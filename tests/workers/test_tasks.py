@@ -1,0 +1,69 @@
+from unittest.mock import MagicMock
+
+from restaurant_bot.workers import tasks
+from restaurant_bot.workers.celery_app import celery_app
+
+
+def test_dependencies_builds_and_caches_worker_services(settings, mocker) -> None:  # type: ignore[no-untyped-def]
+    """Создаёт зависимости воркера один раз и повторно использует их."""
+    tasks.dependencies.cache_clear()
+    mocker.patch.object(tasks, "get_settings", return_value=settings)
+    redis_cls = mocker.patch.object(tasks, "Redis")
+    telegram_cls = mocker.patch.object(tasks, "TelegramClient")
+    sheets_cls = mocker.patch.object(tasks, "GoogleSheetsGateway")
+    openai_cls = mocker.patch.object(tasks, "OpenAIService")
+    orchestrator_cls = mocker.patch.object(tasks, "UpdateOrchestrator")
+    submission_cls = mocker.patch.object(tasks, "SubmissionService")
+
+    first = tasks.dependencies()
+    second = tasks.dependencies()
+
+    assert first is second
+    redis_cls.from_url.assert_called_once_with(settings.redis_url, decode_responses=True)
+    telegram_cls.assert_called_once_with(settings)
+    sheets_cls.assert_called_once_with(settings)
+    openai_cls.assert_called_once_with(settings)
+    orchestrator_cls.assert_called_once()
+    submission_cls.assert_called_once()
+    tasks.dependencies.cache_clear()
+
+
+def test_process_update_task_delegates_to_orchestrator(mocker) -> None:  # type: ignore[no-untyped-def]
+    """Передаёт идентификатор обновления оркестратору."""
+    orchestrator = MagicMock()
+    mocker.patch.object(tasks, "dependencies", return_value=(orchestrator, MagicMock()))
+
+    tasks.process_telegram_update.run(42)
+
+    orchestrator.process.assert_called_once_with(42)
+
+
+def test_submit_order_task_reports_failure_only_after_retry_limit(mocker) -> None:  # type: ignore[no-untyped-def]
+    """Не сообщает финальный сбой до исчерпания повторов Celery."""
+    submission = MagicMock()
+    mocker.patch.object(tasks, "dependencies", return_value=(MagicMock(), submission))
+
+    tasks.submit_order.run("chat-1")
+
+    submission.submit.assert_called_once_with("chat-1", report_failure=False)
+
+
+def test_product_add_and_status_tasks_delegate_to_submission(mocker) -> None:  # type: ignore[no-untyped-def]
+    """Передаёт фоновые запросы соответствующим методам отправки."""
+    submission = MagicMock()
+    mocker.patch.object(tasks, "dependencies", return_value=(MagicMock(), submission))
+
+    tasks.submit_product_add.run("chat-2")
+    tasks.send_order_status.run("chat-3")
+
+    submission.submit_product_add.assert_called_once_with("chat-2")
+    submission.send_status.assert_called_once_with("chat-3")
+
+
+def test_celery_configuration_preserves_delivery_guarantees() -> None:
+    """Сохраняет безопасные настройки доставки фоновых задач."""
+    assert celery_app.conf.task_acks_late is True
+    assert celery_app.conf.task_reject_on_worker_lost is True
+    assert celery_app.conf.worker_prefetch_multiplier == 1
+    assert celery_app.conf.task_track_started is True
+    assert celery_app.conf.task_serializer == "json"

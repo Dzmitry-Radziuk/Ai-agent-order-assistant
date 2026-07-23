@@ -1,0 +1,953 @@
+from __future__ import annotations
+
+import re
+
+from restaurant_bot.domain.models import ExtractedItem, Intent, ParsedCommand
+from restaurant_bot.services.text import (
+    UNIT_ALIASES,
+    clean_text,
+    normalize_text,
+    normalize_unit,
+    parse_number_words,
+)
+
+_COMMANDS: list[tuple[Intent, re.Pattern[str]]] = [
+    (
+        Intent.GREETING,
+        re.compile(r"^(?:/start|старт|начать работу|привет|здравствуйте|начать)$", re.I),
+    ),
+    (
+        Intent.HELP,
+        re.compile(
+            r"^(?:/help|помощь|помоги|покажи помощь|что ты умеешь|как пользоваться|как использовать)$",
+            re.I,
+        ),
+    ),
+    (
+        Intent.SHOW_CART,
+        re.compile(
+            r"^(?:/draft|черновик|корзина|покажи (?:корзину|черновик|заявку)|открой (?:корзину|черновик|заявку)|к черновику|моя заявка)$",
+            re.I,
+        ),
+    ),
+    (
+        Intent.ORDER_STATUS,
+        re.compile(
+            r"^(?:/orders|мои заявки|покажи мои заявки|статус(?:ы)? заявок|проверь статус заявки|обновить статусы?|покажи заявки)$",
+            re.I,
+        ),
+    ),
+    (
+        Intent.CLEAR_CART,
+        re.compile(
+            r"^(?:/reset|сброс|сбрось черновик|очисти(?:ть)? (?:заявку|корзину|черновик)|начать заново|новая заявка)$",
+            re.I,
+        ),
+    ),
+    (
+        Intent.SUBMIT_REQUEST,
+        re.compile(
+            r"^(?:/submit|отправь заявку|отправить заявку|отправить|отправь в корзину|отправить в корзину|добавь товары? в корзину|добавить товары? в корзину|перенеси в корзину|перенести в корзину|перейти к проверке заявки|готово отправляй|оформи заявку)$",
+            re.I,
+        ),
+    ),
+    (Intent.BACK, re.compile(r"^(?:/back|назад|вернуться)$", re.I)),
+    (
+        Intent.ADD_MORE,
+        re.compile(
+            r"^(?:(?:добавить(?:\s+ещ[её])?|добавь(?:\s+ещ[её])?|давай\s+добавим|хочу\s+добавить)\s+товары|"
+            r"ещ[её]\s+товары|продолжим\s+добавлять|есть\s+ещ[её])$",
+            re.I,
+        ),
+    ),
+    (Intent.CONFIRM, re.compile(r"^(?:да|ага|ок|окей|верно|подтверждаю)$", re.I)),
+    (Intent.CANCEL, re.compile(r"^(?:/cancel|нет|не надо|отмена|отменить)$", re.I)),
+    (Intent.THANKS, re.compile(r"^(?:спасибо|благодарю|отлично|супер|класс)$", re.I)),
+    (Intent.SMALL_TALK, re.compile(r"^(?:как дела|кто ты|что нового)$", re.I)),
+]
+
+# Natural voice forms from ``inferVoiceCommand`` in the active n8n workflow.
+# These are deterministic navigation/actions. Product extraction is attempted
+# only after none of these patterns matches, so a spoken command can never
+# become a draft item named "товары" or "черновик".
+_NATURAL_COMMANDS: list[tuple[Intent, re.Pattern[str]]] = [
+    (
+        Intent.GREETING,
+        re.compile(
+            r"^(?:старт|начать работу|начни работу|запусти бота|открой бота|привет|здравствуй|"
+            r"здравствуйте|доброе утро|добрый день|добрый вечер|приветствую|хай)(?: (?:бот|ассистент))?$",
+            re.I,
+        ),
+    ),
+    (
+        Intent.HELP,
+        re.compile(
+            r"^(?:помощь|помоги|покажи помощь|открой помощь|инструкция|что ты умеешь|"
+            r"как пользоваться|как использовать|что делать)$",
+            re.I,
+        ),
+    ),
+    (
+        Intent.SHOW_CART,
+        re.compile(
+            r"^(?:корзина|черновик|моя заявка|текущая заявка|к (?:корзине|черновику)|"
+            r"верни (?:к|в) (?:корзину|черновик)|вернись (?:к|в) (?:корзине|корзину|черновику|черновик)|"
+            r"(?:покажи|показать|открой|открыть) (?:корзину|черновик|заявку|текущую заявку)|"
+            r"покажи текущую заявку)$",
+            re.I,
+        ),
+    ),
+    (
+        Intent.ORDER_STATUS,
+        re.compile(
+            r"^(?:мои заявки|покажи мои заявки|покажи заказы|статус(?:ы)? (?:заявок|заказов)|"
+            r"(?:проверь|проверить|покажи|показать|обнови|обновить) статус(?:ы)?"
+            r"(?: (?:моей|моих|текущей|последней))?(?: (?:заявки|заявок|заказа|заказов))?|"
+            r"обнови|обновить|(?:какой|какие) статус(?:ы)?(?: (?:заявки|заявок|заказа|заказов))?|"
+            r"что (?:со|с) статусом(?: (?:заявки|заказа))?)$",
+            re.I,
+        ),
+    ),
+    (
+        Intent.CLEAR_CART,
+        re.compile(
+            r"^(?:сброс|(?:сбрось|сбросить|очисти|очистить|обнули|обнулить|вычисти|вычистить)"
+            r"(?: (?:всю|весь|все|полностью))? (?:заявку|корзину|черновик|список|заказ|товары|позиции)|"
+            r"(?:удали|удалить|убери|убрать|сотри|стереть) (?:все|всё|всю|весь)(?: (?:из )?"
+            r"(?:заявки|корзины|черновика|списка|заказа))?|начать заново|начни заново|новая заявка|новую заявку)$",
+            re.I,
+        ),
+    ),
+    (
+        Intent.ADD_MORE,
+        re.compile(
+            r"^(?:(?:давай )?(?:добавим|добавить|добавь)(?: мне)?"
+            r"(?:(?: еще| ещё)(?: товары| товар| позиции| позиций| что-нибудь| что то)?|"
+            r" (?:товары|товар|позиции|позиций|что-нибудь|что то))|"
+            r"(?:хочу|нужно|надо|можно) (?:добавить )?(?:еще|ещё)(?: товары| позиции| что-нибудь| что то)?|"
+            r"(?:еще|ещё) (?:товары|позиции)|"
+            r"(?:продолжим|продолжить|давай продолжим|вернемся|вернуться)"
+            r" (?:собирать|добавлять|к добавлению)(?: (?:заявку|товары|позиции))?|"
+            r"(?:есть|будут) (?:еще|ещё)(?: (?:товары|позиции))?)$",
+            re.I,
+        ),
+    ),
+    (
+        Intent.SUBMIT_AS_IS,
+        re.compile(
+            r"^(?:(?:давай )?(?:отправь|отправить|отправляй|запиши|записать)(?: заявку)?"
+            r" (?:как есть|с предупреждением)|(?:все|всё) равно (?:отправь|отправляй|записывай)|"
+            r"риск принимаю|не будем добирать|"
+            r"(?:отправь|отправить|отправляй|передай|передать|передавай)(?: (?:заявку|заказ|товары))?"
+            r" (?:поставщику|поставшику|поставщикам|снабженцу|в снабжение)(?: (?:заявку|заказ|товары))?)$",
+            re.I,
+        ),
+    ),
+    (
+        Intent.SUBMIT_REQUEST,
+        re.compile(
+            r"^(?:(?:отправь|отправить|отправляй|добавь|добавить|положи|положить|перенеси|перенести)"
+            r"(?: (?:товары|товар|позиции|позицию|заявку|заказ))? в корзину|"
+            r"(?:отправь|отправить|отправляй|оформи|оформить|запиши|записать)(?: заявку| в таблицу заказа| в таблицу)?|"
+            r"перейти к проверке заявки|проверь заявку перед отправкой|готово отправляй)$",
+            re.I,
+        ),
+    ),
+    (
+        Intent.BACK,
+        re.compile(r"^(?:назад|вернуться|вернись назад|давай назад|к предыдущему шагу)$", re.I),
+    ),
+    (
+        Intent.CONTINUE_CURRENT,
+        re.compile(
+            r"^(?:продолжить|продолжай|продолжаем|давай продолжим|поехали|дальше|можно дальше)$",
+            re.I,
+        ),
+    ),
+    (
+        Intent.CHECK_MIN_SUM,
+        re.compile(
+            r"^(?:(?:давай )?(?:проверь|проверим|проверить|посмотри|посмотрим|посмотреть|покажи|показать)"
+            r"(?: (?:минимальную сумму|минималку|предупреждение|предупреждения|поставщиков))?|"
+            r"(?:что|как) (?:с|по) (?:минималкой|минимальной суммой))$",
+            re.I,
+        ),
+    ),
+    (
+        Intent.SHOW_FINAL_REVIEW,
+        re.compile(
+            r"^(?:назад )?(?:к|на) финальн(?:ой|ую) проверк[еу]|"
+            r"(?:покажи|верни|вернись)(?: к)? финальн(?:ую|ой) проверк[еу]$",
+            re.I,
+        ),
+    ),
+    (
+        Intent.ENTER_OTHER_QUANTITY,
+        re.compile(
+            r"^(?:(?:давай |давайте |хочу |нужно |надо )?"
+            r"(?:исправь|исправить|исправим|исправьте|поправь|поправить|поправим|поправьте|"
+            r"измени|изменить|изменим|измените|поменяй|поменять|поменяем|поменяйте|сделай|сделать|сделаем)"
+            r"(?: (?:это|текущее))?(?: (?:количество|кол-во))?|"
+            r"(?:введу|ввести|скажу|сказать|назову|назвать|укажу|указать)(?: (?:другое|новое))? количество|"
+            r"(?:хочу|давай) (?:ввести|указать|сказать) (?:другое|новое) количество)$",
+            re.I,
+        ),
+    ),
+    (
+        Intent.ACCEPT_SUGGESTED_QUANTITY,
+        re.compile(
+            r"^(?:(?:исправь|исправить|доведи|довести|сделай|поставь|замени)"
+            r" (?:до (?:подходящего|рекомендованного|ближайшего)|как (?:нужно|положено)|"
+            r"по (?:условиям|шагу)|правильно|рекомендованное|подходящее|ближайшее)(?: количество)?|"
+            r"(?:округли|округлить)(?: количество)?(?: до (?:ближайшего|подходящего|рекомендованного))?|"
+            r"(?:используй|поставь|выбери|возьми) (?:рекомендованное|подходящее|ближайшее) количество)$",
+            re.I,
+        ),
+    ),
+    (
+        Intent.KEEP_CURRENT_QUANTITY,
+        re.compile(
+            r"^(?:(?:оставь|оставить|сохрани|сохранить)(?: (?:как есть|текущее количество|это количество))?|"
+            r"не меняй|ничего не меняй)$",
+            re.I,
+        ),
+    ),
+    (
+        Intent.USE_CATALOG_UNIT,
+        re.compile(
+            r"^(?:(?:используй|использовать|оставь|оставить|сделай)(?: единицу)?"
+            r" (?:из|как в|по) каталог[еу]|(?:сделай|оставь|используй) как в каталоге)$",
+            re.I,
+        ),
+    ),
+    (
+        Intent.CLARIFY_CURRENT,
+        re.compile(
+            r"^(?:(?:давай )?(?:уточним|уточнять|уточнить|проверим|проверить|разберем|разобрать)"
+            r"(?: (?:товары|позиции|заявку|все|проблемные позиции|спорные позиции))?|"
+            r"(?:давай )?(?:перейдем|переходим|вернемся) (?:к )?(?:уточнению|уточнениям|проверке позиций)|"
+            r"(?:покажи|показать|открой|открыть) (?:что нужно уточнить|уточнения|проблемные позиции|спорные позиции)|"
+            r"(?:что|какие позиции) (?:нужно|надо|осталось) уточнить)$",
+            re.I,
+        ),
+    ),
+    (
+        Intent.MANUAL_CURRENT,
+        re.compile(
+            r"^(?:(?:давай )?(?:измени|изменить|исправь|исправить|поищи|искать|опишу|описать|опиши)"
+            r"(?: (?:этот|эту|его|ее|товар|позицию))? (?:название|по-другому|иначе|вручную|текстом)|"
+            r"(?:ни один|ничего) не подходит|(?:нужного|подходящего)(?: товара| варианта)? нет|"
+            r"изменить название|другое название|поищи иначе|опишу вручную)$",
+            re.I,
+        ),
+    ),
+    (
+        Intent.SKIP_CURRENT,
+        re.compile(
+            r"^(?:(?:давай )?(?:пропусти|пропустить|пропустим|скипни|скипнуть)"
+            r"(?: (?:этот|эту|текущий|текущую|данный|данную))?(?: (?:товар|позицию|строку|пункт))?"
+            r"(?: и? (?:перейдем|пойдем|идем) дальше)?|"
+            r"(?:не добавляй|не добавлять|не нужен|не нужна|этот не нужен|эта не нужна)"
+            r"(?: (?:этот|эту))?(?: (?:товар|позицию|строку))?|"
+            r"следующий|следующая|дальше|идем дальше|пойдем дальше|перейдем дальше|давай дальше)$",
+            re.I,
+        ),
+    ),
+]
+
+
+def normalize_command_text(value: str) -> str:
+    """Нормализует пунктуацию и разговорные слова команды."""
+    text = re.sub(r"[.,!?;:]+", " ", normalize_text(value))
+    text = re.sub(r"\s+", " ", text).strip()
+    for _ in range(3):
+        cleaned = re.sub(r"^(?:ну|это|так|ладно|хорошо|ок|окей|ага)\s+", "", text, flags=re.I)
+        if cleaned == text:
+            break
+        text = cleaned.strip()
+    return re.sub(r"\s+пожалуйста$", "", text, flags=re.I).strip()
+
+
+def _has_word_stem(words: list[str], *stems: str) -> bool:
+    """Проверяет наличие слова с одним из заданных корней."""
+    return any(word.startswith(stems) for word in words)
+
+
+def _looks_like_generic_add_navigation(normalized: str, words: list[str]) -> bool:
+    """Отличает переход к добавлению от названия конкретного товара."""
+    has_action = _has_word_stem(
+        words,
+        "добав",
+        "внес",
+        "докин",
+        "попол",
+        "собир",
+        "продолж",
+        "перей",
+        "верн",
+        "пойд",
+        "пошл",
+        "набер",
+        "закаж",
+        "куп",
+    )
+    has_generic_target = _has_word_stem(
+        words,
+        "товар",
+        "позици",
+        "продукт",
+        "покуп",
+        "спис",
+    ) or bool(re.search(r"\b(?:что[- ]?нибудь|что[- ]?то)\b", normalized))
+    if not has_action or not has_generic_target:
+        return False
+
+    # Число или единица почти всегда означают реальную товарную строку:
+    # «добавь товар сироп 5 кг» нельзя превращать в навигацию.
+    if re.search(r"\d", normalized) or any(word in UNIT_ALIASES for word in words):
+        return False
+
+    filler_words = {
+        "а",
+        "в",
+        "во",
+        "да",
+        "давай",
+        "давайте",
+        "для",
+        "еще",
+        "ещё",
+        "и",
+        "к",
+        "ко",
+        "бы",
+        "мне",
+        "может",
+        "мы",
+        "на",
+        "нам",
+        "наши",
+        "нашу",
+        "наш",
+        "надо",
+        "новые",
+        "новых",
+        "новый",
+        "ну",
+        "нужно",
+        "пару",
+        "пожалуйста",
+        "потом",
+        "сейчас",
+        "текущую",
+        "тогда",
+        "хотелось",
+        "хотим",
+        "хочу",
+        "я",
+    }
+    ignored_stems = (
+        "добав",
+        "внес",
+        "докин",
+        "попол",
+        "собир",
+        "продолж",
+        "перей",
+        "верн",
+        "пойд",
+        "пошл",
+        "набер",
+        "закаж",
+        "куп",
+        "товар",
+        "позици",
+        "продукт",
+        "покуп",
+        "спис",
+        "заявк",
+        "заказ",
+        "что-нибудь",
+        "что-то",
+    )
+    meaningful = [
+        word
+        for word in words
+        if word not in filler_words and not word.startswith(ignored_stems)
+    ]
+    return not meaningful
+
+
+def _infer_free_form_navigation(normalized: str) -> Intent | None:
+    """Распознаёт свободную разговорную навигацию независимо от порядка слов."""
+    words = re.findall(r"[a-zа-яё0-9-]+", normalized, flags=re.I)
+    if not words:
+        return None
+
+    # Статусы имеют самый явный смысл и должны быть приоритетнее общих слов
+    # «посмотреть», «заявка» и «заказ».
+    if _has_word_stem(words, "статус"):
+        return Intent.ORDER_STATUS
+    if (
+        _has_word_stem(words, "заявк", "заказ")
+        and _has_word_stem(words, "как", "где", "посмотр", "покаж", "пров", "узна", "обнов")
+        and _has_word_stem(words, "мо", "наш", "послед", "текущ")
+    ):
+        return Intent.ORDER_STATUS
+
+    if _has_word_stem(words, "помощ", "инструкц", "подсказ"):
+        return Intent.HELP
+    if (
+        _has_word_stem(words, "уме")
+        and _has_word_stem(words, "что", "как")
+    ) or (
+        _has_word_stem(words, "объясн", "расскаж")
+        and _has_word_stem(words, "бот", "работ", "польз")
+    ):
+        return Intent.HELP
+
+    has_procurement_request = _has_word_stem(words, "запрос")
+    has_request_list_action = _has_word_stem(
+        words, "покаж", "показ", "посмотр", "откр", "вывед", "спис", "пров"
+    )
+    has_procurement_target = _has_word_stem(words, "снабжен", "менеджер")
+    has_request_send_action = _has_word_stem(
+        words, "отправ", "созда", "оформ", "переда"
+    )
+    if (
+        has_procurement_request
+        and not has_request_send_action
+        and (has_request_list_action or has_procurement_target)
+    ):
+        return Intent.PRODUCT_ADD_LIST
+
+    # Сначала различаем очистку всей заявки и удаление одной позиции.
+    clear_action = _has_word_stem(
+        words, "очист", "сброс", "обнул", "вычист", "стер", "сотри"
+    )
+    clear_target = _has_word_stem(words, "корзин", "черновик", "заявк", "заказ", "спис")
+    remove_all = _has_word_stem(words, "удал", "убер") and _has_word_stem(
+        words, "все", "всё", "всю", "весь", "полност", "целик"
+    )
+    if (clear_action and clear_target) or remove_all:
+        return Intent.CLEAR_CART
+    if (
+        _has_word_stem(words, "начн", "начат", "созда")
+        and _has_word_stem(words, "занов", "нов")
+        and _has_word_stem(words, "заявк", "заказ", "черновик")
+    ):
+        return Intent.CLEAR_CART
+
+    if "как есть" in normalized and _has_word_stem(
+        words, "отправ", "оформ", "переда", "запиш"
+    ):
+        return Intent.SUBMIT_AS_IS
+    if _has_word_stem(words, "риск") and _has_word_stem(words, "приним"):
+        return Intent.SUBMIT_AS_IS
+
+    if (
+        _has_word_stem(words, "финальн")
+        and _has_word_stem(words, "провер")
+        and _has_word_stem(words, "покаж", "верн", "перей", "откр")
+    ):
+        return Intent.SHOW_FINAL_REVIEW
+
+    if _has_word_stem(words, "минимал", "минимальн") and _has_word_stem(
+        words, "пров", "посмотр", "покаж", "что", "как", "верн", "перей", "назад"
+    ):
+        return Intent.CHECK_MIN_SUM
+
+    if _has_word_stem(words, "повтор") and _has_word_stem(words, "отправ"):
+        return Intent.SUBMIT_AS_IS
+
+    show_action = _has_word_stem(words, "покаж", "показ", "посмотр", "откр", "вывед")
+    product_target = _has_word_stem(words, "товар", "позиц", "продукт", "спис")
+    is_issue_request = _has_word_stem(words, "уточн", "проблемн", "спорн")
+    if (
+        show_action
+        and product_target
+        and not is_issue_request
+        and _has_word_stem(words, "поставщик")
+    ):
+        return Intent.CHECK_MIN_SUM
+    if show_action and product_target and not is_issue_request:
+        return Intent.SHOW_CART
+
+    if _looks_like_generic_add_navigation(normalized, words):
+        return Intent.ADD_MORE
+
+    if _has_word_stem(words, "корзин", "черновик") and _has_word_stem(
+        words, "покаж", "посмотр", "откр", "верн", "перей", "зайд", "пойд"
+    ):
+        return Intent.SHOW_CART
+    if (
+        _has_word_stem(words, "текущ")
+        and _has_word_stem(words, "заявк", "заказ")
+        and _has_word_stem(words, "покаж", "посмотр", "откр", "верн")
+    ):
+        return Intent.SHOW_CART
+
+    if _has_word_stem(words, "отправ", "оформ", "заверш", "запиш") and _has_word_stem(
+        words, "заявк", "заказ", "корзин"
+    ):
+        return Intent.SUBMIT_REQUEST
+    if _has_word_stem(words, "готов") and _has_word_stem(
+        words, "отправ", "оформ", "заверш"
+    ):
+        return Intent.SUBMIT_REQUEST
+
+    if _has_word_stem(words, "назад", "предыдущ") and _has_word_stem(
+        words, "верн", "перей", "пойд", "шаг", "назад"
+    ):
+        return Intent.BACK
+
+    if _has_word_stem(words, "уточн", "проблемн", "спорн") and _has_word_stem(
+        words, "покаж", "посмотр", "разбер", "перей", "провер"
+    ):
+        return Intent.CLARIFY_CURRENT
+    if _has_word_stem(words, "рекоменд", "ближайш", "округл") and _has_word_stem(
+        words, "колич", "постав", "сдел", "возьм", "исправ"
+    ):
+        return Intent.ACCEPT_SUGGESTED_QUANTITY
+    if _has_word_stem(words, "каталог") and _has_word_stem(
+        words, "единиц", "остав", "использ", "сдел"
+    ):
+        return Intent.USE_CATALOG_UNIT
+    if _has_word_stem(words, "колич") and _has_word_stem(
+        words, "друг", "нов", "измен", "введ", "укаж", "скаж"
+    ):
+        return Intent.ENTER_OTHER_QUANTITY
+    if (
+        _has_word_stem(words, "не")
+        and _has_word_stem(words, "меня")
+    ) or (
+        _has_word_stem(words, "остав", "сохран")
+        and ("как есть" in normalized or _has_word_stem(words, "текущ"))
+    ):
+        return Intent.KEEP_CURRENT_QUANTITY
+
+    return None
+
+
+_REMOVE_RE = re.compile(
+    r"^(?:убери|удали|исключи|вычеркни|сними|выкинь|не добавляй)\s+(?:из (?:заявки|корзины)\s+)?(.+?)\s*$",
+    re.I,
+)
+_EDIT_RE = re.compile(
+    r"^(?:измени|поменяй|сделай|поставь|исправь|обнови)\s+(.+?)\s+(?:на|до)\s+(\d+(?:[,.]\d+)?)\s*([а-яa-z]*)$",
+    re.I,
+)
+_SELECT_RE = re.compile(r"^(?:вариант|номер|выбери)?\s*([1-5])$", re.I)
+
+
+def is_product_add_request_phrase(text: str) -> bool:
+    """Распознаёт команду отправки товара снабжению."""
+    words = normalize_text(text).split()
+    if not words:
+        return False
+
+    exact_short_commands = {
+        "отправь",
+        "отправить",
+        "отправьте",
+        "запрос",
+        "запрос снабженцу",
+    }
+    normalized = " ".join(words)
+    if normalized in exact_short_commands:
+        return True
+
+    has_action = any(
+        word.startswith(("отправ", "переда", "созда", "оформ", "добав")) for word in words
+    )
+    has_procurement_target = any(
+        word.startswith(("снабжен", "менеджер", "запрос", "заявк")) for word in words
+    )
+    has_product_target = any(word.startswith(("товар", "позици")) for word in words)
+    return has_action and (has_procurement_target or has_product_target)
+
+
+def infer_intent(text: str, callback_data: str = "") -> ParsedCommand:
+    """Определяет намерение пользователя."""
+    if callback_data:
+        return parse_callback(callback_data)
+
+    command_match = re.fullmatch(r"/([a-z][a-z0-9_]*)(?:@[a-z0-9_]+)?", clean_text(text), re.I)
+    if command_match:
+        command_intents = {
+            "start": Intent.GREETING,
+            "help": Intent.HELP,
+            "draft": Intent.SHOW_CART,
+            "reset": Intent.CLEAR_CART,
+            "submit": Intent.SUBMIT_REQUEST,
+            "orders": Intent.ORDER_STATUS,
+            "cancel": Intent.CANCEL,
+            "back": Intent.BACK,
+        }
+        intent = command_intents.get(command_match.group(1).lower())
+        if intent:
+            return ParsedCommand(intent=intent, text=text)
+
+    # Speech recognition commonly returns a trailing full stop.  Commands are
+    # complete phrases, so terminal punctuation must not turn "Добавить еще
+    # товары." into a product named "товары".
+    normalized = normalize_command_text(text)
+    for intent, pattern in (*_COMMANDS, *_NATURAL_COMMANDS):
+        if pattern.fullmatch(normalized):
+            return ParsedCommand(intent=intent, text=text)
+
+    if free_form_intent := _infer_free_form_navigation(normalized):
+        return ParsedCommand(intent=free_form_intent, text=text)
+
+    if match := _REMOVE_RE.match(normalized):
+        target = clean_text(match.group(1))
+        return ParsedCommand(
+            intent=Intent.REMOVE_ITEM, text=text, target_query=target, target_queries=[target]
+        )
+
+    if match := _EDIT_RE.match(normalized):
+        return ParsedCommand(
+            intent=Intent.EDIT_QUANTITY,
+            text=text,
+            target_query=clean_text(match.group(1)),
+            edit_quantity=float(match.group(2).replace(",", ".")),
+            edit_unit=normalize_unit(match.group(3)),
+        )
+
+    if match := _SELECT_RE.match(normalized):
+        return ParsedCommand(
+            intent=Intent.SELECT_CANDIDATE, text=text, selected_index=int(match.group(1))
+        )
+
+    ordinal_patterns = {
+        1: r"(?:1|один|перв(?:ый|ого|ую|ое))",
+        2: r"(?:2|два|втор(?:ой|ого|ую|ое))",
+        3: r"(?:3|три|трет(?:ий|ьего|ью|ье))",
+        4: r"(?:4|четыре|четверт(?:ый|ого|ую|ое))",
+        5: r"(?:5|пять|пят(?:ый|ого|ую|ое))",
+    }
+    explicit_choice = bool(
+        re.search(
+            r"(?:^|\s)(?:вариант|выбери|выбрать|выбираю|беру|подходит|номер)(?:\s|$)", normalized
+        )
+    )
+    polite_choice = bool(re.match(r"^(?:давай|мне|хочу|нужен)\s+", normalized))
+    for index, token in ordinal_patterns.items():
+        bare = re.fullmatch(token, normalized)
+        mentioned = re.search(rf"(?:^|\s){token}(?:\s|$)", normalized)
+        if mentioned and (bare or explicit_choice or polite_choice):
+            return ParsedCommand(
+                intent=Intent.SELECT_CANDIDATE,
+                text=text,
+                selected_index=index,
+            )
+
+    ordinal_text = normalized.removesuffix(" вариант").strip()
+    ordinal_matches = {"первый": 1, "второй": 2, "третий": 3, "четвертый": 4, "пятый": 5}
+    if ordinal_text in ordinal_matches:
+        return ParsedCommand(
+            intent=Intent.SELECT_CANDIDATE,
+            text=text,
+            selected_index=ordinal_matches[ordinal_text],
+        )
+
+    if re.fullmatch(
+        r"(?:пропусти|не нужен|не добавляй)(?: эту позицию| этот товар| товар)?", normalized
+    ):
+        return ParsedCommand(intent=Intent.SKIP_CURRENT, text=text)
+    if re.fullmatch(r"(?:ни один|ничего не подходит|нужного нет|поищи иначе)", normalized):
+        return ParsedCommand(intent=Intent.MANUAL_CURRENT, text=text)
+    if re.fullmatch(r"(?:продолжить|продолжай|дальше|поехали)", normalized):
+        return ParsedCommand(intent=Intent.CONTINUE_CURRENT, text=text)
+    if re.fullmatch(
+        r"(?:отправь как есть|отправить как есть|отправь поставщику|отправить поставщику|отправь заказ поставщику|отправить заказ поставщику|передай поставщикам|передать поставщикам|не будем добирать|риск принимаю)",
+        normalized,
+    ):
+        return ParsedCommand(intent=Intent.SUBMIT_AS_IS, text=text)
+
+    items = parse_product_lines(text)
+    if items:
+        return ParsedCommand(intent=Intent.ADD_ITEMS, text=text, items=items)
+    return ParsedCommand(intent=Intent.UNKNOWN, text=text)
+
+
+def parse_callback(data: str) -> ParsedCommand:
+    """Разбирает данные нажатой кнопки."""
+    parts = data.split(":")
+    if parts[0] == "v2":
+        parts = parts[1:]
+    revision = None
+    if parts and re.fullmatch(r"r\d+", parts[-1], re.I):
+        revision = int(parts.pop()[1:])
+    action = parts[0] if parts else ""
+    rest = parts[1:]
+    mapping = {
+        # The labels are intentionally not inferred from their names.  These
+        # values are the callback contract of Engine v2.1 Prepare in n8n.
+        # `cart` opens final checking, while `back` renders the draft.
+        "cart": Intent.SHOW_FINAL_REVIEW,
+        "submit": Intent.SUBMIT_AS_IS,
+        "clear": Intent.CLEAR_CART,
+        "cancel": Intent.CANCEL,
+        "back": Intent.BACK,
+        "skip": Intent.SKIP_CURRENT,
+        "rename": Intent.MANUAL_CURRENT,
+        "manual": Intent.MANUAL_CURRENT,
+        "orders": Intent.ORDER_STATUS,
+        "help": Intent.HELP,
+        "check_min": Intent.CHECK_MIN_SUM,
+        "resolve": Intent.CONTINUE_CURRENT,
+        "final_review": Intent.SHOW_FINAL_REVIEW,
+        "add": Intent.ADD_MORE,
+        "addreq": Intent.PRODUCT_ADD,
+        "addreqlist": Intent.PRODUCT_ADD_LIST,
+        "addreqretry": Intent.PRODUCT_ADD_RETRY,
+        "addreqskip": Intent.PRODUCT_ADD_SKIP,
+        "searchall": Intent.SEARCH_ALL_SUPPLIERS,
+        "switchsupplier": Intent.SWITCH_SUPPLIER,
+        "keepmul": Intent.KEEP_MULTIPLE,
+        "keepwarn": Intent.KEEP_MULTIPLE,
+        "mulone": Intent.FIX_MULTIPLE,
+        "minsum": Intent.CHECK_MIN_SUM,
+        "minsumadd": Intent.ADD_SUPPLIER_ITEMS,
+        "minsumchoose": Intent.CHOOSE_SUPPLIER_WARNING,
+        "fixmul": Intent.FIX_MULTIPLE,
+        "editmul": Intent.EDIT_MULTIPLE,
+        "unitedit": Intent.UNIT_EDIT,
+        "unitok": Intent.UNIT_OK,
+        "use_catalog_unit": Intent.USE_CATALOG_UNIT,
+        "confirm": Intent.CONFIRM,
+        "keep_current": Intent.KEEP_CURRENT_QUANTITY,
+        "accept_multiple": Intent.ACCEPT_SUGGESTED_QUANTITY,
+        "enter_quantity": Intent.ENTER_OTHER_QUANTITY,
+        "dupmerge": Intent.MERGE_DUPLICATE,
+    }
+    if action in {"select", "sel"} and rest:
+        try:
+            selected = int(rest[-1])
+            if action == "sel":
+                selected += 1
+            return ParsedCommand(
+                intent=Intent.SELECT_CANDIDATE,
+                selected_index=selected,
+                callback_revision=revision,
+                callback_target=rest[0],
+            )
+        except ValueError:
+            return ParsedCommand(
+                intent=Intent.SELECT_CANDIDATE,
+                selection_query=rest[-1],
+                callback_revision=revision,
+                callback_target=rest[0],
+            )
+    if action == "remove" and rest:
+        return ParsedCommand(
+            intent=Intent.REMOVE_ITEM,
+            target_query=rest[-1],
+            callback_revision=revision,
+            callback_target=rest[0],
+        )
+    if action == "qty" and len(rest) >= 2:
+        try:
+            quantity = float(rest[-1])
+        except ValueError:
+            quantity = None
+        return ParsedCommand(
+            intent=Intent.EDIT_QUANTITY,
+            target_query=rest[0],
+            edit_quantity=quantity,
+            callback_revision=revision,
+        )
+    return ParsedCommand(
+        intent=mapping.get(action, Intent.UNKNOWN),
+        text=data,
+        callback_revision=revision,
+        callback_target=rest[0] if rest else "",
+    )
+
+
+def parse_product_lines(text: str) -> list[ExtractedItem]:
+    """Разбирает список товаров из текста."""
+    source = str(text or "").replace(";", "\n").strip()
+    if not source:
+        return []
+    lines = [clean_text(line) for line in re.split(r"\n+", source) if clean_text(line)]
+    if len(lines) == 1 and source.count(",") >= 2:
+        lines = [clean_text(line) for line in source.split(",") if clean_text(line)]
+
+    items: list[ExtractedItem] = []
+    unit_pattern = "|".join(sorted((re.escape(key) for key in UNIT_ALIASES), key=len, reverse=True))
+    trailing = re.compile(
+        rf"^(.*?)(?:\s+|[-:])(?P<qty>\d+(?:[,.]\d+)?)\s*(?P<unit>{unit_pattern})?\s*$",
+        re.I,
+    )
+    leading = re.compile(
+        rf"^(?P<qty>\d+(?:[,.]\d+)?)\s*(?P<unit>{unit_pattern})?\s+(.*)$",
+        re.I,
+    )
+
+    for line in lines:
+        stripped = re.sub(
+            r"^(?:добавь|добавить|закажи|заказать|нужно|надо)\s+", "", line, flags=re.I
+        )
+        quantity_marks = list(
+            re.finditer(
+                rf"(\d+(?:[,.]\d+)?)\s*(?P<unit>{unit_pattern})\b",
+                stripped,
+                flags=re.I,
+            )
+        )
+        # Recover several products spoken in one segment by using each
+        # explicit quantity as the boundary of the preceding product.
+        if len(quantity_marks) >= 2 and not re.search(r"[—–-]\s*\d", stripped):
+            recovered: list[ExtractedItem] = []
+            start = 0
+            for mark in quantity_marks:
+                name = re.sub(
+                    r"^(?:и|а также|а)\s+",
+                    "",
+                    stripped[start : mark.start()].strip(),
+                    flags=re.I,
+                ).strip(" ,;:-—–")
+                if not name:
+                    continue
+                recovered.append(
+                    ExtractedItem(
+                        product_query=name,
+                        quantity=float(mark.group(1).replace(",", ".")),
+                        unit=normalize_unit(mark.group("unit") or ""),
+                        source_line=line,
+                    )
+                )
+                start = mark.end()
+            if recovered:
+                items.extend(recovered)
+                continue
+        if len(quantity_marks) == 1:
+            mark = quantity_marks[0]
+            # A voice phrase can enumerate products and give a quantity only
+            # for the last one: "сироп и говядина 10 кг".  The first product
+            # must remain in the draft (with an unanswered quantity), rather
+            # than being silently swallowed into a single synthetic name.
+            prefix = clean_text(stripped[: mark.start()]).strip(" ,;:-—–")
+            enumerated_names = [
+                clean_text(part).strip(" ,;:-—–")
+                for part in re.split(r"\s+(?:и|а также)\s+", prefix, flags=re.I)
+            ]
+            if len(enumerated_names) > 1 and all(enumerated_names):
+                items.extend(
+                    ExtractedItem(product_query=name, source_line=line)
+                    for name in enumerated_names[:-1]
+                )
+                items.append(
+                    ExtractedItem(
+                        product_query=enumerated_names[-1],
+                        quantity=float(mark.group(1).replace(",", ".")),
+                        unit=normalize_unit(mark.group("unit") or ""),
+                        source_line=line,
+                    )
+                )
+                continue
+            name = clean_text(stripped[: mark.start()]).strip(" ,;:-—–")
+            comment = clean_text(stripped[mark.end() :]).strip(" ,;:-—–")
+            # "Сироп Роза 1 л — 12" contains product packaging followed by
+            # the ordered quantity.  A number after punctuation is never a
+            # supplier comment, so leave this form to the trailing-quantity
+            # parser below.
+            if name and comment and not re.match(r"^\s*[,;:\-—–]*\s*\d", stripped[mark.end() :]):
+                items.append(
+                    ExtractedItem(
+                        product_query=name,
+                        quantity=float(mark.group(1).replace(",", ".")),
+                        unit=normalize_unit(mark.group("unit") or ""),
+                        comment=comment,
+                        user_comment_to_supplier=comment,
+                        source_line=line,
+                    )
+                )
+                continue
+        match = trailing.match(stripped)
+        if match:
+            name = clean_text(match.group(1)).strip(" -:—–")
+            if name:
+                items.append(
+                    ExtractedItem(
+                        product_query=name,
+                        quantity=float(match.group("qty").replace(",", ".")),
+                        unit=normalize_unit(match.group("unit") or ""),
+                        source_line=line,
+                    )
+                )
+                continue
+        match = leading.match(stripped)
+        if match:
+            name = clean_text(match.group(3)).strip(" -:")
+            if name:
+                items.append(
+                    ExtractedItem(
+                        product_query=name,
+                        quantity=float(match.group("qty").replace(",", ".")),
+                        unit=normalize_unit(match.group("unit") or ""),
+                        source_line=line,
+                    )
+                )
+                continue
+
+        tokens = normalize_text(stripped).split()
+        for index in range(len(tokens)):
+            parsed = parse_number_words(tokens, index)
+            if not parsed:
+                continue
+            quantity, end = parsed
+            unit = (
+                normalize_unit(tokens[end])
+                if end < len(tokens) and tokens[end] in UNIT_ALIASES
+                else ""
+            )
+            if end < len(tokens) and unit:
+                end += 1
+            if index == 0:
+                name = " ".join(tokens[end:])
+            elif end == len(tokens):
+                name = " ".join(tokens[:index])
+            else:
+                continue
+            if name:
+                items.append(
+                    ExtractedItem(
+                        product_query=name,
+                        quantity=quantity,
+                        unit=unit,
+                        source_line=line,
+                    )
+                )
+                break
+        else:
+            if len(lines) > 1 or len(stripped.split()) <= 8:
+                items.append(ExtractedItem(product_query=stripped, source_line=line))
+    return items
+
+
+def parse_quantity_unit(text: str) -> tuple[float | None, str]:
+    """Разбирает короткий ответ с количеством и единицей."""
+    normalized = normalize_text(text)
+    if not normalized:
+        return None, ""
+    tokens = normalized.replace(",", ".").split()
+    if len(tokens) >= 1:
+        try:
+            quantity = float(tokens[0])
+            unit = (
+                normalize_unit(tokens[1]) if len(tokens) > 1 and tokens[1] in UNIT_ALIASES else ""
+            )
+            return quantity, unit
+        except ValueError:
+            pass
+    parsed = parse_number_words(tokens, 0)
+    if parsed:
+        quantity, end = parsed
+        unit = (
+            normalize_unit(tokens[end]) if end < len(tokens) and tokens[end] in UNIT_ALIASES else ""
+        )
+        return quantity, unit
+    return None, ""

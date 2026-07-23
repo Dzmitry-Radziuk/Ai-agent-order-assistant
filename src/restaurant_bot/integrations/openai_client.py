@@ -1,0 +1,648 @@
+from __future__ import annotations
+
+import json
+import re
+from difflib import SequenceMatcher
+from pathlib import Path
+from typing import Any, cast
+
+import structlog
+from openai import OpenAI
+from pydantic import BaseModel, Field
+
+from restaurant_bot.config import Settings
+from restaurant_bot.domain.models import ExtractedItem, Intent, ParsedCommand
+from restaurant_bot.services.parser import infer_intent, parse_product_lines
+from restaurant_bot.services.text import (
+    UNIT_ALIASES,
+    clean_text,
+    normalize_text,
+    normalize_unit,
+    to_float,
+)
+
+logger = structlog.get_logger(__name__)
+
+
+class ParsedInputSchema(BaseModel):
+    """Проверяет структурированный результат извлечения товаров."""
+
+    intent: Intent = Intent.UNKNOWN
+    text: str = ""
+    items: list[ExtractedItem] = Field(default_factory=list)
+    target_query: str = ""
+    target_queries: list[str] = Field(default_factory=list)
+    selected_index: int | None = None
+    selection_query: str = ""
+    edit_quantity: float | None = None
+    edit_unit: str = ""
+    global_comment: str = ""
+    document_type: str = ""
+
+
+class ProductMatchDecision(BaseModel):
+    """Проверяет решение ИИ о сопоставлении товара."""
+
+    action: str = Field(pattern="^(select|ambiguous|not_found)$")
+    selected_product_id: str = ""
+    candidate_product_ids: list[str] = Field(default_factory=list)
+    reason: str = ""
+
+
+def restore_explicit_order_terms(
+    items: list[dict[str, Any]], source_text: str = ""
+) -> list[dict[str, Any]]:
+    """Восстанавливает явно указанное количество или единицу."""
+    recovered_from_message = parse_product_lines(source_text)
+    for index, item in enumerate(items):
+        source_line = clean_text(item.get("source_line"))
+        recovered = parse_product_lines(source_line)
+        source = recovered[0] if len(recovered) == 1 else None
+        # n8n recovers each explicit spoken order term even when the model
+        # returned one shared source_line for a multi-product voice message.
+        # Positional recovery is safe only for an equal-length enumeration;
+        # it never invents a product or replaces an LLM product name.
+        if source is None and len(items) == len(recovered_from_message):
+            source = recovered_from_message[index]
+        if source is not None:
+            # The original spoken/source line is authoritative. In
+            # particular, the model must not invent "one bottle" for a line
+            # that contains no quantity at all.
+            item["quantity"] = source.quantity
+            item["unit"] = source.unit if source.quantity is not None else ""
+            if source.quantity is not None:
+                continue
+
+        # Spoken "пару яблок" is an explicit quantity for this item, not a
+        # continuation of the preceding product's number.
+        query = normalize_text(item.get("product_query"))
+        pair = re.search(
+            r"\b(?:пару|пара)\s+([a-zа-я][a-zа-я0-9-]*)",
+            normalize_text(source_text),
+        )
+        if pair and query and (pair.group(1) in query or query in pair.group(1)):
+            item["quantity"] = 2.0
+            item["unit"] = "шт"
+    return items
+
+
+def remove_unsupported_query_qualifiers(
+    items: list[dict[str, Any]], source_text: str
+) -> list[dict[str, Any]]:
+    """Удаляет характеристики товара, которых не называл пользователь."""
+    source_words = re.findall(r"[a-zа-я0-9]+", normalize_text(source_text), flags=re.I)
+    if not source_words:
+        return items
+
+    for item in items:
+        original_words = re.findall(
+            r"[a-zа-я0-9]+", clean_text(item.get("product_query")), flags=re.I
+        )
+        normalized_words = [normalize_text(word) for word in original_words]
+        supported: list[str] = []
+        for original, word in zip(original_words, normalized_words, strict=True):
+            if any(
+                word == source_word
+                or (
+                    len(word) >= 4
+                    and len(source_word) >= 4
+                    and word[0] == source_word[0]
+                    and SequenceMatcher(None, word, source_word).ratio() >= 0.72
+                )
+                for source_word in source_words
+            ):
+                supported.append(original)
+        if supported and len(supported) < len(original_words):
+            item["product_query"] = " ".join(supported)
+    return items
+
+
+def collapse_comment_shadow_items(
+    items: list[dict[str, Any]], global_comment: str = ""
+) -> list[dict[str, Any]]:
+    """Удаляет ложный товар, совпадающий с комментарием."""
+    shadow_indexes: set[int] = set()
+    normalized_global_comment = normalize_text(global_comment).strip(" .,;")
+    if normalized_global_comment:
+        shadow_indexes.update(
+            index
+            for index, item in enumerate(items)
+            if normalize_text(item.get("product_query")).strip(" .,;") == normalized_global_comment
+        )
+    for owner_index, owner in enumerate(items):
+        owner_comments = {
+            normalize_text(owner.get(field)).strip(" .,;")
+            for field in ("comment", "user_comment_to_supplier")
+            if normalize_text(owner.get(field)).strip(" .,;")
+        }
+        if not owner_comments:
+            continue
+        for shadow_index, shadow in enumerate(items):
+            if shadow_index == owner_index:
+                continue
+            shadow_query = normalize_text(shadow.get("product_query")).strip(" .,;")
+            if not shadow_query:
+                continue
+            if shadow_query in owner_comments:
+                if owner.get("quantity") is None and shadow.get("quantity") is not None:
+                    owner["quantity"] = shadow.get("quantity")
+                    owner["unit"] = shadow.get("unit") or owner.get("unit") or ""
+                shadow_indexes.add(shadow_index)
+                continue
+
+            # The model can duplicate a boundary between two spoken items:
+            # "желательно холодным. И говядина".  The first half is already
+            # owned by the syrup comment and the second half is already the
+            # next product, so the combined third item carries no new fact.
+            for comment in owner_comments:
+                if not shadow_query.startswith(comment):
+                    continue
+                remainder = shadow_query[len(comment) :].strip(" .,;")
+                remainder = re.sub(r"^(?:и|а также|а)\s+", "", remainder)
+                if not remainder:
+                    continue
+                if any(
+                    target_index != shadow_index
+                    and target_index != owner_index
+                    and (
+                        normalize_text(target.get("product_query")).startswith(remainder)
+                        or remainder.startswith(normalize_text(target.get("product_query")))
+                    )
+                    for target_index, target in enumerate(items)
+                    if normalize_text(target.get("product_query"))
+                ):
+                    shadow_indexes.add(shadow_index)
+                    break
+    return [item for index, item in enumerate(items) if index not in shadow_indexes]
+
+
+def recover_omitted_explicit_items(payload: dict[str, Any], source_text: str) -> dict[str, Any]:
+    """Восстанавливает пропущенные явно названные товары."""
+    items = list(payload.get("items") or [])
+    intent = Intent(payload.get("intent", Intent.UNKNOWN))
+    if intent not in {Intent.ADD_ITEMS, Intent.UNKNOWN}:
+        # Навигация не может содержать товары. Иначе защитное восстановление
+        # превращает фразы вроде «показать товары поставщика» в позицию заявки.
+        payload["items"] = []
+        return payload
+
+    deterministic = parse_product_lines(source_text)
+    if not items and deterministic:
+        payload["intent"] = Intent.ADD_ITEMS
+        payload["items"] = [item.model_dump() for item in deterministic]
+        return payload
+
+    items = remove_unsupported_query_qualifiers(items, source_text)
+    known_queries = [normalize_text(item.get("product_query")) for item in items]
+    for recovered in deterministic:
+        recovered_query = normalize_text(recovered.product_query)
+        if not recovered_query:
+            continue
+        # Do not replace a model-selected name (for example a corrected
+        # spelling), but append an explicitly spoken product the model omitted.
+        if any(
+            known == recovered_query or known in recovered_query or recovered_query in known
+            for known in known_queries
+            if known
+        ):
+            continue
+        items.append(recovered.model_dump())
+        known_queries.append(recovered_query)
+
+    restored = restore_explicit_order_terms(items, source_text)
+    payload["items"] = collapse_comment_shadow_items(
+        restored, clean_text(payload.get("global_comment"))
+    )
+    return payload
+
+
+_TEXT_SYSTEM = """
+Ты строгий маршрутизатор диалога и парсер текста для Telegram-бота, который собирает заявки на товары.
+Верни только структуру по заданной схеме. Ты не ищешь товар в каталоге и не меняешь черновик.
+
+Правила:
+- Для списка используй intent=add_items; каждая отдельная позиция — отдельный item.
+- Используй intent=add_items только когда пользователь назвал хотя бы один конкретный товар.
+- Если пользователь просит перейти к добавлению товаров, но не называет товар,
+  верни intent=add_more и пустой items. Слова «товар», «товары», «товаров»,
+  «позиция», «позиции» и «продукты» сами по себе не являются названием товара.
+- Навигационная команда может быть длинной, разговорной, с вводными словами и любым
+  порядком слов. Определи действие по смыслу, не превращай всю фразу в product_query.
+- Примеры навигации: «давай пойдём и добавим товары» → add_more;
+  «давай посмотрим наши статусы» → order_status;
+  «можно вернуться и открыть черновик» → show_cart;
+  «запросы снабженцу», «посмотреть запросы» → product_add_list.
+- Поддерживай свободный порядок товара, количества, единицы и комментария, разную пунктуацию, запятые, тире, слеши и голосовые оговорки.
+- Сохраняй исходную строку в source_line. Комментарий сохраняй в comment и не включай его в product_query.
+- Комментарий может быть любым текстом пользователя. Порядок слов свободный; не используй закрытый словарь комментариев.
+- Если комментарий относится ко всем позициям, верни его в global_comment; индивидуальные комментарии оставь в item.comment.
+- Никогда не создавай отдельный item из комментария или из фрагмента между двумя товарами.
+- Слова о качестве, обработке, доставке, замене и пожеланиях пользователя сохраняй дословно в comment, а не в product_query.
+- Пример: «говядина 10 кг мраморная без кожи» → product_query="говядина", quantity=10, unit="кг", comment="мраморная без кожи".
+- Пример общего комментария: «всё привезти до 9 утра» → global_comment="привезти до 9 утра" и не создавай из него товар.
+- Не выдумывай товар, количество, бренд, поставщика или характеристики.
+- Если количество без единицы, сохрани число, а unit оставь пустым.
+- Число в фасовке или объёме внутри названия не является количеством заказа, если заказанное количество указано отдельно после тире или в конце.
+- Неполное или неоднозначное название сохраняй как его сообщил пользователь. Не заменяй его своим вариантом.
+
+Примеры:
+«сироп роза 10 штук говядина 5 кг и джем 10 штук» — три позиции;
+«говядина 10 кг, только охлаждённая» — товар говядина, количество 10 кг, комментарий только охлаждённая;
+«Сироп Роза 1 л — 12» — название Сироп Роза 1 л, количество 12.
+
+Поддерживаемые intent: add_items, remove_item, skip_current, clarify_current, manual_current,
+clear_cart, confirm, cancel, show_cart, submit_request, edit_quantity, select_candidate, add_more,
+greeting, help, thanks, small_talk, back, continue_current, check_min_sum, add_supplier_items,
+submit_as_is, accept_suggested_quantity, keep_current_quantity, enter_other_quantity,
+use_catalog_unit, show_final_review, order_status, product_add_list, unknown.
+Для просмотра ранее созданных запросов снабженцу используй product_add_list.
+""".strip()
+
+_PHOTO_SYSTEM = """
+Распознай фотографию заявки ресторана. Извлеки только реально видимые товарные строки.
+Определи document_type:
+- client_order_sheet — наша таблица с колонками «Зал», «Бар», «Кухня»;
+- printed_order_form — бланк поставщика с печатной фасовкой и отдельной крайней правой ячейкой заказа;
+- order_table — обычная таблица, где число является фактическим количеством заказа;
+- free_list — обычный печатный или рукописный список;
+- product_card или unknown — остальные изображения.
+
+КРИТИЧЕСКОЕ ПРАВИЛО ОПРЕДЕЛЕНИЯ БЛАНКА ПОСТАВЩИКА:
+- Таблица вида «название товара | печатная фасовка | узкая ячейка заказа» является printed_order_form.
+- Это правило действует и для обрезанного фрагмента без заголовка страницы.
+- Заголовок секции с именем поставщика, компанией или телефоном дополнительно подтверждает printed_order_form.
+- Если одинаково оформленные печатные количества стоят почти в каждой строке средней колонки,
+  а рукописные отметки встречаются только в отдельной правой колонке, средняя колонка — фасовка.
+- Такой фрагмент запрещено классифицировать как order_table или free_list.
+
+Печатные справочные значения, остатки, фасовку, цены, телефоны, номера строк и заголовки
+не превращай в количество фактического заказа.
+Комментарий может быть любым текстом. Порядок слов свободный; не используй закрытый словарь комментариев.
+Если комментарий относится ко всем позициям, верни его в global_comment, индивидуальный — в comment.
+Верни intent=add_items, document_type и items с product_query, quantity, unit, department, supplier_hint, comment, source_line,
+source_department, department_quantities, quantity_source, printed_reference_text, order_entry_text, order_entry_type.
+Если это наша таблица заявки с колонками «Зал», «Бар», «Кухня», верни все три значения в department_quantities
+в полях hall, bar, kitchen соответственно. Количество может быть напечатано или вписано ручкой.
+Если печатное значение зачёркнуто и рядом указано новое, верни только новое рукописное значение.
+Строку без положительного количества во всех трёх колонках полностью пропускай.
+
+КРИТИЧЕСКОЕ ПРАВИЛО ДЛЯ printed_order_form:
+- Фактическим заказом является только отдельное разборчивое число в крайней правой ячейке строки.
+- Фасовка в средней колонке не является заказом, даже если выглядит как «2 кг», «5 шт»,
+  «8 кг», «10 кг», «12 л», «5 кг/5 кг» или «3/3 кг».
+- Пустая правая ячейка, прочерк, минус, линия или неразборчивая отметка без цифры означает:
+  товар не заказывают. Полностью пропусти такую строку.
+- Просматривай правую ячейку каждой строки отдельно. Определи строку цифры по горизонтальным границам
+  ячейки; не переноси рукописное число в строку выше или ниже.
+- Мелкая, наклонная, синяя или чёрная рукописная цифра остаётся количеством, если она разборчива.
+- Если печатное значение в правой ячейке зачёркнуто и рядом указано новое число ручкой,
+  используй только новое число: рукописные исправления всегда заменяют старое значение.
+- Перед ответом второй раз проверь: у каждого возвращённого item действительно заполнена
+  отдельная правая ячейка именно в его строке.
+
+Фактическое значение ячейки заказа верни в order_entry_text. Для напечатанного количества заказа используй
+order_entry_type=typed_order_entry, для рукописного — handwritten, для рукописного вместо зачёркнутого —
+handwritten_correction. Если старое значение зачёркнуто, итоговое рукописное значение его заменяет.
+Никогда не суммируй зачёркнутое старое и новое значения.
+Для free_list и order_table извлекай фактические количества из строки или колонки заказа.
+Для order_table также запиши фактическое число в order_entry_text и укажи order_entry_type.
+Добавляй товар только при наличии положительного количества заказа; строки без количества полностью пропускай.
+Если число неразборчиво или непонятно, относится ли оно к строке, пропусти строку и ничего не угадывай.
+Проверь каждую строку отдельно.
+""".strip()
+
+_MATCH_SYSTEM = """
+Ты проверяешь сопоставление пользовательского товара с кандидатами каталога.
+Разрешено выбрать только product_id из переданного списка. Выбирай select только при высокой уверенности.
+Если подходят несколько - ambiguous. Если ни один - not_found. Не используй внешние знания для выдумывания позиции.
+""".strip()
+
+
+class OpenAIService:
+    """Выполняет распознавание, анализ фото и сопоставление товаров."""
+
+    def __init__(self, settings: Settings):
+        """Инициализирует компонент."""
+        self.settings = settings
+        self.client = OpenAI(
+            api_key=settings.openai_api_key.get_secret_value(),
+            timeout=45.0,
+            max_retries=2,
+        )
+        self.vision_client = OpenAI(
+            api_key=settings.openai_api_key.get_secret_value(),
+            timeout=settings.openai_vision_timeout_seconds,
+            max_retries=0,
+        )
+
+    def parse_text(self, text: str) -> ParsedCommand:
+        """Извлекает структурированную команду из текста."""
+        deterministic = infer_intent(text)
+        if deterministic.intent not in {Intent.UNKNOWN, Intent.ADD_ITEMS}:
+            logger.info(
+                "text_command_deterministic",
+                text=text,
+                intent=deterministic.intent.value,
+                item_count=len(deterministic.items),
+            )
+            return deterministic
+        if self._can_use_deterministic_product_list(text, deterministic):
+            logger.info(
+                "text_product_list_deterministic",
+                text=text,
+                intent=deterministic.intent.value,
+                items=[self._item_log(item) for item in deterministic.items],
+            )
+            return deterministic
+        if self._should_skip_ai(text):
+            logger.info(
+                "text_ai_skipped",
+                text=text,
+                intent=deterministic.intent.value,
+                item_count=len(deterministic.items),
+            )
+            return deterministic
+        response = self.client.responses.parse(
+            model=self.settings.openai_text_model,
+            instructions=_TEXT_SYSTEM,
+            input=text,
+            text_format=ParsedInputSchema,
+        )
+        parsed = response.output_parsed
+        if parsed is None:
+            logger.warning("text_ai_empty_result", text=text)
+            return deterministic
+        logger.info(
+            "text_ai_parsed",
+            text=text,
+            intent=parsed.intent.value,
+            global_comment=parsed.global_comment,
+            items=[self._item_log(item) for item in parsed.items],
+        )
+        payload = recover_omitted_explicit_items(parsed.model_dump(), text)
+        for item in payload.get("items", []):
+            if item.get("user_comment_to_supplier") and not item.get("comment"):
+                item["comment"] = item["user_comment_to_supplier"]
+        command = ParsedCommand.model_validate(payload)
+        if (
+            command.intent == Intent.ADD_MORE
+            and deterministic.intent == Intent.ADD_ITEMS
+            and deterministic.items
+        ):
+            logger.warning(
+                "text_ai_navigation_rejected",
+                text=text,
+                ai_intent=command.intent.value,
+                fallback_intent=deterministic.intent.value,
+                fallback_items=[self._item_log(item) for item in deterministic.items],
+            )
+            command = deterministic
+        logger.info(
+            "text_command_normalized",
+            intent=command.intent.value,
+            items=[self._item_log(item) for item in command.items],
+        )
+        return command
+
+    @staticmethod
+    def _can_use_deterministic_product_list(text: str, command: ParsedCommand) -> bool:
+        """Проверяет возможность разбора списка без вызова ИИ."""
+        if command.intent != Intent.ADD_ITEMS or len(command.items) < 2:
+            return False
+
+        raw = clean_text(text).lower().replace("ё", "е")
+        segments = [
+            clean_text(part)
+            for part in re.split(r"\s*(?:;|\n|(?<!\d),(?!\d)|\s+и\s+)\s*", raw)
+            if clean_text(part)
+        ]
+        if len(segments) != len(command.items):
+            return False
+
+        unit_pattern = "|".join(
+            sorted((re.escape(unit) for unit in UNIT_ALIASES), key=len, reverse=True)
+        )
+        item_pattern = re.compile(
+            rf"^(?P<name>.+?)\s+(?P<quantity>\d+(?:[,.]\d+)?)\s*"
+            rf"(?P<unit>{unit_pattern})$",
+            re.IGNORECASE,
+        )
+        suspicious_words = re.compile(
+            r"\b(?:только|срочно|завтра|сегодня|охлажден\w*|заморож\w*|"
+            r"без|пожалуйста|коммент\w*|достав\w*|позвон\w*)\b"
+        )
+
+        for segment, item in zip(segments, command.items, strict=True):
+            match = item_pattern.fullmatch(segment)
+            if match is None:
+                return False
+            name = normalize_text(match.group("name"))
+            if not name or re.search(r"\d", name) or suspicious_words.search(name):
+                return False
+            if normalize_text(item.product_query) != name:
+                return False
+            if item.quantity is None or not item.unit or clean_text(item.comment):
+                return False
+            if abs(item.quantity - float(match.group("quantity").replace(",", "."))) > 1e-9:
+                return False
+            if normalize_unit(match.group("unit")) != normalize_unit(item.unit):
+                return False
+        return True
+
+    @staticmethod
+    def _should_skip_ai(text: str) -> bool:
+        """Проверяет возможность пропустить вызов ИИ."""
+        value = clean_text(text).lower()
+        return bool(
+            not value
+            or value.startswith("/")
+            or re.fullmatch(
+                r"\d+(?:[,.]\d+)?\s*(шт|штук|штуки|штука|кг|килограмм(?:а|ов)?|гр|г|л|литр(?:а|ов)?|мл|уп|упак|кор|ведро|пакет|бут|банка|банки)?",
+                value,
+            )
+        )
+
+    def transcribe(self, path: Path, prompt: str = "", high_accuracy: bool = False) -> str:
+        """Распознаёт голосовое сообщение Telegram."""
+        request: dict[str, Any] = {
+            "model": (
+                self.settings.openai_transcribe_fallback_model
+                if high_accuracy
+                else self.settings.openai_transcribe_model
+            ),
+            "file": None,
+            "response_format": "json",
+            "language": "ru",
+        }
+        with path.open("rb") as audio:
+            request["file"] = audio
+            if prompt:
+                request["prompt"] = prompt
+            result = self.client.audio.transcriptions.create(**request)
+        text = clean_text(getattr(result, "text", ""))
+        if text:
+            logger.info(
+                "voice_transcription_completed",
+                model=request["model"],
+                transcript=text,
+                fallback_used=False,
+            )
+            return text
+        with path.open("rb") as audio:
+            request["model"] = (
+                self.settings.openai_transcribe_model
+                if high_accuracy
+                else self.settings.openai_transcribe_fallback_model
+            )
+            request["file"] = audio
+            fallback = self.client.audio.transcriptions.create(**request)
+        fallback_text = clean_text(getattr(fallback, "text", ""))
+        logger.info(
+            "voice_transcription_completed",
+            model=request["model"],
+            transcript=fallback_text,
+            fallback_used=True,
+        )
+        return fallback_text
+
+    def parse_photo(self, path: Path, mime_type: str, caption: str = "") -> ParsedCommand:
+        """Извлекает товары из фотографии."""
+        import base64
+
+        encoded = base64.b64encode(path.read_bytes()).decode("ascii")
+        response = self.vision_client.responses.parse(
+            model=self.settings.openai_vision_model,
+            instructions=_PHOTO_SYSTEM,
+            input=cast(
+                Any,
+                [
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "input_text", "text": caption or "Распознай заявку на фото"},
+                            {
+                                "type": "input_image",
+                                "image_url": f"data:{mime_type};base64,{encoded}",
+                                "detail": "high",
+                            },
+                        ],
+                    }
+                ],
+            ),
+            text_format=ParsedInputSchema,
+            max_output_tokens=5000,
+        )
+        parsed = response.output_parsed
+        if parsed is None:
+            logger.warning("photo_ai_empty_result", mime_type=mime_type)
+            return ParsedCommand(intent=Intent.UNKNOWN)
+        logger.info(
+            "photo_ai_parsed",
+            document_type=parsed.document_type,
+            global_comment=parsed.global_comment,
+            item_count=len(parsed.items),
+            items=[self._item_log(item) for item in parsed.items],
+        )
+        command = ParsedCommand.model_validate(parsed.model_dump())
+        document_type = clean_text(parsed.document_type).lower()
+        normalized = self._normalise_photo_command(command, document_type)
+        logger.info(
+            "photo_command_normalized",
+            document_type=document_type,
+            input_item_count=len(command.items),
+            output_item_count=len(normalized.items),
+            dropped_item_count=len(command.items) - len(normalized.items),
+            items=[self._item_log(item) for item in normalized.items],
+        )
+        return normalized
+
+    def _normalise_photo_command(self, command: ParsedCommand, document_type: str) -> ParsedCommand:
+        """Применяет защитные правила к результату OCR."""
+        items: list[ExtractedItem] = []
+        for item in command.items:
+            copy = item.model_copy(deep=True)
+            if document_type == "client_order_sheet":
+                department_values = (
+                    copy.department_quantities.hall,
+                    copy.department_quantities.bar,
+                    copy.department_quantities.kitchen,
+                )
+                positive_values = [
+                    value for value in department_values if value is not None and value > 0
+                ]
+                if not positive_values:
+                    continue
+                copy.quantity = sum(positive_values)
+                copy.department = self.settings.default_department
+            if document_type in {"printed_order_form", "supplier_form", "order_table"}:
+                entry_quantity = to_float(copy.order_entry_text)
+                if entry_quantity is not None and copy.order_entry_type in {
+                    "typed",
+                    "typed_order_entry",
+                    "handwritten",
+                    "handwritten_correction",
+                }:
+                    copy.quantity = entry_quantity
+                else:
+                    # Фасовка в бланке поставщика может выглядеть как количество.
+                    # Пустая отдельная ячейка заказа означает, что товар не заказывают.
+                    continue
+            if (
+                document_type != "client_order_sheet"
+                and copy.quantity_source == "printed_order_column"
+                and to_float(copy.order_entry_text) is None
+            ):
+                continue
+            if copy.quantity_source in {
+                "printed_reference",
+                "packaging",
+                "unit_weight",
+                "price",
+            }:
+                continue
+            if copy.quantity is None or copy.quantity <= 0:
+                continue
+            items.append(copy)
+        return command.model_copy(update={"items": items})
+
+    @staticmethod
+    def _item_log(item: ExtractedItem) -> dict[str, Any]:
+        """Формирует диагностический снимок извлечённой позиции."""
+        return {
+            "product_query": item.product_query,
+            "quantity": item.quantity,
+            "unit": item.unit,
+            "department": item.department,
+            "comment": item.comment,
+            "source_line": item.source_line,
+            "source_department": item.source_department,
+            "department_quantities": item.department_quantities.model_dump(),
+            "quantity_source": item.quantity_source,
+            "printed_reference_text": item.printed_reference_text,
+            "order_entry_text": item.order_entry_text,
+            "order_entry_type": item.order_entry_type,
+        }
+
+    def choose_catalog_candidate(
+        self, query: str, candidates: list[dict[str, Any]]
+    ) -> ProductMatchDecision:
+        """Выбирает кандидата только из заданного списка."""
+        response = self.client.responses.parse(
+            model=self.settings.openai_match_model,
+            instructions=_MATCH_SYSTEM,
+            input=json.dumps({"query": query, "candidates": candidates}, ensure_ascii=False),
+            text_format=ProductMatchDecision,
+        )
+        decision = response.output_parsed or ProductMatchDecision(action="ambiguous")
+        logger.info(
+            "catalog_candidate_ai_decision",
+            target_query=query,
+            candidate_count=len(candidates),
+            candidate_product_ids=[
+                str(candidate.get("product_id") or "") for candidate in candidates
+            ],
+            action=decision.action,
+            selected_product_id=decision.selected_product_id,
+            reason=decision.reason,
+        )
+        return decision

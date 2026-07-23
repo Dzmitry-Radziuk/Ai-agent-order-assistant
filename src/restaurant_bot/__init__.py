@@ -1,0 +1,1 @@
+"""Restaurant procurement Telegram bot."""
