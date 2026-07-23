@@ -3,6 +3,7 @@
 __pycache__/
 .pytest_cache/
 .pytest-run/
+.planning/
 .mypy_cache/
 .ruff_cache/
 .coverage
