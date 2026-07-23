@@ -13,7 +13,7 @@ from redis.lock import Lock
 
 from restaurant_bot.config import Settings
 from restaurant_bot.domain.models import CatalogProduct
-from restaurant_bot.integrations.google_sheets import GoogleSheetsGateway
+from restaurant_bot.integrations.google_sheets import GoogleSheetsError, GoogleSheetsGateway
 
 logger = structlog.get_logger(__name__)
 
@@ -34,12 +34,11 @@ class CatalogCache:
         digest = hashlib.sha256(spreadsheet_id.encode("utf-8")).hexdigest()[:20]
         return f"{self.KEY}:{digest}"
 
-    def get(
-        self, spreadsheet_id: str | None = None, force_refresh: bool = False
-    ) -> list[CatalogProduct]:
+    def get(self, spreadsheet_id: str, force_refresh: bool = False) -> list[CatalogProduct]:
         """Возвращает каталог из кэша или обновляет его."""
-        target_id = spreadsheet_id or self.settings.google_spreadsheet_id
-        key = self._key(target_id)
+        if not spreadsheet_id.strip():
+            raise GoogleSheetsError("Venue spreadsheet ID is required")
+        key = self._key(spreadsheet_id)
         if not force_refresh:
             cached = self.redis.get(key)
             if cached:
@@ -47,12 +46,12 @@ class CatalogCache:
                 catalog = [CatalogProduct.model_validate(item) for item in payload]
                 logger.info(
                     "catalog_cache_hit",
-                    spreadsheet_id=target_id,
+                    spreadsheet_id=spreadsheet_id,
                     product_count=len(catalog),
                 )
                 return catalog
         started_at = perf_counter()
-        catalog = self.sheets.load_catalog(target_id)
+        catalog = self.sheets.load_catalog(spreadsheet_id)
         self.redis.setex(
             key,
             self.settings.catalog_cache_ttl_seconds,
@@ -60,18 +59,19 @@ class CatalogCache:
         )
         logger.info(
             "catalog_cache_refreshed",
-            spreadsheet_id=target_id,
+            spreadsheet_id=spreadsheet_id,
             product_count=len(catalog),
             duration_ms=round((perf_counter() - started_at) * 1000),
             forced=force_refresh,
         )
         return catalog
 
-    def invalidate(self, spreadsheet_id: str | None = None) -> None:
+    def invalidate(self, spreadsheet_id: str) -> None:
         """Удаляет каталог заведения из кэша."""
-        target_id = spreadsheet_id or self.settings.google_spreadsheet_id
-        self.redis.delete(self._key(target_id))
-        logger.info("catalog_cache_invalidated", spreadsheet_id=target_id)
+        if not spreadsheet_id.strip():
+            raise GoogleSheetsError("Venue spreadsheet ID is required")
+        self.redis.delete(self._key(spreadsheet_id))
+        logger.info("catalog_cache_invalidated", spreadsheet_id=spreadsheet_id)
 
 
 @contextmanager

@@ -51,7 +51,6 @@ class Settings(BaseSettings):
     celery_broker_url: str = "redis://localhost:6379/1"
     celery_result_backend: str = "redis://localhost:6379/2"
 
-    google_spreadsheet_id: str
     google_service_account_file: Path
     google_venue_directory_url: str = ""
     google_registration_spreadsheet_id: str = ""
@@ -102,7 +101,6 @@ class Settings(BaseSettings):
         if placeholders:
             raise ValueError(f"Production secrets are not configured: {', '.join(placeholders)}")
         required_config = {
-            "GOOGLE_SPREADSHEET_ID": self.google_spreadsheet_id,
             "GOOGLE_VENUE_DIRECTORY_URL": self.google_venue_directory_url,
             "GOOGLE_REGISTRATION_SPREADSHEET_ID": self.google_registration_spreadsheet_id,
             "GOOGLE_RECALC_URL": self.google_recalc_url,

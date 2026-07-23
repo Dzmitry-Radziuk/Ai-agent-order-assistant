@@ -68,20 +68,21 @@ class GoogleSheetsGateway:
         wait=wait_exponential_jitter(initial=0.5, max=8),
         reraise=True,
     )
-    def _get_values(self, range_name: str, spreadsheet_id: str | None = None) -> list[list[Any]]:
+    def _get_values(self, range_name: str, spreadsheet_id: str) -> list[list[Any]]:
         """Читает диапазон значений из Google Sheets."""
+        target_id = self._require_spreadsheet_id(spreadsheet_id)
         response = (
             self.service.spreadsheets()
             .values()
             .get(
-                spreadsheetId=spreadsheet_id or self.settings.google_spreadsheet_id,
+                spreadsheetId=target_id,
                 range=range_name,
             )
             .execute()
         )
         return cast(list[list[Any]], response.get("values", []))
 
-    def read_rows(self, sheet_name: str, spreadsheet_id: str | None = None) -> list[dict[str, Any]]:
+    def read_rows(self, sheet_name: str, spreadsheet_id: str) -> list[dict[str, Any]]:
         """Читает строки выбранного листа."""
         values = self._get_values(f"'{sheet_name}'!A:ZZ", spreadsheet_id)
         if not values:
@@ -102,7 +103,7 @@ class GoogleSheetsGateway:
             rows.append(row)
         return rows
 
-    def load_catalog(self, spreadsheet_id: str | None = None) -> list[CatalogProduct]:
+    def load_catalog(self, spreadsheet_id: str) -> list[CatalogProduct]:
         """Загружает каталог товаров заведения."""
         result = []
         for row in self.read_rows(self.settings.google_catalog_sheet, spreadsheet_id):
@@ -200,11 +201,11 @@ class GoogleSheetsGateway:
             )
         return result
 
-    def append_history(self, rows: list[dict[str, Any]], spreadsheet_id: str | None = None) -> None:
+    def append_history(self, rows: list[dict[str, Any]], spreadsheet_id: str) -> None:
         """Записывает строки заявки в историю."""
         if not rows:
             return
-        target_id = spreadsheet_id or self.settings.google_spreadsheet_id
+        target_id = self._require_spreadsheet_id(spreadsheet_id)
         existing = self._get_values(f"'{self.settings.google_history_sheet}'!A:S", target_id)
         actual_headers = [clean_text(value) for value in (existing[0] if existing else [])]
         if actual_headers[: len(HISTORY_HEADERS)] != list(HISTORY_HEADERS):
@@ -253,10 +254,10 @@ class GoogleSheetsGateway:
         return len(existing) + 1
 
     def increment_catalog_quantities(
-        self, rows: list[dict[str, Any]], spreadsheet_id: str | None = None
+        self, rows: list[dict[str, Any]], spreadsheet_id: str
     ) -> None:
         """Обновляет количества товаров в каталоге."""
-        target_id = spreadsheet_id or self.settings.google_spreadsheet_id
+        target_id = self._require_spreadsheet_id(spreadsheet_id)
         catalog = self.load_catalog(target_id)
         by_id = {product.product_id: product for product in catalog}
         increments: dict[tuple[str, str], float] = defaultdict(float)
@@ -310,11 +311,11 @@ class GoogleSheetsGateway:
             )
 
     def append_product_request(
-        self, row: dict[str, Any], spreadsheet_id: str | None = None
+        self, row: dict[str, Any], spreadsheet_id: str
     ) -> None:
         """Записывает запрос на новый товар."""
         sheet_text = clean_text(row.get("description", ""))
-        target_id = spreadsheet_id or self.settings.google_spreadsheet_id
+        target_id = self._require_spreadsheet_id(spreadsheet_id)
         existing = self._get_values(
             f"'{self.settings.google_product_add_sheet}'!A:A", target_id
         )
@@ -417,7 +418,7 @@ class GoogleSheetsGateway:
         return row.get(header, row.get(domain_key, ""))
 
     def read_order_statuses(
-        self, order_numbers: list[str], spreadsheet_id: str | None = None
+        self, order_numbers: list[str], spreadsheet_id: str
     ) -> list[dict[str, Any]]:
         """Читает статусы отправленных заявок."""
         if not order_numbers:
@@ -428,9 +429,10 @@ class GoogleSheetsGateway:
             row for row in rows if clean_text(row.get("№ Заявки") or row.get("ID заявки")) in wanted
         ]
 
-    def trigger_recalculation(self, order_no: str, spreadsheet_id: str | None = None) -> None:
+    def trigger_recalculation(self, order_no: str, spreadsheet_id: str) -> None:
         """Запускает перерасчёт итогов заявки."""
         del order_no  # The source n8n Apps Script recalculates the whole Заявка sheet.
+        target_id = self._require_spreadsheet_id(spreadsheet_id)
         token = self.settings.google_recalc_token.get_secret_value()
         if not token:
             raise GoogleSheetsError("GOOGLE_RECALC_TOKEN is not configured")
@@ -439,7 +441,7 @@ class GoogleSheetsGateway:
             json={
                 "token": token,
                 "sheetName": self.settings.google_recalc_sheet,
-                "spreadsheetId": spreadsheet_id or self.settings.google_spreadsheet_id,
+                "spreadsheetId": target_id,
             },
             timeout=45.0,
             follow_redirects=True,
@@ -471,6 +473,14 @@ class GoogleSheetsGateway:
             if current_normalized in extra_normalized:
                 return extra
         return "; ".join(value for value in (current, extra) if value)
+
+    @staticmethod
+    def _require_spreadsheet_id(spreadsheet_id: str) -> str:
+        """Отклоняет операцию без таблицы активного заведения."""
+        target_id = clean_text(spreadsheet_id)
+        if not target_id:
+            raise GoogleSheetsError("Venue spreadsheet ID is required")
+        return target_id
 
     def upsert_venue_registration(self, values: dict[str, Any]) -> None:
         """Создаёт или обновляет строку реестра привязок."""

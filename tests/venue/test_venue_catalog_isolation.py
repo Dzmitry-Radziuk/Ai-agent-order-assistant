@@ -1,7 +1,10 @@
 from unittest.mock import MagicMock
 
+import pytest
+
 from restaurant_bot.domain.models import CatalogProduct
 from restaurant_bot.integrations.cache import CatalogCache
+from restaurant_bot.integrations.google_sheets import GoogleSheetsError
 
 
 def test_catalog_cache_is_isolated_by_spreadsheet(settings) -> None:  # type: ignore[no-untyped-def]
@@ -22,3 +25,16 @@ def test_catalog_cache_is_isolated_by_spreadsheet(settings) -> None:  # type: ig
     assert sheets.load_catalog.call_args_list[0].args == ("sheet-a",)
     assert sheets.load_catalog.call_args_list[1].args == ("sheet-b",)
     assert redis.setex.call_args_list[0].args[0] != redis.setex.call_args_list[1].args[0]
+
+
+def test_catalog_cache_rejects_missing_venue_spreadsheet(settings) -> None:  # type: ignore[no-untyped-def]
+    """Не создаёт общий кэш для пользователя без привязки."""
+    redis = MagicMock()
+    sheets = MagicMock()
+    cache = CatalogCache(settings, redis, sheets)
+
+    with pytest.raises(GoogleSheetsError, match="spreadsheet ID is required"):
+        cache.get("")
+
+    redis.get.assert_not_called()
+    sheets.load_catalog.assert_not_called()

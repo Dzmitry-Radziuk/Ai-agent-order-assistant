@@ -11,6 +11,8 @@ from restaurant_bot.integrations.google_sheets import (
     GoogleSheetsGateway,
 )
 
+VENUE_SPREADSHEET_ID = "venue-sheet"
+
 
 def test_history_value_uses_source_contract_headers(settings) -> None:  # type: ignore[no-untyped-def]
     gateway = GoogleSheetsGateway(settings)
@@ -24,16 +26,28 @@ def test_history_value_does_not_export_internal_fields(settings) -> None:  # typ
     assert gateway._history_value({"_department": "Кухня"}, "Неизвестная колонка") == ""
 
 
+def test_gateway_rejects_missing_venue_spreadsheet(settings) -> None:  # type: ignore[no-untyped-def]
+    """Не обращается к Google Sheets без таблицы активного заведения."""
+    gateway = GoogleSheetsGateway(settings)
+    gateway.service = MagicMock()
+
+    with pytest.raises(GoogleSheetsError, match="spreadsheet ID is required"):
+        gateway.load_catalog("")
+
+    gateway.service.spreadsheets.assert_not_called()
+
+
 def test_product_add_write_uses_only_exact_user_description(settings) -> None:  # type: ignore[no-untyped-def]
     gateway = GoogleSheetsGateway(settings)
     gateway.service = MagicMock()
 
     gateway.append_product_request(
-        {"description": "Креветки Polar, 1 тонна", "telegram_user_id": "77"}
+        {"description": "Креветки Polar, 1 тонна", "telegram_user_id": "77"},
+        VENUE_SPREADSHEET_ID,
     )
 
     gateway.service.spreadsheets.return_value.values.return_value.append.assert_called_once_with(
-        spreadsheetId=settings.google_spreadsheet_id,
+        spreadsheetId=VENUE_SPREADSHEET_ID,
         range=f"'{settings.google_product_add_sheet}'!A1",
         valueInputOption="USER_ENTERED",
         insertDataOption="INSERT_ROWS",
@@ -50,13 +64,14 @@ def test_product_add_write_reuses_first_empty_formatted_row(settings) -> None:  
     )
 
     gateway.append_product_request(
-        {"description": "Креветки королевские", "telegram_user_id": "77"}
+        {"description": "Креветки королевские", "telegram_user_id": "77"},
+        VENUE_SPREADSHEET_ID,
     )
 
     values_api = gateway.service.spreadsheets.return_value.values.return_value
     values_api.append.assert_not_called()
     values_api.update.assert_called_once_with(
-        spreadsheetId=settings.google_spreadsheet_id,
+        spreadsheetId=VENUE_SPREADSHEET_ID,
         range=f"'{settings.google_product_add_sheet}'!A3",
         valueInputOption="USER_ENTERED",
         body={"values": [["Креветки королевские"]]},
@@ -73,7 +88,8 @@ def test_product_add_retries_ssl_failure_only_after_verifying_no_write(settings,
     sleep = mocker.patch.object(google_sheets_module, "sleep")
 
     gateway.append_product_request(
-        {"description": "Креветки королевские", "telegram_user_id": "77"}
+        {"description": "Креветки королевские", "telegram_user_id": "77"},
+        VENUE_SPREADSHEET_ID,
     )
 
     assert execute.call_count == 2
@@ -91,7 +107,8 @@ def test_product_add_accepts_verified_write_after_lost_ssl_response(settings, mo
     sleep = mocker.patch.object(google_sheets_module, "sleep")
 
     gateway.append_product_request(
-        {"description": "Креветки королевские", "telegram_user_id": "77"}
+        {"description": "Креветки королевские", "telegram_user_id": "77"},
+        VENUE_SPREADSHEET_ID,
     )
 
     execute.assert_called_once()
@@ -106,7 +123,8 @@ def test_history_write_uses_first_empty_a_to_s_row(settings) -> None:  # type: i
     )
 
     gateway.append_history(
-        [{"№ Заявки": "A-1", "Комментарий": "только охлаждённое", "Стадия": "Новая заявка"}]
+        [{"№ Заявки": "A-1", "Комментарий": "только охлаждённое", "Стадия": "Новая заявка"}],
+        VENUE_SPREADSHEET_ID,
     )
 
     call = gateway.service.spreadsheets.return_value.values.return_value.update.call_args.kwargs
@@ -123,7 +141,7 @@ def test_history_write_appends_only_when_there_is_no_empty_row(settings) -> None
         return_value=[list(HISTORY_HEADERS), ["A-OLD"]]
     )
 
-    gateway.append_history([{"№ Заявки": "A-NEW"}])
+    gateway.append_history([{"№ Заявки": "A-NEW"}], VENUE_SPREADSHEET_ID)
 
     call = gateway.service.spreadsheets.return_value.values.return_value.append.call_args.kwargs
     assert call["range"] == f"'{settings.google_history_sheet}'!A:S"
@@ -135,7 +153,7 @@ def test_read_rows_keeps_first_duplicate_header_value(settings) -> None:  # type
         return_value=[["№ Заявки", "Стадия", "Стадия"], ["A-1", "Новая заявка", ""]]
     )
 
-    assert gateway.read_rows("История")[0]["Стадия"] == "Новая заявка"
+    assert gateway.read_rows("История", VENUE_SPREADSHEET_ID)[0]["Стадия"] == "Новая заявка"
 
 
 def test_live_catalog_headers_fill_submission_metadata(settings) -> None:  # type: ignore[no-untyped-def]
@@ -159,7 +177,7 @@ def test_live_catalog_headers_fill_submission_metadata(settings) -> None:  # typ
         ]
     )
 
-    product = gateway.load_catalog()[0]
+    product = gateway.load_catalog(VENUE_SPREADSHEET_ID)[0]
 
     assert product.supplier == "Сиропы"
     assert product.price == 125
@@ -197,7 +215,8 @@ def test_catalog_update_writes_quantity_and_merged_comment(settings) -> None:  #
                 "_department": "Кухня",
                 "Комментарий": "хранить в холоде; без замены",
             }
-        ]
+        ],
+        VENUE_SPREADSHEET_ID,
     )
 
     call = (
@@ -221,14 +240,14 @@ def test_recalculation_uses_the_same_body_as_n8n(settings, monkeypatch) -> None:
     post = MagicMock(return_value=response)
     monkeypatch.setattr(google_sheets_module.httpx, "post", post)
 
-    GoogleSheetsGateway(settings).trigger_recalculation("A-1")
+    GoogleSheetsGateway(settings).trigger_recalculation("A-1", VENUE_SPREADSHEET_ID)
 
     post.assert_called_once_with(
         settings.google_recalc_url,
         json={
             "token": "secret",
             "sheetName": "Заявка",
-            "spreadsheetId": settings.google_spreadsheet_id,
+            "spreadsheetId": VENUE_SPREADSHEET_ID,
         },
         timeout=45.0,
         follow_redirects=True,
@@ -239,7 +258,7 @@ def test_recalculation_uses_the_same_body_as_n8n(settings, monkeypatch) -> None:
 def test_recalculation_without_token_cannot_be_marked_successful(settings) -> None:  # type: ignore[no-untyped-def]
     settings.google_recalc_token = SecretStr("")
     with pytest.raises(GoogleSheetsError, match="GOOGLE_RECALC_TOKEN"):
-        GoogleSheetsGateway(settings).trigger_recalculation("A-1")
+        GoogleSheetsGateway(settings).trigger_recalculation("A-1", VENUE_SPREADSHEET_ID)
 
 
 def test_registration_upsert_uses_existing_headers_only(settings) -> None:  # type: ignore[no-untyped-def]

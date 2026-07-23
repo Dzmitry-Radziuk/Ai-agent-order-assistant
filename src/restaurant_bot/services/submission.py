@@ -18,7 +18,7 @@ from restaurant_bot.domain.models import (
     SessionStage,
 )
 from restaurant_bot.integrations.cache import CatalogCache, chat_lock
-from restaurant_bot.integrations.google_sheets import GoogleSheetsGateway
+from restaurant_bot.integrations.google_sheets import GoogleSheetsError, GoogleSheetsGateway
 from restaurant_bot.integrations.telegram import TelegramClient
 from restaurant_bot.repositories.sessions import SessionRepository
 from restaurant_bot.repositories.submissions import SubmissionRepository
@@ -67,10 +67,7 @@ class SubmissionService:
             finalized = False
             try:
                 record = self._record(chat_id, pending)
-                configured_id = getattr(
-                    getattr(self, "settings", None), "google_spreadsheet_id", ""
-                )
-                spreadsheet_id = pending.spreadsheet_id or configured_id
+                spreadsheet_id = self._require_venue_spreadsheet_id(pending.spreadsheet_id)
                 if not record.history_written:
                     stage_started = perf_counter()
                     with self.redis.lock(
@@ -78,10 +75,7 @@ class SubmissionService:
                         timeout=120,
                         blocking_timeout=120,
                     ):
-                        if spreadsheet_id:
-                            self.sheets.append_history(pending.rows, spreadsheet_id)
-                        else:
-                            self.sheets.append_history(pending.rows)
+                        self.sheets.append_history(pending.rows, spreadsheet_id)
                     self._checkpoint(pending.order_no, "history_written")
                     logger.info(
                         "submission_history_written",
@@ -181,7 +175,7 @@ class SubmissionService:
                 return
             rows = self.sheets.read_order_statuses(
                 order_numbers,
-                state.spreadsheet_id or self.settings.google_spreadsheet_id,
+                self._require_venue_spreadsheet_id(state.spreadsheet_id),
             )
             self.telegram.send_reply(chat_id, BotReply(text=build_order_status_text(rows, state)))
 
@@ -213,7 +207,7 @@ class SubmissionService:
             try:
                 self.sheets.append_product_request(
                     {"description": request["description"]},
-                    state.spreadsheet_id or self.settings.google_spreadsheet_id,
+                    self._require_venue_spreadsheet_id(state.spreadsheet_id),
                 )
                 status = "submitted"
                 error = ""
@@ -338,6 +332,15 @@ class SubmissionService:
         with SessionLocal() as db:
             _, state = SessionRepository(db).get_for_update(chat_id)
             return state.pending_submission
+
+    @staticmethod
+    def _require_venue_spreadsheet_id(spreadsheet_id: str) -> str:
+        """Останавливает запись без таблицы активного заведения."""
+        target_id = spreadsheet_id.strip()
+        if not target_id:
+            logger.error("venue_spreadsheet_id_missing")
+            raise GoogleSheetsError("Venue spreadsheet ID is required")
+        return target_id
 
     def _record(self, chat_id: str, pending: PendingSubmission) -> SubmissionRecord:
         """Создаёт или загружает запись отправки."""

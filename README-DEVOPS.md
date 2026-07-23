@@ -73,7 +73,6 @@ Compose-сервисы:
 - случайный Telegram webhook secret;
 - JSON service account Google;
 - доступ service account ко всем нужным таблицам;
-- основной Google Spreadsheet ID;
 - directory URL списка заведений;
 - registration Spreadsheet ID;
 - названия рабочих листов;
@@ -299,7 +298,6 @@ Redis не публикуется наружу. Если Redis выноситс�
 
 | Переменная | Обязательная | Секрет | Назначение |
 |---|---:|---:|---|
-| `GOOGLE_SPREADSHEET_ID` | Да | Нет | Таблица по умолчанию |
 | `GOOGLE_SERVICE_ACCOUNT_FILE` | Да | Нет | `/run/secrets/google-service-account.json` |
 | `GOOGLE_VENUE_DIRECTORY_URL` | Да | Обычно нет | HTTPS GViz URL directory-таблицы |
 | `GOOGLE_REGISTRATION_SPREADSHEET_ID` | Да | Нет | Таблица регистрации |
@@ -313,6 +311,10 @@ Redis не публикуется наружу. Если Redis выноситс�
 | `VENUE_DIRECTORY_CACHE_TTL_SECONDS` | Нет | Нет | `120`, допустимо 30–3600 |
 | `CATALOG_CACHE_TTL_SECONDS` | Нет | Нет | `60`, допустимо 5–3600 |
 | `DEFAULT_DEPARTMENT` | Нет | Нет | `Кухня` |
+
+Общей или резервной рабочей таблицы у бота нет. После подтверждения кода бот получает
+ID таблицы конкретного заведения из `GOOGLE_VENUE_DIRECTORY_URL`. Если привязка или ID
+таблицы отсутствуют, обработка заявки останавливается без обращения к Google Sheets.
 
 Секретным является содержимое service account JSON. Spreadsheet IDs сами по себе не дают доступ к закрытой таблице, но их всё равно лучше не публиковать.
 
@@ -376,7 +378,6 @@ OPENAI_TRANSCRIBE_FALLBACK_MODEL
 OPENAI_VISION_TIMEOUT_SECONDS
 POSTGRES_DB
 POSTGRES_USER
-GOOGLE_SPREADSHEET_ID
 GOOGLE_VENUE_DIRECTORY_URL
 GOOGLE_REGISTRATION_SPREADSHEET_ID
 GOOGLE_REGISTRATION_SHEET
@@ -676,7 +677,6 @@ umask 077
   printf 'REDIS_URL=redis://redis:6379/0\n'
   printf 'CELERY_BROKER_URL=redis://redis:6379/1\n'
   printf 'CELERY_RESULT_BACKEND=redis://redis:6379/2\n'
-  printf 'GOOGLE_SPREADSHEET_ID=%s\n' "$GOOGLE_SPREADSHEET_ID"
   printf 'GOOGLE_SERVICE_ACCOUNT_FILE=/run/secrets/google-service-account.json\n'
   printf 'GOOGLE_VENUE_DIRECTORY_URL=%s\n' "$GOOGLE_VENUE_DIRECTORY_URL"
   printf 'GOOGLE_REGISTRATION_SPREADSHEET_ID=%s\n' "$GOOGLE_REGISTRATION_SPREADSHEET_ID"
@@ -1116,4 +1116,3 @@ docker image prune
 - GitLab Pipeline Security: <https://docs.gitlab.com/ci/pipeline_security/>
 - GitLab Deployment Safety: <https://docs.gitlab.com/ci/environments/deployment_safety/>
 - Telegram Bot API `setWebhook`: <https://core.telegram.org/bots/api#setwebhook>
-

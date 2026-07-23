@@ -333,7 +333,6 @@ def _product_add_service(
 ) -> tuple[SubmissionService, ConversationState, MagicMock]:
     """Создаёт сервис отправки нового товара с тестовой транзакцией."""
     service = object.__new__(SubmissionService)
-    service.settings = SimpleNamespace(google_spreadsheet_id="default-sheet")
     service.redis = MagicMock()
     service.telegram = MagicMock()
     service.sheets = MagicMock()

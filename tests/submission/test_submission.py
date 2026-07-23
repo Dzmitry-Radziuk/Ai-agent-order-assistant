@@ -10,6 +10,7 @@ from restaurant_bot.domain.models import (
     PendingSubmission,
     SessionStage,
 )
+from restaurant_bot.integrations.google_sheets import GoogleSheetsError
 from restaurant_bot.services import submission as submission_module
 from restaurant_bot.services.submission import (
     SubmissionService,
@@ -105,7 +106,11 @@ def test_transient_submission_error_is_retried_without_premature_failure_card(
     service.telegram = MagicMock()
     service.sheets = MagicMock()
     service.sheets.append_history.side_effect = TimeoutError("temporary timeout")
-    pending = PendingSubmission(order_no="20260722-retry", rows=[{"Комментарий": "холодным"}])
+    pending = PendingSubmission(
+        order_no="20260722-retry",
+        spreadsheet_id="venue-sheet",
+        rows=[{"Комментарий": "холодным"}],
+    )
     service._load_pending = MagicMock(return_value=pending)  # type: ignore[method-assign]
     service._record = MagicMock(  # type: ignore[method-assign]
         return_value=SimpleNamespace(history_written=False)
@@ -157,7 +162,6 @@ def test_submission_runs_all_external_stages_and_checkpoints(
 ) -> None:
     """Выполняет этапы отправки строго по контрольным точкам."""
     service = object.__new__(SubmissionService)
-    service.settings = SimpleNamespace(google_spreadsheet_id="default-sheet")
     service.redis = MagicMock()
     service.redis.lock.return_value = nullcontext()
     service.telegram = MagicMock()
@@ -200,18 +204,45 @@ def test_submission_runs_all_external_stages_and_checkpoints(
     service._send_completion.assert_called_once_with("chat-1", final_state, "ORDER-1")
 
 
+def test_submission_without_venue_spreadsheet_never_writes_to_google(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Останавливает отправку, если у заявки потеряна таблица заведения."""
+    service = object.__new__(SubmissionService)
+    service.redis = MagicMock()
+    service.telegram = MagicMock()
+    service.sheets = MagicMock()
+    service.catalog_cache = MagicMock()
+    pending = PendingSubmission(order_no="ORDER-NO-SHEET", rows=[{"№ Заявки": "ORDER-NO-SHEET"}])
+    service._load_pending = MagicMock(return_value=pending)  # type: ignore[method-assign]
+    service._record = MagicMock(  # type: ignore[method-assign]
+        return_value=SimpleNamespace(history_written=False)
+    )
+    service._remember_transient_error = MagicMock()  # type: ignore[method-assign]
+    monkeypatch.setattr(submission_module, "chat_lock", lambda *_args, **_kwargs: nullcontext())
+
+    with pytest.raises(GoogleSheetsError, match="spreadsheet ID is required"):
+        service.submit("chat-no-sheet", report_failure=False)
+
+    service.sheets.assert_not_called()
+    assert service.sheets.mock_calls == []
+
+
 def test_submission_failure_is_persisted_and_reported_after_final_retry(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Показывает карточку сбоя только после исчерпания повторов."""
     service = object.__new__(SubmissionService)
-    service.settings = SimpleNamespace(google_spreadsheet_id="sheet-1")
     service.redis = MagicMock()
     service.redis.lock.return_value = nullcontext()
     service.telegram = MagicMock()
     service.sheets = MagicMock()
     service.sheets.append_history.side_effect = RuntimeError("Google unavailable")
-    pending = PendingSubmission(order_no="ORDER-2", rows=[{"№ Заявки": "ORDER-2"}])
+    pending = PendingSubmission(
+        order_no="ORDER-2",
+        spreadsheet_id="venue-sheet",
+        rows=[{"№ Заявки": "ORDER-2"}],
+    )
     service._load_pending = MagicMock(return_value=pending)  # type: ignore[method-assign]
     service._record = MagicMock(  # type: ignore[method-assign]
         return_value=SimpleNamespace(history_written=False)
@@ -236,13 +267,12 @@ def test_notification_failure_after_finalize_never_rolls_back_order(
 ) -> None:
     """Не откатывает заявку после успешной записи из-за сбоя Telegram."""
     service = object.__new__(SubmissionService)
-    service.settings = SimpleNamespace(google_spreadsheet_id="sheet-1")
     service.redis = MagicMock()
     service.redis.lock.return_value = nullcontext()
     service.telegram = MagicMock()
     service.sheets = MagicMock()
     service.catalog_cache = MagicMock()
-    pending = PendingSubmission(order_no="ORDER-3", rows=[])
+    pending = PendingSubmission(order_no="ORDER-3", spreadsheet_id="venue-sheet", rows=[])
     service._load_pending = MagicMock(return_value=pending)  # type: ignore[method-assign]
     service._record = MagicMock(  # type: ignore[method-assign]
         return_value=SimpleNamespace(history_written=True)
