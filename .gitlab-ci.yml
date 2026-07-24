@@ -20,6 +20,8 @@ variables:
 
 default:
   interruptible: true
+  tags:
+    - dev
 
 .python-job:
   image: python:3.12-slim

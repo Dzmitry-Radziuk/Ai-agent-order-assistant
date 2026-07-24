@@ -13,6 +13,8 @@
 
 `.gitlab-ci.yml` создаёт pipeline для веток, тегов и Merge Request. Если для ветки уже открыт Merge Request, отдельный push-pipeline не создаётся — остаётся один MR pipeline.
 
+Все jobs используют тег `dev` и выполняются общим instance Runner `DEVELOP gitlab.testant.online`. Для проекта должна быть включена настройка `Turn on instance runners for this project`.
+
 ## Обязательные jobs
 
 | Job | Проверка |
