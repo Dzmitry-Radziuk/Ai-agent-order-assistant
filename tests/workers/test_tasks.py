@@ -67,3 +67,28 @@ def test_celery_configuration_preserves_delivery_guarantees() -> None:
     assert celery_app.conf.worker_prefetch_multiplier == 1
     assert celery_app.conf.task_track_started is True
     assert celery_app.conf.task_serializer == "json"
+    assert celery_app.conf.result_expires == 86400
+    assert (
+        celery_app.conf.beat_schedule["cleanup-expired-audit-data"]["task"]
+        == "restaurant_bot.cleanup_expired_audit_data"
+    )
+
+
+def test_cleanup_task_uses_configured_retention_periods(settings, mocker) -> None:  # type: ignore[no-untyped-def]
+    db = MagicMock()
+    session_local = mocker.patch.object(tasks, "SessionLocal")
+    session_local.begin.return_value.__enter__.return_value = db
+    repository = mocker.patch.object(tasks, "OrderEventRepository").return_value
+    repository.cleanup.return_value = (7, 11)
+    mocker.patch.object(tasks, "get_settings", return_value=settings)
+
+    result = tasks.cleanup_expired_audit_data.run()
+
+    repository.cleanup.assert_called_once_with(
+        event_retention_days=365,
+        update_retention_days=30,
+    )
+    assert result == {
+        "deleted_order_events": 7,
+        "deleted_telegram_updates": 11,
+    }

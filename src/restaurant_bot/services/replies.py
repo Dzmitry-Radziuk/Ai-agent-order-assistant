@@ -245,11 +245,7 @@ def unrecognized_voice_reply(state: ConversationState) -> BotReply:
 
 def photo_without_quantities_reply(state: ConversationState) -> BotReply:
     """Объясняет отсутствие заполненных количеств на фотографии."""
-    rows = (
-        [[Button(text="Черновик", callback_data="v2:cart")]]
-        if _has_draft_content(state)
-        else []
-    )
+    rows = [[Button(text="Черновик", callback_data="v2:cart")]] if _has_draft_content(state) else []
     return BotReply(
         text=(
             "📷 <b>Не нашёл заполненных количеств</b>\n\n"

@@ -10,7 +10,14 @@ from typing import Any
 import structlog
 
 _SECRET_KEYS = {"authorization", "credential", "password", "secret", "token", "api_key", "apikey"}
-_SECRET_KEY_SUFFIXES = ("_authorization", "_credential", "_password", "_secret", "_token", "_api_key")
+_SECRET_KEY_SUFFIXES = (
+    "_authorization",
+    "_credential",
+    "_password",
+    "_secret",
+    "_token",
+    "_api_key",
+)
 _IDENTIFIER_KEYS = {
     "chat_id",
     "spreadsheet_id",
@@ -58,9 +65,7 @@ def _scrub_tokens(value: str) -> str:
     scrubbed = value
     for pattern in _TOKEN_PATTERNS:
         scrubbed = pattern.sub(
-            lambda match: (
-                f"{match.group(1)}<redacted>" if match.lastindex else "<redacted>"
-            ),
+            lambda match: f"{match.group(1)}<redacted>" if match.lastindex else "<redacted>",
             scrubbed,
         )
     return scrubbed

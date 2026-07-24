@@ -1,0 +1,43 @@
+graph LR
+  linkStyle default fill:#ffffff
+
+  subgraph diagram ["C3 — Компоненты FastAPI API"]
+    style diagram fill:#ffffff,stroke:#ffffff
+
+    28["<div style='font-weight: bold'>Telegram Bot API</div><div style='font-size: 70%; margin-top: 0px'>[Software System]</div><div style='font-size: 80%; margin-top:10px'>Доставляет сообщения,<br />callback, голос и фото;<br />принимает ответы бота.</div>"]
+    style 28 fill:#6b7280,stroke:#4a4f59,color:#ffffff
+
+    subgraph 4 ["Restaurant Procurement Bot"]
+      style 4 fill:#ffffff,stroke:#0b4884,color:#0b4884
+
+      subgraph 5 ["FastAPI API"]
+        style 5 fill:#ffffff,stroke:#2e6295,color:#2e6295
+
+        10["<div style='font-weight: bold'>Celery Task Publisher</div><div style='font-size: 70%; margin-top: 0px'>[Component: workers/tasks.py]</div><div style='font-size: 80%; margin-top:10px'>Ставит новый update в очередь<br />обработки.</div>"]
+        style 10 fill:#85bbf0,stroke:#5d82a8,color:#111827
+        6["<div style='font-weight: bold'>Telegram Webhook</div><div style='font-size: 70%; margin-top: 0px'>[Component: FastAPI route]</div><div style='font-size: 80%; margin-top:10px'>Обрабатывает POST<br />/webhooks/telegram и защищает<br />вход секретным заголовком.</div>"]
+        style 6 fill:#85bbf0,stroke:#5d82a8,color:#111827
+        7["<div style='font-weight: bold'>Health Endpoints</div><div style='font-size: 70%; margin-top: 0px'>[Component: FastAPI routes]</div><div style='font-size: 80%; margin-top:10px'>Проверяют процесс API,<br />PostgreSQL и Redis.</div>"]
+        style 7 fill:#85bbf0,stroke:#5d82a8,color:#111827
+        8["<div style='font-weight: bold'>Input Normalizer</div><div style='font-size: 70%; margin-top: 0px'>[Component: services/input_normalizer.py]</div><div style='font-size: 80%; margin-top:10px'>Преобразует Telegram payload<br />в доменное событие.</div>"]
+        style 8 fill:#85bbf0,stroke:#5d82a8,color:#111827
+        9["<div style='font-weight: bold'>Update Repository</div><div style='font-size: 70%; margin-top: 0px'>[Component: repositories/updates.py]</div><div style='font-size: 80%; margin-top:10px'>Идемпотентно сохраняет<br />Telegram updates и<br />контрольные точки обработки.</div>"]
+        style 9 fill:#85bbf0,stroke:#5d82a8,color:#111827
+      end
+
+      26[("<div style='font-weight: bold'>PostgreSQL</div><div style='font-size: 70%; margin-top: 0px'>[Container: PostgreSQL 17]</div><div style='font-size: 80%; margin-top:10px'>Хранит сессии, Telegram<br />inbox, привязки заведений,<br />отправки и аудит заказов.</div>")]
+      style 26 fill:#2f95c7,stroke:#20688b,color:#ffffff
+      27[("<div style='font-weight: bold'>Redis</div><div style='font-size: 70%; margin-top: 0px'>[Container: Redis 8]</div><div style='font-size: 80%; margin-top:10px'>Временно хранит очередь<br />Celery, результаты задач, кэш<br />и блокировки чатов.</div>")]
+      style 27 fill:#2f95c7,stroke:#20688b,color:#ffffff
+    end
+
+    28-. "<div>Доставляет update</div><div style='font-size: 70%'>[HTTPS/JSON]</div>" .->6
+    6-. "<div>Нормализует payload</div><div style='font-size: 70%'>[Python call]</div>" .->8
+    6-. "<div>Сохраняет update один раз</div><div style='font-size: 70%'>[Python call]</div>" .->9
+    6-. "<div>Публикует задачу для нового<br />update</div><div style='font-size: 70%'>[Python call]</div>" .->10
+    9-. "<div>Создаёт и читает Telegram<br />inbox</div><div style='font-size: 70%'>[SQL]</div>" .->26
+    10-. "<div>Публикует Celery task</div><div style='font-size: 70%'>[Redis protocol]</div>" .->27
+    7-. "<div>Проверяет доступность</div><div style='font-size: 70%'>[SQL]</div>" .->26
+    7-. "<div>Проверяет доступность</div><div style='font-size: 70%'>[Redis PING]</div>" .->27
+
+  end

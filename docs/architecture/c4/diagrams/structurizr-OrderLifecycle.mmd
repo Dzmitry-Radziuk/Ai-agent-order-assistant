@@ -1,0 +1,42 @@
+graph LR
+  linkStyle default fill:#ffffff
+
+  subgraph diagram ["Динамика — жизненный цикл заказа"]
+    style diagram fill:#ffffff,stroke:#ffffff
+
+    subgraph 4 ["Restaurant Procurement Bot"]
+      style 4 fill:#ffffff,stroke:#0b4884,color:#0b4884
+
+      11["<div style='font-weight: bold'>Celery Worker</div><div style='font-size: 70%; margin-top: 0px'>[Container: Python 3.12, Celery]</div><div style='font-size: 80%; margin-top:10px'>Последовательно обрабатывает<br />диалог, вызывает AI и<br />выполняет возобновляемую<br />отправку заявки.</div>"]
+      style 11 fill:#438dd5,stroke:#2e6295,color:#ffffff
+      26[("<div style='font-weight: bold'>PostgreSQL</div><div style='font-size: 70%; margin-top: 0px'>[Container: PostgreSQL 17]</div><div style='font-size: 80%; margin-top:10px'>Хранит сессии, Telegram<br />inbox, привязки заведений,<br />отправки и аудит заказов.</div>")]
+      style 26 fill:#2f95c7,stroke:#20688b,color:#ffffff
+      27[("<div style='font-weight: bold'>Redis</div><div style='font-size: 70%; margin-top: 0px'>[Container: Redis 8]</div><div style='font-size: 80%; margin-top:10px'>Временно хранит очередь<br />Celery, результаты задач, кэш<br />и блокировки чатов.</div>")]
+      style 27 fill:#2f95c7,stroke:#20688b,color:#ffffff
+      5["<div style='font-weight: bold'>FastAPI API</div><div style='font-size: 70%; margin-top: 0px'>[Container: Python 3.12, FastAPI, Uvicorn]</div><div style='font-size: 80%; margin-top:10px'>Принимает Telegram webhook,<br />проверяет секрет, сохраняет<br />update и ставит задачу в<br />очередь.</div>"]
+      style 5 fill:#438dd5,stroke:#2e6295,color:#ffffff
+    end
+
+    1["<div style='font-weight: bold'>Повар / сотрудник кафе</div><div style='font-size: 70%; margin-top: 0px'>[Person]</div><div style='font-size: 80%; margin-top:10px'>Создаёт и отправляет заявку<br />на закупку через Telegram.</div>"]
+    style 1 fill:#08427b,stroke:#052e56,color:#ffffff
+    28["<div style='font-weight: bold'>Telegram Bot API</div><div style='font-size: 70%; margin-top: 0px'>[Software System]</div><div style='font-size: 80%; margin-top:10px'>Доставляет сообщения,<br />callback, голос и фото;<br />принимает ответы бота.</div>"]
+    style 28 fill:#6b7280,stroke:#4a4f59,color:#ffffff
+    29["<div style='font-weight: bold'>OpenAI API</div><div style='font-size: 70%; margin-top: 0px'>[Software System]</div><div style='font-size: 80%; margin-top:10px'>Выполняет транскрибацию,<br />разбор текста, анализ фото и<br />выбор кандидата.</div>"]
+    style 29 fill:#6b7280,stroke:#4a4f59,color:#ffffff
+    30["<div style='font-weight: bold'>Google Sheets</div><div style='font-size: 70%; margin-top: 0px'>[Software System]</div><div style='font-size: 80%; margin-top:10px'>Хранит каталог заведения,<br />регистрацию, историю товаров<br />и заявки на новые товары.</div>"]
+    style 30 fill:#6b7280,stroke:#4a4f59,color:#ffffff
+    31["<div style='font-weight: bold'>Google Apps Script</div><div style='font-size: 70%; margin-top: 0px'>[Software System]</div><div style='font-size: 80%; margin-top:10px'>Пересчитывает рабочий лист<br />заявки после записи заказа.</div>"]
+    style 31 fill:#6b7280,stroke:#4a4f59,color:#ffffff
+
+    1-. "<div>1. 1. Отправляет текст,<br />голос, фото или callback</div><div style='font-size: 70%'>[Telegram]</div>" .->28
+    28-. "<div>2. 2. Доставляет защищённый<br />webhook</div><div style='font-size: 70%'>[HTTPS/JSON]</div>" .->5
+    5-. "<div>3. 3. Идемпотентно сохраняет<br />update</div><div style='font-size: 70%'>[SQL]</div>" .->26
+    5-. "<div>4. 4. Публикует задачу<br />обработки</div><div style='font-size: 70%'>[Redis protocol]</div>" .->27
+    27-. "<div>5. 5. Доставляет задачу<br />worker</div><div style='font-size: 70%'>[Redis protocol]</div>" .->11
+    11-. "<div>6. 6. При необходимости<br />распознаёт и разбирает ввод</div><div style='font-size: 70%'>[HTTPS/JSON]</div>" .->29
+    11-. "<div>7. 7. Сохраняет состояние и<br />аудит</div><div style='font-size: 70%'>[SQL]</div>" .->26
+    11-. "<div>8. 8. При подтверждении<br />записывает заявку</div><div style='font-size: 70%'>[Google Sheets API]</div>" .->30
+    11-. "<div>9. 9. Запускает перерасчёт</div><div style='font-size: 70%'>[HTTPS/JSON]</div>" .->31
+    11-. "<div>10. 10. Отправляет<br />пользователю результат</div><div style='font-size: 70%'>[HTTPS/JSON]</div>" .->28
+
+  end

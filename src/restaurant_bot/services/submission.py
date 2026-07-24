@@ -20,6 +20,7 @@ from restaurant_bot.domain.models import (
 from restaurant_bot.integrations.cache import CatalogCache, chat_lock
 from restaurant_bot.integrations.google_sheets import GoogleSheetsError, GoogleSheetsGateway
 from restaurant_bot.integrations.telegram import TelegramClient
+from restaurant_bot.repositories.order_events import OrderEventRepository
 from restaurant_bot.repositories.sessions import SessionRepository
 from restaurant_bot.repositories.submissions import SubmissionRepository
 from restaurant_bot.services.replies import cart_reply
@@ -345,7 +346,14 @@ class SubmissionService:
     def _record(self, chat_id: str, pending: PendingSubmission) -> SubmissionRecord:
         """Создаёт или загружает запись отправки."""
         with SessionLocal.begin() as db:
-            return SubmissionRepository(db).get_or_create(chat_id, pending)
+            record = SubmissionRepository(db).get_or_create(chat_id, pending)
+            self._append_submission_event(
+                OrderEventRepository(db),
+                pending,
+                event_type="submission_processing_started",
+                idempotency_key=f"order:{pending.order_no}:processing-started",
+            )
+            return record
 
     def _get_record(self, order_no: str) -> SubmissionRecord:
         """Возвращает запись отправки по номеру заявки."""
@@ -374,6 +382,21 @@ class SubmissionService:
                 raise RuntimeError(f"Submission record {order_no} not found")
             setattr(record, field, True)
             record.last_error = None
+            pending = PendingSubmission.model_validate(record.payload)
+            event_types = {
+                "history_written": "submission_history_written",
+                "catalog_updated": "submission_catalog_updated",
+                "recalc_done": "submission_recalculation_completed",
+                "completion_notified": "submission_notification_sent",
+            }
+            event_type = event_types.get(field)
+            if event_type:
+                self._append_submission_event(
+                    OrderEventRepository(db),
+                    pending,
+                    event_type=event_type,
+                    idempotency_key=f"order:{order_no}:{field}",
+                )
 
     def _finalize(self, chat_id: str, order_no: str) -> ConversationState:
         """Финализирует успешно отправленную заявку."""
@@ -392,6 +415,13 @@ class SubmissionService:
             if record:
                 record.finalized = True
                 record.last_error = None
+                pending = PendingSubmission.model_validate(record.payload)
+                self._append_submission_event(
+                    OrderEventRepository(db),
+                    pending,
+                    event_type="submission_completed",
+                    idempotency_key=f"order:{order_no}:completed",
+                )
             return state
 
     @staticmethod
@@ -401,6 +431,7 @@ class SubmissionService:
             state.submitted_order_numbers.append(order_no)
         state.last_order_no = order_no
         state.pending_submission = None
+        state.order_trace_id = ""
         state.cart = []
         state.current_issue_item_id = ""
         state.stage = SessionStage.SUBMITTED
@@ -424,7 +455,39 @@ class SubmissionService:
             )
             if record:
                 record.last_error = error[:4000]
+                pending = PendingSubmission.model_validate(record.payload)
+                self._append_submission_event(
+                    OrderEventRepository(db),
+                    pending,
+                    event_type="submission_failed",
+                    idempotency_key=f"order:{order_no}:failed",
+                    status="error",
+                    details={"error": error},
+                )
             return state
+
+    @staticmethod
+    def _append_submission_event(
+        events: OrderEventRepository,
+        pending: PendingSubmission,
+        *,
+        event_type: str,
+        idempotency_key: str,
+        status: str = "ok",
+        details: dict[str, Any] | None = None,
+    ) -> None:
+        """Связывает этап фоновой отправки с исходным сценарием пользователя."""
+        events.append_once(
+            idempotency_key=idempotency_key,
+            trace_id=pending.trace_id,
+            order_no=pending.order_no,
+            telegram_user_id=pending.telegram_user_id or pending.telegram_chat_id,
+            telegram_chat_id=pending.telegram_chat_id or pending.telegram_user_id,
+            venue_code=pending.venue_code,
+            event_type=event_type,
+            status=status,
+            details=details,
+        )
 
     def _remember_transient_error(self, order_no: str, error: str) -> None:
         """Сохраняет временную ошибку для повторной попытки."""

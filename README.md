@@ -20,7 +20,9 @@ Production-приложение на Python принимает заявки от
 - [База данных и миграции](#база-данных-и-миграции)
 - [Фоновые задачи](#фоновые-задачи)
 - [Логирование](#логирование)
+- [Журнал жизненного цикла заказа](#журнал-жизненного-цикла-заказа)
 - [Тесты и качество кода](#тесты-и-качество-кода)
+- [GitLab CI](#gitlab-ci)
 - [Обновление приложения](#обновление-приложения)
 - [Частые проблемы](#частые-проблемы)
 - [Документация для эксплуатации](#документация-для-эксплуатации)
@@ -102,11 +104,14 @@ Redis ◄───────────────────── Celery 
 |---|---|
 | `api` | Принимает webhook и отдаёт health endpoints |
 | `worker` | Обрабатывает сообщения и фоновые операции |
+| `beat` | Раз в сутки запускает очистку устаревших данных |
 | `migrate` | Однократно выполняет `alembic upgrade head` |
 | `postgres` | Хранит долговечное состояние |
-| `redis` | Celery broker/backend, кэш и блокировки |
+| `redis` | Временно хранит очередь Celery, результаты, кэш и блокировки; аудит заказов в Redis не хранится |
 
 API быстро подтверждает получение update, а длительная работа выполняется worker. Поэтому Telegram не должен ждать распознавание голоса, фотографии или запись в таблицу внутри webhook-запроса.
+
+Подробная модель C4 — контекст, контейнеры, компоненты API/Worker, динамика заказа и deployment — находится в [docs/architecture/README.md](docs/architecture/README.md).
 
 ## Структура проекта
 
@@ -189,6 +194,15 @@ secrets/google-service-account.json
 docker compose config --quiet
 ```
 
+Production-конфигурация проверяется и запускается как объединение двух файлов:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.prod.yml config --quiet
+docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
+```
+
+`docker-compose.prod.yml` включает `APP_ENV=production`, read-only filesystem и дополнительные ограничения контейнеров приложения.
+
 Команда не должна печатать содержимое `.env` или секретного JSON.
 
 ### 4. Собрать и запустить
@@ -198,7 +212,7 @@ docker compose up -d --build
 docker compose ps
 ```
 
-`migrate` должен завершиться с кодом `0`. `api`, `worker`, `postgres` и `redis` должны перейти в состояние `healthy`.
+`migrate` должен завершиться с кодом `0`. `api`, `worker`, `beat`, `postgres` и `redis` должны быть запущены; сервисы с healthcheck должны перейти в состояние `healthy`.
 
 ### 5. Установить webhook
 
@@ -306,8 +320,8 @@ uvicorn restaurant_bot.api.app:app --host 0.0.0.0 --port 8000
 | Приложение | `APP_ENV`, `PUBLIC_BASE_URL`, `APP_TIMEZONE`, `LOG_LEVEL` |
 | Telegram | `TELEGRAM_BOT_TOKEN`, `TELEGRAM_WEBHOOK_SECRET` |
 | OpenAI | `OPENAI_API_KEY`, модели и timeout |
-| PostgreSQL | `POSTGRES_*`, `DATABASE_URL`, настройки пула |
-| Redis/Celery | `REDIS_URL`, `CELERY_BROKER_URL`, `CELERY_RESULT_BACKEND` |
+| PostgreSQL | `POSTGRES_*`, `DATABASE_URL`, настройки пула и сроки хранения аудита |
+| Redis/Celery | `REDIS_URL`, `CELERY_BROKER_URL`, `CELERY_RESULT_BACKEND`, `REDIS_MAXMEMORY` |
 | Google | Spreadsheet IDs, названия листов, service account, Apps Script |
 | Кэш | `CATALOG_CACHE_TTL_SECONDS`, `VENUE_DIRECTORY_CACHE_TTL_SECONDS` |
 | Наблюдаемость | `LANGFUSE_*`, `LOG_USER_CONTENT` |
@@ -399,6 +413,7 @@ Quick Tunnel не предназначен для production: его URL мен�
 | `bot_sessions` | Состояние диалога и черновик |
 | `telegram_updates` | Идемпотентный inbox Telegram |
 | `submission_records` | Этапы и контрольные точки отправки |
+| `order_events` | Ограниченный журнал заказа от первого товара до завершения |
 | `venue_bindings` | Привязка пользователя/чата к заведению |
 
 `migrate` — одноразовый Compose-сервис. Он запускает:
@@ -425,7 +440,8 @@ Celery выполняет:
 - `restaurant_bot.process_telegram_update`;
 - `restaurant_bot.submit_order`;
 - `restaurant_bot.submit_product_add`;
-- `restaurant_bot.send_order_status`.
+- `restaurant_bot.send_order_status`;
+- `restaurant_bot.cleanup_expired_audit_data`.
 
 Отправка заявки имеет контрольные точки:
 
@@ -436,6 +452,8 @@ Celery выполняет:
 5. отправка подтверждения в Telegram.
 
 При временной ошибке worker повторяет незавершённую операцию. Уже подтверждённые этапы не должны выполняться повторно.
+
+Celery Beat запускает очистку ежедневно в `03:15` по `APP_TIMEZONE`. Результаты задач Celery хранятся в Redis не более 24 часов. Redis ограничен `REDIS_MAXMEMORY` и использует `noeviction`: очередь не вытесняется молча, а при достижении лимита запись завершается явной ошибкой, которую нужно отслеживать.
 
 ## Логирование
 
@@ -465,6 +483,38 @@ LOG_CONTENT_MAX_LENGTH=500
 - Telegram/OpenAI tokens;
 - `DATABASE_URL`;
 - все переменные окружения через `env` или `printenv`.
+
+## Журнал жизненного цикла заказа
+
+Когда в черновике появляется первый товар, бот создаёт внутренний `trace_id`. Он не меняется до отмены или успешного завершения заказа. При подтверждении к нему привязывается пользовательский номер заявки `order_no`.
+
+В PostgreSQL сохраняются только ключевые события:
+
+- начало заказа;
+- действия пользователя с названием команды, этапом и количеством позиций — без текста сообщения и названий товаров;
+- отмена заказа;
+- запрос отправки;
+- запись истории, обновление каталога и перерасчёт;
+- успешное завершение и отправка подтверждения;
+- окончательная ошибка отправки.
+
+Каждое событие имеет уникальный `idempotency_key`, поэтому повторная доставка Telegram update или Celery task не создаёт дубликат. `telegram_user_id` обозначает человека, `telegram_chat_id` — чат, а `trace_id` — конкретный сценарий заказа.
+
+Сроки хранения задаются в `.env`:
+
+```dotenv
+ORDER_EVENT_RETENTION_DAYS=365
+TELEGRAM_UPDATE_RETENTION_DAYS=30
+REDIS_MAXMEMORY=256mb
+```
+
+События заказа старше `ORDER_EVENT_RETENTION_DAYS` удаляются автоматически. Из `telegram_updates` удаляются только старые завершённые записи со статусом `done`, `ignored` или `failed`; активные записи очистка не затрагивает. Большие тексты, аудио, фотографии и полные пользовательские сообщения в `order_events` не сохраняются.
+
+После обновления обязательно примените миграцию:
+
+```bash
+docker compose run --rm migrate
+```
 
 ## Тесты и качество кода
 
@@ -498,6 +548,20 @@ python -m pytest tests/ai/test_ai_media.py::test_ai_cannot_turn_a_product_name_i
 Тесты не обращаются к production Telegram, OpenAI или Google Sheets и не запускают n8n. Структура тестов описана в [tests/README.md](tests/README.md).
 
 Production-код проверяется Ruff на короткие однострочные docstring. Docstring пишутся на русском языке.
+
+## GitLab CI
+
+Ветка `develop` содержит Python-приложение. Для веток и Merge Request GitLab запускает:
+
+- Ruff format и lint;
+- строгий mypy;
+- полный pytest с JUnit и coverage;
+- проверку базовой и production Compose-конфигураций;
+- проверку обновления документации вместе с кодом;
+- проверку локальных Markdown-ссылок;
+- валидацию C4 и воспроизводимость Mermaid-диаграмм.
+
+Правила веток, jobs и локальные команды описаны в [docs/ci/README.md](docs/ci/README.md).
 
 ## Обновление приложения
 
@@ -570,6 +634,6 @@ docker compose logs migrate api worker
 ## Документация для эксплуатации
 
 - [README-DEVOPS.md](README-DEVOPS.md) — сервер, GitLab Variables, первый deploy, CI/CD, backup, rollback, мониторинг;
+- [docs/architecture/README.md](docs/architecture/README.md) — проверенная по коду C4-модель и правила её сопровождения;
 - [SECURITY.md](SECURITY.md) — требования безопасности;
 - [tests/README.md](tests/README.md) — структура тестов.
-

@@ -60,6 +60,7 @@ def test_order_status_renderer_groups_rows_by_order_number() -> None:
 
 def test_successful_submission_clears_cart_checkpoint_and_marks_state_submitted() -> None:
     state = ConversationState(
+        order_trace_id="trace-1",
         cart=[CartItem(id="rose", source_query="Сироп Роза")],
         current_issue_item_id="rose",
         pending_submission=PendingSubmission(order_no="20260722-001"),
@@ -69,6 +70,7 @@ def test_successful_submission_clears_cart_checkpoint_and_marks_state_submitted(
 
     assert state.cart == []
     assert state.pending_submission is None
+    assert state.order_trace_id == ""
     assert state.current_issue_item_id == ""
     assert state.stage is SessionStage.SUBMITTED
     assert state.status == "submitted"
@@ -191,9 +193,7 @@ def test_submission_runs_all_external_stages_and_checkpoints(
     service.submit("chat-1")
 
     service.sheets.append_history.assert_called_once_with(pending.rows, "venue-sheet")
-    service.sheets.increment_catalog_quantities.assert_called_once_with(
-        pending.rows, "venue-sheet"
-    )
+    service.sheets.increment_catalog_quantities.assert_called_once_with(pending.rows, "venue-sheet")
     service.sheets.trigger_recalculation.assert_called_once_with("ORDER-1", "venue-sheet")
     assert [call.args for call in service._checkpoint.call_args_list] == [
         ("ORDER-1", "history_written"),

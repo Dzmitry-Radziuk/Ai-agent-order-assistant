@@ -25,6 +25,8 @@ def test_user_content_logging_is_private_by_default() -> None:
 
     assert settings.log_user_content is False
     assert settings.log_content_max_length == 500
+    assert settings.order_event_retention_days == 365
+    assert settings.telegram_update_retention_days == 30
 
 
 def test_get_settings_reads_dotenv_in_production(

@@ -45,6 +45,4 @@ def test_clear_product_add_pending_preserves_cart_and_completed_requests() -> No
     assert state.pending_product_add_request_id == ""
     assert state.product_add_write_in_progress is False
     assert state.cart == [item]
-    assert state.product_add_requests == [
-        {"request_id": "add-old", "status": "submitted"}
-    ]
+    assert state.product_add_requests == [{"request_id": "add-old", "status": "submitted"}]

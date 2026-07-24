@@ -83,7 +83,9 @@ def test_product_add_retries_ssl_failure_only_after_verifying_no_write(settings,
     gateway = GoogleSheetsGateway(settings)
     gateway.service = MagicMock()
     gateway._get_values = MagicMock(side_effect=[[], []])  # type: ignore[method-assign]
-    execute = gateway.service.spreadsheets.return_value.values.return_value.append.return_value.execute
+    execute = (
+        gateway.service.spreadsheets.return_value.values.return_value.append.return_value.execute
+    )
     execute.side_effect = [OSError("[SSL] record layer failure"), {}]
     sleep = mocker.patch.object(google_sheets_module, "sleep")
 
@@ -102,7 +104,9 @@ def test_product_add_accepts_verified_write_after_lost_ssl_response(settings, mo
     gateway.service = MagicMock()
     sheet_text = "Креветки королевские"
     gateway._get_values = MagicMock(side_effect=[[], [[sheet_text]]])  # type: ignore[method-assign]
-    execute = gateway.service.spreadsheets.return_value.values.return_value.append.return_value.execute
+    execute = (
+        gateway.service.spreadsheets.return_value.values.return_value.append.return_value.execute
+    )
     execute.side_effect = OSError("[SSL] record layer failure")
     sleep = mocker.patch.object(google_sheets_module, "sleep")
 

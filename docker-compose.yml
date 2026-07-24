@@ -16,7 +16,20 @@ services:
 
   redis:
     image: redis:8-alpine
-    command: ["redis-server", "--appendonly", "yes"]
+    command:
+      [
+        "redis-server",
+        "--appendonly",
+        "yes",
+        "--auto-aof-rewrite-percentage",
+        "100",
+        "--auto-aof-rewrite-min-size",
+        "64mb",
+        "--maxmemory",
+        "${REDIS_MAXMEMORY:-256mb}",
+        "--maxmemory-policy",
+        "noeviction",
+      ]
     volumes:
       - redis_data:/data
     healthcheck:
@@ -90,6 +103,38 @@ services:
     restart: unless-stopped
     init: true
     stop_grace_period: 90s
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  beat:
+    build: .
+    env_file: .env
+    command:
+      [
+        "celery",
+        "-A",
+        "restaurant_bot.workers.celery_app.celery_app",
+        "beat",
+        "-l",
+        "INFO",
+        "--schedule=/tmp/celerybeat-schedule",
+      ]
+    volumes:
+      - ./secrets/google-service-account.json:/run/secrets/google-service-account.json:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    restart: unless-stopped
+    init: true
+    stop_grace_period: 30s
     security_opt:
       - no-new-privileges:true
     logging:

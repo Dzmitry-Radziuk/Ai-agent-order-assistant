@@ -253,9 +253,7 @@ class GoogleSheetsGateway:
                 return start_index + 1
         return len(existing) + 1
 
-    def increment_catalog_quantities(
-        self, rows: list[dict[str, Any]], spreadsheet_id: str
-    ) -> None:
+    def increment_catalog_quantities(self, rows: list[dict[str, Any]], spreadsheet_id: str) -> None:
         """Обновляет количества товаров в каталоге."""
         target_id = self._require_spreadsheet_id(spreadsheet_id)
         catalog = self.load_catalog(target_id)
@@ -310,15 +308,11 @@ class GoogleSheetsGateway:
                 .execute()
             )
 
-    def append_product_request(
-        self, row: dict[str, Any], spreadsheet_id: str
-    ) -> None:
+    def append_product_request(self, row: dict[str, Any], spreadsheet_id: str) -> None:
         """Записывает запрос на новый товар."""
         sheet_text = clean_text(row.get("description", ""))
         target_id = self._require_spreadsheet_id(spreadsheet_id)
-        existing = self._get_values(
-            f"'{self.settings.google_product_add_sheet}'!A:A", target_id
-        )
+        existing = self._get_values(f"'{self.settings.google_product_add_sheet}'!A:A", target_id)
         initial_count = self._count_product_request_values(existing, sheet_text)
         empty_row = next(
             (
@@ -371,9 +365,7 @@ class GoogleSheetsGateway:
     def _count_product_request_values(values: list[list[Any]], sheet_text: str) -> int:
         """Считает точные совпадения среди прочитанных значений запросов."""
         return sum(
-            1
-            for value_row in values
-            if value_row and clean_text(value_row[0]) == sheet_text
+            1 for value_row in values if value_row and clean_text(value_row[0]) == sheet_text
         )
 
     @staticmethod

@@ -206,9 +206,7 @@ def test_voice_pipeline_shows_progress_before_transcription(mocker) -> None:  # 
     service.catalog.get.assert_not_called()
 
 
-def test_photo_pipeline_reports_download_recognition_and_catalog_stages(
-    mocker, tmp_path
-) -> None:  # type: ignore[no-untyped-def]
+def test_photo_pipeline_reports_download_recognition_and_catalog_stages(mocker, tmp_path) -> None:  # type: ignore[no-untyped-def]
     """Показывает каждый длительный этап обработки фотографии."""
     service = _authorized_orchestrator(mocker)
     service._claim = MagicMock(return_value=_photo_claim())  # type: ignore[method-assign]
@@ -239,17 +237,14 @@ def test_photo_pipeline_reports_download_recognition_and_catalog_stages(
         "📷 <b>Фото получено</b>\n\nЗагружаю изображение…",
         "🔎 <b>Распознаю товары на фото…</b>\n\n"
         "Для большого списка это может занять до нескольких минут.",
-        "📋 <b>Фото распознано</b>\n\n"
-        "Найдено позиций: 2. Сверяю товары с каталогом…",
+        "📋 <b>Фото распознано</b>\n\nНайдено позиций: 2. Сверяю товары с каталогом…",
         "Черновик обновлён",
     ]
     assert all(reply.edit_message_id == 70 for reply in replies[1:])
     service.telegram.disable_keyboard.assert_called_once_with("7", None)
 
 
-def test_photo_timeout_replaces_progress_with_specific_recovery(
-    mocker, tmp_path
-) -> None:  # type: ignore[no-untyped-def]
+def test_photo_timeout_replaces_progress_with_specific_recovery(mocker, tmp_path) -> None:  # type: ignore[no-untyped-def]
     """Заменяет зависшую карточку фото понятной подсказкой после таймаута."""
     service = _authorized_orchestrator(mocker)
     service._claim = MagicMock(return_value=_photo_claim())  # type: ignore[method-assign]

@@ -5,9 +5,11 @@ from functools import lru_cache
 from redis import Redis
 
 from restaurant_bot.config import get_settings
+from restaurant_bot.db import SessionLocal
 from restaurant_bot.integrations.google_sheets import GoogleSheetsGateway
 from restaurant_bot.integrations.openai_client import OpenAIService
 from restaurant_bot.integrations.telegram import TelegramClient
+from restaurant_bot.repositories.order_events import OrderEventRepository
 from restaurant_bot.services.orchestrator import UpdateOrchestrator
 from restaurant_bot.services.submission import SubmissionService
 from restaurant_bot.workers.celery_app import celery_app
@@ -82,3 +84,18 @@ def send_order_status(self, chat_id: str) -> None:  # type: ignore[no-untyped-de
     """Отправляет последние статусы заявок."""
     _, submission = dependencies()
     submission.send_status(chat_id)
+
+
+@celery_app.task(name="restaurant_bot.cleanup_expired_audit_data")
+def cleanup_expired_audit_data() -> dict[str, int]:
+    """Удаляет устаревший аудит и завершённые входящие обновления."""
+    settings = get_settings()
+    with SessionLocal.begin() as db:
+        deleted_events, deleted_updates = OrderEventRepository(db).cleanup(
+            event_retention_days=settings.order_event_retention_days,
+            update_retention_days=settings.telegram_update_retention_days,
+        )
+    return {
+        "deleted_order_events": deleted_events,
+        "deleted_telegram_updates": deleted_updates,
+    }

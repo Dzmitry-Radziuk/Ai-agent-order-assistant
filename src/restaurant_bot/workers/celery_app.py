@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from celery import Celery
+from celery.schedules import crontab
 
 from restaurant_bot.config import get_settings
 from restaurant_bot.logging import configure_logging
@@ -28,4 +29,11 @@ celery_app.conf.update(
     worker_prefetch_multiplier=1,
     task_track_started=True,
     broker_connection_retry_on_startup=True,
+    result_expires=86400,
+    beat_schedule={
+        "cleanup-expired-audit-data": {
+            "task": "restaurant_bot.cleanup_expired_audit_data",
+            "schedule": crontab(hour=3, minute=15),
+        }
+    },
 )

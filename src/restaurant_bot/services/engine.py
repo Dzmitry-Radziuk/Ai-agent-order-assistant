@@ -1775,6 +1775,9 @@ class ConversationEngine:
             )
         state.pending_submission = PendingSubmission(
             order_no=order_no,
+            trace_id=state.order_trace_id,
+            telegram_user_id=event.telegram_user_id or event.chat_id,
+            telegram_chat_id=event.chat_id,
             rows=rows,
             spreadsheet_id=state.spreadsheet_id,
             venue_code=state.venue_code,

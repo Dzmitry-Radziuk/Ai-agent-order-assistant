@@ -371,9 +371,7 @@ def _looks_like_generic_add_navigation(normalized: str, words: list[str]) -> boo
         "что-то",
     )
     meaningful = [
-        word
-        for word in words
-        if word not in filler_words and not word.startswith(ignored_stems)
+        word for word in words if word not in filler_words and not word.startswith(ignored_stems)
     ]
     return not meaningful
 
@@ -397,10 +395,7 @@ def _infer_free_form_navigation(normalized: str) -> Intent | None:
 
     if _has_word_stem(words, "помощ", "инструкц", "подсказ"):
         return Intent.HELP
-    if (
-        _has_word_stem(words, "уме")
-        and _has_word_stem(words, "что", "как")
-    ) or (
+    if (_has_word_stem(words, "уме") and _has_word_stem(words, "что", "как")) or (
         _has_word_stem(words, "объясн", "расскаж")
         and _has_word_stem(words, "бот", "работ", "польз")
     ):
@@ -411,9 +406,7 @@ def _infer_free_form_navigation(normalized: str) -> Intent | None:
         words, "покаж", "показ", "посмотр", "откр", "вывед", "спис", "пров"
     )
     has_procurement_target = _has_word_stem(words, "снабжен", "менеджер")
-    has_request_send_action = _has_word_stem(
-        words, "отправ", "созда", "оформ", "переда"
-    )
+    has_request_send_action = _has_word_stem(words, "отправ", "созда", "оформ", "переда")
     if (
         has_procurement_request
         and not has_request_send_action
@@ -422,9 +415,7 @@ def _infer_free_form_navigation(normalized: str) -> Intent | None:
         return Intent.PRODUCT_ADD_LIST
 
     # Сначала различаем очистку всей заявки и удаление одной позиции.
-    clear_action = _has_word_stem(
-        words, "очист", "сброс", "обнул", "вычист", "стер", "сотри"
-    )
+    clear_action = _has_word_stem(words, "очист", "сброс", "обнул", "вычист", "стер", "сотри")
     clear_target = _has_word_stem(words, "корзин", "черновик", "заявк", "заказ", "спис")
     remove_all = _has_word_stem(words, "удал", "убер") and _has_word_stem(
         words, "все", "всё", "всю", "весь", "полност", "целик"
@@ -438,9 +429,7 @@ def _infer_free_form_navigation(normalized: str) -> Intent | None:
     ):
         return Intent.CLEAR_CART
 
-    if "как есть" in normalized and _has_word_stem(
-        words, "отправ", "оформ", "переда", "запиш"
-    ):
+    if "как есть" in normalized and _has_word_stem(words, "отправ", "оформ", "переда", "запиш"):
         return Intent.SUBMIT_AS_IS
     if _has_word_stem(words, "риск") and _has_word_stem(words, "приним"):
         return Intent.SUBMIT_AS_IS
@@ -491,9 +480,7 @@ def _infer_free_form_navigation(normalized: str) -> Intent | None:
         words, "заявк", "заказ", "корзин"
     ):
         return Intent.SUBMIT_REQUEST
-    if _has_word_stem(words, "готов") and _has_word_stem(
-        words, "отправ", "оформ", "заверш"
-    ):
+    if _has_word_stem(words, "готов") and _has_word_stem(words, "отправ", "оформ", "заверш"):
         return Intent.SUBMIT_REQUEST
 
     if _has_word_stem(words, "назад", "предыдущ") and _has_word_stem(
@@ -517,10 +504,7 @@ def _infer_free_form_navigation(normalized: str) -> Intent | None:
         words, "друг", "нов", "измен", "введ", "укаж", "скаж"
     ):
         return Intent.ENTER_OTHER_QUANTITY
-    if (
-        _has_word_stem(words, "не")
-        and _has_word_stem(words, "меня")
-    ) or (
+    if (_has_word_stem(words, "не") and _has_word_stem(words, "меня")) or (
         _has_word_stem(words, "остав", "сохран")
         and ("как есть" in normalized or _has_word_stem(words, "текущ"))
     ):

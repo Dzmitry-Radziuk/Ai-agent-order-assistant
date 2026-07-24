@@ -24,6 +24,7 @@ class SubmissionRepository:
         if row is None:
             row = SubmissionRecord(
                 order_no=pending.order_no,
+                trace_id=pending.trace_id,
                 telegram_id=telegram_id,
                 payload=pending.model_dump(mode="json"),
             )

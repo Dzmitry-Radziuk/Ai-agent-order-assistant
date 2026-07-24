@@ -51,13 +51,23 @@ Compose-сервисы:
 
 | Сервис | Постоянный | Назначение |
 |---|---:|---|
-| `postgres` | Да | Сессии, inbox Telegram, привязки, этапы отправки |
-| `redis` | Да | Очередь Celery, результаты, кэш и locks |
+| `postgres` | Да | Сессии, inbox Telegram, аудит заказов, привязки, этапы отправки |
+| `redis` | Да | Временная очередь Celery, результаты, кэш и locks |
 | `migrate` | Нет | Однократно применяет Alembic migrations |
 | `api` | Да | Webhook и health endpoints |
 | `worker` | Да | Вся длительная бизнес-логика |
+| `beat` | Да | Ежедневно запускает очистку устаревшего аудита |
 
 `migrate` после успешной работы имеет состояние `Exited (0)`. Это нормально.
+
+`beat` хранит служебный файл расписания в `/tmp/celerybeat-schedule`. Файл временный:
+расписание очистки задаётся в коде приложения и восстанавливается после перезапуска.
+Не меняйте путь на `/app/celerybeat-schedule` — контейнер работает без root-прав,
+поэтому запись в `/app` завершится ошибкой `Permission denied` и циклическим перезапуском `beat`.
+
+Для production используется объединение `docker-compose.yml` и `docker-compose.prod.yml`.
+Override включает `APP_ENV=production`, read-only filesystem, отдельный writable `/tmp`,
+удаление Linux capabilities и ограничение количества процессов для Python-контейнеров.
 
 ## Что нужно получить до начала работ
 
@@ -270,6 +280,8 @@ python3 -c "import secrets; print(secrets.token_urlsafe(48))"
 | `DATABASE_MAX_OVERFLOW` | Нет | Нет | `20` |
 | `DATABASE_POOL_TIMEOUT_SECONDS` | Нет | Нет | `30` |
 | `DATABASE_POOL_RECYCLE_SECONDS` | Нет | Нет | `1800` |
+| `ORDER_EVENT_RETENTION_DAYS` | Нет | Нет | `365`, хранение аудита заказов |
+| `TELEGRAM_UPDATE_RETENTION_DAYS` | Нет | Нет | `30`, хранение завершённых Telegram updates |
 
 Пример согласованных значений:
 
@@ -291,8 +303,9 @@ DATABASE_URL=postgresql+psycopg://autosnab:<URL_ENCODED_PASSWORD>@postgres:5432/
 | `REDIS_URL` | Да | Нет внутри Compose | `redis://redis:6379/0` |
 | `CELERY_BROKER_URL` | Да | Нет внутри Compose | `redis://redis:6379/1` |
 | `CELERY_RESULT_BACKEND` | Да | Нет внутри Compose | `redis://redis:6379/2` |
+| `REDIS_MAXMEMORY` | Нет | Нет | `256mb`; при заполнении Redis возвращает ошибку без тихого удаления очереди |
 
-Redis не публикуется наружу. Если Redis выносится в отдельную инфраструктуру, включите authentication/TLS и считайте URL секретом.
+Redis не публикуется наружу и не используется как долговечный журнал заказов. Результаты Celery автоматически истекают через 24 часа. Если Redis выносится в отдельную инфраструктуру, включите authentication/TLS и считайте URL секретом.
 
 ### Google Sheets и Apps Script
 
@@ -471,6 +484,7 @@ stat -c '%a %n' secrets/google-service-account.json .env
 
 ```bash
 docker compose config --quiet
+docker compose -f docker-compose.yml -f docker-compose.prod.yml config --quiet
 ```
 
 Не выполняйте `docker compose config` без `--quiet` в CI-логе: развёрнутая конфигурация может содержать секреты.
@@ -479,8 +493,8 @@ docker compose config --quiet
 
 ```bash
 docker compose pull postgres redis
-docker compose build api worker migrate
-docker compose up -d
+docker compose -f docker-compose.yml -f docker-compose.prod.yml build api worker migrate beat
+docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
 docker compose ps
 ```
 
@@ -548,12 +562,18 @@ Webhook secret должен содержать только `A-Z`, `a-z`, `0-9`,
 
 ## GitLab CI/CD
 
-В проекте может отсутствовать `.gitlab-ci.yml`. Ниже — безопасная стартовая схема, которую нужно адаптировать к вашей структуре runner и веток.
+В проекте используется `.gitlab-ci.yml`. Актуальное описание обязательных jobs и правил ветки `develop` находится в [docs/ci/README.md](docs/ci/README.md).
 
 ### Рекомендуемый pipeline
 
 ```text
-lint + mypy + tests
+format + lint + mypy
+        │
+        ├── pytest + coverage
+        │
+        ├── documentation impact + Markdown links
+        │
+        └── Structurizr validate + reproducible Mermaid export
         │
         ▼
 manual deploy from protected main/tag
@@ -587,9 +607,11 @@ health check + webhook
 
 Shell executor выполняет pipeline непосредственно на сервере. Не запускайте на нём непроверенный код.
 
-### Пример `.gitlab-ci.yml`
+### Production deploy
 
-Этот пример хранит production `.env` на сервере. GitLab deploy job не перезаписывает секреты:
+Текущий `.gitlab-ci.yml` намеренно выполняет только проверки и не имеет доступа к production-секретам. Deploy следует добавлять отдельным manual job после настройки защищённого runner и environment.
+
+Пример ниже хранит production `.env` на сервере. GitLab deploy job не перезаписывает секреты:
 
 ```yaml
 stages:
@@ -633,9 +655,9 @@ deploy_production:
         "$CI_PROJECT_DIR/"
         /opt/autosnab-bot/
     - cd /opt/autosnab-bot
-    - docker compose config --quiet
-    - docker compose build api worker migrate
-    - docker compose up -d
+    - docker compose -f docker-compose.yml -f docker-compose.prod.yml config --quiet
+    - docker compose -f docker-compose.yml -f docker-compose.prod.yml build api worker migrate beat
+    - docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
     - docker compose exec -T api python -m restaurant_bot.cli set-webhook
     - curl --fail --retry 10 --retry-delay 3
         http://127.0.0.1:8000/health/ready
@@ -714,6 +736,7 @@ docker compose ps -a migrate
 - `redis` — `healthy`;
 - `api` — `healthy`;
 - `worker` — `healthy`;
+- `beat` — `running`;
 - `migrate` — `Exited (0)`.
 
 ### Health
@@ -728,7 +751,7 @@ curl --fail https://bot.company.ru/health/ready
 
 ```bash
 docker compose logs --tail 100 migrate
-docker compose logs --tail 200 api worker
+docker compose logs --tail 200 api worker beat
 ```
 
 Не должно быть циклических рестартов и повторяющихся ошибок настройки.
@@ -1043,6 +1066,7 @@ docker image prune
 ### Ежедневно автоматически
 
 - PostgreSQL backup;
+- очистка `order_events` и завершённых `telegram_updates` через Celery Beat;
 - внешний health check;
 - disk/RAM monitoring;
 - container restart monitoring.
@@ -1092,7 +1116,7 @@ docker image prune
 ### Приложение
 
 - [ ] `migrate` завершён с кодом `0`.
-- [ ] `api`, `worker`, `postgres`, `redis` healthy.
+- [ ] `api`, `worker`, `postgres`, `redis` healthy, `beat` запущен.
 - [ ] Локальный и публичный `/health/ready` отвечают `200`.
 - [ ] Webhook установлен на правильный домен.
 - [ ] `/start`, текст, голос, фото и кнопки проверены.

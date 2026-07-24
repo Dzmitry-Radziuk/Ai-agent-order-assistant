@@ -1,0 +1,68 @@
+graph LR
+  linkStyle default fill:#ffffff
+
+  subgraph diagram ["Deployment — Docker Compose"]
+    style diagram fill:#ffffff,stroke:#ffffff
+
+    subgraph 108 ["External Services"]
+      style 108 fill:#ffffff,stroke:#aaaaac,color:#111827
+
+      109["<div style='font-weight: bold'>Telegram Bot API</div><div style='font-size: 70%; margin-top: 0px'>[Software System]</div><div style='font-size: 80%; margin-top:10px'>Доставляет сообщения,<br />callback, голос и фото;<br />принимает ответы бота.</div>"]
+      style 109 fill:#6b7280,stroke:#4a4f59,color:#ffffff
+      112["<div style='font-weight: bold'>OpenAI API</div><div style='font-size: 70%; margin-top: 0px'>[Software System]</div><div style='font-size: 80%; margin-top:10px'>Выполняет транскрибацию,<br />разбор текста, анализ фото и<br />выбор кандидата.</div>"]
+      style 112 fill:#6b7280,stroke:#4a4f59,color:#ffffff
+      114["<div style='font-weight: bold'>Google Sheets</div><div style='font-size: 70%; margin-top: 0px'>[Software System]</div><div style='font-size: 80%; margin-top:10px'>Хранит каталог заведения,<br />регистрацию, историю товаров<br />и заявки на новые товары.</div>"]
+      style 114 fill:#6b7280,stroke:#4a4f59,color:#ffffff
+      116["<div style='font-weight: bold'>Google Apps Script</div><div style='font-size: 70%; margin-top: 0px'>[Software System]</div><div style='font-size: 80%; margin-top:10px'>Пересчитывает рабочий лист<br />заявки после записи заказа.</div>"]
+      style 116 fill:#6b7280,stroke:#4a4f59,color:#ffffff
+      118["<div style='font-weight: bold'>Langfuse</div><div style='font-size: 70%; margin-top: 0px'>[Software System]</div><div style='font-size: 80%; margin-top:10px'>Опционально принимает<br />обезличенные трассировки<br />обработки Telegram updates.</div>"]
+      style 118 fill:#6b7280,stroke:#4a4f59,color:#ffffff
+    end
+
+    subgraph 91 ["Docker Host"]
+      style 91 fill:#ffffff,stroke:#aaaaac,color:#111827
+
+      subgraph 102 ["Redis Container"]
+        style 102 fill:#ffffff,stroke:#aaaaac,color:#111827
+
+        103[("<div style='font-weight: bold'>Redis</div><div style='font-size: 70%; margin-top: 0px'>[Container: Redis 8]</div><div style='font-size: 80%; margin-top:10px'>Временно хранит очередь<br />Celery, результаты задач, кэш<br />и блокировки чатов.</div>")]
+        style 103 fill:#2f95c7,stroke:#20688b,color:#ffffff
+      end
+
+      subgraph 92 ["Application Containers"]
+        style 92 fill:#ffffff,stroke:#aaaaac,color:#111827
+
+        93["<div style='font-weight: bold'>FastAPI API</div><div style='font-size: 70%; margin-top: 0px'>[Container: Python 3.12, FastAPI, Uvicorn]</div><div style='font-size: 80%; margin-top:10px'>Принимает Telegram webhook,<br />проверяет секрет, сохраняет<br />update и ставит задачу в<br />очередь.</div>"]
+        style 93 fill:#438dd5,stroke:#2e6295,color:#ffffff
+        94["<div style='font-weight: bold'>Celery Worker</div><div style='font-size: 70%; margin-top: 0px'>[Container: Python 3.12, Celery]</div><div style='font-size: 80%; margin-top:10px'>Последовательно обрабатывает<br />диалог, вызывает AI и<br />выполняет возобновляемую<br />отправку заявки.</div>"]
+        style 94 fill:#438dd5,stroke:#2e6295,color:#ffffff
+        95["<div style='font-weight: bold'>Celery Beat</div><div style='font-size: 70%; margin-top: 0px'>[Container: Python 3.12, Celery Beat]</div><div style='font-size: 80%; margin-top:10px'>Ежедневно публикует задачу<br />очистки устаревшего аудита.</div>"]
+        style 95 fill:#438dd5,stroke:#2e6295,color:#ffffff
+        96["<div style='font-weight: bold'>Database Migration</div><div style='font-size: 70%; margin-top: 0px'>[Container: Python 3.12, Alembic]</div><div style='font-size: 80%; margin-top:10px'>Однократно применяет Alembic<br />migrations перед запуском<br />приложения.</div>"]
+        style 96 fill:#438dd5,stroke:#2e6295,color:#ffffff
+      end
+
+      subgraph 97 ["PostgreSQL Container"]
+        style 97 fill:#ffffff,stroke:#aaaaac,color:#111827
+
+        98[("<div style='font-weight: bold'>PostgreSQL</div><div style='font-size: 70%; margin-top: 0px'>[Container: PostgreSQL 17]</div><div style='font-size: 80%; margin-top:10px'>Хранит сессии, Telegram<br />inbox, привязки заведений,<br />отправки и аудит заказов.</div>")]
+        style 98 fill:#2f95c7,stroke:#20688b,color:#ffffff
+      end
+
+    end
+
+    94-. "<div>Читает и записывает состояние</div><div style='font-size: 70%'>[SQL]</div>" .->98
+    96-. "<div>Применяет схему БД</div><div style='font-size: 70%'>[SQL]</div>" .->98
+    93-. "<div>Публикует Celery task</div><div style='font-size: 70%'>[Redis protocol]</div>" .->103
+    103-. "<div>Доставляет Celery tasks</div><div style='font-size: 70%'>[Redis protocol]</div>" .->94
+    94-. "<div>Использует кэш и distributed<br />locks</div><div style='font-size: 70%'>[Redis protocol]</div>" .->103
+    95-. "<div>Публикует ежедневную задачу<br />очистки</div><div style='font-size: 70%'>[Redis protocol]</div>" .->103
+    109-. "<div>Доставляет update</div><div style='font-size: 70%'>[HTTPS/JSON]</div>" .->93
+    94-. "<div>Вызывает Telegram Bot API</div><div style='font-size: 70%'>[HTTPS/JSON]</div>" .->109
+    94-. "<div>Вызывает модели AI</div><div style='font-size: 70%'>[HTTPS/JSON]</div>" .->112
+    94-. "<div>Читает и изменяет таблицы</div><div style='font-size: 70%'>[Google Sheets API]</div>" .->114
+    94-. "<div>Запускает перерасчёт</div><div style='font-size: 70%'>[HTTPS/JSON]</div>" .->116
+    94-. "<div>Отправляет обезличенную<br />трассировку, если включено</div><div style='font-size: 70%'>[HTTPS]</div>" .->118
+    93-. "<div>Создаёт и читает Telegram<br />inbox</div><div style='font-size: 70%'>[SQL]</div>" .->98
+
+  end

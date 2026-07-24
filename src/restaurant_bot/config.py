@@ -47,6 +47,8 @@ class Settings(BaseSettings):
     database_max_overflow: int = Field(default=20, ge=0, le=200)
     database_pool_timeout_seconds: int = Field(default=30, ge=1, le=300)
     database_pool_recycle_seconds: int = Field(default=1800, ge=60, le=86400)
+    order_event_retention_days: int = Field(default=365, ge=30, le=3650)
+    telegram_update_retention_days: int = Field(default=30, ge=7, le=365)
     redis_url: str = "redis://localhost:6379/0"
     celery_broker_url: str = "redis://localhost:6379/1"
     celery_result_backend: str = "redis://localhost:6379/2"

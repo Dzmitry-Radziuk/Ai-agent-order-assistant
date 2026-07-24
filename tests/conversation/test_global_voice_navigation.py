@@ -85,9 +85,7 @@ def test_generic_show_products_opens_supplier_details_on_final_review(settings) 
 
 
 @pytest.mark.parametrize("stage", list(SessionStage))
-def test_procurement_request_list_voice_command_works_from_every_stage(
-    settings, stage
-) -> None:  # type: ignore[no-untyped-def]
+def test_procurement_request_list_voice_command_works_from_every_stage(settings, stage) -> None:  # type: ignore[no-untyped-def]
     """Открывает запросы снабженцу голосом с любого экрана."""
     state = ConversationState(
         stage=stage,

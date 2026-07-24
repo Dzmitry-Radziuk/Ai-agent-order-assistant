@@ -1,0 +1,83 @@
+graph LR
+  linkStyle default fill:#ffffff
+
+  subgraph diagram ["C3 — Компоненты Celery Worker"]
+    style diagram fill:#ffffff,stroke:#ffffff
+
+    28["<div style='font-weight: bold'>Telegram Bot API</div><div style='font-size: 70%; margin-top: 0px'>[Software System]</div><div style='font-size: 80%; margin-top:10px'>Доставляет сообщения,<br />callback, голос и фото;<br />принимает ответы бота.</div>"]
+    style 28 fill:#6b7280,stroke:#4a4f59,color:#ffffff
+    29["<div style='font-weight: bold'>OpenAI API</div><div style='font-size: 70%; margin-top: 0px'>[Software System]</div><div style='font-size: 80%; margin-top:10px'>Выполняет транскрибацию,<br />разбор текста, анализ фото и<br />выбор кандидата.</div>"]
+    style 29 fill:#6b7280,stroke:#4a4f59,color:#ffffff
+    30["<div style='font-weight: bold'>Google Sheets</div><div style='font-size: 70%; margin-top: 0px'>[Software System]</div><div style='font-size: 80%; margin-top:10px'>Хранит каталог заведения,<br />регистрацию, историю товаров<br />и заявки на новые товары.</div>"]
+    style 30 fill:#6b7280,stroke:#4a4f59,color:#ffffff
+    31["<div style='font-weight: bold'>Google Apps Script</div><div style='font-size: 70%; margin-top: 0px'>[Software System]</div><div style='font-size: 80%; margin-top:10px'>Пересчитывает рабочий лист<br />заявки после записи заказа.</div>"]
+    style 31 fill:#6b7280,stroke:#4a4f59,color:#ffffff
+    32["<div style='font-weight: bold'>Langfuse</div><div style='font-size: 70%; margin-top: 0px'>[Software System]</div><div style='font-size: 80%; margin-top:10px'>Опционально принимает<br />обезличенные трассировки<br />обработки Telegram updates.</div>"]
+    style 32 fill:#6b7280,stroke:#4a4f59,color:#ffffff
+
+    subgraph 4 ["Restaurant Procurement Bot"]
+      style 4 fill:#ffffff,stroke:#0b4884,color:#0b4884
+
+      subgraph 11 ["Celery Worker"]
+        style 11 fill:#ffffff,stroke:#2e6295,color:#2e6295
+
+        12["<div style='font-weight: bold'>Task Handlers</div><div style='font-size: 70%; margin-top: 0px'>[Component: workers/tasks.py]</div><div style='font-size: 80%; margin-top:10px'>Запускают обработку update,<br />отправку заявки, статусы и<br />очистку аудита.</div>"]
+        style 12 fill:#85bbf0,stroke:#5d82a8,color:#111827
+        13["<div style='font-weight: bold'>Update Orchestrator</div><div style='font-size: 70%; margin-top: 0px'>[Component: services/orchestrator.py]</div><div style='font-size: 80%; margin-top:10px'>Координирует блокировку чата,<br />регистрацию, разбор, переход<br />состояния и отправку ответа.</div>"]
+        style 13 fill:#85bbf0,stroke:#5d82a8,color:#111827
+        14["<div style='font-weight: bold'>Venue Registration</div><div style='font-size: 70%; margin-top: 0px'>[Component: services/venue_registration.py]</div><div style='font-size: 80%; margin-top:10px'>Проверяет привязку<br />пользователя и выбирает<br />таблицу заведения.</div>"]
+        style 14 fill:#85bbf0,stroke:#5d82a8,color:#111827
+        15["<div style='font-weight: bold'>Input Parser</div><div style='font-size: 70%; margin-top: 0px'>[Component: services/parser.py, integrations/openai_client.py]</div><div style='font-size: 80%; margin-top:10px'>Определяет намерение и<br />извлекает товары, количество<br />и команды.</div>"]
+        style 15 fill:#85bbf0,stroke:#5d82a8,color:#111827
+        16["<div style='font-weight: bold'>Conversation Engine</div><div style='font-size: 70%; margin-top: 0px'>[Component: services/engine.py]</div><div style='font-size: 80%; margin-top:10px'>Применяет бизнес-правила и<br />формирует новое состояние и<br />ответ.</div>"]
+        style 16 fill:#85bbf0,stroke:#5d82a8,color:#111827
+        17["<div style='font-weight: bold'>Submission Service</div><div style='font-size: 70%; margin-top: 0px'>[Component: services/submission.py]</div><div style='font-size: 80%; margin-top:10px'>Идемпотентно записывает<br />историю, обновляет каталог,<br />запускает перерасчёт и<br />завершает заявку.</div>"]
+        style 17 fill:#85bbf0,stroke:#5d82a8,color:#111827
+        18["<div style='font-weight: bold'>State Repositories</div><div style='font-size: 70%; margin-top: 0px'>[Component: repositories/*.py]</div><div style='font-size: 80%; margin-top:10px'>Хранят сессии, входящие<br />updates, привязки и<br />контрольные точки отправки.</div>"]
+        style 18 fill:#85bbf0,stroke:#5d82a8,color:#111827
+        19["<div style='font-weight: bold'>Order Audit Repository</div><div style='font-size: 70%; margin-top: 0px'>[Component: repositories/order_events.py]</div><div style='font-size: 80%; margin-top:10px'>Записывает ограниченный<br />журнал заказа и удаляет<br />устаревшие события.</div>"]
+        style 19 fill:#85bbf0,stroke:#5d82a8,color:#111827
+        20["<div style='font-weight: bold'>Telegram Gateway</div><div style='font-size: 70%; margin-top: 0px'>[Component: integrations/telegram.py]</div><div style='font-size: 80%; margin-top:10px'>Скачивает медиа, подтверждает<br />callback и отправляет или<br />редактирует сообщения.</div>"]
+        style 20 fill:#85bbf0,stroke:#5d82a8,color:#111827
+        21["<div style='font-weight: bold'>OpenAI Gateway</div><div style='font-size: 70%; margin-top: 0px'>[Component: integrations/openai_client.py]</div><div style='font-size: 80%; margin-top:10px'>Распознаёт голос и фото,<br />разбирает текст и помогает<br />выбрать товар.</div>"]
+        style 21 fill:#85bbf0,stroke:#5d82a8,color:#111827
+        22["<div style='font-weight: bold'>Google Sheets Gateway</div><div style='font-size: 70%; margin-top: 0px'>[Component: integrations/google_sheets.py]</div><div style='font-size: 80%; margin-top:10px'>Читает каталог и регистрацию,<br />записывает историю и<br />обновляет количество.</div>"]
+        style 22 fill:#85bbf0,stroke:#5d82a8,color:#111827
+        23["<div style='font-weight: bold'>Cache and Chat Locks</div><div style='font-size: 70%; margin-top: 0px'>[Component: integrations/cache.py]</div><div style='font-size: 80%; margin-top:10px'>Кэширует каталог и<br />сериализует обработку одного<br />чата.</div>"]
+        style 23 fill:#85bbf0,stroke:#5d82a8,color:#111827
+      end
+
+      26[("<div style='font-weight: bold'>PostgreSQL</div><div style='font-size: 70%; margin-top: 0px'>[Container: PostgreSQL 17]</div><div style='font-size: 80%; margin-top:10px'>Хранит сессии, Telegram<br />inbox, привязки заведений,<br />отправки и аудит заказов.</div>")]
+      style 26 fill:#2f95c7,stroke:#20688b,color:#ffffff
+      27[("<div style='font-weight: bold'>Redis</div><div style='font-size: 70%; margin-top: 0px'>[Container: Redis 8]</div><div style='font-size: 80%; margin-top:10px'>Временно хранит очередь<br />Celery, результаты задач, кэш<br />и блокировки чатов.</div>")]
+      style 27 fill:#2f95c7,stroke:#20688b,color:#ffffff
+    end
+
+    27-. "<div>Доставляет Celery tasks</div><div style='font-size: 70%'>[Redis protocol]</div>" .->12
+    12-. "<div>Обрабатывает Telegram update</div><div style='font-size: 70%'>[Python call]</div>" .->13
+    12-. "<div>Выполняет отправку, статусы и<br />запрос нового товара</div><div style='font-size: 70%'>[Python call]</div>" .->17
+    12-. "<div>Удаляет устаревшие записи</div><div style='font-size: 70%'>[Python call]</div>" .->19
+    13-. "<div>Проверяет регистрацию и<br />контекст заведения</div><div style='font-size: 70%'>[Python call]</div>" .->14
+    13-. "<div>Разбирает сообщение или<br />callback</div><div style='font-size: 70%'>[Python call]</div>" .->15
+    13-. "<div>Применяет переход состояния</div><div style='font-size: 70%'>[Python call]</div>" .->16
+    13-. "<div>Читает и фиксирует состояние</div><div style='font-size: 70%'>[Python call]</div>" .->18
+    13-. "<div>Скачивает медиа и отправляет<br />ответ</div><div style='font-size: 70%'>[Python call]</div>" .->20
+    13-. "<div>Передаёт текст, голос или<br />фото</div><div style='font-size: 70%'>[Python call]</div>" .->21
+    13-. "<div>Загружает каталог заведения</div><div style='font-size: 70%'>[Python call]</div>" .->22
+    13-. "<div>Получает каталог и блокирует<br />чат</div><div style='font-size: 70%'>[Python call]</div>" .->23
+    17-. "<div>Читает и фиксирует этапы<br />отправки</div><div style='font-size: 70%'>[Python call]</div>" .->18
+    17-. "<div>Записывает этапы жизненного<br />цикла заказа</div><div style='font-size: 70%'>[Python call]</div>" .->19
+    17-. "<div>Записывает заявку и обновляет<br />каталог</div><div style='font-size: 70%'>[Python call]</div>" .->22
+    17-. "<div>Отправляет результат<br />пользователю</div><div style='font-size: 70%'>[Python call]</div>" .->20
+    14-. "<div>Читает и сохраняет привязку</div><div style='font-size: 70%'>[Python call]</div>" .->18
+    14-. "<div>Читает реестр заведений</div><div style='font-size: 70%'>[Python call]</div>" .->22
+    18-. "<div>Читает и записывает состояние</div><div style='font-size: 70%'>[SQL]</div>" .->26
+    19-. "<div>Записывает и очищает аудит</div><div style='font-size: 70%'>[SQL]</div>" .->26
+    23-. "<div>Использует кэш и distributed<br />locks</div><div style='font-size: 70%'>[Redis protocol]</div>" .->27
+    20-. "<div>Вызывает Telegram Bot API</div><div style='font-size: 70%'>[HTTPS/JSON]</div>" .->28
+    21-. "<div>Вызывает модели AI</div><div style='font-size: 70%'>[HTTPS/JSON]</div>" .->29
+    22-. "<div>Читает и изменяет таблицы</div><div style='font-size: 70%'>[Google Sheets API]</div>" .->30
+    17-. "<div>Запускает перерасчёт</div><div style='font-size: 70%'>[HTTPS/JSON]</div>" .->31
+    13-. "<div>Отправляет обезличенную<br />трассировку, если включено</div><div style='font-size: 70%'>[HTTPS]</div>" .->32
+
+  end

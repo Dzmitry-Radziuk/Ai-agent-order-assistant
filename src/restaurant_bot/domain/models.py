@@ -275,6 +275,9 @@ class PendingSubmission(BaseModel):
     """Хранит неизменяемый снимок отправляемой заявки."""
 
     order_no: str
+    trace_id: str = ""
+    telegram_user_id: str = ""
+    telegram_chat_id: str = ""
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     history_written: bool = False
     catalog_updated: bool = False
@@ -297,6 +300,7 @@ class ConversationState(BaseModel):
     last_order_no: str = ""
     submitted_order_numbers: list[str] = Field(default_factory=list)
     pending_submission: PendingSubmission | None = None
+    order_trace_id: str = ""
     ui_message_id: int | None = None
     last_input_text: str = ""
     restaurant: str = ""

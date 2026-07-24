@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from time import perf_counter
 from typing import Any
+from uuid import uuid4
 
 import structlog
 from redis import Redis
@@ -31,6 +32,7 @@ from restaurant_bot.integrations.google_sheets import GoogleSheetsGateway
 from restaurant_bot.integrations.openai_client import OpenAIService
 from restaurant_bot.integrations.telegram import TelegramClient
 from restaurant_bot.observability import Tracer
+from restaurant_bot.repositories.order_events import OrderEventRepository
 from restaurant_bot.repositories.sessions import SessionRepository
 from restaurant_bot.repositories.updates import UpdateRepository
 from restaurant_bot.services.engine import ConversationEngine
@@ -232,10 +234,25 @@ class UpdateOrchestrator:
                     stage_started = perf_counter()
                     previous_stage = state.stage.value
                     previous_cart_count = len(state.cart)
+                    previous_trace_id = state.order_trace_id
                     result = self.engine.handle(event, command, state, catalog)
 
                     # AI работает за пределами DB-транзакции. Он может выбрать только ID из shortlist.
                     result = self._resolve_ai_pending(event, result, catalog)
+                    trace_started = bool(result.state.cart and not result.state.order_trace_id)
+                    if trace_started:
+                        result.state.order_trace_id = str(uuid4())
+                    if result.state.pending_submission:
+                        result.state.pending_submission.trace_id = (
+                            result.state.pending_submission.trace_id
+                            or result.state.order_trace_id
+                            or previous_trace_id
+                            or str(uuid4())
+                        )
+                        result.state.pending_submission.telegram_user_id = (
+                            event.telegram_user_id or event.chat_id
+                        )
+                        result.state.pending_submission.telegram_chat_id = event.chat_id
                     timings["engine_ms"] = round((perf_counter() - stage_started) * 1000)
                     log.info(
                         "engine_transition_completed",
@@ -253,7 +270,22 @@ class UpdateOrchestrator:
                     self._attach_ui_revision(result.reply, result.state.ui_revision)
                     result.state.ui_message_text = result.reply.text
                     stage_started = perf_counter()
-                    self._checkpoint_state(update_id, event.chat_id, result)
+                    self._checkpoint_state(
+                        update_id,
+                        event.chat_id,
+                        result,
+                        audit_context={
+                            "previous_trace_id": previous_trace_id,
+                            "trace_started": trace_started,
+                            "telegram_user_id": event.telegram_user_id or event.chat_id,
+                            "telegram_chat_id": event.chat_id,
+                            "venue_code": result.state.venue_code,
+                            "intent": command.intent.value,
+                            "input_type": event.input_type.value,
+                            "previous_stage": previous_stage,
+                            "previous_cart_count": previous_cart_count,
+                        },
+                    )
                     timings["state_checkpoint_ms"] = round((perf_counter() - stage_started) * 1000)
                     log.info(
                         "conversation_state_checkpointed",
@@ -380,10 +412,7 @@ class UpdateOrchestrator:
             "reply_text_length": len(reply.text),
             "button_count": sum(len(row) for row in reply.rows),
             "button_callbacks": [
-                button.callback_data
-                for row in reply.rows
-                for button in row
-                if button.callback_data
+                button.callback_data for row in reply.rows for button in row if button.callback_data
             ],
             "edit_message_id": reply.edit_message_id,
         }
@@ -631,9 +660,7 @@ class UpdateOrchestrator:
         return BotReply(text="🔎 Ищу товары в каталоге…")
 
     @staticmethod
-    def _should_show_text_processing(
-        event: TelegramEvent, state: ConversationState
-    ) -> bool:
+    def _should_show_text_processing(event: TelegramEvent, state: ConversationState) -> bool:
         """Проверяет, является ли текст вводом названий товаров."""
         if event.input_type != InputKind.TEXT or not event.text.strip():
             return False
@@ -731,17 +758,94 @@ class UpdateOrchestrator:
                 tasks_enqueued=update.tasks_enqueued,
             )
 
-    def _checkpoint_state(self, update_id: int, chat_id: str, result: EngineResult) -> None:
+    def _checkpoint_state(
+        self,
+        update_id: int,
+        chat_id: str,
+        result: EngineResult,
+        *,
+        audit_context: dict[str, Any] | None = None,
+    ) -> None:
         """Сохраняет контрольную точку изменения состояния."""
         with SessionLocal.begin() as db:
             sessions = SessionRepository(db)
             session_row, _ = sessions.get_for_update(chat_id)
             sessions.save(chat_id, result.state, session_row)
+            if audit_context:
+                self._append_order_transition_events(
+                    OrderEventRepository(db),
+                    update_id,
+                    result,
+                    audit_context,
+                )
             update = UpdateRepository(db).get_for_update(update_id)
             if update is None:
                 raise RuntimeError(f"Update {update_id} disappeared")
             update.result = result.model_dump(mode="json")
             update.state_applied = True
+
+    @staticmethod
+    def _append_order_transition_events(
+        events: OrderEventRepository,
+        update_id: int,
+        result: EngineResult,
+        context: dict[str, Any],
+    ) -> None:
+        """Записывает ключевые события в одной транзакции с состоянием диалога."""
+        previous_trace_id = str(context.get("previous_trace_id") or "")
+        trace_id = (
+            result.state.order_trace_id
+            or (result.state.pending_submission.trace_id if result.state.pending_submission else "")
+            or previous_trace_id
+        )
+        if not trace_id:
+            return
+        identity = {
+            "trace_id": trace_id,
+            "telegram_user_id": str(context["telegram_user_id"]),
+            "telegram_chat_id": str(context["telegram_chat_id"]),
+            "venue_code": str(context.get("venue_code") or ""),
+        }
+        details = {
+            "intent": context["intent"],
+            "input_type": context["input_type"],
+            "previous_stage": context["previous_stage"],
+            "stage": result.state.stage.value,
+            "previous_cart_count": context["previous_cart_count"],
+            "cart_count": len(result.state.cart),
+        }
+        if context.get("trace_started"):
+            events.append_once(
+                idempotency_key=f"trace:{trace_id}:started",
+                event_type="order_started",
+                details={"cart_count": len(result.state.cart)},
+                **identity,
+            )
+        events.append_once(
+            idempotency_key=f"update:{update_id}:order-action",
+            event_type="user_action",
+            details=details,
+            **identity,
+        )
+        if context["intent"] == Intent.CLEAR_CART.value and previous_trace_id:
+            events.append_once(
+                idempotency_key=f"trace:{previous_trace_id}:cancelled",
+                trace_id=previous_trace_id,
+                event_type="order_cancelled",
+                telegram_user_id=identity["telegram_user_id"],
+                telegram_chat_id=identity["telegram_chat_id"],
+                venue_code=identity["venue_code"],
+                details={"previous_cart_count": context["previous_cart_count"]},
+            )
+        pending = result.state.pending_submission
+        if pending:
+            events.append_once(
+                idempotency_key=f"order:{pending.order_no}:requested",
+                event_type="submission_requested",
+                order_no=pending.order_no,
+                details={"row_count": len(pending.rows)},
+                **identity,
+            )
 
     def _checkpoint_reply(self, update_id: int, chat_id: str, message_id: int | None) -> None:
         """Сохраняет контрольную точку ответа Telegram."""
