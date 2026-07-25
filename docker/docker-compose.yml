@@ -41,6 +41,11 @@ services:
     command: ["celery", "-A", "restaurant_bot.workers.celery_app.celery_app", "beat", "-l", "INFO", "--schedule=/tmp/celerybeat-schedule"]
     networks:
       - backend
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import os; os.kill(1, 0)\""]
+      interval: 30s
+      timeout: 5s
+      retries: 3
 
 networks:
   backend:
