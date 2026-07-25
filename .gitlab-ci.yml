@@ -7,7 +7,7 @@ stages:
 variables:
   PROJECT_NAME: auto-snab-orders-assistant
   IMAGE_NAME: cr.yandex/${YC_REGISTRY_BACK_ID}/${PROJECT_NAME}
-  CONTAINER_NAME: orders-assistant
+  CONTAINER_NAME: auto-snab-orders-assistant
   NETWORK_NAME: auto-snab
   DEPLOY_PORT: "8002"
   CONTAINER_PORT: "8000"
