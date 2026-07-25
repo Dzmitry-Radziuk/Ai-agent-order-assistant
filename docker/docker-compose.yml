@@ -1,0 +1,48 @@
+services:
+  api:
+    container_name: ${CONTAINER_NAME:-orders-assistant}-api
+    image: ${IMAGE_NAME}:${IMAGE_TAG:-latest}
+    restart: unless-stopped
+    ports:
+      - "${DEPLOY_PORT:-8001}:${CONTAINER_PORT:-8000}"
+    env_file:
+      - .env
+    networks:
+      - backend
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/ready', timeout=3)"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  worker:
+    container_name: ${CONTAINER_NAME:-orders-assistant}-worker
+    image: ${IMAGE_NAME}:${IMAGE_TAG:-latest}
+    restart: unless-stopped
+    env_file:
+      - .env
+    command: ["celery", "-A", "restaurant_bot.workers.celery_app.celery_app", "worker", "-l", "INFO", "--concurrency=${CELERY_CONCURRENCY:-4}"]
+    networks:
+      - backend
+    healthcheck:
+      test: ["CMD-SHELL", "celery -A restaurant_bot.workers.celery_app.celery_app inspect ping --timeout=5 | grep -q pong"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+
+  beat:
+    container_name: ${CONTAINER_NAME:-orders-assistant}-beat
+    image: ${IMAGE_NAME}:${IMAGE_TAG:-latest}
+    restart: unless-stopped
+    env_file:
+      - .env
+    command: ["celery", "-A", "restaurant_bot.workers.celery_app.celery_app", "beat", "-l", "INFO", "--schedule=/tmp/celerybeat-schedule"]
+    networks:
+      - backend
+
+networks:
+  backend:
+    external: true
+    name: ${NETWORK_NAME:-auto-snab}

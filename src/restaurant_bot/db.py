@@ -22,11 +22,14 @@ engine = create_engine(
     max_overflow=settings.database_max_overflow,
     pool_timeout=settings.database_pool_timeout_seconds,
     pool_recycle=settings.database_pool_recycle_seconds,
+    connect_args=(
+        {"sslcert": "", "sslkey": ""} if settings.database_url.startswith("postgresql") else {}
+    ),
 )
 SessionLocal = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
 
 
-def get_db() -> Generator[Session, None, None]:
+def get_db() -> Generator[Session]:
     """Предоставляет сессию базы данных для запроса FastAPI."""
     session = SessionLocal()
     try:
