@@ -139,7 +139,7 @@ def to_float(value: Any) -> float | None:
             raw = sign + "".join(parts)
     try:
         number = float(Decimal(raw))
-    except (InvalidOperation, ValueError):
+    except InvalidOperation, ValueError:
         return None
     return number if number > 0 else None
 
