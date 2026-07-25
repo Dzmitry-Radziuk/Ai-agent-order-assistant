@@ -5,7 +5,7 @@ stages:
   - deploy
 
 variables:
-  PROJECT_NAME: orders-assistant
+  PROJECT_NAME: auto-snab-orders-assistant
   IMAGE_NAME: cr.yandex/${YC_REGISTRY_BACK_ID}/${PROJECT_NAME}
   CONTAINER_NAME: orders-assistant
   NETWORK_NAME: auto-snab
