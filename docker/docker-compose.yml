@@ -49,4 +49,5 @@ services:
 
 networks:
   backend:
+    external: true
     name: ${NETWORK_NAME:-auto-snab}
