@@ -10,6 +10,7 @@ from typing import Any
 from uuid import uuid4
 
 import structlog
+from openai import APIConnectionError, APITimeoutError, RateLimitError
 from redis import Redis
 from structlog.contextvars import bound_contextvars
 
@@ -30,7 +31,7 @@ from restaurant_bot.domain.models import (
 from restaurant_bot.integrations.cache import CatalogCache, chat_lock
 from restaurant_bot.integrations.google_sheets import GoogleSheetsGateway
 from restaurant_bot.integrations.openai_client import OpenAIService
-from restaurant_bot.integrations.telegram import TelegramClient
+from restaurant_bot.integrations.telegram import TELEGRAM_TRANSIENT_ERRORS, TelegramClient
 from restaurant_bot.observability import Tracer
 from restaurant_bot.repositories.order_events import OrderEventRepository
 from restaurant_bot.repositories.sessions import SessionRepository
@@ -47,6 +48,7 @@ from restaurant_bot.services.venue_registration import (
 )
 
 logger = structlog.get_logger(__name__)
+_OPENAI_TRANSIENT_ERRORS = (APIConnectionError, APITimeoutError, RateLimitError)
 
 
 @dataclass(slots=True)
@@ -172,33 +174,36 @@ class UpdateOrchestrator:
                     # The final reply edits this same card below.
                     if event.input_type == InputKind.VOICE:
                         stage_started = perf_counter()
-                        processing_message_id = self.telegram.send_reply(
+                        processing_message_id = self._send_processing_best_effort(
+                            log,
                             event.chat_id,
                             self._voice_processing_reply(),
                         )
                         # A slow Telegram edit must never postpone the visible
                         # acknowledgement that the voice message was accepted.
-                        self.telegram.disable_keyboard(event.chat_id, state.ui_message_id)
+                        self._disable_keyboard_best_effort(log, event.chat_id, state.ui_message_id)
                         timings["processing_card_ms"] = round(
                             (perf_counter() - stage_started) * 1000
                         )
                     elif event.input_type == InputKind.PHOTO:
                         stage_started = perf_counter()
-                        processing_message_id = self.telegram.send_reply(
+                        processing_message_id = self._send_processing_best_effort(
+                            log,
                             event.chat_id,
                             self._photo_received_reply(),
                         )
-                        self.telegram.disable_keyboard(event.chat_id, state.ui_message_id)
+                        self._disable_keyboard_best_effort(log, event.chat_id, state.ui_message_id)
                         timings["processing_card_ms"] = round(
                             (perf_counter() - stage_started) * 1000
                         )
                     elif self._should_show_text_processing(event, state):
                         stage_started = perf_counter()
-                        processing_message_id = self.telegram.send_reply(
+                        processing_message_id = self._send_processing_best_effort(
+                            log,
                             event.chat_id,
                             self._text_processing_reply(),
                         )
-                        self.telegram.disable_keyboard(event.chat_id, state.ui_message_id)
+                        self._disable_keyboard_best_effort(log, event.chat_id, state.ui_message_id)
                         timings["processing_card_ms"] = round(
                             (perf_counter() - stage_started) * 1000
                         )
@@ -235,6 +240,7 @@ class UpdateOrchestrator:
                     previous_stage = state.stage.value
                     previous_cart_count = len(state.cart)
                     previous_trace_id = state.order_trace_id
+                    previous_new_order_confirmation = state.pending_new_order_confirmation
                     result = self.engine.handle(event, command, state, catalog)
 
                     # AI работает за пределами DB-транзакции. Он может выбрать только ID из shortlist.
@@ -269,6 +275,7 @@ class UpdateOrchestrator:
                     result.state.ui_revision += 1
                     self._attach_ui_revision(result.reply, result.state.ui_revision)
                     result.state.ui_message_text = result.reply.text
+                    self._store_visible_actions(result.state, result.reply)
                     stage_started = perf_counter()
                     self._checkpoint_state(
                         update_id,
@@ -284,6 +291,7 @@ class UpdateOrchestrator:
                             "input_type": event.input_type.value,
                             "previous_stage": previous_stage,
                             "previous_cart_count": previous_cart_count,
+                            "previous_new_order_confirmation": (previous_new_order_confirmation),
                         },
                     )
                     timings["state_checkpoint_ms"] = round((perf_counter() - stage_started) * 1000)
@@ -340,7 +348,20 @@ class UpdateOrchestrator:
                 log.exception("telegram_update_failed", error=str(exc))
                 trace.update(level="ERROR", status_message=str(exc)[:500])
                 self._finish(update_id, "failed", str(exc))
-                if not claim.reply_sent:
+                delivery_deferred = (
+                    claim.state_applied
+                    and not claim.reply_sent
+                    and isinstance(exc, TELEGRAM_TRANSIENT_ERRORS)
+                )
+                if delivery_deferred:
+                    # State/result are already checkpointed. The Celery retry
+                    # will reload them and repeat only Telegram delivery, never
+                    # parsing or applying the user's items a second time.
+                    log.warning(
+                        "telegram_reply_delivery_deferred",
+                        error_type=type(exc).__name__,
+                    )
+                elif not claim.reply_sent:
                     try:
                         error_reply = self._error_reply(event)
                         error_reply.edit_message_id = processing_message_id
@@ -426,6 +447,37 @@ class UpdateOrchestrator:
         except Exception as exc:
             log.warning("telegram_callback_ack_failed", error_type=type(exc).__name__)
 
+    def _send_processing_best_effort(
+        self,
+        log: Any,
+        chat_id: str,
+        reply: BotReply,
+    ) -> int | None:
+        """Отправляет служебную карточку без остановки основной обработки."""
+        try:
+            return self.telegram.send_reply(chat_id, reply)
+        except Exception as exc:
+            log.warning(
+                "telegram_processing_card_failed",
+                error_type=type(exc).__name__,
+            )
+            return None
+
+    def _disable_keyboard_best_effort(
+        self,
+        log: Any,
+        chat_id: str,
+        message_id: int | None,
+    ) -> None:
+        """Отключает старую клавиатуру без остановки основной обработки."""
+        try:
+            self.telegram.disable_keyboard(chat_id, message_id)
+        except Exception as exc:
+            log.warning(
+                "telegram_disable_keyboard_failed",
+                error_type=type(exc).__name__,
+            )
+
     def _complete_registration(
         self,
         update_id: int,
@@ -445,6 +497,7 @@ class UpdateOrchestrator:
         state.ui_revision += 1
         self._attach_ui_revision(reply, state.ui_revision)
         state.ui_message_text = reply.text
+        self._store_visible_actions(state, reply)
         result = EngineResult(state=state, reply=reply)
         if not claim.state_applied:
             self._checkpoint_state(update_id, event.chat_id, result)
@@ -497,7 +550,7 @@ class UpdateOrchestrator:
         if event.input_type == InputKind.CALLBACK:
             return infer_intent("", event.callback_data)
         if event.input_type == InputKind.TEXT:
-            return self.openai.parse_text(event.text)
+            return self._parse_text_in_context(event.text, state)
         if event.input_type in {InputKind.VOICE, InputKind.PHOTO}:
             stage_started = perf_counter()
             downloaded = self.telegram.download_file(event.file_id, event.mime_type)
@@ -509,18 +562,39 @@ class UpdateOrchestrator:
             try:
                 if event.input_type == InputKind.VOICE:
                     stage_started = perf_counter()
-                    transcript = self.openai.transcribe(
-                        downloaded.path,
-                        prompt=self._voice_transcription_prompt(state),
-                    )
-                    high_accuracy_retry = False
-                    if self._requires_high_accuracy_transcription(transcript, state):
-                        high_accuracy_retry = True
+                    try:
                         transcript = self.openai.transcribe(
                             downloaded.path,
                             prompt=self._voice_transcription_prompt(state),
-                            high_accuracy=True,
                         )
+                    except _OPENAI_TRANSIENT_ERRORS as error:
+                        logger.warning(
+                            "voice_transcription_transport_failed",
+                            phase="primary",
+                            error_type=type(error).__name__,
+                        )
+                        return ParsedCommand(intent=Intent.UNKNOWN, text="")
+                    high_accuracy_retry = False
+                    if self._requires_high_accuracy_transcription(transcript, state):
+                        high_accuracy_retry = True
+                        primary_transcript = transcript
+                        try:
+                            retry_transcript = self.openai.transcribe(
+                                downloaded.path,
+                                prompt=self._voice_transcription_prompt(state),
+                                high_accuracy=True,
+                            )
+                            transcript = self._select_transcription_result(
+                                primary_transcript,
+                                retry_transcript,
+                            )
+                        except _OPENAI_TRANSIENT_ERRORS as error:
+                            logger.warning(
+                                "voice_transcription_transport_failed",
+                                phase="high_accuracy",
+                                error_type=type(error).__name__,
+                            )
+                            transcript = primary_transcript
                     logger.info(
                         "voice_transcription_finished",
                         duration_ms=round((perf_counter() - stage_started) * 1000),
@@ -534,7 +608,7 @@ class UpdateOrchestrator:
                     if not self._has_supported_voice_letters(transcript):
                         return ParsedCommand(intent=Intent.UNKNOWN, text="")
                     stage_started = perf_counter()
-                    parsed = self.openai.parse_text(transcript)
+                    parsed = self._parse_text_in_context(transcript, state)
                     logger.info(
                         "voice_text_parse_finished",
                         duration_ms=round((perf_counter() - stage_started) * 1000),
@@ -568,6 +642,119 @@ class UpdateOrchestrator:
                     os.unlink(downloaded.path)
         return ParsedCommand(intent=Intent.UNKNOWN, text=event.text)
 
+    def _parse_text_in_context(
+        self,
+        text: str,
+        state: ConversationState,
+    ) -> ParsedCommand:
+        """Разбирает текст с учётом кнопок, видимых пользователю."""
+        callback_data = self._match_visible_action(text, state)
+        if callback_data:
+            return infer_intent("", callback_data).model_copy(update={"text": text})
+
+        parsed = self.openai.parse_text(text)
+        if not self._needs_visible_action_ai(text, parsed, state):
+            return parsed
+        try:
+            selected = self.openai.choose_visible_action(
+                text,
+                state.ui_message_text,
+                state.visible_actions,
+            )
+        except _OPENAI_TRANSIENT_ERRORS as error:
+            logger.warning(
+                "visible_action_transport_failed",
+                error_type=type(error).__name__,
+            )
+            return ParsedCommand(intent=Intent.UNKNOWN, text=text)
+        if not selected:
+            return parsed
+        return infer_intent("", selected).model_copy(update={"text": text})
+
+    @staticmethod
+    def _match_visible_action(text: str, state: ConversationState) -> str:
+        """Находит явно названную кнопку текущего экрана."""
+        phrase = normalize_text(text)
+        if not phrase:
+            return ""
+        filler_stems = (
+            "давай",
+            "давайте",
+            "пожалуй",
+            "можно",
+            "хочу",
+            "хотел",
+            "нужно",
+            "надо",
+            "пойд",
+            "перейд",
+        )
+        phrase_words = [
+            word
+            for word in re.findall(r"[a-zа-яё0-9]+", phrase, flags=re.I)
+            if word not in {"я", "мы", "мне", "нам", "бы", "сейчас"}
+            and not any(word.startswith(stem) for stem in filler_stems)
+        ]
+        compact_phrase = " ".join(phrase_words)
+        phrase_tokens = set(phrase_words)
+        best: tuple[float, str] = (0.0, "")
+        for action in state.visible_actions:
+            label = normalize_text(action.get("label"))
+            callback_data = str(action.get("action_id") or "")
+            if not label or not callback_data:
+                continue
+            label_words = re.findall(r"[a-zа-яё0-9]+", label, flags=re.I)
+            compact_label = " ".join(label_words)
+            if compact_label in (compact_phrase, " ".join(phrase_words)):
+                return callback_data
+            label_tokens = set(label_words)
+            if len(phrase_tokens) >= 2 and phrase_tokens <= label_tokens and label_tokens:
+                score = len(phrase_tokens) / len(label_tokens)
+                if score > best[0]:
+                    best = (score, callback_data)
+        return best[1] if best[0] >= 0.72 else ""
+
+    @staticmethod
+    def _needs_visible_action_ai(
+        text: str,
+        parsed: ParsedCommand,
+        state: ConversationState,
+    ) -> bool:
+        """Определяет необходимость смыслового выбора видимой кнопки."""
+        if not state.visible_actions or parsed.intent not in {Intent.UNKNOWN, Intent.ADD_ITEMS}:
+            return False
+        if parsed.intent == Intent.ADD_ITEMS and any(
+            item.quantity is not None for item in parsed.items
+        ):
+            return False
+        words = normalize_text(text).split()
+        action_stems = (
+            "выбр",
+            "остав",
+            "введ",
+            "укаж",
+            "исправ",
+            "измен",
+            "поменя",
+            "покаж",
+            "посмотр",
+            "откр",
+            "перей",
+            "верн",
+            "отправ",
+            "добав",
+            "убер",
+            "удал",
+            "очист",
+            "начн",
+            "повтор",
+            "пропуст",
+            "пров",
+        )
+        return state.stage not in {SessionStage.COLLECTING, SessionStage.REVIEW} or any(
+            word.startswith(action_stems) for word in words
+        )
+
     @staticmethod
     def _has_supported_voice_letters(transcript: str) -> bool:
         """Проверяет допустимый алфавит распознанной речи."""
@@ -584,12 +771,46 @@ class UpdateOrchestrator:
                 f"{names}. Он может сказать номер, например «первый» или «вариант два», "
                 "либо полное или частичное название. Верни только произнесённый русский текст."
             )
+        visible_actions = getattr(state, "visible_actions", [])
+        visible = "; ".join(
+            action.get("label", "") for action in visible_actions[:10] if action.get("label")
+        )
+        screen_hint = f" На текущем экране есть кнопки: {visible}." if visible else ""
         return (
             "Русская речь сотрудника кафе. Верни только произнесённый русский текст, "
             "ничего не заменяй и не придумывай. Возможные команды: «добавить товары», "
             "«добавь товары», «покажи черновик», «отправить заявку», «очистить черновик», "
-            "«первый вариант», «второй вариант». Команда не является названием товара."
+            "«не добавлять», «не отправлять», «пропускаем», «первый вариант», "
+            "«второй вариант». Сохраняй частицы «не» и «нет» дословно: они меняют "
+            "действие на противоположное. Команда не является названием товара."
+            f"{screen_hint}"
         )
+
+    @staticmethod
+    def _select_transcription_result(primary: str, retry: str) -> str:
+        """Не позволяет повторному распознаванию потерять значимую часть речи."""
+        primary_normalized = normalize_text(primary)
+        retry_normalized = normalize_text(retry)
+        if primary_normalized in {"тестовый товар", "тест товар", "test product"}:
+            return retry
+        if not UpdateOrchestrator._has_supported_voice_letters(retry):
+            return primary
+        if not UpdateOrchestrator._has_supported_voice_letters(primary):
+            return retry
+
+        primary_words = re.findall(r"[a-zа-яё0-9]+", primary_normalized, flags=re.I)
+        retry_words = re.findall(r"[a-zа-яё0-9]+", retry_normalized, flags=re.I)
+        primary_has_list_structure = bool(
+            re.search(r"[,;\n]", primary)
+            or len(re.findall(r"\d+(?:[,.]\d+)?", primary_normalized)) >= 2
+        )
+        if (
+            len(primary_words) >= 6
+            and len(retry_words) * 2 < len(primary_words)
+            and primary_has_list_structure
+        ):
+            return primary
+        return retry
 
     @staticmethod
     def _requires_high_accuracy_transcription(transcript: str, state: ConversationState) -> bool:
@@ -597,6 +818,19 @@ class UpdateOrchestrator:
         normalized = normalize_text(transcript)
         if normalized in {"тестовый товар", "тест товар", "test product"}:
             return True
+        if UpdateOrchestrator._match_visible_action(transcript, state):
+            return False
+        transcript_words = set(re.findall(r"[a-zа-яё0-9]+", normalized, flags=re.I))
+        for action in getattr(state, "visible_actions", []):
+            label_words = set(
+                re.findall(
+                    r"[a-zа-яё0-9]+",
+                    normalize_text(action.get("label")),
+                    flags=re.I,
+                )
+            )
+            if transcript_words & label_words and transcript_words != label_words:
+                return True
         current = state.current_item()
         if current is None or current.status != ItemStatus.AMBIGUOUS:
             return False
@@ -621,6 +855,16 @@ class UpdateOrchestrator:
                     r"r\d+", button.callback_data.rsplit(":", 1)[-1], re.I
                 ):
                     button.callback_data += suffix
+
+    @staticmethod
+    def _store_visible_actions(state: ConversationState, reply: BotReply) -> None:
+        """Сохраняет кнопки текущего экрана для текстового и голосового управления."""
+        state.visible_actions = [
+            {"label": button.text, "action_id": button.callback_data}
+            for row in reply.rows
+            for button in row
+            if button.text and button.callback_data
+        ]
 
     @staticmethod
     def _voice_processing_reply() -> BotReply:
@@ -827,7 +1071,19 @@ class UpdateOrchestrator:
             details=details,
             **identity,
         )
-        if context["intent"] == Intent.CLEAR_CART.value and previous_trace_id:
+        new_order_was_started = (
+            context["intent"] == Intent.CLEAR_CART.value
+            or (
+                context["intent"] == Intent.START_NEW_ORDER.value
+                and not result.state.pending_new_order_confirmation
+            )
+            or (
+                bool(context.get("previous_new_order_confirmation"))
+                and not result.state.pending_new_order_confirmation
+                and not result.state.cart
+            )
+        )
+        if new_order_was_started and previous_trace_id:
             events.append_once(
                 idempotency_key=f"trace:{previous_trace_id}:cancelled",
                 trace_id=previous_trace_id,

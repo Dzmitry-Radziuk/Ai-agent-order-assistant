@@ -12,6 +12,7 @@ from restaurant_bot.services.parser import infer_intent
         ("покажи черновик", Intent.SHOW_CART),
         ("открой корзину", Intent.SHOW_CART),
         ("сбрось черновик", Intent.CLEAR_CART),
+        ("новый заказ", Intent.START_NEW_ORDER),
         ("добавить товары", Intent.ADD_MORE),
         ("добавь товары", Intent.ADD_MORE),
         ("давай добавим товары", Intent.ADD_MORE),
@@ -29,6 +30,7 @@ def test_n8n_global_voice_routes_are_deterministic(phrase: str, intent: Intent) 
 
 
 def test_voice_add_more_command_with_transcriber_terminal_punctuation() -> None:
+    """Проверяет, что голос добавление ещё команда with транскриптор конечная punctuation."""
     command = infer_intent("Добавить еще товары.")
 
     assert command.intent is Intent.ADD_MORE
@@ -56,9 +58,14 @@ def test_voice_add_more_command_with_transcriber_terminal_punctuation() -> None:
         ("Ничего не подходит", Intent.MANUAL_CURRENT),
         ("Не добавляй эту позицию", Intent.SKIP_CURRENT),
         ("Ну давай продолжим", Intent.CONTINUE_CURRENT),
+        ("Новый заказ.", Intent.START_NEW_ORDER),
+        ("Хочу оформить ещё одну заявку", Intent.START_NEW_ORDER),
+        ("Начать заново", Intent.START_NEW_ORDER),
+        ("Заказ заново", Intent.START_NEW_ORDER),
     ],
 )
 def test_live_voice_wording_routes_before_product_parsing(phrase: str, intent: Intent) -> None:
+    """Проверяет, что реальная голос формулировка маршрутизирует до товар parsing."""
     command = infer_intent(phrase)
 
     assert command.intent is intent
@@ -96,9 +103,18 @@ def test_live_voice_wording_routes_before_product_parsing(phrase: str, intent: I
         ("Давай повторим отправку заявки", Intent.SUBMIT_AS_IS),
         ("Покажи проблемные позиции, разберёмся с ними", Intent.CLARIFY_CURRENT),
         ("Давай поставим рекомендованное количество", Intent.ACCEPT_SUGGESTED_QUANTITY),
+        ("Давайте исправим количество", Intent.FIX_MULTIPLE),
+        ("Давайте выберем количество", Intent.FIX_MULTIPLE),
+        ("Я хочу выбрать количество", Intent.FIX_MULTIPLE),
+        ("Можно подобрать количество?", Intent.FIX_MULTIPLE),
+        ("Хочу поменять текущее количество", Intent.FIX_MULTIPLE),
         ("Оставим текущее количество как есть", Intent.KEEP_CURRENT_QUANTITY),
+        ("Давайте оставим всё как было", Intent.KEEP_CURRENT_QUANTITY),
+        ("Оставь как указано", Intent.KEEP_CURRENT_QUANTITY),
         ("Используем единицу из каталога", Intent.USE_CATALOG_UNIT),
         ("Хочу указать другое количество", Intent.ENTER_OTHER_QUANTITY),
+        ("Давайте создадим следующий заказ", Intent.START_NEW_ORDER),
+        ("Нужно сделать повторную заявку", Intent.START_NEW_ORDER),
     ],
 )
 def test_free_form_voice_navigation_ignores_fillers_and_word_order(
@@ -128,6 +144,26 @@ def test_free_form_navigation_does_not_consume_real_product_names(phrase: str) -
 
 
 @pytest.mark.parametrize(
+    "phrase",
+    [
+        "Не хочу новый заказ",
+        "Не создавай новую заявку",
+        "Новый заказ 5 кг",
+        "Новый заказ соус 2 штуки",
+    ],
+)
+def test_new_order_navigation_does_not_override_negation_or_product_quantity(
+    phrase: str,
+) -> None:
+    """Не начинает новую заявку при отрицании или товарной строке с количеством."""
+    command = infer_intent(phrase)
+
+    assert command.intent is not Intent.START_NEW_ORDER
+    if phrase.startswith("Не "):
+        assert command.intent is Intent.CANCEL
+
+
+@pytest.mark.parametrize(
     ("phrase", "selected_index"),
     [
         ("Давай первый вариант", 1),
@@ -138,7 +174,86 @@ def test_free_form_navigation_does_not_consume_real_product_names(phrase: str) -
     ],
 )
 def test_live_voice_candidate_selection_variants(phrase: str, selected_index: int) -> None:
+    """Проверяет, что реальная голос кандидат выбор варианты."""
     command = infer_intent(phrase)
 
     assert command.intent is Intent.SELECT_CANDIDATE
     assert command.selected_index == selected_index
+
+
+@pytest.mark.parametrize(
+    ("phrase", "intent"),
+    [
+        ("Начнём", Intent.GREETING),
+        ("Запускай", Intent.GREETING),
+        ("Подскажи, что делать", Intent.HELP),
+        ("Как сделать заказ", Intent.HELP),
+        ("Что у меня в заявке", Intent.SHOW_CART),
+        ("Что уже добавлено", Intent.SHOW_CART),
+        ("Заявка ушла?", Intent.ORDER_STATUS),
+        ("Что с моим заказом", Intent.ORDER_STATUS),
+        ("Удали текущую заявку", Intent.CLEAR_CART),
+        ("Я всё добавил", Intent.SUBMIT_REQUEST),
+        ("Заявка готова", Intent.SUBMIT_REQUEST),
+        ("Можно оформлять", Intent.SUBMIT_REQUEST),
+        ("Предыдущий экран", Intent.BACK),
+        ("Продолжим работу", Intent.CONTINUE_CURRENT),
+        ("Покажи итог", Intent.SHOW_FINAL_REVIEW),
+        ("Проверить перед отправкой", Intent.SHOW_FINAL_REVIEW),
+        ("Что не найдено", Intent.CLARIFY_CURRENT),
+        ("Покажи ошибки", Intent.CLARIFY_CURRENT),
+        ("Введу название сам", Intent.MANUAL_CURRENT),
+        ("Другой товар", Intent.MANUAL_CURRENT),
+        ("Убери эту строку", Intent.SKIP_CURRENT),
+        ("Исключи эту позицию", Intent.SKIP_CURRENT),
+        ("Всё верно", Intent.CONFIRM),
+        ("Да, всё верно", Intent.CONFIRM),
+        ("Согласен", Intent.CONFIRM),
+        ("Нет, спасибо", Intent.CANCEL),
+        ("Не отправляй", Intent.CANCEL),
+        ("Передумал", Intent.CANCEL),
+    ],
+)
+def test_common_text_and_voice_phrasings_are_deterministic(
+    phrase: str,
+    intent: Intent,
+) -> None:
+    """Понимает частые живые формулировки до товарного парсинга."""
+    command = infer_intent(phrase)
+
+    assert command.intent is intent
+    assert command.items == []
+
+
+@pytest.mark.parametrize(
+    ("phrase", "selected_index"),
+    [
+        ("Возьми третью", 3),
+        ("Подойдёт первый", 1),
+        ("Нужна четвёртая", 4),
+    ],
+)
+def test_more_candidate_selection_phrasings(phrase: str, selected_index: int) -> None:
+    """Проверяет, что ещё кандидат выбор phrasings."""
+    command = infer_intent(phrase)
+
+    assert command.intent is Intent.SELECT_CANDIDATE
+    assert command.selected_index == selected_index
+
+
+@pytest.mark.parametrize(
+    "phrase",
+    [
+        "Сливки 33% 5 штук",
+        "Сыр номер один 5 кг",
+        "Старт 10 штук",
+        "Другой товар 2 кг",
+        "Согласен 3 упаковки",
+    ],
+)
+def test_command_words_inside_product_lines_remain_products(phrase: str) -> None:
+    """Не превращает товар с количеством в навигацию или выбор кнопки."""
+    command = infer_intent(phrase)
+
+    assert command.intent is Intent.ADD_ITEMS
+    assert command.items

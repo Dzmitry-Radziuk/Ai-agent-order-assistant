@@ -8,6 +8,7 @@ from restaurant_bot.integrations.google_sheets import GoogleSheetsError
 
 
 def test_catalog_cache_is_isolated_by_spreadsheet(settings) -> None:  # type: ignore[no-untyped-def]
+    """Проверяет, что каталог кэш является isolated by таблица."""
     redis = MagicMock()
     redis.get.return_value = None
     sheets = MagicMock()

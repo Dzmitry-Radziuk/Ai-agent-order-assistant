@@ -10,23 +10,29 @@ from restaurant_bot.domain.models import (
 )
 from restaurant_bot.integrations.openai_client import ProductMatchDecision
 from restaurant_bot.services.engine import ConversationEngine
+from restaurant_bot.services.matching import rank_candidates
 from restaurant_bot.services.orchestrator import UpdateOrchestrator
 from restaurant_bot.services.replies import issue_reply
 
 
 class _Matcher:
+    """Имитирует сопоставление товара с кандидатом каталога."""
+
     def __init__(self, decision: ProductMatchDecision):
+        """Инициализирует тестовый двойник зависимости."""
         self.decision = decision
         self.calls: list[tuple[str, list[dict[str, object]]]] = []
 
     def choose_catalog_candidate(
         self, query: str, candidates: list[dict[str, object]]
     ) -> ProductMatchDecision:
+        """Возвращает настроенное решение сопоставления товара."""
         self.calls.append((query, candidates))
         return self.decision
 
 
 def _orchestrator(settings, matcher: _Matcher) -> UpdateOrchestrator:  # type: ignore[no-untyped-def]
+    """Создаёт настроенный тестовый оркестратор."""
     orchestrator = object.__new__(UpdateOrchestrator)
     orchestrator.engine = ConversationEngine(settings)
     orchestrator.openai = matcher
@@ -34,6 +40,7 @@ def _orchestrator(settings, matcher: _Matcher) -> UpdateOrchestrator:  # type: i
 
 
 def test_ai_can_apply_only_catalog_candidate_from_its_shortlist(settings) -> None:  # type: ignore[no-untyped-def]
+    """Проверяет, что ИИ может применяет только каталог кандидат из its shortlist."""
     candidate = Candidate(product_id="rose", name="Сироп Роза", supplier="Сиропы", unit="шт")
     item = CartItem(
         id="voice",
@@ -60,6 +67,7 @@ def test_ai_can_apply_only_catalog_candidate_from_its_shortlist(settings) -> Non
 
 
 def test_ai_not_found_keeps_candidate_choice_for_user(settings) -> None:  # type: ignore[no-untyped-def]
+    """Проверяет, что ИИ не found сохраняет кандидат выбор for пользователь."""
     candidate = Candidate(product_id="rose", name="Сироп Роза", supplier="Сиропы", unit="шт")
     item = CartItem(
         id="voice",
@@ -81,6 +89,7 @@ def test_ai_not_found_keeps_candidate_choice_for_user(settings) -> None:  # type
 
 
 def test_ai_reranker_never_replaces_a_one_word_category_query(settings) -> None:  # type: ignore[no-untyped-def]
+    """Проверяет, что ИИ reranker никогда не replaces a один слово категория query."""
     candidate = Candidate(
         product_id="beef", name="Говядина Тонкий край", supplier="Мясо", unit="кг"
     )
@@ -107,3 +116,76 @@ def test_ai_reranker_never_replaces_a_one_word_category_query(settings) -> None:
 
     assert matcher.calls == []
     assert resolved.state.cart[0].status is ItemStatus.AMBIGUOUS
+
+
+def test_ai_reranker_receives_full_query_with_short_typo(settings) -> None:  # type: ignore[no-untyped-def]
+    """Передаёт ИИ полную опечатку и применяет выбранный товар каталога."""
+    catalog = [
+        CatalogProduct(product_id="rose", name="Сироп Роза, 1л", unit="шт"),
+        CatalogProduct(product_id="tarhun", name="Сироп Тархун, 1л", unit="шт"),
+        CatalogProduct(product_id="feijoa", name="Сироп Фейхоа, 1л", unit="шт"),
+    ]
+    item = CartItem(
+        id="typo",
+        source_query="сироп рза",
+        status=ItemStatus.AMBIGUOUS,
+        candidates=rank_candidates("сироп рза", catalog),
+    )
+    matcher = _Matcher(ProductMatchDecision(action="select", selected_product_id="rose"))
+    result = EngineResult(state=ConversationState(cart=[item]), reply=issue_reply(item, 0))
+
+    resolved = _orchestrator(settings, matcher)._resolve_ai_pending(
+        TelegramEvent(update_id=2, chat_id="123456", input_type=InputKind.TEXT),
+        result,
+        catalog,
+    )
+
+    assert matcher.calls[0][0] == "сироп рза"
+    assert resolved.state.cart[0].source_query == "сироп рза"
+    assert resolved.state.cart[0].comment == ""
+    assert resolved.state.cart[0].catalog_product_id == "rose"
+    assert resolved.state.cart[0].status is ItemStatus.MISSING_QTY
+
+
+def test_ai_never_selects_first_variant_of_multiword_product_family(
+    settings,
+) -> None:  # type: ignore[no-untyped-def]
+    """Не разрешает ИИ выбирать вкус по общему названию линейки."""
+    catalog = [
+        CatalogProduct(
+            product_id="cherry-shiso",
+            name="Кордиал ЛЬЮ Вишня/Шисо 1,0л",
+            unit="шт",
+        ),
+        CatalogProduct(
+            product_id="orange-vanilla",
+            name="Кордиал ЛЬЮ Апельсин/Ваниль 1,0л",
+            unit="шт",
+        ),
+        CatalogProduct(
+            product_id="pear-tonka",
+            name="Кордиал ЛЬЮ Груша/Тонка 1,0л",
+            unit="шт",
+        ),
+    ]
+    item = CartItem(
+        id="cordial",
+        source_query="Кордиал ЛЬЮ",
+        status=ItemStatus.AMBIGUOUS,
+        candidates=rank_candidates("Кордиал ЛЬЮ", catalog),
+    )
+    matcher = _Matcher(ProductMatchDecision(action="select", selected_product_id="cherry-shiso"))
+    result = EngineResult(
+        state=ConversationState(cart=[item]),
+        reply=issue_reply(item, 0),
+    )
+
+    resolved = _orchestrator(settings, matcher)._resolve_ai_pending(
+        TelegramEvent(update_id=3, chat_id="123456", input_type=InputKind.TEXT),
+        result,
+        catalog,
+    )
+
+    assert matcher.calls == []
+    assert resolved.state.cart[0].status is ItemStatus.AMBIGUOUS
+    assert resolved.state.cart[0].catalog_product_id == ""

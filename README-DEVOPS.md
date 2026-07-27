@@ -65,9 +65,9 @@ Compose-сервисы:
 Не меняйте путь на `/app/celerybeat-schedule` — контейнер работает без root-прав,
 поэтому запись в `/app` завершится ошибкой `Permission denied` и циклическим перезапуском `beat`.
 
-Для production используется объединение `docker-compose.yml` и `docker-compose.prod.yml`.
-Override включает `APP_ENV=production`, read-only filesystem, отдельный writable `/tmp`,
-удаление Linux capabilities и ограничение количества процессов для Python-контейнеров.
+Корневой `docker-compose.yml` поднимает полный локальный стек. Production
+использует `docker/Dockerfile` и `docker/docker-compose.yml`: CI собирает image,
+а deploy запускает API, worker и beat в серверной сети `auto-snab`.
 
 ## Что нужно получить до начала работ
 
@@ -239,7 +239,7 @@ curl --fail https://bot.company.ru/health/live
 | `API_BIND_HOST` | Да | Нет | `127.0.0.1` |
 | `API_PORT` | Нет | Нет | Host-порт, обычно `8000` |
 | `UVICORN_WORKERS` | Нет | Нет | Обычно `2` |
-| `CELERY_CONCURRENCY` | Нет | Нет | Обычно `4` |
+| `CELERY_CONCURRENCY` | Нет | Нет | `10`; число одновременно выполняемых задач worker |
 
 ### Telegram
 
@@ -247,6 +247,8 @@ curl --fail https://bot.company.ru/health/live
 |---|---:|---:|---|
 | `TELEGRAM_BOT_TOKEN` | Да | Да | Token от BotFather |
 | `TELEGRAM_WEBHOOK_SECRET` | Да | Да | 32–256 символов `A-Z`, `a-z`, `0-9`, `_`, `-` |
+| `TELEGRAM_REQUEST_TIMEOUT_SECONDS` | Нет | Нет | `15`, общее ожидание ответа Telegram API |
+| `TELEGRAM_CONNECT_TIMEOUT_SECONDS` | Нет | Нет | `5`, ожидание TCP/TLS-соединения с Telegram API |
 
 Создать webhook secret:
 
@@ -260,6 +262,8 @@ python3 -c "import secrets; print(secrets.token_urlsafe(48))"
 |---|---:|---:|---|
 | `OPENAI_API_KEY` | Да | Да | API key проекта |
 | `OPENAI_TEXT_MODEL` | Нет | Нет | `gpt-4o-mini` |
+| `OPENAI_TEXT_TIMEOUT_SECONDS` | Нет | Нет | `12`, максимальное ожидание текстового разбора |
+| `OPENAI_TEXT_MAX_RETRIES` | Нет | Нет | `0`, без скрытых повторов внутри заблокированного чата |
 | `OPENAI_VISION_MODEL` | Нет | Нет | `gpt-5-mini` |
 | `OPENAI_MATCH_MODEL` | Нет | Нет | `gpt-4o-mini` |
 | `OPENAI_TRANSCRIBE_MODEL` | Нет | Нет | `gpt-4o-mini-transcribe` |
@@ -421,7 +425,7 @@ Redis URLs и настройки pool/cache можно оставить в `.env
 
 Для развитой инфраструктуры лучше использовать Vault, OpenBao, Infisical или облачный secret manager и выдавать секреты job кратковременно.
 
-## Первый ручной deploy
+## Первый ручной локальный запуск
 
 ### 1. Клонировать проект
 
@@ -484,7 +488,6 @@ stat -c '%a %n' secrets/google-service-account.json .env
 
 ```bash
 docker compose config --quiet
-docker compose -f docker-compose.yml -f docker-compose.prod.yml config --quiet
 ```
 
 Не выполняйте `docker compose config` без `--quiet` в CI-логе: развёрнутая конфигурация может содержать секреты.
@@ -493,8 +496,8 @@ docker compose -f docker-compose.yml -f docker-compose.prod.yml config --quiet
 
 ```bash
 docker compose pull postgres redis
-docker compose -f docker-compose.yml -f docker-compose.prod.yml build api worker migrate beat
-docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+docker compose build api worker migrate beat
+docker compose up -d
 docker compose ps
 ```
 
@@ -564,153 +567,78 @@ Webhook secret должен содержать только `A-Z`, `a-z`, `0-9`,
 
 В проекте используется `.gitlab-ci.yml`. Актуальное описание обязательных jobs и правил ветки `develop` находится в [docs/ci/README.md](docs/ci/README.md).
 
-### Рекомендуемый pipeline
+### Фактический pipeline
 
 ```text
-format + lint + mypy
-        │
-        ├── pytest + coverage
-        │
-        ├── documentation impact + Markdown links
-        │
-        └── Structurizr validate + reproducible Mermaid export
+build: pytest + coverage
         │
         ▼
-manual deploy from protected main/tag
+lint: Ruff
         │
         ▼
-backup PostgreSQL
+scan: Code Quality + SAST + Secret Detection + Docker build
         │
         ▼
-rsync code to /opt/autosnab-bot
-        │
-        ▼
-build + migrate + restart
-        │
-        ▼
-health check + webhook
+develop → deploy-dev автоматически
+main    → deploy-prod вручную
 ```
 
-### Runner
+Jobs импортируются из `antipov-devops/ci-templates`. Проект не копирует их
+реализацию, а задаёт только переменные приложения.
 
-Для простого deploy можно использовать отдельный GitLab Runner с Shell executor на production-сервере.
+Source of truth для production-контейнеров:
 
-Обязательные ограничения:
+- `docker/Dockerfile` — сборка application image;
+- `docker/docker-compose.yml` — запуск API, worker и beat из готового image.
 
-- runner dedicated только этому проекту;
-- runner locked to project;
-- tag, например `autosnab-production`;
-- запуск только protected jobs;
-- production job manual;
-- пользователь runner имеет доступ только к `/opt/autosnab-bot` и Docker;
-- merge request из недоверенной ветки не получает production variables.
+Текущий `build-hatch.yml` завершает pytest-команду через `|| true`: ошибки
+тестов видны в логах, но не блокируют `build`. Если тесты должны стать
+обязательной проверкой, DevOps должен убрать это поведение в корпоративном
+шаблоне.
 
-Shell executor выполняет pipeline непосредственно на сервере. Не запускайте на нём непроверенный код.
+### Runners
 
-### Production deploy
+Фактические теги берутся из корпоративных шаблонов:
 
-Текущий `.gitlab-ci.yml` намеренно выполняет только проверки и не имеет доступа к production-секретам. Deploy следует добавлять отдельным manual job после настройки защищённого runner и environment.
+- `build` — pytest, Ruff, security scan и Docker image;
+- `dev` — автоматическое развёртывание `develop`;
+- `prod` — ручное развёртывание `main`.
 
-Пример ниже хранит production `.env` на сервере. GitLab deploy job не перезаписывает секреты:
+Runner должен быть locked к доверенному проекту. Production variables и runner
+с тегом `prod` должны быть protected. На production нельзя запускать pipeline
+из недоверенных Merge Request.
 
-```yaml
-stages:
-  - test
-  - deploy
+### Deploy
 
-quality:
-  stage: test
-  image: python:3.12-slim
-  before_script:
-    - python -m pip install --upgrade pip
-    - python -m pip install -e ".[dev]"
-  script:
-    - ruff format --check src tests alembic
-    - ruff check src tests alembic
-    - mypy src
-    - python -m pytest
-  rules:
-    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
-    - if: '$CI_COMMIT_BRANCH'
+`build-image` публикует:
 
-deploy_production:
-  stage: deploy
-  tags:
-    - autosnab-production
-  environment:
-    name: production
-    url: https://bot.company.ru
-  resource_group: production
-  rules:
-    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
-      when: manual
-  script:
-    - test -s /opt/autosnab-bot/.env
-    - test -s /opt/autosnab-bot/secrets/google-service-account.json
-    - rsync -a --delete
-        --exclude '.git/'
-        --exclude '.env'
-        --exclude 'secrets/'
-        --exclude '.venv/'
-        "$CI_PROJECT_DIR/"
-        /opt/autosnab-bot/
-    - cd /opt/autosnab-bot
-    - docker compose -f docker-compose.yml -f docker-compose.prod.yml config --quiet
-    - docker compose -f docker-compose.yml -f docker-compose.prod.yml build api worker migrate beat
-    - docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
-    - docker compose exec -T api python -m restaurant_bot.cli set-webhook
-    - curl --fail --retry 10 --retry-delay 3
-        http://127.0.0.1:8000/health/ready
-    - docker compose ps
+```text
+${IMAGE_NAME}:${CI_COMMIT_SHORT_SHA}
+${IMAGE_NAME}:latest
 ```
 
-Если Python-проект вложен в подкаталог, измените source для `rsync`.
+`deploy-dev` запускается для `develop`, копирует file-variable `ENV_DEV` в
+`docker/.env` и выполняет `docker compose`. `deploy-prod` делает то же с
+`ENV_PROD` для `main`, но требует ручного запуска.
 
-До включения автоматического deploy:
+Перед включением production:
 
-1. выполнить первый ручной deploy;
-2. проверить права runner;
-3. сделать тестовый backup;
-4. проверить rollback на тестовом окружении;
-5. защитить production branch/environment;
-6. включить ручное подтверждение deploy.
+1. проверить protected branch `main` и environment `production`;
+2. проверить права runner `prod`;
+3. убедиться, что `ENV_PROD` имеет тип File и не выводится в лог;
+4. проверить backup и rollback;
+5. выполнить тестовый deploy и health-check.
 
-### Создание `.env` из GitLab Variables
+### Передача `.env`
 
-Если source of truth — GitLab, deploy job должен создавать временный файл с правами `600`, затем атомарно заменять `.env`.
+Source of truth для runtime-конфигурации — GitLab CI/CD file variables:
 
-Принцип:
+- `ENV_DEV` — полный development `.env`;
+- `ENV_PROD` — полный production `.env`.
 
-```bash
-cd /opt/autosnab-bot
-umask 077
-{
-  printf 'APP_ENV=production\n'
-  printf 'PUBLIC_BASE_URL=%s\n' "$PUBLIC_BASE_URL"
-  printf 'API_BIND_HOST=127.0.0.1\n'
-  printf 'API_PORT=%s\n' "${API_PORT:-8000}"
-  printf 'TELEGRAM_BOT_TOKEN=%s\n' "$TELEGRAM_BOT_TOKEN"
-  printf 'TELEGRAM_WEBHOOK_SECRET=%s\n' "$TELEGRAM_WEBHOOK_SECRET"
-  printf 'OPENAI_API_KEY=%s\n' "$OPENAI_API_KEY"
-  printf 'POSTGRES_DB=%s\n' "$POSTGRES_DB"
-  printf 'POSTGRES_USER=%s\n' "$POSTGRES_USER"
-  printf 'POSTGRES_PASSWORD=%s\n' "$POSTGRES_PASSWORD"
-  printf 'DATABASE_URL=%s\n' "$DATABASE_URL"
-  printf 'REDIS_URL=redis://redis:6379/0\n'
-  printf 'CELERY_BROKER_URL=redis://redis:6379/1\n'
-  printf 'CELERY_RESULT_BACKEND=redis://redis:6379/2\n'
-  printf 'GOOGLE_SERVICE_ACCOUNT_FILE=/run/secrets/google-service-account.json\n'
-  printf 'GOOGLE_VENUE_DIRECTORY_URL=%s\n' "$GOOGLE_VENUE_DIRECTORY_URL"
-  printf 'GOOGLE_REGISTRATION_SPREADSHEET_ID=%s\n' "$GOOGLE_REGISTRATION_SPREADSHEET_ID"
-  printf 'GOOGLE_RECALC_URL=%s\n' "$GOOGLE_RECALC_URL"
-  printf 'GOOGLE_RECALC_TOKEN=%s\n' "$GOOGLE_RECALC_TOKEN"
-} > .env.next
-mv .env.next .env
-install -m 600 "$GOOGLE_SERVICE_ACCOUNT_JSON" \
-  secrets/google-service-account.json
-```
-
-Добавьте остальные переменные из `.env.example`, если их значения отличаются от defaults.
+Корпоративный deploy-шаблон копирует выбранный файл в `docker/.env`
+непосредственно перед `docker compose`. Значения должны соответствовать
+актуальному `.env.example`.
 
 Нельзя:
 

@@ -12,12 +12,14 @@ from restaurant_bot.services.parser import infer_intent
 
 
 def _voice(text: str) -> TelegramEvent:
+    """Создаёт тестовое голосовое событие Telegram."""
     return TelegramEvent(
         update_id=1, chat_id="voice-quantity", input_type=InputKind.VOICE, text=text
     )
 
 
 def _multiple_state(engine: ConversationEngine) -> ConversationState:
+    """Создаёт состояние уточнения кратности товара."""
     item = engine._build_item(ExtractedItem(product_query="Глазной мускул", quantity=5, unit="кг"))
     item.id = "multiple"
     item.status = ItemStatus.MATCHED
@@ -31,6 +33,7 @@ def _multiple_state(engine: ConversationEngine) -> ConversationState:
 
 
 def _unit_mismatch_state(engine: ConversationEngine) -> ConversationState:
+    """Создаёт состояние уточнения единицы измерения."""
     item = engine._build_item(ExtractedItem(product_query="Курица", quantity=4, unit="шт"))
     item.id = "unit"
     item.status = ItemStatus.UNIT_MISMATCH
@@ -41,6 +44,7 @@ def _unit_mismatch_state(engine: ConversationEngine) -> ConversationState:
 
 
 def test_voice_generic_correction_repeats_fix_quantity_button(settings) -> None:  # type: ignore[no-untyped-def]
+    """Открывает варианты и не меняет количество без решения пользователя."""
     engine = ConversationEngine(settings)
 
     result = engine.handle(
@@ -50,11 +54,18 @@ def test_voice_generic_correction_repeats_fix_quantity_button(settings) -> None:
         [],
     )
 
-    assert result.state.stage.value == "review"
-    assert result.state.cart[0].quantity == 20
+    assert result.state.stage.value == "await_submit_confirm"
+    assert result.state.cart[0].quantity == 5
+    assert "Выберите количество" in result.reply.text
+    assert [row[0].text for row in result.reply.rows[:3]] == [
+        "Выбрать 20 кг",
+        "Ввести другое количество",
+        "Оставить 5 кг",
+    ]
 
 
 def test_voice_explicit_other_quantity_opens_manual_input(settings) -> None:  # type: ignore[no-untyped-def]
+    """Проверяет, что голос явный другое количество открывает ручной ввод."""
     engine = ConversationEngine(settings)
 
     result = engine.handle(
@@ -69,7 +80,57 @@ def test_voice_explicit_other_quantity_opens_manual_input(settings) -> None:  # 
     assert "Укажите другое количество" in result.reply.text
 
 
+def test_voice_fix_from_final_review_opens_choice(settings) -> None:  # type: ignore[no-untyped-def]
+    """Открывает выбор с финальной проверки, где текущая позиция не выбрана."""
+    engine = ConversationEngine(settings)
+    state = _multiple_state(engine)
+    state.current_issue_item_id = ""
+
+    result = engine.handle(
+        _voice("давай поменяем количество"),
+        ParsedCommand(intent=Intent.UNKNOWN, text="давай поменяем количество"),
+        state,
+        [],
+    )
+
+    assert result.state.cart[0].quantity == 5
+    assert result.state.current_issue_item_id == "multiple"
+    assert "Выберите количество" in result.reply.text
+
+
+def test_voice_choice_numbers_repeat_all_quantity_buttons(settings) -> None:  # type: ignore[no-untyped-def]
+    """Распознаёт голосовые номера трёх вариантов количества."""
+    engine = ConversationEngine(settings)
+
+    first = engine.handle(
+        _voice("давай первый вариант"),
+        ParsedCommand(intent=Intent.SELECT_CANDIDATE, selected_index=1),
+        _multiple_state(engine),
+        [],
+    )
+    assert first.state.cart[0].quantity == 20
+
+    second = engine.handle(
+        _voice("выбираю второй вариант"),
+        ParsedCommand(intent=Intent.SELECT_CANDIDATE, selected_index=2),
+        _multiple_state(engine),
+        [],
+    )
+    assert second.state.cart[0].quantity == 5
+    assert second.state.stage.value == "await_multiple_quantity"
+
+    third = engine.handle(
+        _voice("оставим третий вариант"),
+        ParsedCommand(intent=Intent.SELECT_CANDIDATE, selected_index=3),
+        _multiple_state(engine),
+        [],
+    )
+    assert third.state.cart[0].quantity == 5
+    assert third.state.cart[0].suggested_quantity is None
+
+
 def test_voice_explicit_number_changes_only_current_multiple(settings) -> None:  # type: ignore[no-untyped-def]
+    """Проверяет, что голос явный число изменяет только текущий кратность."""
     engine = ConversationEngine(settings)
     state = _multiple_state(engine)
     second = engine._build_item(ExtractedItem(product_query="Другой товар", quantity=7, unit="кг"))
@@ -86,6 +147,7 @@ def test_voice_explicit_number_changes_only_current_multiple(settings) -> None: 
 
 
 def test_voice_add_without_product_word_accepts_current_multiple_recommendation(settings) -> None:  # type: ignore[no-untyped-def]
+    """Проверяет, что голос добавление без товар слово принимает текущий кратность recommendation."""
     engine = ConversationEngine(settings)
 
     result = engine.handle(
@@ -100,6 +162,7 @@ def test_voice_add_without_product_word_accepts_current_multiple_recommendation(
 
 
 def test_voice_add_more_products_is_not_consumed_as_quantity_correction(settings) -> None:  # type: ignore[no-untyped-def]
+    """Проверяет, что голос добавление ещё товары является не consumed как количество исправление."""
     engine = ConversationEngine(settings)
 
     result = engine.handle(
@@ -114,6 +177,7 @@ def test_voice_add_more_products_is_not_consumed_as_quantity_correction(settings
 
 
 def test_voice_increment_phrase_adds_to_current_multiple_quantity(settings) -> None:  # type: ignore[no-untyped-def]
+    """Проверяет, что голос увеличение phrase добавляет в текущий кратность количество."""
     engine = ConversationEngine(settings)
     state = _multiple_state(engine)
 
@@ -129,6 +193,7 @@ def test_voice_increment_phrase_adds_to_current_multiple_quantity(settings) -> N
 
 
 def test_voice_bare_contextual_add_accepts_missing_multiple(settings) -> None:  # type: ignore[no-untyped-def]
+    """Проверяет, что голос краткое контекстное добавление принимает отсутствующий кратность."""
     engine = ConversationEngine(settings)
     state = _multiple_state(engine)
 
@@ -143,6 +208,7 @@ def test_voice_bare_contextual_add_accepts_missing_multiple(settings) -> None:  
 
 
 def test_voice_unit_mismatch_accepts_catalog_unit_and_spoken_quantity(settings) -> None:  # type: ignore[no-untyped-def]
+    """Проверяет, что голос единица измерения mismatch принимает каталог единица измерения и произнесённый количество."""
     engine = ConversationEngine(settings)
 
     accepted = engine.handle(

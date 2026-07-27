@@ -12,6 +12,7 @@ from restaurant_bot.services.parser import infer_intent
 
 
 def test_voice_add_product_phrase_is_not_interpreted_as_candidate_selection() -> None:
+    """Проверяет, что голос добавление товар phrase является не interpreted как кандидат выбор."""
     command = infer_intent("добавь сироп роза 10 штук")
 
     assert command.intent is Intent.ADD_ITEMS
@@ -21,6 +22,7 @@ def test_voice_add_product_phrase_is_not_interpreted_as_candidate_selection() ->
 
 
 def test_empty_voice_transcript_cannot_select_a_candidate() -> None:
+    """Проверяет, что пустой результат голос транскрипция не может select a кандидат."""
     command = infer_intent("")
 
     assert command.intent is Intent.UNKNOWN
@@ -28,6 +30,7 @@ def test_empty_voice_transcript_cannot_select_a_candidate() -> None:
 
 
 def test_voice_enumeration_keeps_product_without_shared_quantity() -> None:
+    """Проверяет, что голос перечисление сохраняет товар без общая количество."""
     command = infer_intent("сироп и говядина 10 килограмм")
 
     assert command.intent is Intent.ADD_ITEMS
@@ -38,6 +41,7 @@ def test_voice_enumeration_keeps_product_without_shared_quantity() -> None:
 
 
 def test_voice_add_products_phrases_are_navigation_not_product_lines() -> None:
+    """Проверяет, что голос добавление товары phrases являются навигация не товар lines."""
     for phrase in ["добавить товары", "добавь товары", "давай добавим товары"]:
         command = infer_intent(phrase)
         assert command.intent is Intent.ADD_MORE

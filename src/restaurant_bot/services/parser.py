@@ -4,6 +4,7 @@ import re
 
 from restaurant_bot.domain.models import ExtractedItem, Intent, ParsedCommand
 from restaurant_bot.services.text import (
+    NUMBER_WORDS,
     UNIT_ALIASES,
     clean_text,
     normalize_text,
@@ -14,12 +15,18 @@ from restaurant_bot.services.text import (
 _COMMANDS: list[tuple[Intent, re.Pattern[str]]] = [
     (
         Intent.GREETING,
-        re.compile(r"^(?:/start|старт|начать работу|привет|здравствуйте|начать)$", re.I),
+        re.compile(
+            r"^(?:/start|старт|начать работу|начни работу|начать|начнём|начнем|"
+            r"запускай|запусти(?: бота)?|привет|здравствуйте)$",
+            re.I,
+        ),
     ),
     (
         Intent.HELP,
         re.compile(
-            r"^(?:/help|помощь|помоги|покажи помощь|что ты умеешь|как пользоваться|как использовать)$",
+            r"^(?:/help|помощь|помоги|подскажи(?: что делать)?|покажи помощь|"
+            r"что ты умеешь|как пользоваться|как использовать|как (?:сделать|оформить) "
+            r"(?:заказ|заявку)|не (?:знаю|понимаю) что делать)$",
             re.I,
         ),
     ),
@@ -40,7 +47,16 @@ _COMMANDS: list[tuple[Intent, re.Pattern[str]]] = [
     (
         Intent.CLEAR_CART,
         re.compile(
-            r"^(?:/reset|сброс|сбрось черновик|очисти(?:ть)? (?:заявку|корзину|черновик)|начать заново|новая заявка)$",
+            r"^(?:/reset|сброс|сбрось черновик|очисти(?:ть)? (?:заявку|корзину|черновик))$",
+            re.I,
+        ),
+    ),
+    (
+        Intent.START_NEW_ORDER,
+        re.compile(
+            r"^(?:новая заявка|новую заявку|новый заказ|новой заказ|новый черновик|"
+            r"ещ[её] одна заявка|ещ[её] один заказ|начать заново|начни заново|"
+            r"(?:заказ|заявка|черновик) заново)$",
             re.I,
         ),
     ),
@@ -60,9 +76,31 @@ _COMMANDS: list[tuple[Intent, re.Pattern[str]]] = [
             re.I,
         ),
     ),
-    (Intent.CONFIRM, re.compile(r"^(?:да|ага|ок|окей|верно|подтверждаю)$", re.I)),
-    (Intent.CANCEL, re.compile(r"^(?:/cancel|нет|не надо|отмена|отменить)$", re.I)),
-    (Intent.THANKS, re.compile(r"^(?:спасибо|благодарю|отлично|супер|класс)$", re.I)),
+    (
+        Intent.CONFIRM,
+        re.compile(
+            r"^(?:да|давай|да конечно|да (?:всё|все) верно|ага|ок|окей|верно|"
+            r"всё верно|все верно|правильно|"
+            r"согласен|согласна|подтверждаю|подтверждаю заявку)$",
+            re.I,
+        ),
+    ),
+    (
+        Intent.CANCEL,
+        re.compile(
+            r"^(?:/cancel|нет|нет спасибо|нет не отправляй|не отправляй|не надо|не нужно|"
+            r"отмена|отменить|"
+            r"передумал|передумала|стоп|прекрати)$",
+            re.I,
+        ),
+    ),
+    (
+        Intent.THANKS,
+        re.compile(
+            r"^(?:спасибо|благодарю|большое спасибо|спасибо большое|отлично|супер|класс)$",
+            re.I,
+        ),
+    ),
     (Intent.SMALL_TALK, re.compile(r"^(?:как дела|кто ты|что нового)$", re.I)),
 ]
 
@@ -90,7 +128,7 @@ _NATURAL_COMMANDS: list[tuple[Intent, re.Pattern[str]]] = [
     (
         Intent.SHOW_CART,
         re.compile(
-            r"^(?:корзина|черновик|моя заявка|текущая заявка|к (?:корзине|черновику)|"
+            r"^(?:корзина|карзин(?:а|у)?|черновик|моя заявка|текущая заявка|к (?:корзине|черновику)|"
             r"верни (?:к|в) (?:корзину|черновик)|вернись (?:к|в) (?:корзине|корзину|черновику|черновик)|"
             r"(?:покажи|показать|открой|открыть) (?:корзину|черновик|заявку|текущую заявку)|"
             r"покажи текущую заявку)$",
@@ -114,7 +152,20 @@ _NATURAL_COMMANDS: list[tuple[Intent, re.Pattern[str]]] = [
             r"^(?:сброс|(?:сбрось|сбросить|очисти|очистить|обнули|обнулить|вычисти|вычистить)"
             r"(?: (?:всю|весь|все|полностью))? (?:заявку|корзину|черновик|список|заказ|товары|позиции)|"
             r"(?:удали|удалить|убери|убрать|сотри|стереть) (?:все|всё|всю|весь)(?: (?:из )?"
-            r"(?:заявки|корзины|черновика|списка|заказа))?|начать заново|начни заново|новая заявка|новую заявку)$",
+            r"(?:заявки|корзины|черновика|списка|заказа))?)$",
+            re.I,
+        ),
+    ),
+    (
+        Intent.START_NEW_ORDER,
+        re.compile(
+            r"^(?:(?:давай|давайте|хочу|хотим|нужно|надо|можно)? ?"
+            r"(?:начать|начни|начинаем|создать|создай|сделать|оформить|открыть)? ?"
+            r"(?:новую|новая|другую|следующую|ещ[её] одну) (?:заявку|заявка)|"
+            r"(?:давай|давайте|хочу|хотим|нужно|надо|можно)? ?"
+            r"(?:начать|начни|начинаем|создать|создай|сделать|оформить|открыть)? ?"
+            r"(?:новый|другой|следующий|ещ[её] один) (?:заказ|черновик)|"
+            r"начать заново|начни заново|(?:заказ|заявка|черновик) заново)$",
             re.I,
         ),
     ),
@@ -176,18 +227,27 @@ _NATURAL_COMMANDS: list[tuple[Intent, re.Pattern[str]]] = [
     (
         Intent.SHOW_FINAL_REVIEW,
         re.compile(
-            r"^(?:назад )?(?:к|на) финальн(?:ой|ую) проверк[еу]|"
-            r"(?:покажи|верни|вернись)(?: к)? финальн(?:ую|ой) проверк[еу]$",
+            r"^(?:(?:назад )?(?:к|на) финальн(?:ой|ую) проверк[еу]|"
+            r"(?:покажи|верни|вернись)(?: к)? финальн(?:ую|ой) проверк[еу]|"
+            r"(?:покажи|показать|открой|открыть) (?:итог|итоги|итоговую заявку)|"
+            r"(?:проверь|проверить|посмотри|посмотреть) перед отправкой)$",
+            re.I,
+        ),
+    ),
+    (
+        Intent.FIX_MULTIPLE,
+        re.compile(
+            r"^(?:(?:давай |давайте |хочу |нужно |надо )?"
+            r"(?:исправь|исправить|исправим|исправьте|поправь|поправить|поправим|поправьте|"
+            r"измени|изменить|изменим|измените|поменяй|поменять|поменяем|поменяйте|сделай|сделать|сделаем)"
+            r"(?: (?:это|текущее))?(?: (?:количество|кол-во))?)$",
             re.I,
         ),
     ),
     (
         Intent.ENTER_OTHER_QUANTITY,
         re.compile(
-            r"^(?:(?:давай |давайте |хочу |нужно |надо )?"
-            r"(?:исправь|исправить|исправим|исправьте|поправь|поправить|поправим|поправьте|"
-            r"измени|изменить|изменим|измените|поменяй|поменять|поменяем|поменяйте|сделай|сделать|сделаем)"
-            r"(?: (?:это|текущее))?(?: (?:количество|кол-во))?|"
+            r"^(?:"
             r"(?:введу|ввести|скажу|сказать|назову|назвать|укажу|указать)(?: (?:другое|новое))? количество|"
             r"(?:хочу|давай) (?:ввести|указать|сказать) (?:другое|новое) количество)$",
             re.I,
@@ -237,7 +297,9 @@ _NATURAL_COMMANDS: list[tuple[Intent, re.Pattern[str]]] = [
             r"^(?:(?:давай )?(?:измени|изменить|исправь|исправить|поищи|искать|опишу|описать|опиши)"
             r"(?: (?:этот|эту|его|ее|товар|позицию))? (?:название|по-другому|иначе|вручную|текстом)|"
             r"(?:ни один|ничего) не подходит|(?:нужного|подходящего)(?: товара| варианта)? нет|"
-            r"изменить название|другое название|поищи иначе|опишу вручную)$",
+            r"изменить название|другое название|другой товар|нужен другой товар|"
+            r"(?:введу|ввести|напишу|написать|укажу|указать) название (?:сам|сама|вручную)|"
+            r"поищи иначе|опишу вручную)$",
             re.I,
         ),
     ),
@@ -247,6 +309,8 @@ _NATURAL_COMMANDS: list[tuple[Intent, re.Pattern[str]]] = [
             r"^(?:(?:давай )?(?:пропусти|пропустить|пропустим|скипни|скипнуть)"
             r"(?: (?:этот|эту|текущий|текущую|данный|данную))?(?: (?:товар|позицию|строку|пункт))?"
             r"(?: и? (?:перейдем|пойдем|идем) дальше)?|"
+            r"(?:убери|удалить|удали|исключи|исключить) (?:эту|этот|текущую|текущий) "
+            r"(?:позицию|товар|строку|пункт)|"
             r"(?:не добавляй|не добавлять|не нужен|не нужна|этот не нужен|эта не нужна)"
             r"(?: (?:этот|эту))?(?: (?:товар|позицию|строку))?|"
             r"следующий|следующая|дальше|идем дальше|пойдем дальше|перейдем дальше|давай дальше)$",
@@ -271,6 +335,118 @@ def normalize_command_text(value: str) -> str:
 def _has_word_stem(words: list[str], *stems: str) -> bool:
     """Проверяет наличие слова с одним из заданных корней."""
     return any(word.startswith(stems) for word in words)
+
+
+def has_negation(text: str) -> bool:
+    """Определяет явное отрицание в пользовательской фразе."""
+    words = re.findall(r"[a-zа-яё0-9-]+", normalize_text(text), flags=re.I)
+    return any(word in {"не", "нет", "никогда", "никак"} for word in words)
+
+
+def has_negated_action(text: str, *action_stems: str) -> bool:
+    """Находит действие, отрицаемое в пределах короткой разговорной фразы."""
+    words = re.findall(r"[a-zа-яё0-9-]+", normalize_text(text), flags=re.I)
+    for index, word in enumerate(words):
+        if word not in {"не", "нет", "никогда", "никак"}:
+            continue
+        # «не хочу сейчас добавлять», «не надо больше отправлять» и похожие
+        # формы сохраняют отрицание, даже когда между частицей и глаголом
+        # стоят модальные или вводные слова.
+        window = words[index + 1 : index + 7]
+        if any(candidate.startswith(action_stems) for candidate in window):
+            return True
+    return False
+
+
+def is_explicit_item_rejection(text: str) -> bool:
+    """Распознаёт однозначный отказ от текущей товарной позиции."""
+    normalized = normalize_command_text(text)
+    words = re.findall(r"[a-zа-яё0-9-]+", normalized, flags=re.I)
+    if not words:
+        return False
+
+    has_current_marker = _has_word_stem(
+        words,
+        "этот",
+        "эту",
+        "это",
+        "данн",
+        "текущ",
+    )
+    has_item_target = _has_word_stem(words, "товар", "позици", "строк", "пункт")
+    if _has_word_stem(words, "пропуст", "пропуск", "скип") or (
+        _has_word_stem(words, "исключ", "вычерк", "откаж")
+        and has_current_marker
+        and has_item_target
+    ):
+        return True
+    if _has_word_stem(words, "убер", "удал") and has_current_marker and has_item_target:
+        return True
+    if re.search(r"\bне\s+(?:нужен|нужна|нужно|нужны)\b", normalized) and (
+        has_item_target or has_current_marker
+    ):
+        return True
+    return bool(
+        has_negated_action(normalized, "добав")
+        and (
+            has_current_marker
+            or re.fullmatch(
+                r"(?:не\s+)?добав\w*(?:\s+(?:товар|позицию|строку|пункт))?",
+                normalized,
+            )
+        )
+    )
+
+
+def _infer_negated_command(normalized: str) -> Intent | None:
+    """Блокирует мутации, если пользователь явно отрицает действие."""
+    if not has_negation(normalized):
+        return None
+    if is_explicit_item_rejection(normalized):
+        return Intent.SKIP_CURRENT
+    words = re.findall(r"[a-zа-яё0-9-]+", normalized, flags=re.I)
+    has_new_order_target = _has_word_stem(words, "заявк", "заказ", "черновик")
+    has_new_order_marker = _has_word_stem(
+        words,
+        "нов",
+        "друг",
+        "следующ",
+        "повторн",
+        "занов",
+    )
+    if has_new_order_target and has_new_order_marker:
+        return Intent.CANCEL
+    if has_negated_action(normalized, "исправ", "поправ", "измен", "поменя") and (
+        "колич" in normalized or "как есть" in normalized
+    ):
+        return Intent.KEEP_CURRENT_QUANTITY
+    if any(
+        has_negated_action(normalized, *stems)
+        for stems in (
+            ("отправ", "оформ", "подтверж", "переда", "запиш"),
+            ("очист", "очищ", "почист", "сброс", "обнул", "удал", "убер"),
+            ("использ", "остав", "перевед", "конверт"),
+            ("выбер", "выбир", "возьм", "бери"),
+            ("объедин", "суммир", "прибав", "слож", "увелич"),
+        )
+    ):
+        return Intent.CANCEL
+    if has_negated_action(normalized, "добав", "внес", "докин", "попол", "продолж"):
+        generic_targets = {
+            "товары",
+            "товаров",
+            "позиции",
+            "позиций",
+            "продукты",
+            "продуктов",
+        }
+        removal = _REMOVE_RE.match(normalized)
+        if removal:
+            target = normalize_text(removal.group(1))
+            if target and not any(word in generic_targets for word in target.split()):
+                return None
+        return Intent.CANCEL
+    return None
 
 
 def _looks_like_generic_add_navigation(normalized: str, words: list[str]) -> bool:
@@ -386,6 +562,16 @@ def _infer_free_form_navigation(normalized: str) -> Intent | None:
     # «посмотреть», «заявка» и «заказ».
     if _has_word_stem(words, "статус"):
         return Intent.ORDER_STATUS
+    if re.search(
+        r"\b(?:что|как|где)(?:\s+там)?\s+(?:с|со)\s+"
+        r"(?:моей|моим|моими|нашей|нашим|последней|последним|текущей|текущим)?\s*"
+        r"(?:заявк|заказ)",
+        normalized,
+    ) or (
+        _has_word_stem(words, "заявк", "заказ")
+        and _has_word_stem(words, "ушл", "дошл", "отправлен", "принят", "обработ")
+    ):
+        return Intent.ORDER_STATUS
     if (
         _has_word_stem(words, "заявк", "заказ")
         and _has_word_stem(words, "как", "где", "посмотр", "покаж", "пров", "узна", "обнов")
@@ -398,6 +584,12 @@ def _infer_free_form_navigation(normalized: str) -> Intent | None:
     if (_has_word_stem(words, "уме") and _has_word_stem(words, "что", "как")) or (
         _has_word_stem(words, "объясн", "расскаж")
         and _has_word_stem(words, "бот", "работ", "польз")
+    ):
+        return Intent.HELP
+    if (
+        _has_word_stem(words, "как")
+        and _has_word_stem(words, "сдел", "созда", "оформ", "собра")
+        and _has_word_stem(words, "заявк", "заказ")
     ):
         return Intent.HELP
 
@@ -423,11 +615,50 @@ def _infer_free_form_navigation(normalized: str) -> Intent | None:
     if (clear_action and clear_target) or remove_all:
         return Intent.CLEAR_CART
     if (
-        _has_word_stem(words, "начн", "начат", "созда")
+        not has_negation(normalized)
+        and _has_word_stem(words, "начн", "начат", "созда")
         and _has_word_stem(words, "занов", "нов")
         and _has_word_stem(words, "заявк", "заказ", "черновик")
     ):
+        return Intent.START_NEW_ORDER
+    if (
+        _has_word_stem(words, "удал", "убер", "отмен")
+        and _has_word_stem(words, "текущ", "цел")
+        and _has_word_stem(words, "заявк", "заказ", "черновик")
+    ):
         return Intent.CLEAR_CART
+
+    has_new_order_target = _has_word_stem(words, "заявк", "заказ", "черновик")
+    has_new_order_marker = _has_word_stem(
+        words,
+        "нов",
+        "друг",
+        "следующ",
+        "повторн",
+        "занов",
+    ) or (_has_word_stem(words, "еще", "ещё") and _has_word_stem(words, "одн"))
+    has_new_order_action = _has_word_stem(
+        words,
+        "начн",
+        "начат",
+        "созда",
+        "сдела",
+        "оформ",
+        "откр",
+        "хоч",
+        "нуж",
+        "над",
+        "давай",
+    )
+    if (
+        not has_negation(normalized)
+        and has_new_order_target
+        and has_new_order_marker
+        and has_new_order_action
+        and not re.search(r"\d", normalized)
+        and not any(word in UNIT_ALIASES for word in words)
+    ):
+        return Intent.START_NEW_ORDER
 
     if "как есть" in normalized and _has_word_stem(words, "отправ", "оформ", "переда", "запиш"):
         return Intent.SUBMIT_AS_IS
@@ -439,6 +670,11 @@ def _infer_free_form_navigation(normalized: str) -> Intent | None:
         and _has_word_stem(words, "провер")
         and _has_word_stem(words, "покаж", "верн", "перей", "откр")
     ):
+        return Intent.SHOW_FINAL_REVIEW
+    if (
+        _has_word_stem(words, "итог")
+        and _has_word_stem(words, "покаж", "посмотр", "откр", "верн", "перей")
+    ) or ("перед отправкой" in normalized and _has_word_stem(words, "пров", "посмотр", "покаж")):
         return Intent.SHOW_FINAL_REVIEW
 
     if _has_word_stem(words, "минимал", "минимальн") and _has_word_stem(
@@ -461,6 +697,20 @@ def _infer_free_form_navigation(normalized: str) -> Intent | None:
         return Intent.CHECK_MIN_SUM
     if show_action and product_target and not is_issue_request:
         return Intent.SHOW_CART
+    if (
+        _has_word_stem(words, "заявк", "заказ", "корзин", "черновик")
+        and (
+            (
+                _has_word_stem(words, "что", "какие")
+                and ("у меня" in normalized or _has_word_stem(words, "мо", "наш", "текущ", "внутр"))
+            )
+            or _has_word_stem(words, "содерж", "добавлен", "леж")
+        )
+    ) or (
+        _has_word_stem(words, "что", "какие")
+        and _has_word_stem(words, "добавлен", "внесен", "внесён", "выбран")
+    ):
+        return Intent.SHOW_CART
 
     if _looks_like_generic_add_navigation(normalized, words):
         return Intent.ADD_MORE
@@ -482,20 +732,45 @@ def _infer_free_form_navigation(normalized: str) -> Intent | None:
         return Intent.SUBMIT_REQUEST
     if _has_word_stem(words, "готов") and _has_word_stem(words, "отправ", "оформ", "заверш"):
         return Intent.SUBMIT_REQUEST
+    if (
+        (_has_word_stem(words, "готов") and _has_word_stem(words, "заявк", "заказ", "все", "всё"))
+        or (
+            _has_word_stem(words, "добав")
+            and _has_word_stem(words, "все", "всё")
+            and _has_word_stem(words, "я", "мы")
+        )
+        or (_has_word_stem(words, "можн") and _has_word_stem(words, "оформ", "отправ", "заверш"))
+    ):
+        return Intent.SUBMIT_REQUEST
 
     if _has_word_stem(words, "назад", "предыдущ") and _has_word_stem(
-        words, "верн", "перей", "пойд", "шаг", "назад"
+        words, "верн", "перей", "пойд", "шаг", "экран", "назад"
     ):
         return Intent.BACK
+    if _has_word_stem(words, "продолж") and _has_word_stem(
+        words, "работ", "дальш", "оформ", "заявк"
+    ):
+        return Intent.CONTINUE_CURRENT
 
-    if _has_word_stem(words, "уточн", "проблемн", "спорн") and _has_word_stem(
-        words, "покаж", "посмотр", "разбер", "перей", "провер"
+    has_issue_word = _has_word_stem(words, "уточн", "проблемн", "спорн", "ошиб") or (
+        _has_word_stem(words, "не") and _has_word_stem(words, "найден", "нашл")
+    )
+    if has_issue_word and _has_word_stem(
+        words, "покаж", "посмотр", "разбер", "перей", "провер", "что", "какие"
     ):
         return Intent.CLARIFY_CURRENT
     if _has_word_stem(words, "рекоменд", "ближайш", "округл") and _has_word_stem(
         words, "колич", "постав", "сдел", "возьм", "исправ"
     ):
         return Intent.ACCEPT_SUGGESTED_QUANTITY
+    if (
+        _has_word_stem(words, "колич")
+        and _has_word_stem(
+            words, "исправ", "поправ", "измен", "поменя", "выбр", "выбе", "выбира", "подобр"
+        )
+        and not _has_word_stem(words, "друг", "нов", "сво", "введ", "укаж", "скаж")
+    ):
+        return Intent.FIX_MULTIPLE
     if _has_word_stem(words, "каталог") and _has_word_stem(
         words, "единиц", "остав", "использ", "сдел"
     ):
@@ -506,7 +781,13 @@ def _infer_free_form_navigation(normalized: str) -> Intent | None:
         return Intent.ENTER_OTHER_QUANTITY
     if (_has_word_stem(words, "не") and _has_word_stem(words, "меня")) or (
         _has_word_stem(words, "остав", "сохран")
-        and ("как есть" in normalized or _has_word_stem(words, "текущ"))
+        and (
+            "как есть" in normalized
+            or "как было" in normalized
+            or "как указано" in normalized
+            or "без изменений" in normalized
+            or _has_word_stem(words, "текущ")
+        )
     ):
         return Intent.KEEP_CURRENT_QUANTITY
 
@@ -514,14 +795,89 @@ def _infer_free_form_navigation(normalized: str) -> Intent | None:
 
 
 _REMOVE_RE = re.compile(
-    r"^(?:убери|удали|исключи|вычеркни|сними|выкинь|не добавляй)\s+(?:из (?:заявки|корзины)\s+)?(.+?)\s*$",
+    r"^(?:(?:убери|удали|удалить|исключи|исключить|вычеркни|вычеркнуть|сними|"
+    r"снять|выкинь|выкинуть|не добавляй)\s+(?:из (?:заявки|корзины|черновика)\s+)?|"
+    r"(?:мне\s+)?не\s+(?:нужен|нужна|нужно|нужны)\s+)(.+?)\s*$",
     re.I,
 )
-_EDIT_RE = re.compile(
-    r"^(?:измени|поменяй|сделай|поставь|исправь|обнови)\s+(.+?)\s+(?:на|до)\s+(\d+(?:[,.]\d+)?)\s*([а-яa-z]*)$",
-    re.I,
+_EDIT_ACTION = (
+    r"(?:измени|изменить|поменяй|поменять|сделай|сделать|поставь|поставить|"
+    r"исправь|исправить|обнови|обновить|замени|заменить)"
 )
+_NUMBER_START = (
+    r"(?:\d+(?:[,.]\d+)?|"
+    + "|".join(sorted((re.escape(word) for word in NUMBER_WORDS), key=len, reverse=True))
+    + r")"
+)
+_EDIT_AMOUNT = rf"(?P<amount>{_NUMBER_START}(?:\s+[a-zа-яё.]+){{0,3}})"
+_EDIT_PATTERNS = [
+    re.compile(
+        rf"^{_EDIT_ACTION}\s+у\s+(?P<target>.+?)\s+(?:количество|кол-во)\s+"
+        rf"(?:на|до)\s+{_EDIT_AMOUNT}$",
+        re.I,
+    ),
+    re.compile(
+        rf"^{_EDIT_ACTION}\s+(?:количество|кол-во)\s+(?:у\s+)?(?P<target>.+?)\s+"
+        rf"(?:на|до)\s+{_EDIT_AMOUNT}$",
+        re.I,
+    ),
+    re.compile(
+        rf"^для\s+(?P<target>.+?)\s+{_EDIT_ACTION}(?:\s+(?:количество|кол-во))?"
+        rf"\s+(?:на\s+)?{_EDIT_AMOUNT}$",
+        re.I,
+    ),
+    re.compile(
+        rf"^(?P<target>.+?)\s+{_EDIT_ACTION}(?:\s+(?:количество|кол-во))?"
+        rf"\s+(?:на|до)\s+{_EDIT_AMOUNT}$",
+        re.I,
+    ),
+    re.compile(
+        rf"^{_EDIT_ACTION}\s+(?:у\s+)?(?P<target>.+?)\s+(?:на|до)\s+{_EDIT_AMOUNT}$",
+        re.I,
+    ),
+    re.compile(
+        rf"^{_EDIT_ACTION}(?:\s+(?:количество|кол-во))?\s+(?:на|до)\s+{_EDIT_AMOUNT}$",
+        re.I,
+    ),
+    re.compile(
+        rf"^{_EDIT_ACTION}\s+(?:у\s+)?(?P<target>.+)\s+{_EDIT_AMOUNT}$",
+        re.I,
+    ),
+]
 _SELECT_RE = re.compile(r"^(?:вариант|номер|выбери)?\s*([1-5])$", re.I)
+
+
+def _clean_command_target(value: str) -> str:
+    """Убирает служебные слова перед названием товара."""
+    target = clean_text(value)
+    target = re.sub(
+        r"^(?:(?:этот|эту|это|данный|данную|текущий|текущую)\s+)?"
+        r"(?:товар|позицию|строку|пункт)\s+",
+        "",
+        target,
+        flags=re.I,
+    )
+    return target.strip(" ,;:-—–")
+
+
+def _parse_edit_quantity(text: str) -> ParsedCommand | None:
+    """Разбирает изменение количества при разном порядке слов."""
+    for pattern in _EDIT_PATTERNS:
+        match = pattern.fullmatch(text)
+        if match is None:
+            continue
+        quantity, unit = parse_quantity_unit(match.group("amount"))
+        if quantity is None:
+            continue
+        target = _clean_command_target(match.groupdict().get("target") or "")
+        return ParsedCommand(
+            intent=Intent.EDIT_QUANTITY,
+            text=text,
+            target_query=target,
+            edit_quantity=quantity,
+            edit_unit=unit,
+        )
+    return None
 
 
 def is_product_add_request_phrase(text: str) -> bool:
@@ -580,23 +936,24 @@ def infer_intent(text: str, callback_data: str = "") -> ParsedCommand:
         if pattern.fullmatch(normalized):
             return ParsedCommand(intent=intent, text=text)
 
+    if is_explicit_item_rejection(normalized):
+        return ParsedCommand(intent=Intent.SKIP_CURRENT, text=text)
+
+    if negated_intent := _infer_negated_command(normalized):
+        return ParsedCommand(intent=negated_intent, text=text)
+
+    if edit_command := _parse_edit_quantity(normalized):
+        return edit_command.model_copy(update={"text": text})
+
     if free_form_intent := _infer_free_form_navigation(normalized):
         return ParsedCommand(intent=free_form_intent, text=text)
 
     if match := _REMOVE_RE.match(normalized):
-        target = clean_text(match.group(1))
-        return ParsedCommand(
-            intent=Intent.REMOVE_ITEM, text=text, target_query=target, target_queries=[target]
-        )
-
-    if match := _EDIT_RE.match(normalized):
-        return ParsedCommand(
-            intent=Intent.EDIT_QUANTITY,
-            text=text,
-            target_query=clean_text(match.group(1)),
-            edit_quantity=float(match.group(2).replace(",", ".")),
-            edit_unit=normalize_unit(match.group(3)),
-        )
+        target = _clean_command_target(match.group(1))
+        if target:
+            return ParsedCommand(
+                intent=Intent.REMOVE_ITEM, text=text, target_query=target, target_queries=[target]
+            )
 
     if match := _SELECT_RE.match(normalized):
         return ParsedCommand(
@@ -604,22 +961,25 @@ def infer_intent(text: str, callback_data: str = "") -> ParsedCommand:
         )
 
     ordinal_patterns = {
-        1: r"(?:1|один|перв(?:ый|ого|ую|ое))",
-        2: r"(?:2|два|втор(?:ой|ого|ую|ое))",
-        3: r"(?:3|три|трет(?:ий|ьего|ью|ье))",
-        4: r"(?:4|четыре|четверт(?:ый|ого|ую|ое))",
-        5: r"(?:5|пять|пят(?:ый|ого|ую|ое))",
+        1: r"(?:1|один|перв(?:ый|ого|ая|ую|ое))",
+        2: r"(?:2|два|втор(?:ой|ого|ая|ую|ое))",
+        3: r"(?:3|три|трет(?:ий|ьего|ья|ью|ье))",
+        4: r"(?:4|четыре|четверт(?:ый|ого|ая|ую|ое))",
+        5: r"(?:5|пять|пят(?:ый|ого|ая|ую|ое))",
     }
     explicit_choice = bool(
         re.search(
-            r"(?:^|\s)(?:вариант|выбери|выбрать|выбираю|беру|подходит|номер)(?:\s|$)", normalized
+            r"(?:^|\s)(?:вариант|выбери|выбрать|выбираю|беру|возьми|взять|"
+            r"подходит|подойдёт|подойдет|нужен|нужна|номер)(?:\s|$)",
+            normalized,
         )
     )
-    polite_choice = bool(re.match(r"^(?:давай|мне|хочу|нужен)\s+", normalized))
+    polite_choice = bool(re.match(r"^(?:давай|мне|хочу|нужен|нужна|возьми)\s+", normalized))
+    contains_measurement = any(word in UNIT_ALIASES for word in normalized.split())
     for index, token in ordinal_patterns.items():
         bare = re.fullmatch(token, normalized)
         mentioned = re.search(rf"(?:^|\s){token}(?:\s|$)", normalized)
-        if mentioned and (bare or explicit_choice or polite_choice):
+        if mentioned and not contains_measurement and (bare or explicit_choice or polite_choice):
             return ParsedCommand(
                 intent=Intent.SELECT_CANDIDATE,
                 text=text,
@@ -769,18 +1129,30 @@ def parse_product_lines(text: str) -> list[ExtractedItem]:
         rf"^(?P<qty>\d+(?:[,.]\d+)?)\s*(?P<unit>{unit_pattern})?\s+(.*)$",
         re.I,
     )
+    packaging = re.compile(
+        rf"(?:"
+        rf"\d+(?:[,.]\d+)?\s*(?:{unit_pattern})\s*[*xх×]\s*\d+(?:[,.]\d+)?"
+        rf"(?:\s*\(\s*~?\s*\d+(?:[,.]\d+)?\s*(?:{unit_pattern})\s*\))?"
+        rf"|"
+        rf"\d+(?:[,.]\d+)?\s*[*xх×]\s*\d+(?:[,.]\d+)?\s*(?:{unit_pattern})"
+        rf")",
+        re.I,
+    )
 
     for line in lines:
         stripped = re.sub(
             r"^(?:добавь|добавить|закажи|заказать|нужно|надо)\s+", "", line, flags=re.I
         )
-        quantity_marks = list(
-            re.finditer(
+        packaging_spans = [match.span() for match in packaging.finditer(stripped)]
+        quantity_marks = [
+            mark
+            for mark in re.finditer(
                 rf"(\d+(?:[,.]\d+)?)\s*(?P<unit>{unit_pattern})\b",
                 stripped,
                 flags=re.I,
             )
-        )
+            if not any(start <= mark.start() < end for start, end in packaging_spans)
+        ]
         # Recover several products spoken in one segment by using each
         # explicit quantity as the boundary of the preceding product.
         if len(quantity_marks) >= 2 and not re.search(r"[—–-]\s*\d", stripped):
@@ -833,7 +1205,17 @@ def parse_product_lines(text: str) -> list[ExtractedItem]:
                 )
                 continue
             name = clean_text(stripped[: mark.start()]).strip(" ,;:-—–")
-            comment = clean_text(stripped[mark.end() :]).strip(" ,;:-—–")
+            comment = clean_text(stripped[mark.end() :]).strip(" .,!?:;-—–")
+            if name and not comment:
+                items.append(
+                    ExtractedItem(
+                        product_query=name,
+                        quantity=float(mark.group(1).replace(",", ".")),
+                        unit=normalize_unit(mark.group("unit") or ""),
+                        source_line=line,
+                    )
+                )
+                continue
             # "Сироп Роза 1 л — 12" contains product packaging followed by
             # the ordered quantity.  A number after punctuation is never a
             # supplier comment, so leave this form to the trailing-quantity
@@ -850,6 +1232,9 @@ def parse_product_lines(text: str) -> list[ExtractedItem]:
                     )
                 )
                 continue
+        if packaging_spans and not quantity_marks:
+            items.append(ExtractedItem(product_query=stripped, source_line=line))
+            continue
         match = trailing.match(stripped)
         if match:
             name = clean_text(match.group(1)).strip(" -:—–")
@@ -907,7 +1292,9 @@ def parse_product_lines(text: str) -> list[ExtractedItem]:
                 )
                 break
         else:
-            if len(lines) > 1 or len(stripped.split()) <= 8:
+            if (len(lines) > 1 or len(stripped.split()) <= 8) and re.search(
+                r"[a-zа-яё]", stripped, re.I
+            ):
                 items.append(ExtractedItem(product_query=stripped, source_line=line))
     return items
 
@@ -917,7 +1304,11 @@ def parse_quantity_unit(text: str) -> tuple[float | None, str]:
     normalized = normalize_text(text)
     if not normalized:
         return None, ""
-    tokens = normalized.replace(",", ".").split()
+    tokens = [
+        cleaned
+        for token in normalized.replace(",", ".").split()
+        if (cleaned := re.sub(r"\.+$", "", token))
+    ]
     if len(tokens) >= 1:
         try:
             quantity = float(tokens[0])

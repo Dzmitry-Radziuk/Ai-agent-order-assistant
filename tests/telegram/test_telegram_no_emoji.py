@@ -3,6 +3,7 @@ from restaurant_bot.integrations.telegram import TelegramClient
 
 
 def test_outgoing_telegram_text_and_buttons_preserve_workflow_emoji() -> None:
+    """Проверяет, что исходящий Telegram текст и кнопки сохраняет workflow emoji."""
     reply = BotReply(
         text="✅ Черновик готов",
         rows=[[Button(text="📦 Показать черновик", callback_data="v2:back")]],

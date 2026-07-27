@@ -33,9 +33,13 @@ class Settings(BaseSettings):
 
     telegram_bot_token: SecretStr
     telegram_webhook_secret: SecretStr
+    telegram_request_timeout_seconds: float = Field(default=15.0, ge=5.0, le=60.0)
+    telegram_connect_timeout_seconds: float = Field(default=5.0, ge=1.0, le=30.0)
 
     openai_api_key: SecretStr
     openai_text_model: str = "gpt-4o-mini"
+    openai_text_timeout_seconds: float = Field(default=12.0, ge=3.0, le=60.0)
+    openai_text_max_retries: int = Field(default=0, ge=0, le=2)
     openai_vision_model: str = "gpt-5-mini"
     openai_vision_timeout_seconds: float = Field(default=180.0, ge=30.0, le=600.0)
     openai_match_model: str = "gpt-4o-mini"

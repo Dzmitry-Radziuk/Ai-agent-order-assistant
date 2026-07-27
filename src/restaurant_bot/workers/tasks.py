@@ -8,13 +8,14 @@ from restaurant_bot.config import get_settings
 from restaurant_bot.db import SessionLocal
 from restaurant_bot.integrations.google_sheets import GoogleSheetsGateway
 from restaurant_bot.integrations.openai_client import OpenAIService
-from restaurant_bot.integrations.telegram import TelegramClient
+from restaurant_bot.integrations.telegram import TELEGRAM_TRANSIENT_ERRORS, TelegramClient
 from restaurant_bot.repositories.order_events import OrderEventRepository
 from restaurant_bot.services.orchestrator import UpdateOrchestrator
 from restaurant_bot.services.submission import SubmissionService
 from restaurant_bot.workers.celery_app import celery_app
 
 SUBMISSION_MAX_RETRIES = 8
+UPDATE_DELIVERY_MAX_RETRIES = 4
 
 
 @lru_cache(maxsize=1)
@@ -33,6 +34,10 @@ def dependencies() -> tuple[UpdateOrchestrator, SubmissionService]:
 
 @celery_app.task(
     bind=True,
+    autoretry_for=TELEGRAM_TRANSIENT_ERRORS,
+    retry_backoff=True,
+    retry_jitter=True,
+    retry_kwargs={"max_retries": UPDATE_DELIVERY_MAX_RETRIES},
     name="restaurant_bot.process_telegram_update",
 )
 def process_telegram_update(self, update_id: int) -> None:  # type: ignore[no-untyped-def]

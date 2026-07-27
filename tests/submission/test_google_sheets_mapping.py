@@ -15,6 +15,7 @@ VENUE_SPREADSHEET_ID = "venue-sheet"
 
 
 def test_history_value_uses_source_contract_headers(settings) -> None:  # type: ignore[no-untyped-def]
+    """Проверяет, что история значение использует исходный контракт заголовки."""
     gateway = GoogleSheetsGateway(settings)
     row = {"№ Заявки": "20260722-001", "Кол-во": 10, "_department": "Кухня"}
     assert gateway._history_value(row, "№ Заявки") == "20260722-001"
@@ -22,6 +23,7 @@ def test_history_value_uses_source_contract_headers(settings) -> None:  # type: 
 
 
 def test_history_value_does_not_export_internal_fields(settings) -> None:  # type: ignore[no-untyped-def]
+    """Проверяет, что история значение выполняет не экспортирует внутренние fields."""
     gateway = GoogleSheetsGateway(settings)
     assert gateway._history_value({"_department": "Кухня"}, "Неизвестная колонка") == ""
 
@@ -38,6 +40,7 @@ def test_gateway_rejects_missing_venue_spreadsheet(settings) -> None:  # type: i
 
 
 def test_product_add_write_uses_only_exact_user_description(settings) -> None:  # type: ignore[no-untyped-def]
+    """Проверяет, что товар добавление запись использует только точный пользователь описание."""
     gateway = GoogleSheetsGateway(settings)
     gateway.service = MagicMock()
 
@@ -120,6 +123,7 @@ def test_product_add_accepts_verified_write_after_lost_ssl_response(settings, mo
 
 
 def test_history_write_uses_first_empty_a_to_s_row(settings) -> None:  # type: ignore[no-untyped-def]
+    """Проверяет, что история запись использует первый пустой результат a в s строка."""
     gateway = GoogleSheetsGateway(settings)
     gateway.service = MagicMock()
     gateway._get_values = MagicMock(  # type: ignore[method-assign]
@@ -139,6 +143,7 @@ def test_history_write_uses_first_empty_a_to_s_row(settings) -> None:  # type: i
 
 
 def test_history_write_appends_only_when_there_is_no_empty_row(settings) -> None:  # type: ignore[no-untyped-def]
+    """Проверяет, что история запись appends только когда there является без пустой результат строка."""
     gateway = GoogleSheetsGateway(settings)
     gateway.service = MagicMock()
     gateway._get_values = MagicMock(  # type: ignore[method-assign]
@@ -152,6 +157,7 @@ def test_history_write_appends_only_when_there_is_no_empty_row(settings) -> None
 
 
 def test_read_rows_keeps_first_duplicate_header_value(settings) -> None:  # type: ignore[no-untyped-def]
+    """Проверяет, что чтение строки сохраняет первый дубликат header значение."""
     gateway = GoogleSheetsGateway(settings)
     gateway._get_values = MagicMock(  # type: ignore[method-assign]
         return_value=[["№ Заявки", "Стадия", "Стадия"], ["A-1", "Новая заявка", ""]]
@@ -161,6 +167,7 @@ def test_read_rows_keeps_first_duplicate_header_value(settings) -> None:  # type
 
 
 def test_live_catalog_headers_fill_submission_metadata(settings) -> None:  # type: ignore[no-untyped-def]
+    """Проверяет, что реальная каталог заголовки fill отправка заявки metadata."""
     gateway = GoogleSheetsGateway(settings)
     gateway.read_rows = MagicMock(  # type: ignore[method-assign]
         return_value=[
@@ -193,6 +200,7 @@ def test_live_catalog_headers_fill_submission_metadata(settings) -> None:  # typ
 
 
 def test_catalog_update_writes_quantity_and_merged_comment(settings) -> None:  # type: ignore[no-untyped-def]
+    """Проверяет, что каталог update записывает количество и merged комментарий."""
     gateway = GoogleSheetsGateway(settings)
     gateway.service = MagicMock()
     gateway.load_catalog = MagicMock(  # type: ignore[method-assign]
@@ -236,6 +244,7 @@ def test_catalog_update_writes_quantity_and_merged_comment(settings) -> None:  #
 
 
 def test_recalculation_uses_the_same_body_as_n8n(settings, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    """Проверяет, что перерасчёт использует тот же body как n8n."""
     settings.google_recalc_token = SecretStr("secret")
     settings.google_recalc_sheet = "Заявка"
     response = MagicMock()
@@ -260,12 +269,14 @@ def test_recalculation_uses_the_same_body_as_n8n(settings, monkeypatch) -> None:
 
 
 def test_recalculation_without_token_cannot_be_marked_successful(settings) -> None:  # type: ignore[no-untyped-def]
+    """Проверяет, что перерасчёт без токен не может be отмечается успешная."""
     settings.google_recalc_token = SecretStr("")
     with pytest.raises(GoogleSheetsError, match="GOOGLE_RECALC_TOKEN"):
         GoogleSheetsGateway(settings).trigger_recalculation("A-1", VENUE_SPREADSHEET_ID)
 
 
 def test_registration_upsert_uses_existing_headers_only(settings) -> None:  # type: ignore[no-untyped-def]
+    """Проверяет, что регистрация создание или обновление использует существующий заголовки только."""
     gateway = GoogleSheetsGateway(settings)
     gateway.service = MagicMock()
     gateway._get_values = MagicMock(  # type: ignore[method-assign]
@@ -333,6 +344,7 @@ def test_registration_upsert_reuses_first_empty_formatted_row(settings) -> None:
 
 
 def test_registration_upsert_rejects_missing_identity_header(settings) -> None:  # type: ignore[no-untyped-def]
+    """Проверяет, что регистрация создание или обновление отклоняет отсутствующий идентификационный header."""
     gateway = GoogleSheetsGateway(settings)
     gateway._get_values = MagicMock(return_value=[["Канал", "Код"]])  # type: ignore[method-assign]
     with pytest.raises(GoogleSheetsError, match="Chat ID"):

@@ -8,7 +8,7 @@ from typing import Any
 
 import httpx
 import structlog
-from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_fixed
+from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential_jitter
 
 from restaurant_bot.config import Settings
 from restaurant_bot.domain.models import BotReply
@@ -26,6 +26,10 @@ class TelegramRetryableError(TelegramAPIError):
     """Сообщает о временной ошибке Telegram API."""
 
     pass
+
+
+TELEGRAM_CONNECT_ERRORS = (httpx.ConnectTimeout, httpx.ConnectError)
+TELEGRAM_TRANSIENT_ERRORS = (*TELEGRAM_CONNECT_ERRORS, TelegramRetryableError)
 
 
 @dataclass(slots=True)
@@ -49,20 +53,20 @@ class TelegramClient:
         self.file_url = (
             f"https://api.telegram.org/file/bot{settings.telegram_bot_token.get_secret_value()}"
         )
-        # A successful Telegram connection normally opens well below one
-        # second. Fail fast on an unreachable route so a button does not sit
-        # behind several multi-second connection attempts.
-        self.client = httpx.Client(timeout=httpx.Timeout(12.0, connect=1.2))
+        self.client = httpx.Client(
+            timeout=httpx.Timeout(
+                settings.telegram_request_timeout_seconds,
+                connect=settings.telegram_connect_timeout_seconds,
+            )
+        )
 
     @retry(
         # Retrying a read timeout can duplicate a Telegram message: the server
         # may have accepted it even though the response never reached us.
         # Connection failures are safe to repeat because no request was sent.
-        retry=retry_if_exception_type(
-            (httpx.ConnectTimeout, httpx.ConnectError, TelegramRetryableError)
-        ),
-        stop=stop_after_attempt(2),
-        wait=wait_fixed(0.15),
+        retry=retry_if_exception_type(TELEGRAM_TRANSIENT_ERRORS),
+        stop=stop_after_attempt(3),
+        wait=wait_exponential_jitter(initial=0.25, max=2.0),
         reraise=True,
     )
     def _call(self, method: str, payload: dict[str, Any]) -> dict[str, Any]:
@@ -150,6 +154,18 @@ class TelegramClient:
                 payload["message_id"] = reply.edit_message_id
                 try:
                     result = self._call("editMessageText", payload)
+                except TELEGRAM_CONNECT_ERRORS as exc:
+                    # A connect failure happens before Telegram receives the
+                    # request, so falling back to a new message cannot duplicate
+                    # an already edited card. It also avoids losing a completed
+                    # result merely because one old progress card was unreachable.
+                    logger.warning(
+                        "telegram_edit_fallback_to_send",
+                        error_type=type(exc).__name__,
+                    )
+                    fallback_payload = dict(payload)
+                    fallback_payload.pop("message_id", None)
+                    result = self._call("sendMessage", fallback_payload)
                 except TelegramAPIError as exc:
                     if "message is not modified" in str(exc).lower():
                         result = {"message_id": reply.edit_message_id}

@@ -3,6 +3,7 @@ from restaurant_bot.services.input_normalizer import normalize_telegram_update
 
 
 def test_telegram_photo_uses_largest_available_size() -> None:
+    """Проверяет, что Telegram photo использует наибольший доступно размер."""
     event = normalize_telegram_update(
         {
             "update_id": 1,
@@ -16,6 +17,7 @@ def test_telegram_photo_uses_largest_available_size() -> None:
 
 
 def test_image_document_is_routed_as_photo() -> None:
+    """Проверяет, что изображение документ является маршрутизируется как photo."""
     event = normalize_telegram_update(
         {
             "update_id": 2,

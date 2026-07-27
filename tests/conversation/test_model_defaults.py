@@ -2,10 +2,12 @@ from restaurant_bot.domain.models import CartItem, ConversationState, Department
 
 
 def test_conversation_state_uses_kitchen_as_default_department() -> None:
+    """Проверяет, что conversation состояние использует кухня как по умолчанию подразделение."""
     assert ConversationState().department == "Кухня"
 
 
 def test_department_defaults_and_quantity_lookup_use_normal_russian_names() -> None:
+    """Проверяет, что подразделение значения по умолчанию и количество поиск use normal русские names."""
     quantities = DepartmentQuantities(hall=1, bar=2, kitchen=3)
 
     assert CartItem(id="item", source_query="Товар").department == "Кухня"

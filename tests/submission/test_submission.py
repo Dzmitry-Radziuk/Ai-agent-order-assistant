@@ -10,6 +10,7 @@ from restaurant_bot.domain.models import (
     PendingSubmission,
     SessionStage,
 )
+from restaurant_bot.integrations.cache import google_history_lock_key
 from restaurant_bot.integrations.google_sheets import GoogleSheetsError
 from restaurant_bot.services import submission as submission_module
 from restaurant_bot.services.submission import (
@@ -21,6 +22,7 @@ from restaurant_bot.services.submission import (
 
 
 def test_submission_success_card_matches_n8n() -> None:
+    """Проверяет, что отправка заявки успех карточка соответствует n8n."""
     reply = submission_success_reply(type("State", (), {"ui_revision": 4})(), "20260722-001")
 
     assert reply.text == "✅ <b>Заявка отправлена</b>\n\nНомер заявки: 20260722-001"
@@ -31,6 +33,7 @@ def test_submission_success_card_matches_n8n() -> None:
 
 
 def test_submission_failure_card_matches_n8n() -> None:
+    """Проверяет, что отправка заявки сбой карточка соответствует n8n."""
     reply = submission_failure_reply(type("State", (), {"ui_revision": 4})(), "20260722-001")
 
     assert reply.text == (
@@ -45,6 +48,7 @@ def test_submission_failure_card_matches_n8n() -> None:
 
 
 def test_order_status_renderer_groups_rows_by_order_number() -> None:
+    """Проверяет, что заказ статус renderer группирует строки by заказ число."""
     text = build_order_status_text(
         [
             {"order_no": "A-1", "product_name": "Сироп Роза", "status": "Новая заявка"},
@@ -59,6 +63,7 @@ def test_order_status_renderer_groups_rows_by_order_number() -> None:
 
 
 def test_successful_submission_clears_cart_checkpoint_and_marks_state_submitted() -> None:
+    """Проверяет, что успешная отправка заявки очищает черновик checkpoint и marks состояние submitted."""
     state = ConversationState(
         order_trace_id="trace-1",
         cart=[CartItem(id="rose", source_query="Сироп Роза")],
@@ -79,6 +84,7 @@ def test_successful_submission_clears_cart_checkpoint_and_marks_state_submitted(
 
 
 def test_order_status_limits_to_ten_tracked_orders_and_formats_delivery_date() -> None:
+    """Проверяет, что заказ статус ограничивает в ten отслеживаемые orders и форматирует delivery date."""
     numbers = [f"A-{index}" for index in range(12)]
     rows = [
         {
@@ -100,9 +106,21 @@ def test_order_status_limits_to_ten_tracked_orders_and_formats_delivery_date() -
     assert "24 июля 2026" in text
 
 
+def test_google_history_lock_is_isolated_by_venue_spreadsheet() -> None:
+    """Разные таблицы заведений не конкурируют за одну блокировку."""
+    first_key = google_history_lock_key("venue-sheet-1")
+    same_key = google_history_lock_key("  venue-sheet-1  ")
+    second_key = google_history_lock_key("venue-sheet-2")
+
+    assert first_key == same_key
+    assert first_key != second_key
+    assert "venue-sheet-1" not in first_key
+
+
 def test_transient_submission_error_is_retried_without_premature_failure_card(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """Проверяет, что transient отправка заявки ошибка является повторяется без premature сбой карточка."""
     service = object.__new__(SubmissionService)
     service.redis = MagicMock()
     service.telegram = MagicMock()
@@ -132,6 +150,7 @@ def test_transient_submission_error_is_retried_without_premature_failure_card(
 def test_retry_delivers_success_card_after_order_was_already_finalized(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """Проверяет, что повтор delivers успех карточка after заказ was уже finalized."""
     service = object.__new__(SubmissionService)
     service.redis = MagicMock()
     service._load_pending = MagicMock(return_value=None)  # type: ignore[method-assign]
@@ -148,6 +167,7 @@ def test_retry_delivers_success_card_after_order_was_already_finalized(
 
 
 def test_success_card_is_checkpointed_only_after_telegram_accepts_it() -> None:
+    """Проверяет, что успех карточка является checkpointed только after Telegram принимает it."""
     service = object.__new__(SubmissionService)
     service.telegram = MagicMock()
     service._checkpoint = MagicMock()  # type: ignore[method-assign]
@@ -201,6 +221,11 @@ def test_submission_runs_all_external_stages_and_checkpoints(
         ("ORDER-1", "recalc_done"),
     ]
     service.catalog_cache.invalidate.assert_called_once_with("venue-sheet")
+    service.redis.lock.assert_called_once_with(
+        google_history_lock_key("venue-sheet"),
+        timeout=120,
+        blocking_timeout=120,
+    )
     service._send_completion.assert_called_once_with("chat-1", final_state, "ORDER-1")
 
 

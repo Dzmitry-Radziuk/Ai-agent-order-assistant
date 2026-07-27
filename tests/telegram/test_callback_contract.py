@@ -11,6 +11,7 @@ from restaurant_bot.services.parser import parse_callback
 
 
 def test_callback_actions_have_explicit_state_machine_meanings() -> None:
+    """Проверяет, что callback действия имеют явный состояние machine meanings."""
     assert parse_callback("v2:cart").intent is Intent.SHOW_FINAL_REVIEW
     assert parse_callback("v2:back").intent is Intent.BACK
     assert parse_callback("v2:submit").intent is Intent.SUBMIT_AS_IS
@@ -19,6 +20,7 @@ def test_callback_actions_have_explicit_state_machine_meanings() -> None:
 
 
 def test_candidate_callbacks_use_human_numbering_and_keep_revision() -> None:
+    """Проверяет, что кандидат callback use human numbering и keep ревизия."""
     command = parse_callback("v2:sel:4:0:r7")
 
     assert command.intent is Intent.SELECT_CANDIDATE
@@ -28,6 +30,7 @@ def test_candidate_callbacks_use_human_numbering_and_keep_revision() -> None:
 
 
 def test_stale_callback_cannot_mutate_current_draft(settings) -> None:  # type: ignore[no-untyped-def]
+    """Проверяет, что stale callback не может изменяет текущий черновик."""
     engine = ConversationEngine(settings)
     state = ConversationState(
         ui_revision=3,

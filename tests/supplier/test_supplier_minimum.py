@@ -3,6 +3,7 @@ from restaurant_bot.services.replies import supplier_warning_details_reply
 
 
 def test_supplier_minimum_warning_shows_gap_and_recovery_actions() -> None:
+    """Проверяет, что поставщик минимум предупреждение показывает gap и восстановление действия."""
     item = CartItem(
         id="rose",
         source_query="Сироп Роза",

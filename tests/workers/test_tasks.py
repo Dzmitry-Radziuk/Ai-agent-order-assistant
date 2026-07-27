@@ -1,5 +1,6 @@
 from unittest.mock import MagicMock
 
+from restaurant_bot.integrations.telegram import TELEGRAM_TRANSIENT_ERRORS
 from restaurant_bot.workers import tasks
 from restaurant_bot.workers.celery_app import celery_app
 
@@ -36,6 +37,16 @@ def test_process_update_task_delegates_to_orchestrator(mocker) -> None:  # type:
     tasks.process_telegram_update.run(42)
 
     orchestrator.process.assert_called_once_with(42)
+
+
+def test_process_update_retries_only_transient_telegram_delivery_failures() -> None:
+    """Не повторяет бизнес-логику после произвольной ошибки приложения."""
+    assert tasks.process_telegram_update.autoretry_for == TELEGRAM_TRANSIENT_ERRORS
+    assert tasks.process_telegram_update.retry_kwargs == {
+        "max_retries": tasks.UPDATE_DELIVERY_MAX_RETRIES
+    }
+    assert tasks.process_telegram_update.retry_backoff is True
+    assert tasks.process_telegram_update.retry_jitter is True
 
 
 def test_submit_order_task_reports_failure_only_after_retry_limit(mocker) -> None:  # type: ignore[no-untyped-def]
@@ -75,6 +86,7 @@ def test_celery_configuration_preserves_delivery_guarantees() -> None:
 
 
 def test_cleanup_task_uses_configured_retention_periods(settings, mocker) -> None:  # type: ignore[no-untyped-def]
+    """Проверяет, что cleanup task использует configured retention periods."""
     db = MagicMock()
     session_local = mocker.patch.object(tasks, "SessionLocal")
     session_local.begin.return_value.__enter__.return_value = db

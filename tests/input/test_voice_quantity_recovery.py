@@ -6,6 +6,7 @@ from restaurant_bot.integrations.openai_client import (
 
 
 def test_voice_recovery_restores_quantity_and_unit_from_shared_source_line() -> None:
+    """Проверяет, что голос восстановление восстанавливает количество и единица измерения из общая исходный строка."""
     source = "Сироп роза 10 штук, говядина 5 кг"
     items = [
         {"product_query": "Сироп роза", "quantity": None, "unit": "", "source_line": source},
@@ -18,6 +19,7 @@ def test_voice_recovery_restores_quantity_and_unit_from_shared_source_line() -> 
 
 
 def test_voice_recovery_never_replaces_the_model_product_name() -> None:
+    """Проверяет, что голос восстановление никогда не replaces модель товар название."""
     source = "Сыропроза 10 штук"
     items = [{"product_query": "Сыропроза", "quantity": None, "unit": "", "source_line": source}]
 
@@ -28,7 +30,48 @@ def test_voice_recovery_never_replaces_the_model_product_name() -> None:
     assert restored[0]["unit"] == "шт"
 
 
+def test_packaged_product_uses_only_quantity_after_full_name() -> None:
+    """Не принимает фасовку внутри названия за количество заказа."""
+    source = "Сыр Швейцарский Сыробогатов 180гр 500 грам свежего"
+    items = [
+        {
+            "product_query": "Сыр Швейцарский Сыробогатов 180гр",
+            "quantity": 500.0,
+            "unit": "грам",
+            "comment": "свежего",
+            "source_line": source,
+        }
+    ]
+
+    restored = restore_explicit_order_terms(items, source)
+
+    assert restored[0]["product_query"] == "Сыр Швейцарский Сыробогатов 180гр"
+    assert restored[0]["quantity"] == 500.0
+    assert restored[0]["unit"] == "г"
+    assert restored[0]["comment"] == "свежего"
+
+
+def test_model_quantity_wins_when_source_also_contains_packaging() -> None:
+    """Не заменяет количество заказа фасовкой из исходного названия."""
+    source = "Сыр Швейцарский Сыробогатов 180гр 10 штук"
+    items = [
+        {
+            "product_query": "Сыр Швейцарский Сыробогатов",
+            "quantity": 10.0,
+            "unit": "штук",
+            "source_line": source,
+        }
+    ]
+
+    restored = restore_explicit_order_terms(items, source)
+
+    assert restored[0]["quantity"] == 10.0
+    assert restored[0]["unit"] == "шт"
+    assert restored[0]["source_line"] == source
+
+
 def test_empty_voice_model_result_recovers_every_explicit_product() -> None:
+    """Проверяет, что пустой результат голос модель результат восстанавливает каждый явный товар."""
     payload = {"intent": Intent.UNKNOWN, "items": []}
 
     restored = recover_omitted_explicit_items(
@@ -46,6 +89,7 @@ def test_empty_voice_model_result_recovers_every_explicit_product() -> None:
 
 
 def test_navigation_intent_can_never_be_recovered_as_a_product() -> None:
+    """Проверяет, что навигация намерение может никогда не be recovered как a товар."""
     payload = {"intent": Intent.SHOW_CART, "items": []}
 
     restored = recover_omitted_explicit_items(payload, "Показать товары поставщика.")
@@ -55,6 +99,7 @@ def test_navigation_intent_can_never_be_recovered_as_a_product() -> None:
 
 
 def test_navigation_intent_discards_model_items_before_cart_mutation() -> None:
+    """Проверяет, что навигация намерение отбрасывает модель позиции до черновик mutation."""
     payload = {
         "intent": Intent.CHECK_MIN_SUM,
         "items": [{"product_query": "Тестовый товар", "quantity": None, "unit": ""}],
@@ -67,6 +112,7 @@ def test_navigation_intent_discards_model_items_before_cart_mutation() -> None:
 
 
 def test_partial_voice_model_result_restores_the_omitted_conjoined_item() -> None:
+    """Проверяет, что partial голос модель результат восстанавливает пропущенная соединённый союзом позиция."""
     payload = {
         "intent": Intent.ADD_ITEMS,
         "items": [
@@ -90,6 +136,7 @@ def test_partial_voice_model_result_restores_the_omitted_conjoined_item() -> Non
 
 
 def test_pair_of_apples_uses_its_own_spoken_quantity() -> None:
+    """Проверяет, что пара для яблок использует its own произнесённый количество."""
     source = "Сироп роза пять штук, говядина десять килограмм и пару яблок."
     items = [
         {
@@ -117,6 +164,7 @@ def test_pair_of_apples_uses_its_own_spoken_quantity() -> None:
 
 
 def test_voice_recovery_removes_a_model_invented_quantity() -> None:
+    """Проверяет, что голос восстановление удаляет a модель выдуманное количество."""
     source = "Сироп роза пять штук и бутылка воды."
     items = [
         {

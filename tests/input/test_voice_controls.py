@@ -17,12 +17,14 @@ from restaurant_bot.services.parser import infer_intent
 
 
 def _voice(text: str) -> TelegramEvent:
+    """Создаёт тестовое голосовое событие Telegram."""
     return TelegramEvent(
         update_id=1, chat_id="voice-controls", input_type=InputKind.VOICE, text=text
     )
 
 
 def _candidates() -> list[Candidate]:
+    """Создаёт тестовый набор кандидатов каталога."""
     return [
         Candidate(product_id="rose", name="Сироп Роза", supplier="Сиропы", unit="шт"),
         Candidate(product_id="tarhun", name="Сироп Тархун", supplier="Сиропы", unit="шт"),
@@ -31,6 +33,7 @@ def _candidates() -> list[Candidate]:
 
 @pytest.mark.parametrize("phrase", ["давай второй", "вариант два", "беру второй вариант"])
 def test_voice_selects_candidate_by_natural_number(settings, phrase: str) -> None:  # type: ignore[no-untyped-def]
+    """Проверяет, что голос выбирает кандидат by естественный число."""
     item = CartItem(
         id="choice",
         source_query="сироп",
@@ -61,6 +64,7 @@ def test_voice_selects_candidate_by_natural_number(settings, phrase: str) -> Non
     ],
 )
 def test_voice_controls_not_found_card(settings, phrase: str, intent: Intent) -> None:  # type: ignore[no-untyped-def]
+    """Проверяет, что голос controls не found карточка."""
     item = CartItem(id="missing", source_query="редкий соус", status=ItemStatus.NOT_FOUND)
     state = ConversationState(cart=[item], current_issue_item_id="missing")
     result = ConversationEngine(settings).handle(
@@ -74,6 +78,7 @@ def test_voice_controls_not_found_card(settings, phrase: str, intent: Intent) ->
 
 
 def test_voice_confirms_final_submission(settings) -> None:  # type: ignore[no-untyped-def]
+    """Проверяет, что голос подтверждает финальный отправка заявки."""
     item = CartItem(
         id="ready",
         source_query="Сироп Роза",
@@ -98,6 +103,7 @@ def test_voice_confirms_final_submission(settings) -> None:  # type: ignore[no-u
 
 
 def test_voice_keeps_or_changes_multiple_warning_in_context(settings) -> None:  # type: ignore[no-untyped-def]
+    """Проверяет, что голос сохраняет или изменяет кратность предупреждение в контекст."""
     item = CartItem(
         id="multiple",
         source_query="Говядина",
@@ -130,7 +136,7 @@ def test_voice_keeps_or_changes_multiple_warning_in_context(settings) -> None:  
 
 
 def test_voice_fix_quantity_repeats_visible_button_action(settings) -> None:  # type: ignore[no-untyped-def]
-    """Применяет рекомендуемое количество как одноимённая кнопка."""
+    """Открывает выбор количества как одноимённая кнопка."""
     item = CartItem(
         id="multiple",
         source_query="Говядина",
@@ -151,10 +157,12 @@ def test_voice_fix_quantity_repeats_visible_button_action(settings) -> None:  # 
         [],
     )
 
-    assert result.state.cart[0].quantity == 20
+    assert result.state.cart[0].quantity == 5
+    assert "Выберите количество" in result.reply.text
 
 
 def test_voice_opens_and_retries_procurement_request(settings) -> None:  # type: ignore[no-untyped-def]
+    """Проверяет, что голос открывает и повторяет procurement запрос."""
     state = ConversationState(
         product_add_requests=[
             {"request_id": "failed-1", "description": "Редкий соус", "status": "write_failed"}
@@ -181,6 +189,7 @@ def test_voice_opens_and_retries_procurement_request(settings) -> None:  # type:
 
 @pytest.mark.parametrize("phrase", ["МБР", "эм бэ эр"])
 def test_voice_selects_visible_supplier_by_name_or_spoken_acronym(settings, phrase: str) -> None:  # type: ignore[no-untyped-def]
+    """Проверяет, что голос выбирает видимый поставщик by название или произнесённый acronym."""
     item = CartItem(
         id="supplier-item",
         source_query="Сироп",
@@ -216,6 +225,7 @@ def test_voice_selects_visible_supplier_by_name_or_spoken_acronym(settings, phra
 def test_global_add_more_voice_command_wins_on_local_issue_cards(
     settings, status: ItemStatus, phrase: str
 ) -> None:  # type: ignore[no-untyped-def]
+    """Проверяет, что общий добавление ещё голос команда wins on local уточнение cards."""
     item = CartItem(
         id="issue",
         source_query="Сироп Роза",
@@ -234,6 +244,7 @@ def test_global_add_more_voice_command_wins_on_local_issue_cards(
 
 
 def test_voice_adds_items_for_the_only_supplier_below_minimum(settings) -> None:  # type: ignore[no-untyped-def]
+    """Проверяет, что голос добавляет позиции for только поставщик below минимум."""
     item = CartItem(
         id="supplier-item",
         source_query="Сироп",

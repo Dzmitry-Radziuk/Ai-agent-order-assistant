@@ -1,19 +1,29 @@
 from pathlib import Path
 from types import SimpleNamespace
 
+import httpx
 import pytest
+from openai import APITimeoutError
 
 from restaurant_bot.domain.models import ExtractedItem, Intent, ParsedCommand
 from restaurant_bot.integrations import openai_client
-from restaurant_bot.integrations.openai_client import OpenAIService, ParsedInputSchema
+from restaurant_bot.integrations.openai_client import (
+    OpenAIService,
+    ParsedInputSchema,
+    VisibleActionDecision,
+)
 
 
 class _Transcriptions:
+    """Имитирует endpoint транскрипции OpenAI в тестах."""
+
     def __init__(self, responses: list[str]):
+        """Инициализирует тестовый двойник зависимости."""
         self.responses = responses
         self.calls: list[dict[str, object]] = []
 
     def create(self, **kwargs):  # type: ignore[no-untyped-def]
+        """Имитирует создание результата транскрипции."""
         self.calls.append(kwargs)
         return SimpleNamespace(text=self.responses.pop(0))
 
@@ -31,7 +41,21 @@ def test_vision_client_uses_long_timeout_without_hidden_retries(settings, mocker
     }
 
 
+def test_text_client_uses_bounded_timeout_without_hidden_retries(settings, mocker) -> None:  # type: ignore[no-untyped-def]
+    """Не позволяет текстовому запросу блокировать чат повторными ожиданиями."""
+    client_factory = mocker.patch.object(openai_client, "OpenAI")
+
+    OpenAIService(settings)
+
+    assert client_factory.call_args_list[0].kwargs == {
+        "api_key": settings.openai_api_key.get_secret_value(),
+        "timeout": settings.openai_text_timeout_seconds,
+        "max_retries": settings.openai_text_max_retries,
+    }
+
+
 def test_openai_input_schema_has_fixed_department_quantity_fields() -> None:
+    """Проверяет, что openai ввод схема имеет фиксированные подразделение количество fields."""
     schema = ParsedInputSchema.model_json_schema()
     extracted_item = schema["$defs"]["ExtractedItem"]
     quantities = schema["$defs"]["DepartmentQuantities"]
@@ -56,21 +80,37 @@ def test_photo_uses_dedicated_vision_client(settings, tmp_path: Path) -> None:  
 
 
 class _Responses:
+    """Имитирует endpoint структурированных ответов OpenAI в тестах."""
+
     def __init__(self, parsed):  # type: ignore[no-untyped-def]
+        """Инициализирует тестовый двойник зависимости."""
         self.parsed = parsed
         self.calls: list[dict[str, object]] = []
 
     def parse(self, **kwargs):  # type: ignore[no-untyped-def]
+        """Имитирует разбор структурированного ответа OpenAI."""
         self.calls.append(kwargs)
         return SimpleNamespace(output_parsed=self.parsed)
 
 
 class _FailingResponses:
+    """Имитирует ошибку endpoint структурированных ответов OpenAI."""
+
     def parse(self, **kwargs):  # type: ignore[no-untyped-def]
+        """Имитирует разбор структурированного ответа OpenAI."""
         raise RuntimeError("OpenAI HTTP 429")
 
 
+class _TimeoutResponses:
+    """Имитирует тайм-аут endpoint структурированных ответов OpenAI."""
+
+    def parse(self, **kwargs):  # type: ignore[no-untyped-def]
+        """Имитирует разбор структурированного ответа OpenAI."""
+        raise APITimeoutError(httpx.Request("POST", "https://api.openai.test/responses"))
+
+
 def _service(settings, client):  # type: ignore[no-untyped-def]
+    """Создаёт настроенный тестовый экземпляр сервиса."""
     service = object.__new__(OpenAIService)
     service.settings = settings
     service.client = client
@@ -81,6 +121,7 @@ def _service(settings, client):  # type: ignore[no-untyped-def]
 def test_voice_transcription_uses_fallback_when_primary_returns_empty(
     settings, tmp_path: Path
 ) -> None:  # type: ignore[no-untyped-def]
+    """Проверяет, что голос распознавание голоса использует резервную модель когда основная модель возвращает пустой результат."""
     transcriptions = _Transcriptions(["", "сироп роза десять штук"])
     service = _service(
         settings, SimpleNamespace(audio=SimpleNamespace(transcriptions=transcriptions))
@@ -97,6 +138,7 @@ def test_voice_transcription_uses_fallback_when_primary_returns_empty(
 
 
 def test_voice_transcription_receives_context_prompt(settings, tmp_path: Path) -> None:  # type: ignore[no-untyped-def]
+    """Проверяет, что голос распознавание голоса receives контекст инструкция модели."""
     transcriptions = _Transcriptions(["первый вариант"])
     service = _service(
         settings, SimpleNamespace(audio=SimpleNamespace(transcriptions=transcriptions))
@@ -111,6 +153,7 @@ def test_voice_transcription_receives_context_prompt(settings, tmp_path: Path) -
 def test_high_accuracy_voice_transcription_uses_the_stronger_model(
     settings, tmp_path: Path
 ) -> None:  # type: ignore[no-untyped-def]
+    """Проверяет, что повышенная accuracy голос распознавание голоса использует stronger модель."""
     transcriptions = _Transcriptions(["добавить товары"])
     service = _service(
         settings, SimpleNamespace(audio=SimpleNamespace(transcriptions=transcriptions))
@@ -125,6 +168,7 @@ def test_high_accuracy_voice_transcription_uses_the_stronger_model(
 def test_photo_parser_passes_caption_and_high_detail_image_as_structured_input(
     settings, tmp_path: Path
 ) -> None:  # type: ignore[no-untyped-def]
+    """Проверяет, что photo парсер передаёт подпись и повышенная detail изображение как структурированный ввод."""
     parsed = ParsedInputSchema(intent=Intent.ADD_ITEMS)
     responses = _Responses(parsed)
     service = _service(settings, SimpleNamespace(responses=responses))
@@ -144,6 +188,7 @@ def test_photo_parser_passes_caption_and_high_detail_image_as_structured_input(
 
 
 def test_catalog_matcher_uses_only_structured_candidate_decision(settings) -> None:  # type: ignore[no-untyped-def]
+    """Проверяет, что каталог сопоставление использует только структурированный кандидат decision."""
     parsed = SimpleNamespace(
         action="select", selected_product_id="rose", candidate_product_ids=["rose"], reason="exact"
     )
@@ -160,7 +205,60 @@ def test_catalog_matcher_uses_only_structured_candidate_decision(settings) -> No
     assert call["text_format"].__name__ == "ProductMatchDecision"
 
 
+def test_visible_action_ai_returns_only_an_allowed_confident_action(settings) -> None:  # type: ignore[no-untyped-def]
+    """Возвращает только уверенно выбранную кнопку текущего экрана."""
+    responses = _Responses(
+        VisibleActionDecision(
+            action_id="v2:mulone:r7",
+            confidence=0.93,
+            reason="Пользователь просит выбрать количество",
+        )
+    )
+    service = _service(settings, SimpleNamespace(responses=responses))
+
+    selected = service.choose_visible_action(
+        "Давайте выберем другое количество",
+        "Проверьте количество",
+        [
+            {"label": "Выбрать количество", "action_id": "v2:mulone:r7"},
+            {"label": "К черновику", "action_id": "v2:back:r7"},
+        ],
+    )
+
+    assert selected == "v2:mulone:r7"
+    assert responses.calls[0]["text_format"] is VisibleActionDecision
+
+
+@pytest.mark.parametrize(
+    "decision",
+    [
+        VisibleActionDecision(action_id="v2:clear:r7", confidence=0.99),
+        VisibleActionDecision(action_id="v2:mulone:r7", confidence=0.8),
+        VisibleActionDecision(action_id="v2:mulone:r7", confidence=0.5),
+    ],
+)
+def test_visible_action_ai_rejects_hidden_or_uncertain_action(
+    settings,
+    decision: VisibleActionDecision,
+) -> None:  # type: ignore[no-untyped-def]
+    """Не выполняет скрытое или неуверенно распознанное действие."""
+    service = _service(
+        settings,
+        SimpleNamespace(responses=_Responses(decision)),
+    )
+
+    assert (
+        service.choose_visible_action(
+            "сделай что-нибудь",
+            "Проверьте количество",
+            [{"label": "Выбрать количество", "action_id": "v2:mulone:r7"}],
+        )
+        == ""
+    )
+
+
 def test_ai_item_supplier_comment_is_preserved_as_working_item_comment(settings) -> None:  # type: ignore[no-untyped-def]
+    """Проверяет, что ИИ позиция поставщик комментарий является сохраняется как working позиция комментарий."""
     parsed = ParsedInputSchema(
         intent=Intent.ADD_ITEMS,
         global_comment="на завтра",
@@ -197,6 +295,7 @@ def test_ai_cannot_turn_a_product_name_into_add_more_navigation(settings) -> Non
 
 
 def test_simple_explicit_product_list_skips_the_second_ai_call(settings) -> None:  # type: ignore[no-untyped-def]
+    """Проверяет, что простой явный товар список пропускает второй ИИ call."""
     service = _service(settings, SimpleNamespace(responses=_FailingResponses()))
 
     command = service.parse_text("Сироп роза 10 штук, говядина 5 килограмм")
@@ -206,6 +305,176 @@ def test_simple_explicit_product_list_skips_the_second_ai_call(settings) -> None
         ("Сироп роза", 10, "шт"),
         ("говядина", 5, "кг"),
     ]
+
+
+def test_simple_single_product_with_terminal_punctuation_skips_ai(settings) -> None:  # type: ignore[no-untyped-def]
+    """Разбирает очевидный голосовой товар локально без второго запроса к ИИ."""
+    service = _service(settings, SimpleNamespace(responses=_FailingResponses()))
+
+    command = service.parse_text("Сыр швейцарский Сыробогатов 10 штук.")
+
+    assert command.intent is Intent.ADD_ITEMS
+    assert len(command.items) == 1
+    assert command.items[0].product_query == "Сыр швейцарский Сыробогатов"
+    assert command.items[0].quantity == 10
+    assert command.items[0].unit == "шт"
+    assert command.items[0].comment == ""
+
+
+def test_single_product_with_comment_still_uses_semantic_ai(settings) -> None:  # type: ignore[no-untyped-def]
+    """Оставляет ИИ сообщения с пользовательским комментарием."""
+    text = "Сыр швейцарский Сыробогатов 10 штук обязательно свежий"
+    parsed = ParsedInputSchema(
+        intent=Intent.ADD_ITEMS,
+        items=[
+            ExtractedItem(
+                product_query="Сыр швейцарский Сыробогатов",
+                quantity=10,
+                unit="шт",
+                comment="обязательно свежий",
+                source_line=text,
+            )
+        ],
+    )
+    responses = _Responses(parsed)
+    service = _service(settings, SimpleNamespace(responses=responses))
+
+    command = service.parse_text(text)
+
+    assert len(responses.calls) == 1
+    assert command.items[0].comment == "обязательно свежий"
+
+
+def test_text_timeout_returns_deterministic_product_fallback(settings) -> None:  # type: ignore[no-untyped-def]
+    """Не теряет распознанный товар при сетевом таймауте ИИ."""
+    service = _service(settings, SimpleNamespace(responses=_TimeoutResponses()))
+
+    command = service.parse_text("Сироп роза 5 штук обязательно охлаждённым")
+
+    assert command.intent is Intent.ADD_ITEMS
+    assert len(command.items) == 1
+    assert command.items[0].product_query == "Сироп роза"
+    assert command.items[0].quantity == 5
+    assert command.items[0].unit == "шт"
+    assert command.items[0].comment == "обязательно охлаждённым"
+
+
+def test_hyphenated_multiline_product_list_skips_ai_and_keeps_quantities(
+    settings,
+) -> None:  # type: ignore[no-untyped-def]
+    """Разбирает простой список с тире локально и без задержки ИИ."""
+    service = _service(settings, SimpleNamespace(responses=_FailingResponses()))
+
+    command = service.parse_text("Сироп Снгря - 2 шт\nКордиал Апельсин - 3 шт")
+
+    assert command.intent is Intent.ADD_ITEMS
+    assert [(item.product_query, item.quantity, item.unit) for item in command.items] == [
+        ("Сироп Снгря", 2, "шт"),
+        ("Кордиал Апельсин", 3, "шт"),
+    ]
+
+
+@pytest.mark.parametrize("text", ["сироп шка", "креветки королевские"])
+def test_short_product_name_without_quantity_skips_ai(settings, text: str) -> None:  # type: ignore[no-untyped-def]
+    """Не зависит от ИИ при поиске короткого названия без количества."""
+    service = _service(settings, SimpleNamespace(responses=_FailingResponses()))
+
+    command = service.parse_text(text)
+
+    assert command.intent is Intent.ADD_ITEMS
+    assert len(command.items) == 1
+    assert command.items[0].product_query == text
+    assert command.items[0].quantity is None
+
+
+def test_short_product_with_possible_comment_skips_slow_initial_ai(settings) -> None:  # type: ignore[no-untyped-def]
+    """Оставляет короткую фразу каталогу для разделения названия и комментария."""
+    service = _service(settings, SimpleNamespace(responses=_FailingResponses()))
+
+    command = service.parse_text("сироп рза холодным")
+
+    assert command.intent is Intent.ADD_ITEMS
+    assert len(command.items) == 1
+    assert command.items[0].product_query == "сироп рза холодным"
+
+
+def test_original_packaged_product_line_is_preserved_for_catalog_check(settings) -> None:  # type: ignore[no-untyped-def]
+    """Сохраняет исходное название для отделения фасовки по каталогу."""
+    text = "Концентрат Интерквас красного сусла, 650г"
+    parsed = ParsedInputSchema(
+        intent=Intent.ADD_ITEMS,
+        items=[
+            ExtractedItem(
+                product_query="Концентрат Интерквас красного сусла",
+                quantity=650,
+                unit="г",
+            )
+        ],
+    )
+    service = _service(settings, SimpleNamespace(responses=_Responses(parsed)))
+
+    command = service.parse_text(text)
+
+    assert command.items[0].source_line == text
+
+
+def test_text_ai_unknown_placeholders_do_not_lock_supplier_search(settings) -> None:  # type: ignore[no-untyped-def]
+    """Не принимает служебное unknown за отдел или выбранного поставщика."""
+    text = "Сыр Швейцарский Сыробогатов 180гр 10 штук"
+    parsed = ParsedInputSchema(
+        intent=Intent.ADD_ITEMS,
+        items=[
+            ExtractedItem(
+                product_query="Сыр Швейцарский Сыробогатов",
+                quantity=10,
+                unit="штук",
+                department="unknown",
+                supplier_hint="unknown",
+                source_line=text,
+            )
+        ],
+    )
+    service = _service(settings, SimpleNamespace(responses=_Responses(parsed)))
+
+    command = service.parse_text(text)
+
+    assert command.items[0].quantity == 10
+    assert command.items[0].unit == "шт"
+    assert command.items[0].department == ""
+    assert command.items[0].supplier_hint == ""
+
+
+def test_explicit_global_comment_scope_still_uses_semantic_ai(settings) -> None:  # type: ignore[no-untyped-def]
+    """Не превращает явный общий комментарий в комментарий одной позиции."""
+    service = _service(settings, SimpleNamespace(responses=_FailingResponses()))
+
+    with pytest.raises(RuntimeError, match="OpenAI HTTP 429"):
+        service.parse_text("сироп роза всем завтра")
+
+
+@pytest.mark.parametrize(
+    ("suffix", "expected_quantity"),
+    [
+        ("", None),
+        (" 100 кг", 100),
+    ],
+)
+def test_exact_packaged_product_skips_ai_and_keeps_full_catalog_name(
+    settings, suffix: str, expected_quantity: int | None
+) -> None:  # type: ignore[no-untyped-def]
+    """Сохраняет точное название с фасовкой и не ждёт вызов ИИ."""
+    service = _service(settings, SimpleNamespace(responses=_FailingResponses()))
+    name = (
+        "ME-ФБ-Глазной мускул говяжий с/м В/У ~ 2кг*10(~20кг) Фермерский бычок Мираторг (Брянск) Ро"
+    )
+
+    command = service.parse_text(f"{name}{suffix}")
+
+    assert command.intent is Intent.ADD_ITEMS
+    assert len(command.items) == 1
+    assert command.items[0].product_query == name
+    assert command.items[0].quantity == expected_quantity
+    assert command.items[0].unit == ("кг" if expected_quantity is not None else "")
 
 
 @pytest.mark.parametrize(
@@ -237,6 +506,7 @@ def test_free_form_navigation_skips_ai_product_extraction(
     ],
 )
 def test_ambiguous_product_lists_still_use_structured_ai(settings, text: str) -> None:  # type: ignore[no-untyped-def]
+    """Проверяет, что неоднозначный товар списки still use структурированный ИИ."""
     service = _service(settings, SimpleNamespace(responses=_FailingResponses()))
 
     with pytest.raises(RuntimeError, match="OpenAI HTTP 429"):
@@ -244,6 +514,7 @@ def test_ambiguous_product_lists_still_use_structured_ai(settings, text: str) ->
 
 
 def test_openai_parse_error_is_not_silently_replaced_with_an_empty_command(settings) -> None:  # type: ignore[no-untyped-def]
+    """Проверяет, что openai parse ошибка является не без подтверждения заменяется with an пустой результат команда."""
     service = _service(settings, SimpleNamespace(responses=_FailingResponses()))
 
     with pytest.raises(RuntimeError, match="OpenAI HTTP 429"):
@@ -251,6 +522,7 @@ def test_openai_parse_error_is_not_silently_replaced_with_an_empty_command(setti
 
 
 def test_client_order_sheet_uses_the_selected_department_quantity(settings) -> None:  # type: ignore[no-untyped-def]
+    """Проверяет, что клиент заказ таблица использует выбранный подразделение количество."""
     service = _service(settings, SimpleNamespace())
     command = service._normalise_photo_command(
         ParsedCommand(
@@ -458,7 +730,36 @@ def test_photo_drops_every_item_without_actual_order_quantity(settings) -> None:
     assert command.items == []
 
 
+@pytest.mark.parametrize(
+    "document_type",
+    [
+        "client_order_sheet",
+        "printed_order_form",
+        "order_table",
+        "free_list",
+        "unknown_document",
+        "product_card",
+    ],
+)
+def test_photo_never_keeps_product_without_positive_quantity(
+    settings,
+    document_type: str,
+) -> None:  # type: ignore[no-untyped-def]
+    """Отбрасывает товар без количества для любого типа изображения."""
+    service = _service(settings, SimpleNamespace())
+    command = service._normalise_photo_command(
+        ParsedCommand(
+            intent=Intent.ADD_ITEMS,
+            items=[ExtractedItem(product_query="Товар без количества", quantity=None)],
+        ),
+        document_type,
+    )
+
+    assert command.items == []
+
+
 def test_handwritten_replacement_wins_over_crossed_out_client_sheet_quantity(settings) -> None:  # type: ignore[no-untyped-def]
+    """Проверяет, что рукописное замена wins over зачёркнутое исключено клиент таблица количество."""
     service = _service(settings, SimpleNamespace())
     command = service._normalise_photo_command(
         ParsedCommand(
@@ -478,3 +779,49 @@ def test_handwritten_replacement_wins_over_crossed_out_client_sheet_quantity(set
     )
 
     assert command.items[0].quantity == 7
+
+
+def test_photo_normalizer_marks_retained_free_list_quantity_as_photo_derived(settings) -> None:  # type: ignore[no-untyped-def]
+    """Помечает количество из свободного списка, чтобы каталог его не перезаписал."""
+    service = _service(settings, SimpleNamespace())
+    command = service._normalise_photo_command(
+        ParsedCommand(
+            intent=Intent.ADD_ITEMS,
+            items=[
+                ExtractedItem(
+                    product_query="Курица",
+                    quantity=1,
+                    unit="кг",
+                    source_line="Курица — 1 кг",
+                )
+            ],
+        ),
+        "free_list",
+    )
+
+    assert command.items[0].quantity == 1
+    assert command.items[0].quantity_source == "photo_order_entry"
+
+
+def test_free_list_keeps_explicit_quantity_even_if_model_calls_it_order_column(
+    settings,
+) -> None:  # type: ignore[no-untyped-def]
+    """Не удаляет видимое количество свободного списка из-за названия источника."""
+    service = _service(settings, SimpleNamespace())
+    command = service._normalise_photo_command(
+        ParsedCommand(
+            intent=Intent.ADD_ITEMS,
+            items=[
+                ExtractedItem(
+                    product_query="Сироп Роза",
+                    quantity=6,
+                    unit="шт",
+                    source_line="Сироп Роза — 6 шт",
+                    quantity_source="printed_order_column",
+                )
+            ],
+        ),
+        "free_list",
+    )
+
+    assert [(item.product_query, item.quantity) for item in command.items] == [("Сироп Роза", 6)]

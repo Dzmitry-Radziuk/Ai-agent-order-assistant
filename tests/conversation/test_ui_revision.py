@@ -3,6 +3,7 @@ from restaurant_bot.services.orchestrator import UpdateOrchestrator
 
 
 def test_reply_callbacks_receive_one_ui_revision_suffix() -> None:
+    """Проверяет, что ответ callback receive один ui ревизия суффикс."""
     reply = BotReply(
         text="Черновик",
         rows=[

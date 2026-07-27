@@ -9,12 +9,14 @@ from restaurant_bot.config import Settings, get_settings, settings_env_file
 
 
 def test_only_production_selects_dotenv_file() -> None:
+    """Проверяет, что только production выбирает dotenv файл."""
     assert settings_env_file("production") == ".env"
     assert settings_env_file("local") is None
     assert settings_env_file("test") is None
 
 
 def test_user_content_logging_is_private_by_default() -> None:
+    """Проверяет, что пользователь content логирование является личный by по умолчанию."""
     settings = Settings(
         telegram_bot_token="test-token",
         telegram_webhook_secret="test-secret",
@@ -27,11 +29,14 @@ def test_user_content_logging_is_private_by_default() -> None:
     assert settings.log_content_max_length == 500
     assert settings.order_event_retention_days == 365
     assert settings.telegram_update_retention_days == 30
+    assert settings.telegram_request_timeout_seconds == 15
+    assert settings.telegram_connect_timeout_seconds == 5
 
 
 def test_get_settings_reads_dotenv_in_production(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
+    """Проверяет, что get settings читает dotenv в production."""
     (tmp_path / ".env").write_text(
         "\n".join(
             (
@@ -72,6 +77,7 @@ def test_get_settings_reads_dotenv_in_production(
 
 
 def test_production_rejects_an_insecure_public_url() -> None:
+    """Проверяет, что production отклоняет an небезопасный public URL."""
     with pytest.raises(ValidationError, match="must use HTTPS"):
         Settings(
             app_env="production",
@@ -86,6 +92,7 @@ def test_production_rejects_an_insecure_public_url() -> None:
 
 
 def test_production_rejects_placeholder_google_configuration() -> None:
+    """Проверяет, что production отклоняет заглушка Google configuration."""
     with pytest.raises(ValidationError, match="configuration is not complete"):
         Settings(
             app_env="production",

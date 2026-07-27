@@ -15,6 +15,7 @@ from restaurant_bot.services.engine import ConversationEngine
 
 
 def test_voice_recovery_supports_quantity_before_product() -> None:
+    """Проверяет, что голос восстановление supports количество до товар."""
     payload = {"intent": Intent.UNKNOWN, "items": []}
 
     restored = recover_omitted_explicit_items(payload, "10 штук сироп роза")
@@ -28,6 +29,7 @@ def test_voice_recovery_supports_quantity_before_product() -> None:
 
 
 def test_voice_recovery_does_not_invent_quantity_that_was_not_spoken() -> None:
+    """Проверяет, что голос восстановление выполняет не выдумывает количество что was не произнесённый."""
     items = [
         {
             "product_query": "бутылка воды",
@@ -43,7 +45,34 @@ def test_voice_recovery_does_not_invent_quantity_that_was_not_spoken() -> None:
     assert restored[0]["unit"] == ""
 
 
+def test_shared_source_line_does_not_copy_last_quantity_to_every_product() -> None:
+    """Берёт количества по строкам исходного сообщения, а не из копии ИИ."""
+    source = "Сироп Снгря - 2 шт\nКордиал Апельсин - 3 шт"
+    items = [
+        {
+            "product_query": "Сироп Снгря",
+            "quantity": 2,
+            "unit": "шт",
+            "source_line": source,
+        },
+        {
+            "product_query": "Кордиал Апельсин",
+            "quantity": 3,
+            "unit": "шт",
+            "source_line": source,
+        },
+    ]
+
+    restored = restore_explicit_order_terms(items, source)
+
+    assert [(item["quantity"], item["unit"]) for item in restored] == [
+        (2, "шт"),
+        (3, "шт"),
+    ]
+
+
 def test_empty_voice_add_items_uses_the_source_recovery_card(settings) -> None:  # type: ignore[no-untyped-def]
+    """Проверяет, что пустой результат голос добавление позиции использует исходный восстановление карточка."""
     result = ConversationEngine(settings).handle(
         TelegramEvent(update_id=7, chat_id="7", input_type=InputKind.VOICE),
         ParsedCommand(intent=Intent.ADD_ITEMS),
@@ -63,6 +92,7 @@ def test_empty_voice_add_items_uses_the_source_recovery_card(settings) -> None: 
 
 
 def test_unknown_empty_voice_uses_the_same_source_recovery_card(settings) -> None:  # type: ignore[no-untyped-def]
+    """Проверяет, что unknown пустой результат голос использует тот же исходный восстановление карточка."""
     result = ConversationEngine(settings).handle(
         TelegramEvent(update_id=8, chat_id="8", input_type=InputKind.VOICE),
         ParsedCommand(intent=Intent.UNKNOWN),
@@ -78,6 +108,7 @@ def test_unknown_empty_voice_uses_the_same_source_recovery_card(settings) -> Non
 
 
 def test_voice_comment_shadow_is_not_created_as_a_separate_product() -> None:
+    """Проверяет, что голос комментарий ложная позиция является не created как a отдельно товар."""
     payload = {
         "intent": Intent.ADD_ITEMS,
         "items": [
@@ -108,6 +139,7 @@ def test_voice_comment_shadow_is_not_created_as_a_separate_product() -> None:
 
 
 def test_real_audio_cross_item_shadow_is_removed() -> None:
+    """Проверяет, что реальный аудио перекрёстная позиция ложная позиция является removed."""
     source = "Сыровроза 5 штук, желательно холодным. И говядина 10 килограмм мраморная."
     payload = {
         "intent": Intent.ADD_ITEMS,
@@ -146,6 +178,7 @@ def test_real_audio_cross_item_shadow_is_removed() -> None:
 
 
 def test_global_comment_is_not_duplicated_as_a_product() -> None:
+    """Проверяет, что общий комментарий является не duplicated как a товар."""
     source = (
         "Сироп роза 5 штук только охлаждённый и говядина 10 килограмм без кожи. "
         "Всё привезти после девяти утра без звонка."
@@ -193,6 +226,7 @@ def test_global_comment_is_not_duplicated_as_a_product() -> None:
 
 
 def test_voice_beef_cannot_gain_an_unspoken_qualifier_or_auto_select(settings) -> None:  # type: ignore[no-untyped-def]
+    """Проверяет, что голос говядина не может получает an unspoken qualifier или auto select."""
     payload = {
         "intent": Intent.ADD_ITEMS,
         "items": [

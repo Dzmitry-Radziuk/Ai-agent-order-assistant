@@ -12,10 +12,12 @@ from restaurant_bot.services.engine import ConversationEngine
 
 
 def _event() -> TelegramEvent:
+    """Создаёт тестовое событие Telegram."""
     return TelegramEvent(update_id=1, chat_id="123456", input_type=InputKind.TEXT)
 
 
 def test_submit_request_opens_final_review_without_enqueuing(settings) -> None:  # type: ignore[no-untyped-def]
+    """Проверяет, что отправка запрос открывает финальный review без enqueuing."""
     engine = ConversationEngine(settings)
     catalog = [CatalogProduct(product_id="rose", name="Сироп Роза", supplier="Сиропы", unit="шт")]
     added = engine.handle(
@@ -38,6 +40,7 @@ def test_submit_request_opens_final_review_without_enqueuing(settings) -> None: 
 
 
 def test_clear_cart_removes_draft_and_returns_to_collecting(settings) -> None:  # type: ignore[no-untyped-def]
+    """Проверяет, что очистка черновик удаляет черновик и возвращает в collecting."""
     engine = ConversationEngine(settings)
     state = ConversationState(cart=[])
 

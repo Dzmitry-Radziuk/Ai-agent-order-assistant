@@ -23,11 +23,9 @@ scripts
 AGENTS.md
 CLAUDE.md
 tests
-deploy
 .coverage
 htmlcov
 dist
 build
 *.egg-info
 n8n_extract
-.gitlab-ci_old.yml

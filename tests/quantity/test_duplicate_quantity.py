@@ -15,6 +15,7 @@ from restaurant_bot.services.parser import infer_intent
 
 
 def _event() -> TelegramEvent:
+    """Создаёт тестовое событие Telegram."""
     return TelegramEvent(update_id=1, chat_id="123456", input_type=InputKind.TEXT)
 
 
@@ -29,6 +30,7 @@ def _voice(text: str) -> TelegramEvent:
 
 
 def test_repeated_product_with_quantity_requires_explicit_merge(settings) -> None:  # type: ignore[no-untyped-def]
+    """Проверяет, что повторный товар with количество требует явный merge."""
     engine = ConversationEngine(settings)
     catalog = [CatalogProduct(product_id="rose", name="Сироп Роза", supplier="Сиропы", unit="шт")]
     first = engine.handle(
@@ -59,6 +61,7 @@ def test_repeated_product_with_quantity_requires_explicit_merge(settings) -> Non
 
 
 def test_duplicate_merge_adds_only_the_confirmed_increment(settings) -> None:  # type: ignore[no-untyped-def]
+    """Проверяет, что дубликат merge добавляет только confirmed увеличение."""
     engine = ConversationEngine(settings)
     catalog = [CatalogProduct(product_id="rose", name="Сироп Роза", supplier="Сиропы", unit="шт")]
     state = ConversationState()
@@ -182,6 +185,7 @@ def test_voice_variants_skip_duplicate(settings, phrase: str) -> None:  # type: 
 
 
 def test_identical_resolved_voice_duplicates_are_collapsed_without_doubling(settings) -> None:  # type: ignore[no-untyped-def]
+    """Проверяет, что одинаковые resolved голос дубликаты являются объединяются без doubling."""
     engine = ConversationEngine(settings)
     first = engine._build_item(
         ExtractedItem(product_query="говядина мраморная", quantity=10, unit="кг")
@@ -203,3 +207,83 @@ def test_identical_resolved_voice_duplicates_are_collapsed_without_doubling(sett
     assert len(state.cart) == 1
     assert state.cart[0].quantity == 10
     assert state.cart[0].comment == "только мраморная"
+
+
+def test_resolved_same_product_quantities_are_combined_into_one_row(settings) -> None:  # type: ignore[no-untyped-def]
+    """Объединяет ранее сохранённые строки одного товара с разным количеством."""
+    engine = ConversationEngine(settings)
+    first = engine._build_item(
+        ExtractedItem(product_query="Сыр Швейцарский", quantity=2, unit="шт")
+    )
+    second = engine._build_item(
+        ExtractedItem(product_query="Сыр Швейцарский", quantity=3, unit="шт")
+    )
+    for item in (first, second):
+        item.catalog_product_id = "cheese"
+        item.catalog_name = "Сыр Швейцарский Сыробогатов 180гр"
+        item.catalog_unit = "шт"
+        item.status = ItemStatus.MATCHED
+    first.comment = "без замены"
+    second.comment = "для кухни"
+    state = ConversationState(cart=[first, second])
+
+    engine._remove_exact_cart_duplicates(state)
+
+    assert len(state.cart) == 1
+    assert state.cart[0].quantity == 5
+    assert state.cart[0].comment == "без замены; для кухни"
+
+
+@pytest.mark.parametrize(
+    ("input_kind", "phrase"),
+    [
+        (InputKind.VOICE, "три."),
+        (InputKind.TEXT, "три"),
+        (InputKind.VOICE, "добавь три штуки."),
+        (InputKind.VOICE, "давай 3 штуки"),
+    ],
+)
+def test_contextual_duplicate_quantity_merges_with_existing_row(
+    settings,
+    input_kind: InputKind,
+    phrase: str,
+) -> None:  # type: ignore[no-untyped-def]
+    """Прибавляет короткое количество к существующей строке товара."""
+    engine = ConversationEngine(settings)
+    existing = engine._build_item(
+        ExtractedItem(product_query="Сыр Швейцарский", quantity=2, unit="шт")
+    )
+    existing.id = "existing"
+    existing.catalog_product_id = "cheese"
+    existing.catalog_name = "Сыр Швейцарский Сыробогатов 180гр"
+    existing.catalog_unit = "шт"
+    existing.status = ItemStatus.MATCHED
+    duplicate = engine._build_item(ExtractedItem(product_query="Сыр Швейцарский"))
+    duplicate.id = "duplicate"
+    duplicate.catalog_product_id = "cheese"
+    duplicate.catalog_name = existing.catalog_name
+    duplicate.catalog_unit = "шт"
+    duplicate.status = ItemStatus.DUPLICATE_PENDING
+    duplicate.issue_message = existing.id
+    duplicate.duplicate_existing_quantity = 2
+    duplicate.duplicate_existing_unit = "шт"
+    state = ConversationState(
+        cart=[existing, duplicate],
+        current_issue_item_id=duplicate.id,
+    )
+    event = TelegramEvent(
+        update_id=3,
+        chat_id="123456",
+        input_type=input_kind,
+        text=phrase,
+    )
+
+    result = engine.handle(event, infer_intent(phrase), state, [])
+
+    assert len(result.state.cart) == 2
+    assert result.state.cart[0].quantity == 5
+    assert result.state.cart[1].quantity == 3
+    assert result.state.cart[1].status is ItemStatus.SKIPPED
+    assert result.state.current_issue_item_id == ""
+    assert sum(item.status is ItemStatus.MATCHED for item in result.state.cart) == 1
+    assert "Сыр Швейцарский Сыробогатов 180гр — 5 шт" in result.reply.text

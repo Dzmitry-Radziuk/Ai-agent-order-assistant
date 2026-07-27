@@ -25,14 +25,17 @@ from restaurant_bot.services.parser import infer_intent
     ],
 )
 def test_primary_telegram_commands_have_deterministic_intents(command: str, intent: Intent) -> None:
+    """Проверяет, что основная модель Telegram команды имеют детерминированный intents."""
     assert infer_intent(command).intent is intent
 
 
 def test_command_with_bot_suffix_has_same_intent() -> None:
+    """Проверяет, что команда with бота суффикс имеет тот же намерение."""
     assert infer_intent("/submit@restaurant_order_bot").intent is Intent.SUBMIT_REQUEST
 
 
 def test_draft_and_cancel_preserve_existing_procurement_request(settings) -> None:  # type: ignore[no-untyped-def]
+    """Проверяет, что черновик и cancel сохраняет существующий procurement запрос."""
     engine = ConversationEngine(settings)
     state = ConversationState(
         cart=[
@@ -63,6 +66,7 @@ def test_draft_and_cancel_preserve_existing_procurement_request(settings) -> Non
 
 
 def test_order_status_callback_uses_source_progress_text(settings) -> None:  # type: ignore[no-untyped-def]
+    """Проверяет, что заказ статус callback использует исходный прогресс текст."""
     result = ConversationEngine(settings).handle(
         TelegramEvent(
             update_id=1, chat_id="1", input_type=InputKind.CALLBACK, callback_message_id=42

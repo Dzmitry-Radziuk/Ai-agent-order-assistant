@@ -123,6 +123,7 @@ def _privacy_processor(
     """Создаёт процессор обезличивания структурированных событий."""
 
     def processor(_: Any, __: str, event_dict: dict[str, Any]) -> dict[str, Any]:
+        """Обезличивает одно структурированное событие журнала."""
         return {
             key: sanitize_log_value(
                 value,

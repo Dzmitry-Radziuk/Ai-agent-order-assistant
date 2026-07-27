@@ -12,6 +12,7 @@ from restaurant_bot.services.engine import ConversationEngine
 
 
 def test_repeat_missing_product_keeps_one_open_question(settings) -> None:  # type: ignore[no-untyped-def]
+    """Проверяет, что repeat отсутствующий товар сохраняет один открытый question."""
     engine = ConversationEngine(settings)
     catalog = [CatalogProduct(product_id="rose", name="Сироп Роза", supplier="Сиропы", unit="шт")]
     first = engine.handle(

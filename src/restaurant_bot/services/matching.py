@@ -48,6 +48,17 @@ def tokens(value: str) -> set[str]:
     }
 
 
+def supplier_matches_hint(supplier: str, supplier_hint: str) -> bool:
+    """Сопоставляет полное и сокращённое названия одного поставщика."""
+    normalized_supplier = normalize_text(supplier)
+    normalized_hint = normalize_text(supplier_hint)
+    return bool(
+        normalized_supplier
+        and normalized_hint
+        and (normalized_supplier in normalized_hint or normalized_hint in normalized_supplier)
+    )
+
+
 def _token_matches(query_token: str, product_token: str) -> bool:
     """Проверяет достаточность совпадения поискового слова."""
     if query_token == product_token:
@@ -55,11 +66,13 @@ def _token_matches(query_token: str, product_token: str) -> bool:
     short, long = sorted((query_token, product_token), key=len)
     if len(short) >= 4 and short in long and len(short) / len(long) >= 0.6:
         return True
-    if len(query_token) < 4 or len(product_token) < 4:
+    if len(query_token) < 3 or len(product_token) < 3:
         return False
     if query_token[0] != product_token[0]:
         return False
-    return SequenceMatcher(None, query_token, product_token).ratio() >= 0.72
+    similarity = SequenceMatcher(None, query_token, product_token).ratio()
+    threshold = 0.8 if min(len(query_token), len(product_token)) == 3 else 0.72
+    return similarity >= threshold
 
 
 def has_catalog_search_evidence(query: str, product: CatalogProduct) -> bool:
@@ -92,11 +105,17 @@ def has_catalog_search_evidence(query: str, product: CatalogProduct) -> bool:
 def has_complete_query_evidence(query: str, product_name: str) -> bool:
     """Проверяет совпадение всех значимых слов запроса."""
     query_tokens = tokens(query)
+    return bool(query_tokens) and query_evidence_tokens(query, product_name) == query_tokens
+
+
+def query_evidence_tokens(query: str, product_name: str) -> set[str]:
+    """Возвращает слова запроса, подтверждённые названием товара."""
     product_tokens = tokens(product_name)
-    return bool(query_tokens and product_tokens) and all(
-        any(_token_matches(query_token, product_token) for product_token in product_tokens)
-        for query_token in query_tokens
-    )
+    return {
+        query_token
+        for query_token in tokens(query)
+        if any(_token_matches(query_token, product_token) for product_token in product_tokens)
+    }
 
 
 def match_score(query: str, product: CatalogProduct, supplier_hint: str = "") -> float:
@@ -136,7 +155,7 @@ def match_score(query: str, product: CatalogProduct, supplier_hint: str = "") ->
         # below the automatic-selection threshold.
         if compact_similarity >= 0.77:
             base = max(base, 55 * compact_similarity)
-    if supplier_hint and normalize_text(supplier_hint) in normalize_text(product.supplier):
+    if supplier_matches_hint(product.supplier, supplier_hint):
         base += 8
     return min(100.0, base)
 
@@ -149,9 +168,7 @@ def rank_candidates(
 ) -> list[Candidate]:
     """Ранжирует кандидатов из каталога."""
     supplier_matches = [
-        product
-        for product in catalog
-        if supplier_hint and normalize_text(supplier_hint) in normalize_text(product.supplier)
+        product for product in catalog if supplier_matches_hint(product.supplier, supplier_hint)
     ]
     scoped_catalog = supplier_matches or catalog
     ranked: list[Candidate] = []
@@ -195,6 +212,20 @@ def can_auto_select(candidates: list[Candidate]) -> bool:
 def is_broad_category_query(query: str, candidates: list[Candidate]) -> bool:
     """Определяет слишком общий категорийный запрос."""
     query_tokens = tokens(query)
+    if not query_tokens or not candidates:
+        return False
+
+    def name_key(value: str) -> str:
+        """Возвращает ключ полного названия без знаков оформления."""
+        return re.sub(r"[^a-zа-я0-9]+", "", normalize_text(value))
+
+    query_key = name_key(query)
+    exact_matches = [candidate for candidate in candidates if name_key(candidate.name) == query_key]
+    if exact_matches:
+        # Одно полное совпадение безопасно. Одинаковые строки от нескольких
+        # поставщиков всё равно требуют явного выбора пользователя.
+        return len(exact_matches) > 1
+
     if len(query_tokens) == 1:
         category = next(iter(query_tokens))
         for candidate in candidates:
@@ -214,12 +245,17 @@ def is_broad_category_query(query: str, candidates: list[Candidate]) -> bool:
 
     def evidence(candidate: Candidate) -> set[str]:
         """Возвращает подтверждённые совпадения кандидата."""
-        product_tokens = tokens(candidate.name)
-        return {
-            query_token
-            for query_token in query_tokens
-            if any(_token_matches(query_token, product_token) for product_token in product_tokens)
-        }
+        return query_evidence_tokens(query, candidate.name)
+
+    complete_candidates = [
+        candidate for candidate in candidates if evidence(candidate) == query_tokens
+    ]
+    if len(complete_candidates) >= 2:
+        # Запрос из нескольких слов тоже может быть лишь названием линейки:
+        # «Кордиал ЛЬЮ» полностью входит во множество разных вкусов. Ни
+        # разница в баллах, ни ИИ не должны выбирать первый товар вместо
+        # пользователя.
+        return True
 
     first_evidence = evidence(candidates[0])
     second_evidence = evidence(candidates[1])

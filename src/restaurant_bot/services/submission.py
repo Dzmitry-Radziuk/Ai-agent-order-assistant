@@ -17,7 +17,7 @@ from restaurant_bot.domain.models import (
     PendingSubmission,
     SessionStage,
 )
-from restaurant_bot.integrations.cache import CatalogCache, chat_lock
+from restaurant_bot.integrations.cache import CatalogCache, chat_lock, google_history_lock_key
 from restaurant_bot.integrations.google_sheets import GoogleSheetsError, GoogleSheetsGateway
 from restaurant_bot.integrations.telegram import TelegramClient
 from restaurant_bot.repositories.order_events import OrderEventRepository
@@ -72,7 +72,7 @@ class SubmissionService:
                 if not record.history_written:
                     stage_started = perf_counter()
                     with self.redis.lock(
-                        "lock:google-history-write",
+                        google_history_lock_key(spreadsheet_id),
                         timeout=120,
                         blocking_timeout=120,
                     ):

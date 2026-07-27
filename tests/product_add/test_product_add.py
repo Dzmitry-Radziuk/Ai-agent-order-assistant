@@ -24,12 +24,14 @@ from restaurant_bot.services.submission import SubmissionService
 
 
 def _event(update_id: int = 1, text: str = "") -> TelegramEvent:
+    """Создаёт тестовое событие Telegram."""
     return TelegramEvent(
         update_id=update_id, chat_id="123456", input_type=InputKind.TEXT, text=text
     )
 
 
 def test_product_add_request_removes_unresolved_item_and_enqueues_sheet_write(settings) -> None:  # type: ignore[no-untyped-def]
+    """Проверяет, что товар добавление запрос удаляет неразрешённая позиция и enqueues таблица запись."""
     engine = ConversationEngine(settings)
     missing = engine.handle(
         _event(),
@@ -65,6 +67,7 @@ def test_product_add_request_removes_unresolved_item_and_enqueues_sheet_write(se
 
 
 def test_product_add_keeps_other_unresolved_items_in_draft(settings) -> None:  # type: ignore[no-untyped-def]
+    """Проверяет, что товар добавление сохраняет другое неразрешённая позиции в черновик."""
     engine = ConversationEngine(settings)
     catalog = [CatalogProduct(product_id="rose", name="Сироп Роза", supplier="Сиропы", unit="шт")]
     added = engine.handle(
@@ -100,10 +103,12 @@ def test_product_add_keeps_other_unresolved_items_in_draft(settings) -> None:  #
 
 
 def _button_texts(reply) -> list[str]:  # type: ignore[no-untyped-def]
+    """Возвращает тексты кнопок тестового ответа."""
     return [button.text for row in reply.rows for button in row]
 
 
 def test_product_add_is_available_from_not_found_and_ambiguous_screens() -> None:
+    """Проверяет, что товар добавление является доступно из не found и неоднозначный screens."""
     not_found = issue_reply(
         CartItem(id="missing", source_query="Мисо-паста Genzo", status=ItemStatus.NOT_FOUND)
     )
@@ -135,6 +140,7 @@ def test_product_add_is_available_from_not_found_and_ambiguous_screens() -> None
 
 
 def test_product_add_prompt_requests_all_details_in_one_message(settings) -> None:  # type: ignore[no-untyped-def]
+    """Проверяет, что товар добавление инструкция модели запросы все details в один сообщение."""
     engine = ConversationEngine(settings)
     state = ConversationState(
         cart=[CartItem(id="missing", source_query="Мисо-паста Genzo", status=ItemStatus.NOT_FOUND)],
@@ -152,6 +158,7 @@ def test_product_add_prompt_requests_all_details_in_one_message(settings) -> Non
 
 
 def test_product_add_description_event_is_idempotent(settings) -> None:  # type: ignore[no-untyped-def]
+    """Проверяет, что товар добавление описание событие является idempotent."""
     engine = ConversationEngine(settings)
     prompt_state = ConversationState(
         stage="await_product_add_details",
@@ -170,6 +177,7 @@ def test_product_add_description_event_is_idempotent(settings) -> None:  # type:
 
 
 def test_voice_product_add_details_keep_sender_and_are_idempotent(settings) -> None:  # type: ignore[no-untyped-def]
+    """Проверяет, что голос товар добавление details keep отправитель и являются idempotent."""
     engine = ConversationEngine(settings)
     state = ConversationState(
         stage=SessionStage.AWAIT_PRODUCT_ADD_DETAILS,
@@ -210,6 +218,7 @@ def test_voice_product_add_details_keep_sender_and_are_idempotent(settings) -> N
 
 
 def test_product_add_retry_reuses_id_and_never_retries_uncertain_write(settings) -> None:  # type: ignore[no-untyped-def]
+    """Проверяет, что товар добавление повтор reuses идентификатор и никогда не повторяет uncertain запись."""
     engine = ConversationEngine(settings)
     state = ConversationState(
         product_add_requests=[
@@ -239,6 +248,7 @@ def test_product_add_retry_reuses_id_and_never_retries_uncertain_write(settings)
 
 
 def test_product_add_write_outcomes_are_persisted_before_the_reply_is_built() -> None:
+    """Проверяет, что товар добавление запись результаты являются persisted до ответ является built."""
     state = ConversationState(
         stage=SessionStage.AWAIT_PRODUCT_ADD_DETAILS,
         status="await_product_add_details",
@@ -274,6 +284,7 @@ def test_product_add_write_outcomes_are_persisted_before_the_reply_is_built() ->
 
 
 def test_product_add_success_is_shown_before_a_fresh_draft() -> None:
+    """Проверяет, что товар добавление успех является shown до a fresh черновик."""
     service = object.__new__(SubmissionService)
     service.telegram = MagicMock()
     service.telegram.send_reply.side_effect = [77, 88]
@@ -315,6 +326,7 @@ def test_product_add_success_is_shown_before_a_fresh_draft() -> None:
 
 
 def test_product_add_request_list_keeps_request_separate_from_cart() -> None:
+    """Проверяет, что товар добавление запрос список сохраняет запрос отдельно из черновик."""
     state = ConversationState(
         product_add_requests=[
             {"request_id": "add-1", "description": "Мисо-паста Genzo, 1 кг", "status": "submitted"}

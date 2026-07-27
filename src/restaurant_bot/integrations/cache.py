@@ -18,6 +18,15 @@ from restaurant_bot.integrations.google_sheets import GoogleSheetsError, GoogleS
 logger = structlog.get_logger(__name__)
 
 
+def google_history_lock_key(spreadsheet_id: str) -> str:
+    """Формирует отдельный ключ записи истории для таблицы заведения."""
+    target_id = spreadsheet_id.strip()
+    if not target_id:
+        raise GoogleSheetsError("Venue spreadsheet ID is required")
+    digest = hashlib.sha256(target_id.encode("utf-8")).hexdigest()[:20]
+    return f"lock:google-history-write:{digest}"
+
+
 class CatalogCache:
     """Кэширует каталоги заведений в Redis."""
 

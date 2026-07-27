@@ -22,7 +22,7 @@ services:
     restart: unless-stopped
     env_file:
       - .env
-    command: ["celery", "-A", "restaurant_bot.workers.celery_app.celery_app", "worker", "-l", "INFO", "--concurrency=${CELERY_CONCURRENCY:-4}"]
+    command: ["celery", "-A", "restaurant_bot.workers.celery_app.celery_app", "worker", "-l", "INFO", "--concurrency=${CELERY_CONCURRENCY:-10}"]
     networks:
       - backend
     healthcheck:

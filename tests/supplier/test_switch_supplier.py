@@ -11,6 +11,7 @@ from restaurant_bot.services.engine import ConversationEngine
 
 
 def test_switch_supplier_skips_failed_item_and_shows_supplier_choices(settings) -> None:  # type: ignore[no-untyped-def]
+    """Проверяет, что смена поставщик пропускает failed позиция и показывает поставщик choices."""
     engine = ConversationEngine(settings)
     state = ConversationState(
         supplier_hint_context="Поставщик А",

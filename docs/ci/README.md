@@ -1,86 +1,75 @@
 <!-- generated-by: gsd-doc-writer -->
 # GitLab CI и правила веток
 
-## Ветки
+## Источник конфигурации
 
-- `develop` — основная ветка Python-приложения.
-- Новая разработка выполняется в короткоживущих feature-ветках от `develop`.
-- Feature-ветка возвращается в `develop` через Merge Request с успешным pipeline.
-- `main` в текущем GitLab-проекте содержит отдельную историю n8n и не является базой Python-кода.
+Локальный `.gitlab-ci.yml` задаёт переменные проекта и подключает корпоративные
+шаблоны `antipov-devops/ci-templates`:
+
+- `build-hatch.yml` — pytest и Ruff для Python-проекта на Hatchling;
+- `security-scan.yml` — Code Quality, SAST и Secret Detection;
+- `docker-build.yml` — сборка и публикация Docker image;
+- `deploy.yml` — развёртывание development и production.
+
+Локальная конфигурация не копирует и не переопределяет DevOps jobs: она задаёт
+переменные приложения, а сборка и доставка приходят из корпоративных шаблонов.
+Production image собирается по `docker/Dockerfile`, а серверные контейнеры
+описаны в `docker/docker-compose.yml`.
+
+## Фактический pipeline
+
+| Stage / job | Что выполняется |
+|---|---|
+| `build` | Установка `.[dev]`, полный pytest и HTML coverage |
+| `lint` | `ruff check` и `ruff format --check` |
+| `scan` | Code Quality, SAST, Secret Detection и публикация Docker image |
+| `deploy-dev` | Автоматическое развёртывание ветки `develop` |
+| `deploy-prod` | Ручное развёртывание ветки `main` |
+
+Job `build` и `lint` используют runner с тегом `build`. Deploy jobs используют
+теги, заданные корпоративным `deploy.yml`: `dev` и `prod`.
+
+## Контракт тестов
+
+Корпоративный `build` запускает:
+
+```bash
+python -m pytest ${TEST_PATH:-tests/} ${PYTEST_ARGS:---tb=short} --cov --cov-report=html --cov-report=term-missing
+```
+
+Важно: фактическая команда pytest в текущем `build-hatch.yml` заканчивается
+`|| true`. Поэтому упавшие тесты видны в логах, но сами по себе не переводят
+`build` в статус failed. Изменение этого правила должно выполняться
+в корпоративном шаблоне DevOps, а не скрытым переопределением его `script` в
+проекте.
+
+## Ветки и доставка
+
+- Feature-ветки создаются от `develop` и возвращаются через Merge Request.
+- `develop` собирает image с SHA текущего commit и автоматически обновляет dev.
+- `main` использует тот же контракт сборки; production deployment запускается
+  вручную.
 - Force-push в `develop` не используется.
 
-## Когда запускается pipeline
-
-`.gitlab-ci.yml` создаёт pipeline для веток, тегов и Merge Request. Если для ветки уже открыт Merge Request, отдельный push-pipeline не создаётся — остаётся один MR pipeline.
-
-Quality, test и documentation jobs используют тег `dev` и выполняются общим
-instance Runner `DEVELOP gitlab.testant.online`. Для проекта должна быть
-включена настройка `Turn on instance runners for this project`.
-
-Сборка и развёртывание используют корпоративные runners:
-
-- `build-did` — BuildKit/buildx, GitLab Registry и S3 build cache;
-- `group-deploy-shell` — development Docker host;
-- `server-a-shell` — production Docker host.
-
-## Обязательные jobs
-
-| Job | Проверка |
-|---|---|
-| `lint` | `ruff format --check`, `ruff check`, строгий `mypy` |
-| `compose-config` | базовая и production Compose-конфигурации корректно объединяются |
-| `tests` | полный `pytest`, JUnit-отчёт, Cobertura coverage и порог покрытия 84% |
-| `documentation` | документация изменена вместе со значимым кодом; локальные Markdown-ссылки существуют |
-| `c4-architecture` | Structurizr DSL проходит `validate` и `inspect`; Mermaid-экспорт воспроизводим |
-| `build` | единый immutable Docker image публикуется в GitLab Registry с S3 build cache |
-| `deploy dev` | `develop` автоматически разворачивается в environment `development` |
-| `deploy prod` | тег `v*` вручную разворачивается в environment `production` |
-
-Все jobs блокирующие: `allow_failure` не используется.
-
-## Маршрутизация доставки
-
-Ветка `develop` публикуется в `${CI_REGISTRY_IMAGE}/dev` с SHA-тегом и
-автоматически разворачивается на development host. Теги `v*` публикуются в
-`${CI_REGISTRY_IMAGE}/prod`; production deploy запускается вручную.
-
-Ветка `main` не используется для production deployment, пока она содержит
-отдельную историю n8n. Полный перечень GitLab variables, требования к runners и
-операционные команды описаны в [`deploy/README.md`](../../deploy/README.md).
-
-## Правило актуальности документации
-
-Изменения в следующих областях требуют изменения `README.md`, `README-DEVOPS.md`, `SECURITY.md` или файла внутри `docs/` в том же commit/Merge Request:
-
-- `src/restaurant_bot/`;
-- миграции Alembic;
-- `Dockerfile`, `docker-compose.yml` и `docker-compose.prod.yml`;
-- `.env.example`, `pyproject.toml` и `Makefile`;
-- `.gitlab-ci.yml` и скрипты документационных проверок.
-
-Проверку выполняет `scripts/check_docs_updated.py`. Изменения только в тестах не требуют искусственной правки документации.
+Актуальные имена registry image, контейнера, сети и портов находятся в
+`.gitlab-ci.yml`. Значения из старой схемы GitLab Registry, S3 build cache и
+deploy по тегам `v*` к текущему pipeline не относятся.
 
 ## Локальная проверка
 
-Перед push:
-
 ```bash
+python -m pip install -e ".[dev]"
 python -m ruff format --check src tests alembic scripts
 python -m ruff check src tests alembic scripts
 python -m mypy src scripts
 python -m pytest
-python scripts/check_markdown_links.py
-python scripts/check_docs_updated.py --base HEAD^ --head HEAD
 ```
 
-C4 проверяется командами из `docs/architecture/c4/README.md`.
+## Проверка после изменения CI
 
-## Настройки GitLab
+Перед merge необходимо убедиться, что:
 
-После первого успешного pipeline рекомендуется защитить `develop`:
-
-- запретить прямой push;
-- разрешить изменения только через Merge Request;
-- включить требование успешного pipeline перед merge;
-- запретить force-push;
-- потребовать минимум одного reviewer для архитектурно значимых изменений.
+1. `build` запускает pytest и создаёт HTML coverage;
+2. `lint` выполняет проверки Ruff;
+3. `build-image` и deploy jobs сохранили прежние правила веток;
+4. в логи и артефакты не попали `.env`, токены или service-account JSON.

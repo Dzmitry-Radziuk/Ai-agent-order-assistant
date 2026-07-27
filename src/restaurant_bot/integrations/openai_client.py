@@ -7,21 +7,33 @@ from pathlib import Path
 from typing import Any, cast
 
 import structlog
-from openai import OpenAI
+from openai import APIConnectionError, APITimeoutError, OpenAI, RateLimitError
 from pydantic import BaseModel, Field
 
 from restaurant_bot.config import Settings
 from restaurant_bot.domain.models import ExtractedItem, Intent, ParsedCommand
-from restaurant_bot.services.parser import infer_intent, parse_product_lines
+from restaurant_bot.services.parser import infer_intent, parse_product_lines, parse_quantity_unit
 from restaurant_bot.services.text import (
     UNIT_ALIASES,
     clean_text,
     normalize_text,
     normalize_unit,
+    parse_number_words,
     to_float,
 )
 
 logger = structlog.get_logger(__name__)
+
+_EMPTY_AI_VALUES = {
+    "unknown",
+    "none",
+    "null",
+    "n/a",
+    "неизвестно",
+    "неизвестный",
+    "не указано",
+    "не указан",
+}
 
 
 class ParsedInputSchema(BaseModel):
@@ -49,22 +61,122 @@ class ProductMatchDecision(BaseModel):
     reason: str = ""
 
 
+class VisibleActionDecision(BaseModel):
+    """Проверяет выбор действия среди кнопок текущего экрана."""
+
+    action_id: str = ""
+    confidence: float = Field(default=0, ge=0, le=1)
+    reason: str = ""
+
+
+def _quantity_outside_packaged_query(
+    product_query: str,
+    source_line: str,
+) -> tuple[float | None, str]:
+    """Находит количество после названия товара с указанной фасовкой."""
+    normalized_query = normalize_text(product_query)
+    normalized_source = normalize_text(source_line)
+    unit_pattern = "|".join(
+        sorted((re.escape(unit) for unit in UNIT_ALIASES), key=len, reverse=True)
+    )
+    if not re.search(rf"\d+(?:[,.]\d+)?\s*(?:{unit_pattern})\b", normalized_query):
+        return None, ""
+    query_start = normalized_source.find(normalized_query)
+    if query_start < 0:
+        return None, ""
+
+    before = normalized_source[:query_start].strip(" ,;:-—–")
+    after = normalized_source[query_start + len(normalized_query) :].strip(" ,;:-—–")
+    for outside_query in (after, before):
+        quantity, unit = parse_quantity_unit(outside_query)
+        if quantity is not None and unit:
+            return quantity, unit
+    return None, ""
+
+
+def _quantities_with_units(source_line: str) -> list[tuple[float, str]]:
+    """Извлекает все явно указанные количества вместе с единицами."""
+    normalized = normalize_text(source_line).replace(",", ".")
+    normalized = re.sub(r"(?<=\d)(?=[a-zа-я])", " ", normalized, flags=re.I)
+    tokens = [token.strip(" .,:;—–-") for token in normalized.split()]
+    found: list[tuple[float, str]] = []
+    index = 0
+    while index < len(tokens):
+        parsed = parse_number_words(tokens, index)
+        if parsed is None:
+            index += 1
+            continue
+        quantity, end = parsed
+        raw_unit = tokens[end] if end < len(tokens) else ""
+        if raw_unit in UNIT_ALIASES:
+            found.append((quantity, normalize_unit(raw_unit)))
+            index = end + 1
+            continue
+        index += 1
+    return found
+
+
+def _clear_unknown_item_placeholders(items: list[dict[str, Any]]) -> None:
+    """Очищает служебные заглушки ИИ в полях маршрутизации товара."""
+    for item in items:
+        for field in ("department", "supplier_hint", "source_department"):
+            if normalize_text(item.get(field)) in _EMPTY_AI_VALUES:
+                item[field] = ""
+
+
 def restore_explicit_order_terms(
     items: list[dict[str, Any]], source_text: str = ""
 ) -> list[dict[str, Any]]:
     """Восстанавливает явно указанное количество или единицу."""
     recovered_from_message = parse_product_lines(source_text)
     for index, item in enumerate(items):
-        source_line = clean_text(item.get("source_line"))
-        recovered = parse_product_lines(source_line)
-        source = recovered[0] if len(recovered) == 1 else None
+        original_line = clean_text(item.get("source_line")) or clean_text(source_text)
+        outside_quantity, outside_unit = _quantity_outside_packaged_query(
+            clean_text(item.get("product_query")),
+            original_line,
+        )
+        if outside_quantity is not None:
+            item["source_line"] = original_line
+            item["quantity"] = outside_quantity
+            item["unit"] = outside_unit
+            continue
+
+        # A source can contain both packaging in the name and order quantity.
+        # Keep the model value only when it is explicitly present in the source.
+        explicit_terms = _quantities_with_units(original_line)
+        model_quantity = to_float(item.get("quantity"))
+        model_unit = normalize_unit(item.get("unit"))
+        if (
+            len(items) == 1
+            and len(explicit_terms) >= 2
+            and model_quantity is not None
+            and model_unit
+            and any(
+                abs(quantity - model_quantity) <= 1e-9 and unit == model_unit
+                for quantity, unit in explicit_terms
+            )
+        ):
+            item["source_line"] = original_line
+            item["quantity"] = model_quantity
+            item["unit"] = model_unit
+            continue
+
         # n8n recovers each explicit spoken order term even when the model
         # returned one shared source_line for a multi-product voice message.
-        # Positional recovery is safe only for an equal-length enumeration;
-        # it never invents a product or replaces an LLM product name.
-        if source is None and len(items) == len(recovered_from_message):
+        # Positional recovery from the complete user message is authoritative
+        # when both enumerations have the same length. The model often copies
+        # the whole message into every source_line; parsing that field first
+        # would assign the final product's quantity to all preceding items.
+        source = None
+        if len(items) == len(recovered_from_message):
             source = recovered_from_message[index]
+        if source is None:
+            source_line = clean_text(item.get("source_line"))
+            recovered = parse_product_lines(source_line)
+            source = recovered[0] if len(recovered) == 1 else None
         if source is not None:
+            if not clean_text(item.get("source_line")):
+                item["source_line"] = source.source_line or clean_text(source_text)
             # The original spoken/source line is authoritative. In
             # particular, the model must not invent "one bottle" for a line
             # that contains no quantity at all.
@@ -179,6 +291,7 @@ def collapse_comment_shadow_items(
 def recover_omitted_explicit_items(payload: dict[str, Any], source_text: str) -> dict[str, Any]:
     """Восстанавливает пропущенные явно названные товары."""
     items = list(payload.get("items") or [])
+    _clear_unknown_item_placeholders(items)
     intent = Intent(payload.get("intent", Intent.UNKNOWN))
     if intent not in {Intent.ADD_ITEMS, Intent.UNKNOWN}:
         # Навигация не может содержать товары. Иначе защитное восстановление
@@ -228,9 +341,13 @@ _TEXT_SYSTEM = """
   «позиция», «позиции» и «продукты» сами по себе не являются названием товара.
 - Навигационная команда может быть длинной, разговорной, с вводными словами и любым
   порядком слов. Определи действие по смыслу, не превращай всю фразу в product_query.
+- Явное отрицание всегда важнее глагола действия: «не добавлять» — skip_current,
+  «не отправляй» — cancel, а не add_more/submit_request. Никогда не выполняй
+  добавление, отправку, очистку, выбор или подтверждение, если пользователь их отрицает.
 - Примеры навигации: «давай пойдём и добавим товары» → add_more;
   «давай посмотрим наши статусы» → order_status;
   «можно вернуться и открыть черновик» → show_cart;
+  «новый заказ», «хочу оформить ещё одну заявку» → start_new_order;
   «запросы снабженцу», «посмотреть запросы» → product_add_list.
 - Поддерживай свободный порядок товара, количества, единицы и комментария, разную пунктуацию, запятые, тире, слеши и голосовые оговорки.
 - Сохраняй исходную строку в source_line. Комментарий сохраняй в comment и не включай его в product_query.
@@ -238,7 +355,12 @@ _TEXT_SYSTEM = """
 - Если комментарий относится ко всем позициям, верни его в global_comment; индивидуальные комментарии оставь в item.comment.
 - Никогда не создавай отдельный item из комментария или из фрагмента между двумя товарами.
 - Слова о качестве, обработке, доставке, замене и пожеланиях пользователя сохраняй дословно в comment, а не в product_query.
+- Незнакомое или написанное с опечаткой слово рядом с категорией товара может быть частью названия.
+  Не переноси такое слово в comment только потому, что оно написано неправильно.
+- Отделяй от возможного названия только явное пожелание о качестве, состоянии, обработке,
+  доставке или замене. Само возможное название сохраняй дословно, без исправления.
 - Пример: «говядина 10 кг мраморная без кожи» → product_query="говядина", quantity=10, unit="кг", comment="мраморная без кожи".
+- Пример с опечаткой: «сироп рза холодным» → product_query="сироп рза", comment="холодным".
 - Пример общего комментария: «всё привезти до 9 утра» → global_comment="привезти до 9 утра" и не создавай из него товар.
 - Не выдумывай товар, количество, бренд, поставщика или характеристики.
 - Если количество без единицы, сохрани число, а unit оставь пустым.
@@ -254,7 +376,7 @@ _TEXT_SYSTEM = """
 clear_cart, confirm, cancel, show_cart, submit_request, edit_quantity, select_candidate, add_more,
 greeting, help, thanks, small_talk, back, continue_current, check_min_sum, add_supplier_items,
 submit_as_is, accept_suggested_quantity, keep_current_quantity, enter_other_quantity,
-use_catalog_unit, show_final_review, order_status, product_add_list, unknown.
+use_catalog_unit, show_final_review, order_status, product_add_list, start_new_order, unknown.
 Для просмотра ранее созданных запросов снабженцу используй product_add_list.
 """.strip()
 
@@ -285,6 +407,9 @@ source_department, department_quantities, quantity_source, printed_reference_tex
 в полях hall, bar, kitchen соответственно. Количество может быть напечатано или вписано ручкой.
 Если печатное значение зачёркнуто и рядом указано новое, верни только новое рукописное значение.
 Строку без положительного количества во всех трёх колонках полностью пропускай.
+Не переноси значение из соседней строки: количество, подразделение и комментарий относятся только к товару
+на той же горизонтальной строке. Если ячейки «Зал», «Бар» и «Кухня» текущего товара пусты, полностью пропусти именно эту строку,
+даже когда строка ниже содержит количество. Значение в строке ниже относится только к товару в строке ниже.
 
 КРИТИЧЕСКОЕ ПРАВИЛО ДЛЯ printed_order_form:
 - Фактическим заказом является только отдельное разборчивое число в крайней правой ячейке строки.
@@ -317,6 +442,17 @@ _MATCH_SYSTEM = """
 Если подходят несколько - ambiguous. Если ни один - not_found. Не используй внешние знания для выдумывания позиции.
 """.strip()
 
+_VISIBLE_ACTION_SYSTEM = """
+Ты определяешь, хочет ли пользователь выполнить одно из действий, доступных на текущем экране
+Telegram-бота. Выбирай только action_id из переданного списка actions.
+
+Пользователь может говорить разговорно, менять порядок слов, использовать синонимы, называть
+номер кнопки, часть её текста или смысл действия. Если фраза является названием товара,
+комментарием, количеством или не относится ни к одной кнопке, верни пустой action_id.
+Отрицание действия запрещает выбирать противоположную положительную кнопку.
+Не выдумывай действие. confidence >= 0.9 ставь только при однозначном соответствии.
+""".strip()
+
 
 class OpenAIService:
     """Выполняет распознавание, анализ фото и сопоставление товаров."""
@@ -326,8 +462,8 @@ class OpenAIService:
         self.settings = settings
         self.client = OpenAI(
             api_key=settings.openai_api_key.get_secret_value(),
-            timeout=45.0,
-            max_retries=2,
+            timeout=settings.openai_text_timeout_seconds,
+            max_retries=settings.openai_text_max_retries,
         )
         self.vision_client = OpenAI(
             api_key=settings.openai_api_key.get_secret_value(),
@@ -354,6 +490,30 @@ class OpenAIService:
                 items=[self._item_log(item) for item in deterministic.items],
             )
             return deterministic
+        if self._can_use_deterministic_single_product_with_quantity(text, deterministic):
+            logger.info(
+                "text_single_product_deterministic",
+                text=text,
+                intent=deterministic.intent.value,
+                items=[self._item_log(item) for item in deterministic.items],
+            )
+            return deterministic
+        if self._can_use_deterministic_short_product(text, deterministic):
+            logger.info(
+                "text_short_product_deterministic",
+                text=text,
+                intent=deterministic.intent.value,
+                items=[self._item_log(item) for item in deterministic.items],
+            )
+            return deterministic
+        if self._can_use_deterministic_packaged_product(text, deterministic):
+            logger.info(
+                "text_packaged_product_deterministic",
+                text=text,
+                intent=deterministic.intent.value,
+                items=[self._item_log(item) for item in deterministic.items],
+            )
+            return deterministic
         if self._should_skip_ai(text):
             logger.info(
                 "text_ai_skipped",
@@ -362,12 +522,24 @@ class OpenAIService:
                 item_count=len(deterministic.items),
             )
             return deterministic
-        response = self.client.responses.parse(
-            model=self.settings.openai_text_model,
-            instructions=_TEXT_SYSTEM,
-            input=text,
-            text_format=ParsedInputSchema,
-        )
+        try:
+            response = self.client.responses.parse(
+                model=self.settings.openai_text_model,
+                instructions=_TEXT_SYSTEM,
+                input=text,
+                text_format=ParsedInputSchema,
+            )
+        except (APIConnectionError, APITimeoutError, RateLimitError) as error:
+            logger.warning(
+                "text_ai_transport_failed",
+                text=text,
+                error_type=type(error).__name__,
+                deterministic_intent=deterministic.intent.value,
+                deterministic_item_count=len(deterministic.items),
+            )
+            if deterministic.intent == Intent.ADD_ITEMS and deterministic.items:
+                return deterministic
+            raise
         parsed = response.output_parsed
         if parsed is None:
             logger.warning("text_ai_empty_result", text=text)
@@ -410,7 +582,7 @@ class OpenAIService:
         if command.intent != Intent.ADD_ITEMS or len(command.items) < 2:
             return False
 
-        raw = clean_text(text).lower().replace("ё", "е")
+        raw = str(text or "").strip().lower().replace("ё", "е")
         segments = [
             clean_text(part)
             for part in re.split(r"\s*(?:;|\n|(?<!\d),(?!\d)|\s+и\s+)\s*", raw)
@@ -423,7 +595,7 @@ class OpenAIService:
             sorted((re.escape(unit) for unit in UNIT_ALIASES), key=len, reverse=True)
         )
         item_pattern = re.compile(
-            rf"^(?P<name>.+?)\s+(?P<quantity>\d+(?:[,.]\d+)?)\s*"
+            rf"^(?P<name>.+?)\s*(?:[-—–:]\s*)?(?P<quantity>\d+(?:[,.]\d+)?)\s*"
             rf"(?P<unit>{unit_pattern})$",
             re.IGNORECASE,
         )
@@ -436,7 +608,7 @@ class OpenAIService:
             match = item_pattern.fullmatch(segment)
             if match is None:
                 return False
-            name = normalize_text(match.group("name"))
+            name = normalize_text(match.group("name")).strip(" -:—–")
             if not name or re.search(r"\d", name) or suspicious_words.search(name):
                 return False
             if normalize_text(item.product_query) != name:
@@ -448,6 +620,75 @@ class OpenAIService:
             if normalize_unit(match.group("unit")) != normalize_unit(item.unit):
                 return False
         return True
+
+    @staticmethod
+    def _can_use_deterministic_single_product_with_quantity(
+        text: str,
+        command: ParsedCommand,
+    ) -> bool:
+        """Проверяет однозначный одиночный товар с количеством."""
+        if command.intent != Intent.ADD_ITEMS or len(command.items) != 1:
+            return False
+        item = command.items[0]
+        normalized_units = set(UNIT_ALIASES.values())
+        raw_source = clean_text(text)
+        source = raw_source.rstrip(" .!?")
+        item_source = clean_text(item.source_line).rstrip(" .!?")
+        return bool(
+            source
+            and raw_source.endswith((".", "!", "?"))
+            and item_source == source
+            and item.product_query
+            and item.quantity is not None
+            and item.quantity > 0
+            and normalize_unit(item.unit) in normalized_units
+            and not clean_text(item.comment)
+            and not clean_text(item.user_comment_to_supplier)
+            and not command.global_comment
+        )
+
+    @staticmethod
+    def _can_use_deterministic_short_product(text: str, command: ParsedCommand) -> bool:
+        """Проверяет короткое название товара без количества."""
+        if command.intent != Intent.ADD_ITEMS or len(command.items) != 1:
+            return False
+        item = command.items[0]
+        query = clean_text(item.product_query)
+        has_global_scope = bool(
+            re.search(
+                r"\b(?:все|всё|всем|всей|вся|весь|общий|общая|обоим|обеим|каждому)\b",
+                normalize_text(text),
+            )
+        )
+        return bool(
+            query
+            and len(query.split()) <= 4
+            and not has_global_scope
+            and item.quantity is None
+            and not item.unit
+            and not item.comment
+            and not command.global_comment
+            and normalize_text(query) == normalize_text(text)
+        )
+
+    @staticmethod
+    def _can_use_deterministic_packaged_product(text: str, command: ParsedCommand) -> bool:
+        """Распознаёт одно точное название с компактной записью фасовки."""
+        if command.intent != Intent.ADD_ITEMS or len(command.items) != 1:
+            return False
+        if "\n" in str(text or "") or ";" in str(text or ""):
+            return False
+        unit_pattern = "|".join(
+            sorted((re.escape(unit) for unit in UNIT_ALIASES), key=len, reverse=True)
+        )
+        return bool(
+            re.search(
+                rf"\d+(?:[,.]\d+)?\s*(?:{unit_pattern})\s*[*xх×]\s*"
+                rf"\d+(?:[,.]\d+)?",
+                text,
+                flags=re.I,
+            )
+        )
 
     @staticmethod
     def _should_skip_ai(text: str) -> bool:
@@ -574,6 +815,8 @@ class OpenAIService:
                     continue
                 copy.quantity = sum(positive_values)
                 copy.department = self.settings.default_department
+                if copy.quantity_source not in {"handwritten", "handwritten_correction"}:
+                    copy.quantity_source = "department_columns"
             if document_type in {"printed_order_form", "supplier_form", "order_table"}:
                 entry_quantity = to_float(copy.order_entry_text)
                 if entry_quantity is not None and copy.order_entry_type in {
@@ -588,7 +831,7 @@ class OpenAIService:
                     # Пустая отдельная ячейка заказа означает, что товар не заказывают.
                     continue
             if (
-                document_type != "client_order_sheet"
+                document_type in {"unknown", "unknown_document", "product_card"}
                 and copy.quantity_source == "printed_order_column"
                 and to_float(copy.order_entry_text) is None
             ):
@@ -602,6 +845,8 @@ class OpenAIService:
                 continue
             if copy.quantity is None or copy.quantity <= 0:
                 continue
+            if not copy.quantity_source:
+                copy.quantity_source = copy.order_entry_type or "photo_order_entry"
             items.append(copy)
         return command.model_copy(update={"items": items})
 
@@ -613,6 +858,7 @@ class OpenAIService:
             "quantity": item.quantity,
             "unit": item.unit,
             "department": item.department,
+            "supplier_hint": item.supplier_hint,
             "comment": item.comment,
             "source_line": item.source_line,
             "source_department": item.source_department,
@@ -646,3 +892,47 @@ class OpenAIService:
             reason=decision.reason,
         )
         return decision
+
+    def choose_visible_action(
+        self,
+        text: str,
+        screen_text: str,
+        actions: list[dict[str, str]],
+    ) -> str:
+        """Выбирает голосовое действие только среди кнопок текущего экрана."""
+        allowed = {
+            str(action.get("action_id") or ""): str(action.get("label") or "")
+            for action in actions
+            if action.get("action_id") and action.get("label")
+        }
+        if not allowed:
+            return ""
+        response = self.client.responses.parse(
+            model=self.settings.openai_text_model,
+            instructions=_VISIBLE_ACTION_SYSTEM,
+            input=json.dumps(
+                {
+                    "user_text": text,
+                    "screen_text": screen_text[:2000],
+                    "actions": [
+                        {"action_id": action_id, "label": label}
+                        for action_id, label in allowed.items()
+                    ],
+                },
+                ensure_ascii=False,
+            ),
+            text_format=VisibleActionDecision,
+        )
+        decision = response.output_parsed or VisibleActionDecision()
+        selected = decision.action_id if decision.action_id in allowed else ""
+        if decision.confidence < 0.9:
+            selected = ""
+        logger.info(
+            "visible_action_ai_decision",
+            text=text,
+            action_count=len(allowed),
+            selected_action_id=selected,
+            confidence=decision.confidence,
+            reason=decision.reason,
+        )
+        return selected

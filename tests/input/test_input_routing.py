@@ -5,6 +5,7 @@ from restaurant_bot.services.parser import infer_intent
 
 
 def test_bot_suffix_is_removed_from_slash_command_before_routing() -> None:
+    """Проверяет, что бота суффикс является removed из slash команда до маршрутизация."""
     event = normalize_telegram_update(
         {"update_id": 1, "message": {"chat": {"id": 7}, "text": "/draft@restaurant_order_bot"}}
     )
@@ -15,6 +16,7 @@ def test_bot_suffix_is_removed_from_slash_command_before_routing() -> None:
 
 
 def test_product_typo_is_never_interpreted_as_skip_command() -> None:
+    """Проверяет, что товар опечатка является никогда не interpreted как пропуск команда."""
     command = infer_intent("гонядина 5 кг")
 
     assert command.intent is Intent.ADD_ITEMS
@@ -23,6 +25,7 @@ def test_product_typo_is_never_interpreted_as_skip_command() -> None:
 
 
 def test_direct_commands_bypass_catalog_but_product_operations_read_it() -> None:
+    """Проверяет, что direct команды обходит каталог but товар operations чтение it."""
     assert not UpdateOrchestrator._needs_catalog(ParsedCommand(intent=Intent.SHOW_CART))
     assert not UpdateOrchestrator._needs_catalog(ParsedCommand(intent=Intent.CLEAR_CART))
     assert not UpdateOrchestrator._needs_catalog(ParsedCommand(intent=Intent.EDIT_QUANTITY))
@@ -31,6 +34,7 @@ def test_direct_commands_bypass_catalog_but_product_operations_read_it() -> None
 
 
 def test_callback_input_preserves_callback_data_for_engine() -> None:
+    """Проверяет, что callback ввод сохраняет callback data for engine."""
     event = normalize_telegram_update(
         {
             "update_id": 2,

@@ -2,10 +2,12 @@ from contextlib import nullcontext
 from types import SimpleNamespace
 from unittest.mock import ANY, MagicMock
 
+import httpx
 import pytest
 
 from restaurant_bot.domain.models import (
     BotReply,
+    Button,
     CatalogProduct,
     ConversationState,
     EngineResult,
@@ -206,6 +208,36 @@ def test_voice_pipeline_shows_progress_before_transcription(mocker) -> None:  # 
     service.catalog.get.assert_not_called()
 
 
+def test_voice_pipeline_continues_when_progress_card_times_out(mocker) -> None:  # type: ignore[no-untyped-def]
+    """Не отменяет распознавание голоса из-за сбоя служебной карточки."""
+    service = _authorized_orchestrator(mocker)
+    service._claim = MagicMock(return_value=_voice_claim())  # type: ignore[method-assign]
+    command = ParsedCommand(intent=Intent.FIX_MULTIPLE, text="выбрать количество")
+    service._parse = MagicMock(return_value=command)  # type: ignore[method-assign]
+    result = EngineResult(
+        state=ConversationState(),
+        reply=BotReply(
+            text="Выберите количество",
+            rows=[[Button(text="Выбрать 20 кг", callback_data="v2:accept_multiple")]],
+        ),
+    )
+    service.engine.handle.return_value = result
+    service._resolve_ai_pending = MagicMock(return_value=result)  # type: ignore[method-assign]
+    service.telegram.send_reply.side_effect = [TimeoutError("Telegram timeout"), 67]
+
+    service.process(2)
+
+    service._parse.assert_called_once()
+    final = service.telegram.send_reply.call_args_list[1].args[1]
+    assert final.text == "Выберите количество"
+    assert final.edit_message_id is None
+    checkpoint = service._checkpoint_state.call_args.args[2]
+    assert checkpoint.state.visible_actions == [
+        {"label": "Выбрать 20 кг", "action_id": "v2:accept_multiple:r1"}
+    ]
+    service._finish.assert_called_once_with(2, "done")
+
+
 def test_photo_pipeline_reports_download_recognition_and_catalog_stages(mocker, tmp_path) -> None:  # type: ignore[no-untyped-def]
     """Показывает каждый длительный этап обработки фотографии."""
     service = _authorized_orchestrator(mocker)
@@ -351,3 +383,40 @@ def test_pipeline_failure_is_checkpointed_and_user_gets_safe_reply(mocker) -> No
     error_reply = service.telegram.send_reply.call_args.args[1]
     assert "Не удалось обработать сообщение" in error_reply.text
     assert error_reply.rows[0][0].text == "Черновик"
+
+
+def test_checkpointed_result_retries_only_telegram_delivery(mocker) -> None:  # type: ignore[no-untyped-def]
+    """Не применяет товары повторно после временного TLS-сбоя Telegram."""
+    service = _authorized_orchestrator(mocker)
+    result = EngineResult(
+        state=ConversationState(spreadsheet_id="venue-sheet"),
+        reply=BotReply(text="Черновик обновлён", edit_message_id=66),
+    )
+    claim = _voice_claim()
+    claim.result = result.model_dump(mode="json")
+    claim.state_applied = True
+    service._claim = MagicMock(return_value=claim)  # type: ignore[method-assign]
+    service._parse = MagicMock()  # type: ignore[method-assign]
+    request = httpx.Request("POST", "https://telegram.invalid/editMessageText")
+    service.telegram.send_reply.side_effect = [
+        httpx.ConnectTimeout("TLS timeout", request=request),
+        91,
+    ]
+
+    with pytest.raises(httpx.ConnectTimeout, match="TLS timeout"):
+        service.process(2)
+
+    service._parse.assert_not_called()
+    service.engine.handle.assert_not_called()
+    service._checkpoint_state.assert_not_called()
+    assert service.telegram.send_reply.call_count == 1
+    service._finish.assert_called_once_with(2, "failed", "TLS timeout")
+
+    service.process(2)
+
+    service._parse.assert_not_called()
+    service.engine.handle.assert_not_called()
+    service._checkpoint_state.assert_not_called()
+    service._checkpoint_reply.assert_called_once_with(2, "7", 91)
+    service._checkpoint_tasks.assert_called_once_with(2)
+    assert service._finish.call_args_list[-1].args == (2, "done")

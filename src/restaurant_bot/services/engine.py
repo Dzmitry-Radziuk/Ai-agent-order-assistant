@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 from collections import defaultdict
+from copy import deepcopy
 from datetime import UTC, datetime
 from uuid import uuid4
 
@@ -30,11 +31,16 @@ from restaurant_bot.services.matching import (
     has_complete_query_evidence,
     is_broad_category_query,
     nearest_valid_multiple,
+    query_evidence_tokens,
     rank_candidates,
+    supplier_matches_hint,
     tokens,
 )
 from restaurant_bot.services.parser import (
+    has_negated_action,
+    has_negation,
     infer_intent,
+    is_explicit_item_rejection,
     is_product_add_request_phrase,
     parse_product_lines,
     parse_quantity_unit,
@@ -51,6 +57,9 @@ from restaurant_bot.services.replies import (
     final_review_reply,
     help_reply,
     issue_reply,
+    multiple_quantity_choice_reply,
+    new_order_confirmation_reply,
+    new_order_started_reply,
     no_current_manual_reply,
     photo_without_quantities_reply,
     product_add_requests_reply,
@@ -66,9 +75,11 @@ from restaurant_bot.services.replies import (
     welcome_reply,
 )
 from restaurant_bot.services.text import (
+    UNIT_ALIASES,
     convert_quantity,
     normalize_text,
     normalize_unit,
+    parse_number_words,
 )
 
 
@@ -105,6 +116,7 @@ class ConversationEngine:
         # new product search, and "поставь 40" must affect only that item.
         # Keep that state-aware rule local and deterministic for text and
         # voice alike.
+        command = self._contextual_negative_command(command, event, state)
         command = self._contextual_quantity_command(command, event.text, state)
         command = self._contextual_voice_command(command, event, state)
         if (
@@ -129,7 +141,21 @@ class ConversationEngine:
         if (
             current
             and current.status in {ItemStatus.NOT_FOUND, ItemStatus.AMBIGUOUS}
-            and command.intent not in {Intent.SKIP_CURRENT, Intent.MANUAL_CURRENT}
+            and command.intent
+            not in {
+                Intent.CANCEL,
+                Intent.PRODUCT_ADD_SKIP,
+                Intent.SKIP_CURRENT,
+                Intent.MANUAL_CURRENT,
+            }
+            and not has_negated_action(
+                event.text or command.text,
+                "отправ",
+                "переда",
+                "созда",
+                "оформ",
+                "добав",
+            )
             and is_product_add_request_phrase(event.text or command.text)
         ):
             command = ParsedCommand(
@@ -196,11 +222,29 @@ class ConversationEngine:
         ):
             return EngineResult(state=state, reply=cart_reply(state))
 
+        if state.pending_new_order_confirmation:
+            phrase = normalize_text(event.text or command.text)
+            if command.intent in {
+                Intent.CLEAR_CART,
+                Intent.START_NEW_ORDER,
+                Intent.CONFIRM,
+            } or self._is_explicit_yes(phrase):
+                return self._start_new_order(state)
+            if (
+                command.intent in {Intent.BACK, Intent.CANCEL, Intent.SHOW_CART}
+                or has_negation(phrase)
+                or self._has_any_prefix(phrase, "нет", "остав", "сохран", "передум")
+            ):
+                state.pending_new_order_confirmation = False
+                return EngineResult(state=state, reply=cart_reply(state))
+            return EngineResult(state=state, reply=new_order_confirmation_reply(state))
+
         # n8n's missing_qty branch treats a short answer like "10" or
         # "10 штук" as the quantity of the currently opened item.
         current_item = state.current_item()
         if (
-            current_item
+            event.input_type != InputKind.CALLBACK
+            and current_item
             and current_item.status
             in {ItemStatus.MISSING_QTY, ItemStatus.UNIT_MISMATCH, ItemStatus.DUPLICATE_PENDING}
             and state.stage
@@ -211,27 +255,27 @@ class ConversationEngine:
             }
             and (event.text.strip() or command.text.strip())
         ):
-            quantity, unit = parse_quantity_unit(event.text or command.text)
+            quantity, unit = self._spoken_quantity(event.text or command.text)
             if quantity is not None:
                 item = state.current_item()
                 assert item is not None
                 item.quantity = quantity
                 item.unit = unit or item.catalog_unit or item.unit
-                if (
-                    item.status == ItemStatus.UNIT_MISMATCH
-                    and item.catalog_unit
-                    and item.unit != item.catalog_unit
-                ):
+                if item.status == ItemStatus.DUPLICATE_PENDING:
+                    return self._confirm_current(state)
+                if item.catalog_unit and item.unit and item.unit != item.catalog_unit:
                     converted = convert_quantity(item.quantity, item.unit, item.catalog_unit)
                     if converted is not None:
                         item.quantity = converted
                         item.unit = item.catalog_unit
-                if item.status != ItemStatus.DUPLICATE_PENDING:
-                    item.status = (
-                        ItemStatus.MATCHED
-                        if item.catalog_product_id or item.catalog_name or item.catalog_unit
-                        else item.status
-                    )
+                    else:
+                        item.status = ItemStatus.UNIT_MISMATCH
+                        return self._advance(state)
+                item.status = (
+                    ItemStatus.MATCHED
+                    if item.catalog_product_id or item.catalog_name or item.catalog_unit
+                    else item.status
+                )
                 return self._advance(state)
 
         if command.intent == Intent.GREETING:
@@ -261,13 +305,13 @@ class ConversationEngine:
             ):
                 return EngineResult(state=state, reply=supplier_warning_details_reply(state))
             return EngineResult(state=state, reply=cart_reply(state))
+        if command.intent == Intent.START_NEW_ORDER:
+            if state.stage == SessionStage.SUBMITTED or not self._has_active_draft_items(state):
+                return self._start_new_order(state)
+            state.pending_new_order_confirmation = True
+            return EngineResult(state=state, reply=new_order_confirmation_reply(state))
         if command.intent == Intent.CLEAR_CART:
-            state = ConversationState(
-                restaurant=state.restaurant,
-                role=state.role,
-                metadata=state.metadata,
-            )
-            return EngineResult(state=state, reply=welcome_reply(state))
+            return self._start_new_order(state)
         if command.intent == Intent.PRODUCT_ADD:
             index = self._callback_item_index(command, state)
             item = state.cart[index] if index is not None and index < len(state.cart) else None
@@ -395,37 +439,16 @@ class ConversationEngine:
             return self._use_catalog_unit(state)
         if command.intent == Intent.UNIT_EDIT:
             return self._enter_other_quantity(state)
-        if command.intent in {Intent.ACCEPT_SUGGESTED_QUANTITY, Intent.FIX_MULTIPLE}:
-            if command.intent == Intent.FIX_MULTIPLE:
-                multiple = next(
-                    (
-                        item
-                        for item in state.cart
-                        if item.status == ItemStatus.MATCHED
-                        and item.suggested_quantity is not None
-                        and item.suggested_quantity != item.quantity
-                    ),
-                    None,
-                )
-                if multiple:
-                    state.current_issue_item_id = multiple.id
+        if command.intent == Intent.FIX_MULTIPLE:
+            return self._show_multiple_quantity_choice(state)
+        if command.intent == Intent.ACCEPT_SUGGESTED_QUANTITY:
+            self._select_multiple_warning(state)
             return self._accept_suggested_quantity(state)
         if command.intent in {Intent.KEEP_CURRENT_QUANTITY, Intent.KEEP_MULTIPLE}:
-            if command.intent == Intent.KEEP_MULTIPLE:
-                multiple = next(
-                    (
-                        item
-                        for item in state.cart
-                        if item.status == ItemStatus.MATCHED
-                        and item.suggested_quantity is not None
-                        and item.suggested_quantity != item.quantity
-                    ),
-                    None,
-                )
-                if multiple:
-                    state.current_issue_item_id = multiple.id
+            self._select_multiple_warning(state)
             return self._keep_current_quantity(state)
         if command.intent in {Intent.ENTER_OTHER_QUANTITY, Intent.EDIT_MULTIPLE}:
+            self._select_multiple_warning(state)
             return self._enter_other_quantity(state)
         if command.intent == Intent.SKIP_CURRENT:
             return self._skip_current(state)
@@ -475,6 +498,8 @@ class ConversationEngine:
                 )
             if not any(item.status == ItemStatus.MATCHED for item in state.cart):
                 return EngineResult(state=state, reply=empty_draft_reply())
+            state.current_issue_item_id = ""
+            state.current_issue_kind = None
             state.stage = SessionStage.AWAIT_SUBMIT_CONFIRM
             return EngineResult(state=state, reply=final_review_reply(state))
         if command.intent == Intent.SUBMIT_AS_IS:
@@ -679,9 +704,11 @@ class ConversationEngine:
             Intent.CHECK_MIN_SUM,
             Intent.CLARIFY_CURRENT,
             Intent.CLEAR_CART,
+            Intent.START_NEW_ORDER,
             Intent.GREETING,
             Intent.HELP,
             Intent.ORDER_STATUS,
+            Intent.PRODUCT_ADD_SKIP,
             Intent.PRODUCT_ADD_LIST,
             Intent.SHOW_CART,
             Intent.SHOW_FINAL_REVIEW,
@@ -699,7 +726,10 @@ class ConversationEngine:
             for item in state.cart
             if item.quantity is None
             and item.status in removable_statuses
-            and infer_intent(item.source_query).intent in navigation_intents
+            and (
+                infer_intent(item.source_query).intent in navigation_intents
+                or not re.search(r"[a-zа-яё]", item.source_query, re.I)
+            )
         }
         if not removed_ids:
             return
@@ -721,6 +751,9 @@ class ConversationEngine:
         return CartItem(
             id=uuid4().hex[:12],
             source_query=extracted.product_query,
+            source_line=extracted.source_line,
+            quantity_source=extracted.quantity_source,
+            order_entry_type=extracted.order_entry_type,
             quantity=extracted.quantity,
             unit=normalize_unit(extracted.unit),
             department=extracted.department or self.settings.default_department,
@@ -734,6 +767,22 @@ class ConversationEngine:
         quantity, unit = parse_quantity_unit(text)
         if quantity is not None:
             return quantity, unit
+        words = [
+            cleaned
+            for word in normalize_text(text).replace(",", ".").split()
+            if (cleaned := re.sub(r"\.+$", "", word))
+        ]
+        for index in range(len(words)):
+            parsed = parse_number_words(words, index)
+            if parsed is None:
+                continue
+            quantity, end = parsed
+            unit = (
+                normalize_unit(words[end])
+                if end < len(words) and words[end] in UNIT_ALIASES
+                else ""
+            )
+            return quantity, unit
         for item in parse_product_lines(text):
             if item.quantity is not None:
                 return item.quantity, item.unit
@@ -746,6 +795,8 @@ class ConversationEngine:
         state: ConversationState,
     ) -> ParsedCommand:
         """Обрабатывает команду количества с учётом текущего экрана."""
+        if command.text.startswith("v2:"):
+            return command
         current = state.current_item()
         if current is None:
             return command
@@ -810,7 +861,7 @@ class ConversationEngine:
                         "intent": (
                             Intent.ENTER_OTHER_QUANTITY
                             if wants_manual_quantity
-                            else Intent.ACCEPT_SUGGESTED_QUANTITY
+                            else Intent.FIX_MULTIPLE
                         )
                     }
                 )
@@ -850,6 +901,8 @@ class ConversationEngine:
         """Обрабатывает голосовую команду с учётом текущего экрана."""
         if event.input_type != InputKind.VOICE:
             return command
+        if command.intent == Intent.EDIT_QUANTITY and command.edit_quantity is not None:
+            return command
 
         raw = event.text or command.text
         phrase = normalize_text(raw)
@@ -885,6 +938,7 @@ class ConversationEngine:
             Intent.CHECK_MIN_SUM,
             Intent.CLARIFY_CURRENT,
             Intent.CLEAR_CART,
+            Intent.START_NEW_ORDER,
             Intent.GREETING,
             Intent.HELP,
             Intent.ORDER_STATUS,
@@ -965,7 +1019,11 @@ class ConversationEngine:
                 return command.model_copy(update={"intent": Intent.MERGE_DUPLICATE})
 
         if current and current.status == ItemStatus.UNIT_MISMATCH:
-            if self._is_explicit_yes(phrase) or self._has_any_prefix(phrase, "остав", "добав"):
+            if command.intent == Intent.SKIP_CURRENT:
+                return command
+            if not has_negation(phrase) and (
+                self._is_explicit_yes(phrase) or self._has_any_prefix(phrase, "остав", "добав")
+            ):
                 return command.model_copy(update={"intent": Intent.USE_CATALOG_UNIT})
             if self._has_any_prefix(phrase, "нет", "измен", "другое колич"):
                 return command.model_copy(update={"intent": Intent.ENTER_OTHER_QUANTITY})
@@ -982,6 +1040,28 @@ class ConversationEngine:
                 return command.model_copy(update={"intent": Intent.KEEP_MULTIPLE})
             if self._has_any_prefix(phrase, "рекоменд", "ближайш", "округл"):
                 return command.model_copy(update={"intent": Intent.ACCEPT_SUGGESTED_QUANTITY})
+
+            current_warning = state.current_item()
+            if current_warning in warnings:
+                spoken_index = self._spoken_choice_index(phrase)
+                if spoken_index is None and command.intent == Intent.SELECT_CANDIDATE:
+                    spoken_index = command.selected_index
+                if spoken_index == 1:
+                    return command.model_copy(update={"intent": Intent.ACCEPT_SUGGESTED_QUANTITY})
+                if spoken_index == 2:
+                    return command.model_copy(update={"intent": Intent.ENTER_OTHER_QUANTITY})
+                if spoken_index == 3:
+                    return command.model_copy(update={"intent": Intent.KEEP_CURRENT_QUANTITY})
+            if self._spoken_quantity(phrase)[0] is None and self._has_any_prefix(
+                phrase,
+                "исправ",
+                "поправ",
+                "измен",
+                "поменя",
+                "выб",
+                "подоб",
+            ):
+                return command.model_copy(update={"intent": Intent.FIX_MULTIPLE})
 
         if state.stage == SessionStage.AWAIT_SUBMIT_CONFIRM:
             if self._is_explicit_yes(phrase) or self._has_any_prefix(phrase, "подтверж", "отправ"):
@@ -1021,19 +1101,23 @@ class ConversationEngine:
             for request in state.product_add_requests
             if request.get("description") and request.get("status") != "cancelled"
         ]
-        if "запрос" in phrase and any(
-            stem in phrase
-            for stem in (
-                "снабжен",
-                "покаж",
-                "показ",
-                "посмотр",
-                "откр",
-                "вывед",
-                "спис",
-                "пров",
-                "повтор",
-                "еще раз",
+        if (
+            not has_negation(phrase)
+            and "запрос" in phrase
+            and any(
+                stem in phrase
+                for stem in (
+                    "снабжен",
+                    "покаж",
+                    "показ",
+                    "посмотр",
+                    "откр",
+                    "вывед",
+                    "спис",
+                    "пров",
+                    "повтор",
+                    "еще раз",
+                )
             )
         ):
             if self._has_any_prefix(phrase, "повтор", "еще раз"):
@@ -1050,6 +1134,141 @@ class ConversationEngine:
         return command
 
     @staticmethod
+    def _has_active_draft_items(state: ConversationState) -> bool:
+        """Проверяет наличие позиций, которые пользователь ещё может потерять."""
+        return any(item.status != ItemStatus.SKIPPED for item in state.cart)
+
+    @staticmethod
+    def _fresh_order_state(state: ConversationState) -> ConversationState:
+        """Создаёт пустую заявку, сохраняя регистрацию и историю пользователя."""
+        return ConversationState(
+            last_order_no=state.last_order_no,
+            submitted_order_numbers=list(state.submitted_order_numbers),
+            restaurant=state.restaurant,
+            telegram_user_id=state.telegram_user_id,
+            telegram_chat_id=state.telegram_chat_id,
+            venue_code=state.venue_code,
+            venue_name=state.venue_name,
+            spreadsheet_id=state.spreadsheet_id,
+            spreadsheet_url=state.spreadsheet_url,
+            role=state.role,
+            metadata=deepcopy(state.metadata),
+            department=state.department,
+            product_add_requests=deepcopy(state.product_add_requests),
+        )
+
+    def _start_new_order(self, state: ConversationState) -> EngineResult:
+        """Безопасно начинает новую заявку без потери истории и регистрации."""
+        fresh = self._fresh_order_state(state)
+        fresh.metadata["onboarding_shown"] = True
+        return EngineResult(state=fresh, reply=new_order_started_reply())
+
+    def _contextual_negative_command(
+        self,
+        command: ParsedCommand,
+        event: TelegramEvent,
+        state: ConversationState,
+    ) -> ParsedCommand:
+        """Применяет отрицание до любых подтверждающих и изменяющих маршрутов."""
+        if event.input_type == InputKind.CALLBACK:
+            return command
+        raw = event.text or command.text
+        phrase = normalize_text(raw)
+        if not phrase:
+            return command
+
+        current = state.current_item()
+        rejects_item = is_explicit_item_rejection(phrase)
+
+        if state.stage == SessionStage.AWAIT_PRODUCT_ADD_DETAILS and (
+            rejects_item
+            or command.intent == Intent.CANCEL
+            or has_negated_action(
+                phrase,
+                "отправ",
+                "созда",
+                "оформ",
+                "добав",
+                "подтверж",
+            )
+        ):
+            return command.model_copy(
+                update={
+                    "intent": Intent.PRODUCT_ADD_SKIP,
+                    "callback_target": str(state.pending_product_add_item_index or 0),
+                }
+            )
+
+        if state.stage == SessionStage.AWAIT_ADD_MORE_CONFIRM and (
+            rejects_item
+            or command.intent == Intent.CANCEL
+            or has_negated_action(phrase, "добав", "продолж", "внес", "докин")
+        ):
+            return command.model_copy(update={"intent": Intent.BACK})
+
+        if state.stage == SessionStage.AWAIT_SUBMIT_CONFIRM and (
+            command.intent == Intent.CANCEL
+            or has_negated_action(phrase, "отправ", "подтверж", "оформ", "переда", "запиш")
+            or self._has_any_prefix(phrase, "передум", "отмен")
+        ):
+            return command.model_copy(update={"intent": Intent.BACK})
+
+        if current is None:
+            return command
+        if rejects_item:
+            return command.model_copy(update={"intent": Intent.SKIP_CURRENT})
+        if current.status == ItemStatus.DUPLICATE_PENDING and (
+            command.intent == Intent.CANCEL
+            or has_negated_action(
+                phrase,
+                "объедин",
+                "добав",
+                "суммир",
+                "прибав",
+                "слож",
+                "увелич",
+            )
+        ):
+            return command.model_copy(update={"intent": Intent.SKIP_CURRENT})
+        if current.status == ItemStatus.UNIT_MISMATCH and (
+            command.intent == Intent.CANCEL
+            or has_negated_action(
+                phrase,
+                "использ",
+                "остав",
+                "добав",
+                "перевед",
+                "конверт",
+                "подтверж",
+            )
+        ):
+            return command.model_copy(update={"intent": Intent.ENTER_OTHER_QUANTITY})
+        if current.status == ItemStatus.AMBIGUOUS and (
+            command.intent == Intent.CANCEL
+            or has_negated_action(phrase, "выбер", "выбир", "возьм", "бери")
+            or (has_negation(phrase) and self._spoken_choice_index(phrase) is not None)
+        ):
+            return command.model_copy(update={"intent": Intent.CONTINUE_CURRENT})
+        if (
+            current.status == ItemStatus.MATCHED
+            and current.suggested_quantity is not None
+            and current.suggested_quantity != current.quantity
+            and (
+                command.intent == Intent.KEEP_CURRENT_QUANTITY
+                or has_negated_action(
+                    phrase,
+                    "исправ",
+                    "измен",
+                    "округл",
+                    "рекоменд",
+                    "замен",
+                )
+            )
+        ):
+            return command.model_copy(update={"intent": Intent.KEEP_CURRENT_QUANTITY})
+        return command
+
+    @staticmethod
     def _has_any_prefix(phrase: str, *stems: str) -> bool:
         """Проверяет наличие одного из допустимых префиксов."""
         return any(re.search(rf"(?:^|\s){re.escape(stem)}", phrase) for stem in stems)
@@ -1057,6 +1276,8 @@ class ConversationEngine:
     @staticmethod
     def _is_explicit_yes(phrase: str) -> bool:
         """Отличает подтверждение «да» от разговорного слова «давай»."""
+        if has_negation(phrase):
+            return False
         words = re.findall(r"[a-zа-яё0-9-]+", phrase, flags=re.I)
         return any(
             word
@@ -1131,6 +1352,8 @@ class ConversationEngine:
     @staticmethod
     def _spoken_choice_index(phrase: str) -> int | None:
         """Определяет номер варианта из живой речи."""
+        if has_negation(phrase):
+            return None
         words = {
             1: r"(?:1|один|перв\w*)",
             2: r"(?:2|два|втор\w*)",
@@ -1279,7 +1502,7 @@ class ConversationEngine:
             scoped = [
                 product
                 for product in catalog
-                if normalize_text(item.supplier_hint) in normalize_text(product.supplier)
+                if supplier_matches_hint(product.supplier, item.supplier_hint)
             ]
             if search_scope != SearchScope.ANY_SUPPLIER:
                 # A selected supplier is a strict filter.  If that supplier
@@ -1310,12 +1533,20 @@ class ConversationEngine:
         if not item.comment and len(candidates) >= 2:
             query_words = re.findall(r"[a-zа-я0-9]+", normalize_text(item.source_query), flags=re.I)
             query_tokens = tokens(item.source_query)
-            first_evidence = query_tokens & tokens(candidates[0].name)
-            second_evidence = query_tokens & tokens(candidates[1].name)
+            first_evidence = query_evidence_tokens(item.source_query, candidates[0].name)
+            second_evidence = query_evidence_tokens(item.source_query, candidates[1].name)
+            shared_category_evidence = first_evidence == second_evidence
+            uniquely_supported_variant = len(first_evidence) >= 2 and len(first_evidence) > len(
+                second_evidence
+            )
             if (
                 first_evidence
-                and first_evidence == second_evidence
+                and (shared_category_evidence or uniquely_supported_variant)
                 and len(first_evidence) < len(query_tokens)
+                and not any(
+                    has_complete_query_evidence(item.source_query, candidate.name)
+                    for candidate in candidates
+                )
             ):
                 comment_words = [word for word in query_words if word not in first_evidence]
                 product_words = [word for word in query_words if word in first_evidence]
@@ -1351,6 +1582,7 @@ class ConversationEngine:
         item.supplier_minimum_amount = product.supplier_minimum_amount
         item.supplier_current_sum = product.supplier_current_sum
         item.existing_quantity = product.department_quantities.for_department(item.department) or 0
+        self._reconcile_quantity_with_catalog_name(item, product.name)
         user_comment = item.comment or self._comment_left_after_catalog_match(
             item.source_query, product.name
         )
@@ -1375,6 +1607,41 @@ class ConversationEngine:
         else:
             item.suggested_quantity = None
         item.status = ItemStatus.MATCHED
+
+    @staticmethod
+    def _reconcile_quantity_with_catalog_name(item: CartItem, product_name: str) -> None:
+        """Отделяет количество заказа от фасовки в полном названии."""
+        if item.quantity_source:
+            return
+        source_tokens = re.findall(r"[a-zа-я0-9%]+", normalize_text(item.source_line), flags=re.I)
+        product_tokens = re.findall(r"[a-zа-я0-9%]+", normalize_text(product_name), flags=re.I)
+        if not source_tokens or not product_tokens or len(source_tokens) < len(product_tokens):
+            return
+
+        product_start = next(
+            (
+                index
+                for index in range(len(source_tokens) - len(product_tokens) + 1)
+                if source_tokens[index : index + len(product_tokens)] == product_tokens
+            ),
+            None,
+        )
+        if product_start is None:
+            return
+
+        before = " ".join(source_tokens[:product_start])
+        after = " ".join(source_tokens[product_start + len(product_tokens) :])
+        explicit_quantity: tuple[float | None, str] = (None, "")
+        for outside_name in (after, before):
+            quantity, unit = parse_quantity_unit(outside_name)
+            if quantity is not None:
+                explicit_quantity = (quantity, unit)
+                break
+
+        item.source_query = product_name
+        item.quantity, item.unit = explicit_quantity
+        if item.comment and normalize_text(item.comment) in normalize_text(product_name):
+            item.comment = ""
 
     @staticmethod
     def _suggested_quantity_for_multiple(item: CartItem) -> float | None:
@@ -1431,8 +1698,8 @@ class ConversationEngine:
 
     @staticmethod
     def _remove_exact_cart_duplicates(state: ConversationState) -> None:
-        """Удаляет точные дубликаты позиций черновика."""
-        owners: dict[tuple[str, float | None, str, str], CartItem] = {}
+        """Объединяет подтверждённые дубликаты позиций черновика."""
+        owners: dict[tuple[str, str, str], CartItem] = {}
         duplicate_ids: set[str] = set()
         for item in state.cart:
             # A pending duplicate is a confirmation card, not extraction noise.
@@ -1441,7 +1708,6 @@ class ConversationEngine:
                 continue
             key = (
                 item.catalog_product_id,
-                item.quantity,
                 normalize_unit(item.unit or item.catalog_unit),
                 item.department,
             )
@@ -1449,6 +1715,12 @@ class ConversationEngine:
             if owner is None:
                 owners[key] = item
                 continue
+            # Одинаковые количества обычно означают повтор одной операции
+            # доставки или дубль распознавания, поэтому не удваиваем их.
+            # Разные количества — это уже две добавленные партии одного товара;
+            # пользователь должен видеть их одной суммарной строкой.
+            if owner.quantity != item.quantity:
+                owner.quantity = (owner.quantity or 0) + (item.quantity or 0)
             owner.comment = ConversationEngine._merge_comments(owner.comment, item.comment)
             duplicate_ids.add(item.id)
 
@@ -1612,7 +1884,7 @@ class ConversationEngine:
         if item.suggested_quantity is not None:
             item.quantity = item.suggested_quantity
         item.status = ItemStatus.MATCHED if item.quantity else ItemStatus.MISSING_QTY
-        return self._advance(state)
+        return self._advance_multiple_quantity_choice(state)
 
     def _keep_current_quantity(self, state: ConversationState) -> EngineResult:
         """Сохраняет текущее количество позиции."""
@@ -1621,7 +1893,7 @@ class ConversationEngine:
             return EngineResult(state=state, reply=cart_reply(state))
         item.suggested_quantity = None
         item.status = ItemStatus.MATCHED if item.quantity else ItemStatus.MISSING_QTY
-        return self._advance(state)
+        return self._advance_multiple_quantity_choice(state)
 
     def _enter_other_quantity(self, state: ConversationState) -> EngineResult:
         """Переводит диалог к ручному вводу количества."""
@@ -1633,10 +1905,74 @@ class ConversationEngine:
             if item.status == ItemStatus.UNIT_MISMATCH
             else SessionStage.AWAIT_MULTIPLE_QUANTITY
         )
+        expected_unit = item.catalog_unit or item.unit
+        if item.status == ItemStatus.UNIT_MISMATCH and expected_unit:
+            prompt = (
+                f"Укажите количество в {expected_unit} одним сообщением. "
+                f"Например: 5 {expected_unit}."
+            )
+        else:
+            example = f"5 {expected_unit}".strip()
+            prompt = f"Укажите другое количество одним сообщением. Например: {example}."
         return EngineResult(
             state=state,
-            reply=BotReply(text="Укажите другое количество одним сообщением, например: 5 кг."),
+            reply=BotReply(
+                text=prompt,
+                rows=[
+                    [Button(text="Вернуться к вариантам", callback_data="v2:resolve")],
+                    [
+                        Button(
+                            text="Не добавлять",
+                            callback_data=f"v2:skip:{self._item_index(state, item)}",
+                        )
+                    ],
+                ],
+            ),
         )
+
+    @staticmethod
+    def _multiple_warnings(state: ConversationState) -> list[CartItem]:
+        """Возвращает товары, для которых нужно выбрать количество."""
+        return [
+            item
+            for item in state.cart
+            if item.status == ItemStatus.MATCHED
+            and item.suggested_quantity is not None
+            and item.suggested_quantity != item.quantity
+        ]
+
+    def _select_multiple_warning(self, state: ConversationState) -> CartItem | None:
+        """Выбирает текущий товар с предупреждением или первый доступный."""
+        current = state.current_item()
+        warnings = self._multiple_warnings(state)
+        if current in warnings:
+            return current
+        if warnings:
+            state.current_issue_item_id = warnings[0].id
+            return warnings[0]
+        return None
+
+    def _show_multiple_quantity_choice(self, state: ConversationState) -> EngineResult:
+        """Открывает варианты количества без автоматического изменения."""
+        item = self._select_multiple_warning(state)
+        if item is None:
+            state.current_issue_item_id = ""
+            return EngineResult(state=state, reply=final_review_reply(state))
+        state.stage = SessionStage.AWAIT_SUBMIT_CONFIRM
+        state.status = "await_multiple_choice"
+        return EngineResult(state=state, reply=multiple_quantity_choice_reply(item))
+
+    def _advance_multiple_quantity_choice(self, state: ConversationState) -> EngineResult:
+        """Показывает следующий выбор количества или финальную проверку."""
+        state.current_issue_item_id = ""
+        next_item = self._select_multiple_warning(state)
+        if next_item is not None:
+            state.stage = SessionStage.AWAIT_SUBMIT_CONFIRM
+            state.status = "await_multiple_choice"
+            return EngineResult(state=state, reply=multiple_quantity_choice_reply(next_item))
+        state.stage = SessionStage.AWAIT_SUBMIT_CONFIRM
+        state.status = "await_submit_confirm"
+        return EngineResult(state=state, reply=final_review_reply(state))
 
     def _skip_current(self, state: ConversationState) -> EngineResult:
         """Пропускает текущую позицию."""
@@ -1696,17 +2032,23 @@ class ConversationEngine:
         target = normalize_text(command.target_query)
         item = state.current_item()
         if target:
-            item = max(
-                state.cart,
-                key=lambda row: self._contains_score(
-                    target, normalize_text(row.catalog_name or row.source_query)
-                ),
-                default=None,
-            )
+            item = next((row for row in state.cart if row.id == command.target_query), None)
+            if item is None:
+                item = max(
+                    state.cart,
+                    key=lambda row: self._contains_score(
+                        target, normalize_text(row.catalog_name or row.source_query)
+                    ),
+                    default=None,
+                )
         if item is None:
             return EngineResult(
                 state=state, reply=BotReply(text="Позиция для изменения не найдена.")
             )
+        was_multiple_choice = item in self._multiple_warnings(state) and state.stage in {
+            SessionStage.AWAIT_SUBMIT_CONFIRM,
+            SessionStage.AWAIT_MULTIPLE_QUANTITY,
+        }
         quantity = command.edit_quantity
         if command.edit_unit and item.catalog_unit:
             converted = convert_quantity(quantity, command.edit_unit, item.catalog_unit)
@@ -1720,6 +2062,8 @@ class ConversationEngine:
         if item.catalog_product_id:
             item.status = ItemStatus.MATCHED
             item.suggested_quantity = self._suggested_quantity_for_multiple(item)
+        if was_multiple_choice:
+            return self._advance_multiple_quantity_choice(state)
         return self._advance(state)
 
     def _prepare_submission(self, event: TelegramEvent, state: ConversationState) -> EngineResult:

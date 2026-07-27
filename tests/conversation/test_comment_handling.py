@@ -13,10 +13,12 @@ from restaurant_bot.services.parser import parse_product_lines
 
 
 def _event() -> TelegramEvent:
+    """Создаёт тестовое событие Telegram."""
     return TelegramEvent(update_id=1, chat_id="123456", input_type=InputKind.TEXT)
 
 
 def test_catalog_and_user_comments_are_joined_once_in_source_order(settings) -> None:  # type: ignore[no-untyped-def]
+    """Проверяет, что каталог и пользователь комментарии являются слитное один раз в исходный заказ."""
     engine = ConversationEngine(settings)
 
     assert (
@@ -26,6 +28,7 @@ def test_catalog_and_user_comments_are_joined_once_in_source_order(settings) -> 
 
 
 def test_comment_is_not_part_of_product_name_and_reaches_submission_row(settings) -> None:  # type: ignore[no-untyped-def]
+    """Проверяет, что комментарий является не part для товар название и reaches отправка заявки строка."""
     engine = ConversationEngine(settings)
     catalog = [
         CatalogProduct(
@@ -59,6 +62,7 @@ def test_comment_is_not_part_of_product_name_and_reaches_submission_row(settings
 
 
 def test_global_comment_is_appended_to_every_item_comment_and_order_row(settings) -> None:  # type: ignore[no-untyped-def]
+    """Проверяет, что общий комментарий является appended в каждый позиция комментарий и заказ строка."""
     engine = ConversationEngine(settings)
     catalog = [
         CatalogProduct(
@@ -97,6 +101,7 @@ def test_global_comment_is_appended_to_every_item_comment_and_order_row(settings
 
 
 def test_parser_keeps_trailing_comment_after_quantity_out_of_product_name() -> None:
+    """Проверяет, что парсер сохраняет после количества комментарий after количество исключено для товар название."""
     items = parse_product_lines("сироп роза 10 штук охлаждённым")
 
     assert len(items) == 1
@@ -107,6 +112,7 @@ def test_parser_keeps_trailing_comment_after_quantity_out_of_product_name() -> N
 
 
 def test_parser_keeps_multiword_delivery_preferences_as_a_single_comment() -> None:
+    """Проверяет, что парсер сохраняет многословный delivery preferences как a один комментарий."""
     cases = [
         ("сироп роза 5 штук желательно охлаждённым", "желательно охлаждённым"),
         (
@@ -132,6 +138,7 @@ def test_parser_keeps_multiword_delivery_preferences_as_a_single_comment() -> No
 
 
 def test_comment_before_quantity_is_recovered_after_catalog_match(settings) -> None:  # type: ignore[no-untyped-def]
+    """Проверяет, что комментарий до количество является recovered after каталог сопоставление."""
     engine = ConversationEngine(settings)
     catalog = [
         CatalogProduct(
@@ -164,6 +171,7 @@ def test_comment_before_quantity_is_recovered_after_catalog_match(settings) -> N
 
 
 def test_arbitrary_item_comment_survives_ambiguous_choice_and_submission(settings) -> None:  # type: ignore[no-untyped-def]
+    """Проверяет, что произвольный позиция комментарий survives неоднозначный выбор и отправка заявки."""
     engine = ConversationEngine(settings)
     catalog = [
         CatalogProduct(
@@ -216,7 +224,118 @@ def test_arbitrary_item_comment_survives_ambiguous_choice_and_submission(setting
     assert pending.state.pending_submission.rows[0]["Комментарий"] == "мраморная без кожи"
 
 
+def test_typo_resolution_preserves_item_and_global_comments(settings) -> None:  # type: ignore[no-untyped-def]
+    """Не теряет комментарии при исправлении опечатки в названии."""
+    engine = ConversationEngine(settings)
+    catalog = [
+        CatalogProduct(
+            product_id="rose",
+            name="Сироп Роза, 1л",
+            supplier="Сиропы",
+            unit="шт",
+            price=100,
+        ),
+        CatalogProduct(
+            product_id="tarhun",
+            name="Сироп Тархун, 1л",
+            supplier="Сиропы",
+            unit="шт",
+            price=100,
+        ),
+    ]
+    added = engine.handle(
+        _event(),
+        ParsedCommand(
+            intent=Intent.ADD_ITEMS,
+            global_comment="доставить завтра до 10 утра",
+            items=[
+                ExtractedItem(
+                    product_query="сироп рза",
+                    quantity=5,
+                    unit="шт",
+                    comment="только охлаждённым",
+                )
+            ],
+        ),
+        ConversationState(restaurant="Кафе"),
+        catalog,
+    )
+
+    item = added.state.cart[0]
+    assert item.source_query == "сироп рза"
+    assert item.comment == "только охлаждённым; доставить завтра до 10 утра"
+    assert item.status is ItemStatus.AMBIGUOUS
+
+    selected = engine.handle(
+        _event(),
+        ParsedCommand(intent=Intent.SELECT_CANDIDATE, selected_index=1, callback_target="0"),
+        added.state,
+        catalog,
+    )
+
+    assert selected.state.cart[0].catalog_product_id == "rose"
+    assert selected.state.cart[0].comment == "только охлаждённым; доставить завтра до 10 утра"
+    pending = engine._prepare_submission(_event(), selected.state)
+    assert pending.state.pending_submission is not None
+    assert (
+        pending.state.pending_submission.rows[0]["Комментарий"]
+        == "только охлаждённым; доставить завтра до 10 утра"
+    )
+
+
+def test_catalog_evidence_separates_many_product_typos_from_free_comments(
+    settings,
+) -> None:  # type: ignore[no-untyped-def]
+    """Разделяет опечатки и произвольные комментарии без словаря товаров."""
+    engine = ConversationEngine(settings)
+    cases = [
+        (
+            "сироп рза холодным",
+            [
+                CatalogProduct(product_id="rose", name="Сироп Роза, 1л", unit="шт"),
+                CatalogProduct(product_id="tarhun", name="Сироп Тархун, 1л", unit="шт"),
+            ],
+            "сироп рза",
+            "холодным",
+            "rose",
+        ),
+        (
+            "кордиал апелсин без льда",
+            [
+                CatalogProduct(
+                    product_id="orange",
+                    name="Кордиал Апельсин/Ваниль, 1л",
+                    unit="шт",
+                ),
+                CatalogProduct(product_id="cherry", name="Кордиал Вишня, 1л", unit="шт"),
+            ],
+            "кордиал апелсин",
+            "без льда",
+            "orange",
+        ),
+        (
+            "сыр пармезн натереть мелко",
+            [
+                CatalogProduct(product_id="parmesan", name="Сыр Пармезан", unit="кг"),
+                CatalogProduct(product_id="gouda", name="Сыр Гауда", unit="кг"),
+            ],
+            "сыр пармезн",
+            "натереть мелко",
+            "parmesan",
+        ),
+    ]
+
+    for raw_query, catalog, expected_query, expected_comment, product_id in cases:
+        item = engine._build_item(ExtractedItem(product_query=raw_query))
+        engine._match_item(item, catalog)
+
+        assert item.source_query == expected_query
+        assert item.comment == expected_comment
+        assert item.candidates[0].product_id == product_id
+
+
 def test_existing_comment_shadow_is_removed_from_persisted_draft(settings) -> None:  # type: ignore[no-untyped-def]
+    """Проверяет, что существующий комментарий ложная позиция является removed из persisted черновик."""
     engine = ConversationEngine(settings)
     owner = engine._build_item(
         ExtractedItem(product_query="сироп роза", quantity=3, unit="шт", comment="холодным")

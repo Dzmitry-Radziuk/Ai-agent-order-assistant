@@ -23,6 +23,7 @@ from restaurant_bot.services.venue_registration import (
 
 
 def _event(text: str = "", *, callback: str = "", chat_type: str = "private") -> TelegramEvent:
+    """Создаёт тестовое событие Telegram."""
     return TelegramEvent(
         update_id=1,
         chat_id="77",
@@ -37,28 +38,37 @@ def _event(text: str = "", *, callback: str = "", chat_type: str = "private") ->
 
 
 class _Directory:
+    """Имитирует справочник заведений в тестах регистрации."""
+
     def __init__(self, matches: list[Venue]):
+        """Инициализирует тестовый двойник зависимости."""
         self.matches = matches
         self.codes: list[str] = []
 
     def find(self, code: str) -> list[Venue]:
+        """Возвращает тестовое заведение по коду."""
         self.codes.append(code)
         return self.matches
 
 
 class _Service(VenueRegistrationService):
+    """Имитирует сервис контекста заведения в тестах."""
+
     current: VenueContext | None = None
 
     def context_for(self, event: TelegramEvent) -> VenueContext | None:
+        """Возвращает тестовый контекст активного заведения."""
         del event
         return self.current
 
 
 def _service(settings, matches: list[Venue]) -> _Service:  # type: ignore[no-untyped-def]
+    """Создаёт настроенный тестовый экземпляр сервиса."""
     return _Service(settings, MagicMock(), MagicMock(), directory=_Directory(matches))  # type: ignore[arg-type]
 
 
 def _venue(code: str = "6461W6", name: str = "Качели") -> Venue:
+    """Создаёт тестовую запись заведения."""
     return Venue(
         code=code,
         name=name,
@@ -82,6 +92,7 @@ def test_all_registration_entry_points_use_one_lookup(
     text: str,
     expected_code: str,  # type: ignore[no-untyped-def]
 ) -> None:
+    """Проверяет, что все регистрация запись points use один поиск."""
     service = _service(settings, [_venue()])
 
     result = service.handle(_event(text))
@@ -93,12 +104,14 @@ def test_all_registration_entry_points_use_one_lookup(
 
 
 def test_arbitrary_text_is_not_an_invite_code(settings) -> None:  # type: ignore[no-untyped-def]
+    """Проверяет, что произвольный текст является не an пригласительный код."""
     result = _service(settings, []).handle(_event("добавить товары"))
     assert result.handled is False
     assert valid_code("добавить") is False
 
 
 def test_start_without_code_explains_how_to_connect(settings) -> None:  # type: ignore[no-untyped-def]
+    """Проверяет, что start без код explains how в подключение."""
     result = _service(settings, []).handle(_event("/start"))
     assert result.handled is True
     assert result.reply is not None
@@ -106,6 +119,7 @@ def test_start_without_code_explains_how_to_connect(settings) -> None:  # type: 
 
 
 def test_registration_is_rejected_outside_private_chat(settings) -> None:  # type: ignore[no-untyped-def]
+    """Проверяет, что регистрация является rejected вне личный чат."""
     result = _service(settings, [_venue()]).handle(_event("/start 6461W6", chat_type="group"))
     assert result.handled is True
     assert result.reply is not None
@@ -113,6 +127,7 @@ def test_registration_is_rejected_outside_private_chat(settings) -> None:  # typ
 
 
 def test_confirmation_escapes_venue_html(settings) -> None:  # type: ignore[no-untyped-def]
+    """Проверяет, что подтверждение экранирует заведение html."""
     result = _service(settings, [_venue(name='<Кафе & "Бар">')]).handle(_event("/start 6461W6"))
     assert result.reply is not None
     assert '&lt;Кафе &amp; "Бар"&gt;' in result.reply.text
@@ -120,6 +135,7 @@ def test_confirmation_escapes_venue_html(settings) -> None:  # type: ignore[no-u
 
 
 def test_callback_revision_is_ignored_and_code_is_looked_up_again(settings) -> None:  # type: ignore[no-untyped-def]
+    """Проверяет, что callback ревизия является игнорируется и код является looked up again."""
     service = _service(settings, [_venue()])
     service._bind = MagicMock()  # type: ignore[method-assign]
     service._bind.return_value.handled = True
@@ -131,6 +147,7 @@ def test_callback_revision_is_ignored_and_code_is_looked_up_again(settings) -> N
 
 
 def test_declining_confirmation_never_writes(settings) -> None:  # type: ignore[no-untyped-def]
+    """Проверяет, что отказ от подтверждение никогда не записывает."""
     service = _service(settings, [_venue()])
     service._bind = MagicMock()  # type: ignore[method-assign]
 
@@ -141,6 +158,7 @@ def test_declining_confirmation_never_writes(settings) -> None:  # type: ignore[
 
 
 def test_switch_requires_an_extra_confirmation(settings) -> None:  # type: ignore[no-untyped-def]
+    """Проверяет, что смена требует an extra подтверждение."""
     service = _service(settings, [_venue()])
     service.current = VenueContext(
         venue_code="OLD123",
@@ -160,6 +178,7 @@ def test_switch_requires_an_extra_confirmation(settings) -> None:  # type: ignor
 
 
 def test_missing_and_conflicting_codes_have_distinct_messages(settings) -> None:  # type: ignore[no-untyped-def]
+    """Проверяет, что отсутствующий и конфликтующие codes имеют различаются messages."""
     missing = _service(settings, []).handle(_event("6461W6"))
     conflict = _service(settings, [_venue(), _venue(name="Дубль")]).handle(_event("6461W6"))
     assert missing.reply is not None and "не найден" in missing.reply.text
@@ -167,6 +186,7 @@ def test_missing_and_conflicting_codes_have_distinct_messages(settings) -> None:
 
 
 def test_gviz_parser_uses_headers_and_extracts_real_sheet_id() -> None:
+    """Проверяет, что gviz парсер использует заголовки и extracts реальный таблица идентификатор."""
     payload = {
         "table": {
             "cols": [
@@ -194,12 +214,14 @@ def test_gviz_parser_uses_headers_and_extracts_real_sheet_id() -> None:
 
 
 def test_gviz_parser_rejects_missing_required_header() -> None:
+    """Проверяет, что gviz парсер отклоняет отсутствующий required header."""
     text = 'google.visualization.Query.setResponse({"table":{"cols":[],"rows":[]}});'
     with pytest.raises(VenueDirectoryError, match="missing venue directory header"):
         VenueDirectory.parse_gviz(text)
 
 
 def test_directory_does_not_cache_transport_errors(settings) -> None:  # type: ignore[no-untyped-def]
+    """Проверяет, что справочник выполняет не кэш транспорт ошибки."""
     redis = MagicMock()
     redis.get.return_value = None
     client = MagicMock()
@@ -210,11 +232,65 @@ def test_directory_does_not_cache_transport_errors(settings) -> None:  # type: i
     redis.setex.assert_not_called()
 
 
+def test_directory_keeps_a_complete_gviz_url(settings) -> None:  # type: ignore[no-untyped-def]
+    """Использует готовый адрес справочника без изменения."""
+    url = "https://docs.google.com/spreadsheets/d/sheet-id/gviz/tq?tqx=out:json&gid=42"
+    configured = settings.model_copy(update={"google_venue_directory_url": url})
+    directory = VenueDirectory(configured, MagicMock(), client=MagicMock())
+
+    assert directory._directory_url() == url
+
+
+def test_directory_builds_gviz_url_from_spreadsheet_id(settings) -> None:  # type: ignore[no-untyped-def]
+    """Строит адрес справочника, если передан только ID таблицы."""
+    spreadsheet_id = "abc_DEF-12345678901234567890"
+    configured = settings.model_copy(
+        update={
+            "google_venue_directory_url": spreadsheet_id,
+            "google_registration_sheet": "Чаты заведений",
+        }
+    )
+    directory = VenueDirectory(configured, MagicMock(), client=MagicMock())
+
+    assert directory._directory_url() == (
+        "https://docs.google.com/spreadsheets/d/"
+        f"{spreadsheet_id}/gviz/tq?tqx=out%3Ajson&sheet=%D0%A7%D0%B0%D1%82%D1%8B+"
+        "%D0%B7%D0%B0%D0%B2%D0%B5%D0%B4%D0%B5%D0%BD%D0%B8%D0%B9"
+    )
+
+
+def test_directory_falls_back_to_registration_spreadsheet_id(settings) -> None:  # type: ignore[no-untyped-def]
+    """Использует центральную таблицу регистрации при пустом URL."""
+    spreadsheet_id = "abc_DEF-12345678901234567890"
+    configured = settings.model_copy(
+        update={
+            "google_venue_directory_url": "",
+            "google_registration_spreadsheet_id": spreadsheet_id,
+        }
+    )
+    directory = VenueDirectory(configured, MagicMock(), client=MagicMock())
+
+    assert f"/d/{spreadsheet_id}/gviz/tq?" in directory._directory_url()
+
+
+def test_directory_reports_missing_configuration_before_http_call(settings) -> None:  # type: ignore[no-untyped-def]
+    """Возвращает контролируемую ошибку при отсутствии настроек."""
+    client = MagicMock()
+    directory = VenueDirectory(settings, MagicMock(), client=client)
+
+    with pytest.raises(VenueDirectoryError, match="not configured"):
+        directory._directory_url()
+
+    client.get.assert_not_called()
+
+
 def test_spreadsheet_id_parser_does_not_accept_arbitrary_url() -> None:
+    """Проверяет, что таблица идентификатор парсер выполняет не accept произвольный URL."""
     assert extract_spreadsheet_id("https://example.test/not-a-sheet") == ""
 
 
 def test_successful_binding_is_synced_before_success_is_shown(settings, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    """Проверяет, что успешная привязка является synced до успех является shown."""
     binding = SimpleNamespace(
         id=5,
         channel="telegram",
@@ -252,6 +328,7 @@ def test_successful_binding_is_synced_before_success_is_shown(settings, monkeypa
 
 
 def test_google_sync_failure_does_not_report_success(settings, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    """Проверяет, что Google синхронизация сбой выполняет не report успех."""
     binding = SimpleNamespace(
         id=5,
         channel="telegram",
@@ -291,6 +368,7 @@ def test_google_sync_failure_does_not_report_success(settings, monkeypatch) -> N
 def test_repeated_binding_reports_already_connected_without_duplicate(
     settings, monkeypatch
 ) -> None:  # type: ignore[no-untyped-def]
+    """Проверяет, что повторный привязка сообщает уже connected без дубликат."""
     binding = SimpleNamespace(
         id=5,
         channel="telegram",

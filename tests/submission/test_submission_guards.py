@@ -13,10 +13,12 @@ from restaurant_bot.services.engine import ConversationEngine
 
 
 def _event() -> TelegramEvent:
+    """Создаёт тестовое событие Telegram."""
     return TelegramEvent(update_id=1, chat_id="123456", input_type=InputKind.TEXT)
 
 
 def test_submit_request_stops_on_first_unresolved_item(settings) -> None:  # type: ignore[no-untyped-def]
+    """Проверяет, что отправка запрос останавливает on первый неразрешённая позиция."""
     engine = ConversationEngine(settings)
     result = engine.handle(
         _event(),
@@ -33,6 +35,7 @@ def test_submit_request_stops_on_first_unresolved_item(settings) -> None:  # typ
 
 
 def test_submit_as_is_cannot_bypass_unresolved_item_guard(settings) -> None:  # type: ignore[no-untyped-def]
+    """Проверяет, что отправка как является не может обходит неразрешённая позиция проверка."""
     engine = ConversationEngine(settings)
     catalog = [CatalogProduct(product_id="rose", name="Сироп Роза", supplier="Сиропы", unit="шт")]
     result = engine.handle(
@@ -59,6 +62,7 @@ def test_submit_as_is_cannot_bypass_unresolved_item_guard(settings) -> None:  # 
 
 
 def test_submission_retry_reuses_checkpoint_without_clearing_draft(settings) -> None:  # type: ignore[no-untyped-def]
+    """Проверяет, что отправка заявки повтор reuses checkpoint без clearing черновик."""
     engine = ConversationEngine(settings)
     cart_item = engine._build_item(ExtractedItem(product_query="Сироп Роза", quantity=5, unit="шт"))
     cart_item.status = ItemStatus.MATCHED

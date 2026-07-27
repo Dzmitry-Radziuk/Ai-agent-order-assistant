@@ -5,6 +5,7 @@ import re
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from typing import Any, ClassVar, cast
+from urllib.parse import urlencode
 
 import httpx
 import structlog
@@ -100,7 +101,7 @@ class VenueDirectory:
             payload = json.loads(cast(str | bytes | bytearray, cached))
             return [Venue(**item) for item in payload]
         try:
-            response = self.client.get(self.settings.google_venue_directory_url)
+            response = self.client.get(self._directory_url())
             response.raise_for_status()
             venues = self.parse_gviz(response.text)
         except (httpx.HTTPError, ValueError, KeyError, TypeError, VenueDirectoryError) as exc:
@@ -111,6 +112,24 @@ class VenueDirectory:
             json.dumps([asdict(venue) for venue in venues], ensure_ascii=False),
         )
         return venues
+
+    def _directory_url(self) -> str:
+        """Возвращает GViz URL справочника из URL или ID таблицы."""
+        configured = clean_text(self.settings.google_venue_directory_url)
+        if configured.startswith(("https://", "http://")):
+            return configured
+        spreadsheet_id = extract_spreadsheet_id(
+            configured or self.settings.google_registration_spreadsheet_id
+        )
+        if not spreadsheet_id:
+            raise VenueDirectoryError("venue directory is not configured")
+        query = urlencode(
+            {
+                "tqx": "out:json",
+                "sheet": self.settings.google_registration_sheet,
+            }
+        )
+        return f"https://docs.google.com/spreadsheets/d/{spreadsheet_id}/gviz/tq?{query}"
 
     @classmethod
     def parse_gviz(cls, text: str) -> list[Venue]:

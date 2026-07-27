@@ -8,6 +8,7 @@ from restaurant_bot.integrations.telegram import TelegramAPIError, TelegramClien
 
 
 def test_long_reply_is_split_without_losing_text() -> None:
+    """Проверяет, что long ответ является split без потери текст."""
     text = "текст" * 2500
 
     chunks = TelegramClient._split_text(text)
@@ -18,6 +19,7 @@ def test_long_reply_is_split_without_losing_text() -> None:
 
 
 def test_media_download_fails_clearly_without_telegram_file_id() -> None:
+    """Проверяет, что медиа download завершается ошибкой clearly без Telegram файл идентификатор."""
     client = object.__new__(TelegramClient)
 
     with pytest.raises(TelegramAPIError, match="Telegram не передал бинарные данные файла"):
@@ -25,6 +27,7 @@ def test_media_download_fails_clearly_without_telegram_file_id() -> None:
 
 
 def test_inline_keyboard_payload_preserves_callbacks_and_strips_emoji() -> None:
+    """Проверяет, что inline keyboard payload сохраняет callback и strips emoji."""
     reply = BotReply(
         text="Черновик", rows=[[Button(text="Показать черновик", callback_data="v2:back:r3")]]
     )
@@ -35,10 +38,12 @@ def test_inline_keyboard_payload_preserves_callbacks_and_strips_emoji() -> None:
 
 
 def test_callback_progress_edit_clears_the_obsolete_keyboard() -> None:
+    """Проверяет, что callback прогресс edit очищает устаревшая keyboard."""
     client = object.__new__(TelegramClient)
     calls: list[tuple[str, dict[str, object]]] = []
 
     def call(method: str, payload: dict[str, object]) -> dict[str, int]:
+        """Сохраняет параметры тестового вызова Telegram API."""
         calls.append((method, payload))
         return {"message_id": 42}
 
@@ -66,6 +71,7 @@ def test_callback_progress_edit_clears_the_obsolete_keyboard() -> None:
 
 
 def test_disable_keyboard_ignores_a_card_without_inline_keyboard() -> None:
+    """Проверяет, что disable keyboard игнорирует a карточка без inline keyboard."""
     client = object.__new__(TelegramClient)
     client._call = MagicMock(
         side_effect=TelegramAPIError("Telegram editMessageReplyMarkup failed (400)")
@@ -107,6 +113,7 @@ def test_delete_message_failure_does_not_stop_user_action() -> None:
     ],
 )
 def test_expired_callback_does_not_retry_the_whole_action(description: str) -> None:
+    """Проверяет, что устаревший callback выполняет не повтор whole действие."""
     client = object.__new__(TelegramClient)
     client._call = MagicMock(side_effect=TelegramAPIError(description))  # type: ignore[method-assign]
 
@@ -116,6 +123,7 @@ def test_expired_callback_does_not_retry_the_whole_action(description: str) -> N
 
 
 def test_telegram_api_error_never_includes_the_bot_url() -> None:
+    """Проверяет, что Telegram API ошибка никогда не includes бота URL."""
     text = TelegramClient._error_text(
         "editMessageReplyMarkup",
         400,
@@ -127,6 +135,7 @@ def test_telegram_api_error_never_includes_the_bot_url() -> None:
 
 
 def test_connect_timeout_is_retried_only_once() -> None:
+    """Проверяет, что подключение тайм-аут является повторяется только один раз."""
     client = object.__new__(TelegramClient)
     client.base_url = "https://telegram.invalid"
     request = httpx.Request("POST", "https://telegram.invalid/sendMessage")
@@ -138,7 +147,51 @@ def test_connect_timeout_is_retried_only_once() -> None:
     assert client.client.post.call_count == 2
 
 
+def test_two_connect_timeouts_are_retried_before_success() -> None:
+    """Переживает два кратких сбоя TLS до успешного соединения."""
+    client = object.__new__(TelegramClient)
+    client.base_url = "https://telegram.invalid"
+    request = httpx.Request("POST", "https://telegram.invalid/sendMessage")
+    success = httpx.Response(200, json={"ok": True, "result": {"message_id": 8}})
+    client.client = MagicMock()
+    client.client.post.side_effect = [
+        httpx.ConnectTimeout("timeout-1", request=request),
+        httpx.ConnectTimeout("timeout-2", request=request),
+        success,
+    ]
+
+    assert client._call("sendMessage", {}) == {"message_id": 8}
+    assert client.client.post.call_count == 3
+
+
+def test_edit_connect_failure_falls_back_to_new_message() -> None:
+    """Доставляет сохранённый результат новой карточкой после сбоя edit."""
+    client = object.__new__(TelegramClient)
+    request = httpx.Request("POST", "https://telegram.invalid/editMessageText")
+    client._call = MagicMock(  # type: ignore[method-assign]
+        side_effect=[
+            httpx.ConnectTimeout("edit unavailable", request=request),
+            {"message_id": 99},
+        ]
+    )
+
+    message_id = client.send_reply(
+        "1",
+        BotReply(text="Черновик обновлён", edit_message_id=42),
+    )
+
+    assert message_id == 99
+    edit_method, edit_payload = client._call.call_args_list[0].args
+    send_method, send_payload = client._call.call_args_list[1].args
+    assert edit_method == "editMessageText"
+    assert edit_payload["message_id"] == 42
+    assert send_method == "sendMessage"
+    assert "message_id" not in send_payload
+    assert send_payload["text"] == "Черновик обновлён"
+
+
 def test_read_timeout_is_not_retried_to_avoid_duplicate_message() -> None:
+    """Проверяет, что чтение тайм-аут является не повторяется в avoid дубликат сообщение."""
     client = object.__new__(TelegramClient)
     client.base_url = "https://telegram.invalid"
     request = httpx.Request("POST", "https://telegram.invalid/sendMessage")

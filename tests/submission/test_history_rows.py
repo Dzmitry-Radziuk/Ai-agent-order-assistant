@@ -11,6 +11,7 @@ from restaurant_bot.services.engine import ConversationEngine
 
 
 def test_submission_row_uses_add_sheet_contract_headers(settings) -> None:  # type: ignore[no-untyped-def]
+    """Проверяет, что отправка заявки строка использует добавление таблица контракт заголовки."""
     engine = ConversationEngine(settings)
     event = TelegramEvent(update_id=1, chat_id="11112222", input_type=InputKind.TEXT)
     catalog = [

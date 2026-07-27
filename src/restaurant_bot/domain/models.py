@@ -26,6 +26,7 @@ class Intent(StrEnum):
     CLARIFY_CURRENT = "clarify_current"
     MANUAL_CURRENT = "manual_current"
     CLEAR_CART = "clear_cart"
+    START_NEW_ORDER = "start_new_order"
     CONFIRM = "confirm"
     CANCEL = "cancel"
     SHOW_CART = "show_cart"
@@ -238,6 +239,9 @@ class CartItem(BaseModel):
 
     id: str
     source_query: str
+    source_line: str = ""
+    quantity_source: str = ""
+    order_entry_type: str = ""
     quantity: float | None = None
     unit: str = ""
     department: str = "Кухня"
@@ -262,6 +266,12 @@ class CartItem(BaseModel):
     duplicate_existing_quantity: float = 0
     duplicate_existing_unit: str = ""
     product_add_request_id: str = ""
+
+    @field_validator("source_query", "source_line", "quantity_source", "order_entry_type")
+    @classmethod
+    def strip_source_text(cls, value: str) -> str:
+        """Обрезает пробелы в исходном названии товара."""
+        return " ".join(value.split()).strip()
 
     @property
     def amount(self) -> float:
@@ -316,6 +326,7 @@ class ConversationState(BaseModel):
     department: str = "Кухня"
     ui_revision: int = 0
     ui_message_text: str = ""
+    visible_actions: list[dict[str, str]] = Field(default_factory=list)
     supplier_hint_context: str = ""
     current_issue_kind: IssueKind | None = None
     search_scope: SearchScope = SearchScope.SUPPLIER_ONLY
@@ -328,6 +339,7 @@ class ConversationState(BaseModel):
     unit_item_index: int | None = None
     edit_multiple_index: int | None = None
     pending_added_items_count: int = 0
+    pending_new_order_confirmation: bool = False
 
     def current_item(self) -> CartItem | None:
         """Возвращает позицию, ожидающую действия пользователя."""

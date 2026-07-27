@@ -3,6 +3,7 @@ from restaurant_bot.services.input_normalizer import normalize_telegram_update
 
 
 def test_normalizes_text_command_and_sender() -> None:
+    """Проверяет, что нормализует текст команда и отправитель."""
     event = normalize_telegram_update(
         {
             "update_id": 7,
@@ -21,6 +22,7 @@ def test_normalizes_text_command_and_sender() -> None:
 
 
 def test_normalizes_voice_message() -> None:
+    """Проверяет, что нормализует голос сообщение."""
     event = normalize_telegram_update(
         {
             "update_id": 8,

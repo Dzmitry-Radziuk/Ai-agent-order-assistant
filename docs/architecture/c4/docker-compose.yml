@@ -1,9 +1,0 @@
-services:
-  structurizr:
-    image: structurizr/structurizr
-    command: ["local"]
-    ports:
-      - "${C4_PORT:-8081}:8080"
-    volumes:
-      - ./:/usr/local/structurizr
-    restart: "no"
