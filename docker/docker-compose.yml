@@ -1,11 +1,9 @@
 services:
   migrate:
-    container_name: ${CONTAINER_NAME:-orders-assistant}-migrate
     image: ${IMAGE_NAME}:${IMAGE_TAG:-latest}
+    command: ["alembic", "-c", "alembic.ini", "upgrade", "head"]
     env_file:
       - .env
-    command: ["alembic", "upgrade", "head"]
-    restart: "no"
     networks:
       - backend
 
@@ -36,6 +34,9 @@ services:
     env_file:
       - .env
     command: ["celery", "-A", "restaurant_bot.workers.celery_app.celery_app", "worker", "-l", "INFO", "--concurrency=${CELERY_CONCURRENCY:-10}"]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
     networks:
       - backend
     depends_on:
@@ -55,6 +56,9 @@ services:
     env_file:
       - .env
     command: ["celery", "-A", "restaurant_bot.workers.celery_app.celery_app", "beat", "-l", "INFO", "--schedule=/tmp/celerybeat-schedule"]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
     networks:
       - backend
     depends_on:
