@@ -320,12 +320,14 @@ Redis не публикуется наружу и не используется 
 | `GOOGLE_REGISTRATION_SPREADSHEET_ID` | Да | Нет | Таблица регистрации |
 | `GOOGLE_REGISTRATION_SHEET` | Нет | Нет | `Чаты` |
 | `GOOGLE_CATALOG_SHEET` | Нет | Нет | `Заявка` |
-| `GOOGLE_HISTORY_SHEET` | Нет | Нет | `История товары(API)`, переходная запись товарных строк |
 | `GOOGLE_ORDER_STATUS_SHEET` | Нет | Нет | `История`, источник статусов заявок |
 | `GOOGLE_PRODUCT_ADD_SHEET` | Нет | Нет | `Добавить` |
 | `GOOGLE_RECALC_URL` | Да | Ограниченный доступ | HTTPS URL Apps Script |
 | `GOOGLE_RECALC_TOKEN` | Да | Да | Token проверки вызова Apps Script |
 | `GOOGLE_RECALC_SHEET` | Нет | Нет | `Заявка` |
+| `GOOGLE_ORDER_SUBMISSION_URL` | Да | Ограниченный доступ | HTTPS URL центрального Apps Script отправки заявки |
+| `GOOGLE_ORDER_SUBMISSION_SECRET` | Да | Да | Общий секрет центрального Apps Script |
+| `GOOGLE_ORDER_SUBMISSION_TIMEOUT_SECONDS` | Нет | Нет | `60`, допустимо 5–180 секунд |
 | `VENUE_DIRECTORY_CACHE_TTL_SECONDS` | Нет | Нет | `120`, допустимо 30–3600 |
 | `CATALOG_CACHE_TTL_SECONDS` | Нет | Нет | `60`, допустимо 5–3600 |
 | `DEFAULT_DEPARTMENT` | Нет | Нет | `Кухня` |
@@ -372,6 +374,7 @@ GitLab предупреждает, что masking не защищает от в�
 | `POSTGRES_PASSWORD` | Variable | Masked and hidden | Да |
 | `DATABASE_URL` | Variable | Masked and hidden | Да |
 | `GOOGLE_RECALC_TOKEN` | Variable | Masked and hidden | Да |
+| `GOOGLE_ORDER_SUBMISSION_SECRET` | Variable | Masked and hidden | Да |
 | `GOOGLE_SERVICE_ACCOUNT_JSON` | **File** | Hidden/доступное для File | Да |
 | `LANGFUSE_SECRET_KEY` | Variable | Masked and hidden | Да |
 
@@ -400,11 +403,12 @@ GOOGLE_VENUE_DIRECTORY_URL
 GOOGLE_REGISTRATION_SPREADSHEET_ID
 GOOGLE_REGISTRATION_SHEET
 GOOGLE_CATALOG_SHEET
-GOOGLE_HISTORY_SHEET
 GOOGLE_ORDER_STATUS_SHEET
 GOOGLE_PRODUCT_ADD_SHEET
 GOOGLE_RECALC_URL
 GOOGLE_RECALC_SHEET
+GOOGLE_ORDER_SUBMISSION_URL
+GOOGLE_ORDER_SUBMISSION_TIMEOUT_SECONDS
 DEFAULT_DEPARTMENT
 LANGFUSE_ENABLED
 LANGFUSE_PUBLIC_KEY
@@ -1050,9 +1054,10 @@ docker image prune
 - [ ] Локальный и публичный `/health/ready` отвечают `200`.
 - [ ] Webhook установлен на правильный домен.
 - [ ] `/start`, текст, голос, фото и кнопки проверены.
-- [ ] Заявка записана в `История товары(API)` на переходном этапе.
-- [ ] Комментарии записаны.
+- [ ] Количество и комментарии записаны в лист `Заявка` таблицы заведения.
 - [ ] Apps Script перерасчёта вызван.
+- [ ] Центральный Apps Script создал заявку и вернул внешний `Номер заявки`.
+- [ ] В центральных листах `Заявки` и `База Заявок` появились ожидаемые строки.
 - [ ] «Мои заявки» читает статусы из листа `История`.
 
 ### Надёжность

@@ -586,9 +586,9 @@ flowchart LR
 
 **Действие пользователя:** Нажимает «Отправить поставщику».
 
-**Ответ бота:** Записывает заявку, очищает отправленный черновик и показывает номер с кнопками статуса и новой заявки.
+**Ответ бота:** Обновляет лист «Заявка», запускает перерасчёт, передаёт заказ центральному сервису и показывает полученный номер с кнопками статуса и новой заявки.
 
-**Результат:** Каждая позиция записана один раз; пользователь видит подтверждение.
+**Результат:** Центральный сервис создал заявку, бот сохранил её внешний номер и только после этого очистил отправленный черновик.
 
 **Примеры фраз:**
 
@@ -600,6 +600,7 @@ flowchart LR
 
 - [`tests/submission/test_submission.py`](../tests/submission/test_submission.py) → `test_successful_submission_clears_cart_checkpoint_and_marks_state_submitted`
 - [`tests/submission/test_submission.py`](../tests/submission/test_submission.py) → `test_submission_success_card_matches_n8n`
+- [`tests/submission/test_submission.py`](../tests/submission/test_submission.py) → `test_submission_runs_all_external_stages_and_uses_external_order_number`
 
 #### SUB-04 · Статус отправленных заявок
 
@@ -627,27 +628,30 @@ flowchart LR
 - [`tests/submission/test_submission.py`](../tests/submission/test_submission.py) → `test_order_status_renderer_handles_history_without_delivery_date`
 - [`tests/submission/test_submission.py`](../tests/submission/test_submission.py) → `test_order_status_limits_to_ten_tracked_orders_and_formats_delivery_date`
 
-#### SUB-05 · Временный сбой при отправке
+#### SUB-05 · Сбой до или во время финальной отправки
 
 **Приоритет:** Критический<br>
 **Канал:** Системный<br>
-**Предусловие:** Telegram, Google Sheets или сеть временно не отвечают.
+**Предусловие:** Google Sheets, центральный скрипт, Telegram или сеть временно не отвечают.
 
-**Действие пользователя:** Ждёт результат либо повторяет действие после сообщения об ошибке.
+**Действие пользователя:** Следует инструкции бота: безопасно повторяет ранний этап либо передаёт внутренний код менеджеру.
 
-**Ответ бота:** Безопасно повторяет только допустимый этап и не создаёт вторую заявку.
+**Ответ бота:** До центрального POST предлагает безопасный повтор. После начала POST не отправляет заявку повторно и просит проверить результат через менеджера по снабжению.
 
-**Результат:** Успешно записанная заявка не дублируется; подтверждённая ошибка отображается после исчерпания повторов.
+**Результат:** Неоднозначный сетевой ответ не приводит к автоматическому дублю заказа поставщикам.
 
 **Примеры фраз:**
 
 - «Повторить отправку»
-- «К черновику»
+- «Не отправляйте её повторно»
+- «Сообщить код менеджеру»
 
 **Автоматическая проверка:**
 
-- [`tests/submission/test_submission.py`](../tests/submission/test_submission.py) → `test_transient_submission_error_is_retried_without_premature_failure_card`
-- [`tests/submission/test_submission.py`](../tests/submission/test_submission.py) → `test_retry_delivers_success_card_after_order_was_already_finalized`
+- [`tests/submission/test_submission.py`](../tests/submission/test_submission.py) → `test_transient_pre_dispatch_error_can_be_retried_safely`
+- [`tests/submission/test_submission.py`](../tests/submission/test_submission.py) → `test_ambiguous_dispatch_failure_is_never_automatically_retried`
+- [`tests/submission/test_submission.py`](../tests/submission/test_submission.py) → `test_redelivery_after_started_dispatch_does_not_send_second_post`
+- [`tests/submission/test_submission_guards.py`](../tests/submission/test_submission_guards.py) → `test_submission_retry_is_blocked_after_uncertain_dispatch`
 
 ### Защита от неверного действия
 

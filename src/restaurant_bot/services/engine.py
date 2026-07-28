@@ -74,6 +74,7 @@ from restaurant_bot.services.replies import (
     unrecognized_voice_reply,
     welcome_reply,
 )
+from restaurant_bot.services.submission_presenter import submission_dispatch_uncertain_reply
 from restaurant_bot.services.text import (
     UNIT_ALIASES,
     convert_quantity,
@@ -2212,6 +2213,17 @@ class ConversationEngine:
 
     def _prepare_submission(self, event: TelegramEvent, state: ConversationState) -> EngineResult:
         """Фиксирует черновик для надёжной отправки."""
+        if (
+            state.pending_submission
+            and state.pending_submission.failed_stage == "dispatch_uncertain"
+        ):
+            return EngineResult(
+                state=state,
+                reply=submission_dispatch_uncertain_reply(
+                    state,
+                    state.pending_submission.order_no,
+                ),
+            )
         if (
             state.pending_submission
             and state.pending_submission.order_no

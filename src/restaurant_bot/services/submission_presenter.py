@@ -54,6 +54,20 @@ def submission_failure_reply(state: Any, order_no: str) -> BotReply:
     )
 
 
+def submission_dispatch_uncertain_reply(state: Any, order_no: str) -> BotReply:
+    """Формирует предупреждение без опасной кнопки повторной отправки."""
+    del state
+    return BotReply(
+        text=(
+            "⚠️ <b>Нужно проверить отправку</b>\n\n"
+            "Бот передал заявку, но не получил подтверждение от системы закупок.\n\n"
+            "<b>Не отправляйте её повторно:</b> поставщики могли уже получить заказ.\n"
+            "Сообщите менеджеру по снабжению этот код:\n"
+            f"<code>{escape(order_no)}</code>"
+        )
+    )
+
+
 def _status_value(row: dict[str, Any], *keys: str, default: str = "") -> str:
     """Возвращает первое заполненное поле статуса."""
     for key in keys:

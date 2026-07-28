@@ -70,7 +70,6 @@ def test_submission_retry_reuses_checkpoint_without_clearing_draft(settings) -> 
         cart=[cart_item],
         pending_submission=PendingSubmission(
             order_no="20260722-0001",
-            history_written=True,
             rows=[{"Наименование у поставщика": "Сироп Роза", "Кол-во": 5}],
         ),
     )
@@ -81,7 +80,6 @@ def test_submission_retry_reuses_checkpoint_without_clearing_draft(settings) -> 
     assert retry.state.stage.value == "submitting"
     assert retry.state.pending_submission is not None
     assert retry.state.pending_submission.order_no == "20260722-0001"
-    assert retry.state.pending_submission.history_written is True
     assert retry.state.cart[0].status is ItemStatus.MATCHED
     assert retry.reply.text == (
         "⚠️ <b>Отправка не завершена</b>\n\n"
@@ -92,3 +90,24 @@ def test_submission_retry_reuses_checkpoint_without_clearing_draft(settings) -> 
         ["Повторить отправку", "v2:submit"],
         ["К черновику", "v2:back"],
     ]
+
+
+def test_submission_retry_is_blocked_after_uncertain_dispatch(settings) -> None:  # type: ignore[no-untyped-def]
+    """Не разрешает повторный POST после неоднозначного ответа центрального скрипта."""
+    engine = ConversationEngine(settings)
+    state = ConversationState(
+        pending_submission=PendingSubmission(
+            order_no="20260722-0002",
+            failed_stage="dispatch_uncertain",
+            last_error="read timeout",
+            rows=[{"Наименование у поставщика": "Сироп Роза", "Кол-во": 5}],
+        ),
+    )
+
+    guarded = engine._prepare_submission(_event(), state)
+
+    assert guarded.enqueue_submission is False
+    assert guarded.state.pending_submission is not None
+    assert guarded.state.pending_submission.order_no == "20260722-0002"
+    assert "не отправляйте её повторно" in guarded.reply.text.lower()
+    assert guarded.reply.rows == []

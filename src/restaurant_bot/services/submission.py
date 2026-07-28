@@ -17,8 +17,12 @@ from restaurant_bot.domain.models import (
     PendingSubmission,
     SessionStage,
 )
-from restaurant_bot.integrations.cache import CatalogCache, chat_lock, google_history_lock_key
-from restaurant_bot.integrations.google_sheets import GoogleSheetsError, GoogleSheetsGateway
+from restaurant_bot.integrations.cache import CatalogCache, chat_lock, google_submission_lock_key
+from restaurant_bot.integrations.google_sheets import (
+    GoogleSheetsError,
+    GoogleSheetsGateway,
+    OrderSubmissionResult,
+)
 from restaurant_bot.integrations.telegram import TelegramClient
 from restaurant_bot.repositories.order_events import OrderEventRepository
 from restaurant_bot.repositories.sessions import SessionRepository
@@ -27,6 +31,7 @@ from restaurant_bot.services.replies import cart_reply
 from restaurant_bot.services.submission_presenter import (
     _callback_with_revision,
     build_order_status_text,
+    submission_dispatch_uncertain_reply,
     submission_failure_reply,
     submission_success_reply,
 )
@@ -62,59 +67,127 @@ class SubmissionService:
                 logger.info("submission_without_pending_order", chat_id=chat_id)
                 completion = self._load_unnotified_completion(chat_id)
                 if completion is not None:
-                    order_no, state = completion
-                    self._send_completion(chat_id, state, order_no)
+                    checkpoint_order_no, external_order_no, state = completion
+                    self._send_completion(
+                        chat_id,
+                        state,
+                        external_order_no,
+                        checkpoint_order_no,
+                    )
                 return
             finalized = False
             try:
                 record = self._record(chat_id, pending)
                 spreadsheet_id = self._require_venue_spreadsheet_id(pending.spreadsheet_id)
-                if not record.history_written:
-                    stage_started = perf_counter()
-                    with self.redis.lock(
-                        google_history_lock_key(spreadsheet_id),
-                        timeout=120,
-                        blocking_timeout=120,
-                    ):
-                        self.sheets.append_history(pending.rows, spreadsheet_id)
-                    self._checkpoint(pending.order_no, "history_written")
-                    logger.info(
-                        "submission_history_written",
-                        chat_id=chat_id,
-                        order_no=pending.order_no,
-                        row_count=len(pending.rows),
-                        duration_ms=round((perf_counter() - stage_started) * 1000),
+                dispatch_uncertain = ""
+                external_order_no = ""
+                with self.redis.lock(
+                    google_submission_lock_key(spreadsheet_id),
+                    timeout=300,
+                    blocking_timeout=300,
+                ):
+                    record = self._get_record(pending.order_no)
+                    if record.dispatch_started and not record.dispatch_completed:
+                        dispatch_uncertain = (
+                            record.last_error
+                            or "Предыдущая попытка отправки не завершила контрольную точку."
+                        )
+                        self._mark_dispatch_uncertain(
+                            chat_id,
+                            pending.order_no,
+                            dispatch_uncertain,
+                        )
+                    else:
+                        if not record.catalog_updated:
+                            stage_started = perf_counter()
+                            self.sheets.increment_catalog_quantities(
+                                pending.rows,
+                                spreadsheet_id,
+                            )
+                            self._checkpoint(pending.order_no, "catalog_updated")
+                            self.catalog_cache.invalidate(spreadsheet_id)
+                            logger.info(
+                                "submission_catalog_updated",
+                                chat_id=chat_id,
+                                order_no=pending.order_no,
+                                duration_ms=round((perf_counter() - stage_started) * 1000),
+                            )
+                        record = self._get_record(pending.order_no)
+                        if not record.recalc_done:
+                            stage_started = perf_counter()
+                            self.sheets.trigger_recalculation(
+                                pending.order_no,
+                                spreadsheet_id,
+                            )
+                            self._checkpoint(pending.order_no, "recalc_done")
+                            logger.info(
+                                "submission_recalculation_completed",
+                                chat_id=chat_id,
+                                order_no=pending.order_no,
+                                duration_ms=round((perf_counter() - stage_started) * 1000),
+                            )
+                        record = self._get_record(pending.order_no)
+                        if not record.dispatch_completed:
+                            prepared = self.sheets.prepare_order_submission(
+                                spreadsheet_id,
+                                pending.order_no,
+                            )
+                            self._mark_dispatch_started(pending.order_no)
+                            stage_started = perf_counter()
+                            try:
+                                result = self.sheets.send_order_submission(prepared)
+                            except Exception as exc:
+                                dispatch_uncertain = str(exc)
+                                self._mark_dispatch_uncertain(
+                                    chat_id,
+                                    pending.order_no,
+                                    dispatch_uncertain,
+                                )
+                                logger.exception(
+                                    "submission_dispatch_uncertain",
+                                    chat_id=chat_id,
+                                    order_no=pending.order_no,
+                                )
+                            else:
+                                self._mark_dispatch_completed(
+                                    pending.order_no,
+                                    result,
+                                )
+                                external_order_no = result.order_number
+                                logger.info(
+                                    "submission_dispatched",
+                                    chat_id=chat_id,
+                                    order_no=pending.order_no,
+                                    external_order_no=external_order_no,
+                                    base_rows=result.base_rows,
+                                    request_rows=result.request_rows,
+                                    duration_ms=round((perf_counter() - stage_started) * 1000),
+                                )
+                        else:
+                            external_order_no = record.external_order_no or pending.order_no
+                if dispatch_uncertain:
+                    self._send_dispatch_uncertain_once(
+                        chat_id,
+                        pending.order_no,
                     )
-                record = self._get_record(pending.order_no)
-                if not record.catalog_updated:
-                    stage_started = perf_counter()
-                    self.sheets.increment_catalog_quantities(pending.rows, spreadsheet_id)
-                    self._checkpoint(pending.order_no, "catalog_updated")
-                    self.catalog_cache.invalidate(spreadsheet_id)
-                    logger.info(
-                        "submission_catalog_updated",
-                        chat_id=chat_id,
-                        order_no=pending.order_no,
-                        duration_ms=round((perf_counter() - stage_started) * 1000),
-                    )
-                record = self._get_record(pending.order_no)
-                if not record.recalc_done:
-                    stage_started = perf_counter()
-                    self.sheets.trigger_recalculation(pending.order_no, spreadsheet_id)
-                    self._checkpoint(pending.order_no, "recalc_done")
-                    logger.info(
-                        "submission_recalculation_completed",
-                        chat_id=chat_id,
-                        order_no=pending.order_no,
-                        duration_ms=round((perf_counter() - stage_started) * 1000),
-                    )
-                final_state = self._finalize(chat_id, pending.order_no)
+                    return
+                final_state = self._finalize(
+                    chat_id,
+                    pending.order_no,
+                    external_order_no,
+                )
                 finalized = True
-                self._send_completion(chat_id, final_state, pending.order_no)
+                self._send_completion(
+                    chat_id,
+                    final_state,
+                    external_order_no,
+                    pending.order_no,
+                )
                 logger.info(
                     "submission_completed",
                     chat_id=chat_id,
                     order_no=pending.order_no,
+                    external_order_no=external_order_no,
                     total_ms=round((perf_counter() - started_at) * 1000),
                 )
             except Exception as exc:
@@ -131,15 +204,24 @@ class SubmissionService:
                     self._remember_transient_error(pending.order_no, str(exc))
                 raise
 
-    def _send_completion(self, chat_id: str, state: ConversationState, order_no: str) -> None:
+    def _send_completion(
+        self,
+        chat_id: str,
+        state: ConversationState,
+        external_order_no: str,
+        checkpoint_order_no: str,
+    ) -> None:
         """Отправляет подтверждение завершённой заявки."""
-        self.telegram.send_reply(chat_id, submission_success_reply(state, order_no))
-        self._checkpoint(order_no, "completion_notified")
+        self.telegram.send_reply(
+            chat_id,
+            submission_success_reply(state, external_order_no),
+        )
+        self._checkpoint(checkpoint_order_no, "completion_notified")
 
     @staticmethod
     def _load_unnotified_completion(
         chat_id: str,
-    ) -> tuple[str, ConversationState] | None:
+    ) -> tuple[str, str, ConversationState] | None:
         """Загружает завершённую заявку без уведомления."""
         from sqlalchemy import select
 
@@ -159,7 +241,7 @@ class SubmissionService:
             if record is None:
                 return None
             _, state = SessionRepository(db).get_for_update(chat_id)
-            return record.order_no, state
+            return record.order_no, record.external_order_no or record.order_no, state
 
     def send_status(self, chat_id: str) -> None:
         """Отправляет пользователю статусы его заявок."""
@@ -384,9 +466,9 @@ class SubmissionService:
             record.last_error = None
             pending = PendingSubmission.model_validate(record.payload)
             event_types = {
-                "history_written": "submission_history_written",
                 "catalog_updated": "submission_catalog_updated",
                 "recalc_done": "submission_recalculation_completed",
+                "dispatch_uncertain_notified": "submission_dispatch_uncertain_notified",
                 "completion_notified": "submission_notification_sent",
             }
             event_type = event_types.get(field)
@@ -398,14 +480,126 @@ class SubmissionService:
                     idempotency_key=f"order:{order_no}:{field}",
                 )
 
-    def _finalize(self, chat_id: str, order_no: str) -> ConversationState:
+    def _mark_dispatch_started(self, order_no: str) -> None:
+        """Фиксирует начало необратимого вызова до выполнения HTTP POST."""
+        from sqlalchemy import select
+
+        with SessionLocal.begin() as db:
+            record = db.scalar(
+                select(SubmissionRecord)
+                .where(SubmissionRecord.order_no == order_no)
+                .with_for_update()
+            )
+            if record is None:
+                raise RuntimeError(f"Submission record {order_no} not found")
+            if record.dispatch_started:
+                return
+            record.dispatch_started = True
+            record.dispatch_started_at = datetime.now(UTC)
+            record.last_error = None
+            pending = PendingSubmission.model_validate(record.payload)
+            self._append_submission_event(
+                OrderEventRepository(db),
+                pending,
+                event_type="submission_dispatch_started",
+                idempotency_key=f"order:{order_no}:dispatch-started",
+            )
+
+    def _mark_dispatch_completed(
+        self,
+        order_no: str,
+        result: OrderSubmissionResult,
+    ) -> None:
+        """Сохраняет внешний номер успешно созданной заявки."""
+        from sqlalchemy import select
+
+        with SessionLocal.begin() as db:
+            record = db.scalar(
+                select(SubmissionRecord)
+                .where(SubmissionRecord.order_no == order_no)
+                .with_for_update()
+            )
+            if record is None:
+                raise RuntimeError(f"Submission record {order_no} not found")
+            record.dispatch_completed = True
+            record.external_order_no = result.order_number
+            record.dispatch_completed_at = datetime.now(UTC)
+            record.last_error = None
+            pending = PendingSubmission.model_validate(record.payload)
+            self._append_submission_event(
+                OrderEventRepository(db),
+                pending,
+                event_type="submission_dispatched",
+                idempotency_key=f"order:{order_no}:dispatched",
+                details={
+                    "external_order_no": result.order_number,
+                    "base_rows": result.base_rows,
+                    "request_rows": result.request_rows,
+                },
+            )
+
+    def _mark_dispatch_uncertain(
+        self,
+        chat_id: str,
+        order_no: str,
+        error: str,
+    ) -> None:
+        """Запрещает повторный POST после неопределённого сетевого результата."""
+        from sqlalchemy import select
+
+        with SessionLocal.begin() as db:
+            sessions = SessionRepository(db)
+            row, state = sessions.get_for_update(chat_id)
+            state.stage = SessionStage.SUBMISSION_FAILED
+            state.status = "dispatch_uncertain"
+            if state.pending_submission:
+                state.pending_submission.failed_stage = "dispatch_uncertain"
+                state.pending_submission.last_error = error[:1000]
+            sessions.save(chat_id, state, row)
+            record = db.scalar(
+                select(SubmissionRecord)
+                .where(SubmissionRecord.order_no == order_no)
+                .with_for_update()
+            )
+            if record is None:
+                raise RuntimeError(f"Submission record {order_no} not found")
+            record.last_error = error[:4000]
+            pending = PendingSubmission.model_validate(record.payload)
+            self._append_submission_event(
+                OrderEventRepository(db),
+                pending,
+                event_type="submission_dispatch_uncertain",
+                idempotency_key=f"order:{order_no}:dispatch-uncertain",
+                status="uncertain",
+                details={"error": error},
+            )
+
+    def _send_dispatch_uncertain_once(self, chat_id: str, order_no: str) -> None:
+        """Один раз предупреждает пользователя и не предлагает повторную отправку."""
+        record = self._get_record(order_no)
+        if record.dispatch_uncertain_notified:
+            return
+        with SessionLocal() as db:
+            _, state = SessionRepository(db).get_for_update(chat_id)
+        self.telegram.send_reply(
+            chat_id,
+            submission_dispatch_uncertain_reply(state, order_no),
+        )
+        self._checkpoint(order_no, "dispatch_uncertain_notified")
+
+    def _finalize(
+        self,
+        chat_id: str,
+        order_no: str,
+        external_order_no: str,
+    ) -> ConversationState:
         """Финализирует успешно отправленную заявку."""
         from sqlalchemy import select
 
         with SessionLocal.begin() as db:
             sessions = SessionRepository(db)
             row, state = sessions.get_for_update(chat_id)
-            self._apply_successful_submission_state(state, order_no)
+            self._apply_successful_submission_state(state, external_order_no)
             sessions.save(chat_id, state, row)
             record = db.scalar(
                 select(SubmissionRecord)
@@ -421,6 +615,7 @@ class SubmissionService:
                     pending,
                     event_type="submission_completed",
                     idempotency_key=f"order:{order_no}:completed",
+                    details={"external_order_no": external_order_no},
                 )
             return state
 

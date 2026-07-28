@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import re
 from collections import defaultdict
+from dataclasses import dataclass
+from datetime import UTC, datetime
 from functools import cached_property
 from time import sleep
 from typing import Any, cast
@@ -17,33 +19,30 @@ from restaurant_bot.services.text import clean_text, normalize_text, to_float
 
 SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
 
-HISTORY_HEADERS = (
-    "Время создания заявки",
-    "Время изменения",
-    "ID заявки",
-    "№ Заявки",
-    "Условное название поставщика",
-    "Условное наз-ие заведения",
-    "Роль",
-    "Наименование у поставщика",
-    "Ед.Изм. для заказа",
-    "Минимальная Кратность в заказе",
-    "Полезный V, m Нетто Ед.Изм.для Заказа",
-    "Цена за Ед.Изм. для заказа",
-    "Кол-во",
-    "Мин сумма Заказа по Поставщику",
-    "Комментарий",
-    "Сумма по товару в заказе",
-    "Сумма по заявке к поставщику",
-    "Стадия",
-    "Стадия от Заведения",
-)
-
 
 class GoogleSheetsError(RuntimeError):
     """Сообщает об ошибке интеграции с Google Sheets."""
 
     pass
+
+
+@dataclass(frozen=True, slots=True, repr=False)
+class PreparedOrderSubmission:
+    """Хранит проверенный запрос к центральному Web App."""
+
+    url: str
+    payload: dict[str, Any]
+    timeout_seconds: float
+
+
+@dataclass(frozen=True, slots=True)
+class OrderSubmissionResult:
+    """Описывает созданную центральным Web App заявку."""
+
+    order_number: str
+    base_rows: int
+    request_rows: int
+    notifications: dict[str, Any]
 
 
 class GoogleSheetsGateway:
@@ -201,58 +200,6 @@ class GoogleSheetsGateway:
             )
         return result
 
-    def append_history(self, rows: list[dict[str, Any]], spreadsheet_id: str) -> None:
-        """Записывает строки заявки в историю."""
-        if not rows:
-            return
-        target_id = self._require_spreadsheet_id(spreadsheet_id)
-        existing = self._get_values(f"'{self.settings.google_history_sheet}'!A:S", target_id)
-        actual_headers = [clean_text(value) for value in (existing[0] if existing else [])]
-        if actual_headers[: len(HISTORY_HEADERS)] != list(HISTORY_HEADERS):
-            raise GoogleSheetsError("History sheet A:S headers do not match the n8n contract")
-        values = [[self._history_value(row, header) for header in HISTORY_HEADERS] for row in rows]
-        first_empty_row = self._first_empty_history_row(existing, len(values))
-        if first_empty_row <= len(existing):
-            last_row = first_empty_row + len(values) - 1
-            (
-                self.service.spreadsheets()
-                .values()
-                .update(
-                    spreadsheetId=target_id,
-                    range=(
-                        f"'{self.settings.google_history_sheet}'!A{first_empty_row}:S{last_row}"
-                    ),
-                    valueInputOption="USER_ENTERED",
-                    body={"values": values},
-                )
-                .execute()
-            )
-            return
-        (
-            self.service.spreadsheets()
-            .values()
-            .append(
-                spreadsheetId=target_id,
-                range=f"'{self.settings.google_history_sheet}'!A:S",
-                valueInputOption="USER_ENTERED",
-                insertDataOption="INSERT_ROWS",
-                body={"values": values},
-            )
-            .execute()
-        )
-
-    @staticmethod
-    def _first_empty_history_row(existing: list[list[Any]], required_rows: int) -> int:
-        """Находит первую свободную строку истории."""
-        if required_rows <= 0:
-            return 2
-        last_start_index = len(existing) - required_rows
-        for start_index in range(1, last_start_index + 1):
-            block = existing[start_index : start_index + required_rows]
-            if all(not any(clean_text(cell) for cell in row) for row in block):
-                return start_index + 1
-        return len(existing) + 1
-
     def increment_catalog_quantities(self, rows: list[dict[str, Any]], spreadsheet_id: str) -> None:
         """Обновляет количества товаров в каталоге."""
         target_id = self._require_spreadsheet_id(spreadsheet_id)
@@ -389,26 +336,6 @@ class GoogleSheetsGateway:
             )
         )
 
-    @staticmethod
-    def _history_value(row: dict[str, Any], header: str) -> Any:
-        """Сопоставляет поля заявки со столбцами истории."""
-        aliases = {
-            "Условное название поставщика": "Поставщик",
-            "Условное наз-ие заведения": "Заведение",
-            "Наименование у поставщика": "Наименование товара",
-            "Ед.Изм. для заказа": "Единица измерения",
-            "Минимальная Кратность в заказе": "Кратность",
-            "Полезный V, m Нетто Ед.Изм.для Заказа": "Полезный объем",
-            "Цена за Ед.Изм. для заказа": "Цена",
-            "Кол-во": "Количество",
-            "Мин сумма Заказа по Поставщику": "Минимальная сумма",
-            "Сумма по товару в заказе": "Сумма товара",
-            "Сумма по заявке к поставщику": "Сумма поставщика",
-            "Стадия от Заведения": "Стадия от заведения",
-        }
-        domain_key = aliases.get(header, header)
-        return row.get(header, row.get(domain_key, ""))
-
     def read_order_statuses(
         self, order_numbers: list[str], spreadsheet_id: str
     ) -> list[dict[str, Any]]:
@@ -423,6 +350,78 @@ class GoogleSheetsGateway:
             if clean_text(row.get("Номер заявки") or row.get("№ Заявки") or row.get("ID заявки"))
             in wanted
         ]
+
+    def prepare_order_submission(
+        self,
+        spreadsheet_id: str,
+        client_request_id: str,
+    ) -> PreparedOrderSubmission:
+        """Готовит запрос отправки без выполнения внешнего POST."""
+        target_id = self._require_spreadsheet_id(spreadsheet_id)
+        url = self.settings.google_order_submission_url.strip()
+        secret = self.settings.google_order_submission_secret.get_secret_value()
+        if not url:
+            raise GoogleSheetsError("GOOGLE_ORDER_SUBMISSION_URL is not configured")
+        if not secret:
+            raise GoogleSheetsError("GOOGLE_ORDER_SUBMISSION_SECRET is not configured")
+        metadata = (
+            self.service.spreadsheets()
+            .get(
+                spreadsheetId=target_id,
+                fields="properties.title",
+            )
+            .execute()
+        )
+        spreadsheet_name = clean_text((metadata.get("properties") or {}).get("title"))
+        if not spreadsheet_name:
+            raise GoogleSheetsError("Venue spreadsheet title is missing")
+        return PreparedOrderSubmission(
+            url=url,
+            payload={
+                "secret": secret,
+                "sourceSpreadsheetId": target_id,
+                "sourceSpreadsheetName": spreadsheet_name,
+                "sourceSpreadsheetUrl": (
+                    f"https://docs.google.com/spreadsheets/d/{target_id}/edit"
+                ),
+                "requestedAt": datetime.now(UTC).isoformat(),
+                "clientRequestId": clean_text(client_request_id),
+            },
+            timeout_seconds=self.settings.google_order_submission_timeout_seconds,
+        )
+
+    @staticmethod
+    def send_order_submission(request: PreparedOrderSubmission) -> OrderSubmissionResult:
+        """Отправляет один заранее подготовленный запрос в центральный Web App."""
+        response = httpx.post(
+            request.url,
+            json=request.payload,
+            timeout=request.timeout_seconds,
+            follow_redirects=True,
+        )
+        response.raise_for_status()
+        try:
+            payload = response.json()
+        except ValueError as exc:
+            raise GoogleSheetsError("Order submission script returned invalid JSON") from exc
+        if not isinstance(payload, dict):
+            raise GoogleSheetsError("Order submission script returned invalid payload")
+        if payload.get("ok") is False:
+            message = clean_text(payload.get("message"))
+            raise GoogleSheetsError(message or "Order submission script returned ok=false")
+        result = payload.get("result")
+        if not isinstance(result, dict):
+            raise GoogleSheetsError("Order submission script did not return result")
+        order_number = clean_text(result.get("orderNumber"))
+        if not order_number:
+            raise GoogleSheetsError("Order submission script did not return orderNumber")
+        notifications = result.get("notifications")
+        return OrderSubmissionResult(
+            order_number=order_number,
+            base_rows=int(to_float(result.get("baseRows")) or 0),
+            request_rows=int(to_float(result.get("requestRows")) or 0),
+            notifications=notifications if isinstance(notifications, dict) else {},
+        )
 
     def trigger_recalculation(self, order_no: str, spreadsheet_id: str) -> None:
         """Запускает перерасчёт итогов заявки."""

@@ -451,12 +451,13 @@
       "channels": ["Кнопка"],
       "precondition": "Все обязательные уточнения завершены, пользователь подтверждает отправку.",
       "user_action": "Нажимает «Отправить поставщику».",
-      "bot_response": "Записывает заявку, очищает отправленный черновик и показывает номер с кнопками статуса и новой заявки.",
-      "result": "Каждая позиция записана один раз; пользователь видит подтверждение.",
+      "bot_response": "Обновляет лист «Заявка», запускает перерасчёт, передаёт заказ центральному сервису и показывает полученный номер с кнопками статуса и новой заявки.",
+      "result": "Центральный сервис создал заявку, бот сохранил её внешний номер и только после этого очистил отправленный черновик.",
       "examples": ["Отправить поставщику", "Проверить статус", "Новая заявка"],
       "test_refs": [
         "tests/submission/test_submission.py::test_successful_submission_clears_cart_checkpoint_and_marks_state_submitted",
-        "tests/submission/test_submission.py::test_submission_success_card_matches_n8n"
+        "tests/submission/test_submission.py::test_submission_success_card_matches_n8n",
+        "tests/submission/test_submission.py::test_submission_runs_all_external_stages_and_uses_external_order_number"
       ]
     },
     {
@@ -481,17 +482,19 @@
     {
       "id": "SUB-05",
       "category": "submission",
-      "title": "Временный сбой при отправке",
+      "title": "Сбой до или во время финальной отправки",
       "priority": "critical",
       "channels": ["Системный"],
-      "precondition": "Telegram, Google Sheets или сеть временно не отвечают.",
-      "user_action": "Ждёт результат либо повторяет действие после сообщения об ошибке.",
-      "bot_response": "Безопасно повторяет только допустимый этап и не создаёт вторую заявку.",
-      "result": "Успешно записанная заявка не дублируется; подтверждённая ошибка отображается после исчерпания повторов.",
-      "examples": ["Повторить отправку", "К черновику"],
+      "precondition": "Google Sheets, центральный скрипт, Telegram или сеть временно не отвечают.",
+      "user_action": "Следует инструкции бота: безопасно повторяет ранний этап либо передаёт внутренний код менеджеру.",
+      "bot_response": "До центрального POST предлагает безопасный повтор. После начала POST не отправляет заявку повторно и просит проверить результат через менеджера по снабжению.",
+      "result": "Неоднозначный сетевой ответ не приводит к автоматическому дублю заказа поставщикам.",
+      "examples": ["Повторить отправку", "Не отправляйте её повторно", "Сообщить код менеджеру"],
       "test_refs": [
-        "tests/submission/test_submission.py::test_transient_submission_error_is_retried_without_premature_failure_card",
-        "tests/submission/test_submission.py::test_retry_delivers_success_card_after_order_was_already_finalized"
+        "tests/submission/test_submission.py::test_transient_pre_dispatch_error_can_be_retried_safely",
+        "tests/submission/test_submission.py::test_ambiguous_dispatch_failure_is_never_automatically_retried",
+        "tests/submission/test_submission.py::test_redelivery_after_started_dispatch_does_not_send_second_post",
+        "tests/submission/test_submission_guards.py::test_submission_retry_is_blocked_after_uncertain_dispatch"
       ]
     },
     {

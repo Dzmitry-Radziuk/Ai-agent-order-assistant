@@ -672,7 +672,7 @@
 
       <article id="scenario-SUB-03" class="scenario-card"
         data-category="submission"
-        data-priority="critical" data-search="sub-03 успешная отправка и номер заявки проверка и отправка нажимает «отправить поставщику». записывает заявку, очищает отправленный черновик и показывает номер с кнопками статуса и новой заявки. отправить поставщику проверить статус новая заявка">
+        data-priority="critical" data-search="sub-03 успешная отправка и номер заявки проверка и отправка нажимает «отправить поставщику». обновляет лист «заявка», запускает перерасчёт, передаёт заказ центральному сервису и показывает полученный номер с кнопками статуса и новой заявки. отправить поставщику проверить статус новая заявка">
         <div class="card-top">
           <span class="scenario-id">SUB-03</span>
           <span class="priority priority-critical">Критический</span>
@@ -683,16 +683,16 @@
         <dl>
           <div><dt>Перед началом</dt><dd>Все обязательные уточнения завершены, пользователь подтверждает отправку.</dd></div>
           <div><dt>Пользователь</dt><dd>Нажимает «Отправить поставщику».</dd></div>
-          <div><dt>Бот</dt><dd>Записывает заявку, очищает отправленный черновик и показывает номер с кнопками статуса и новой заявки.</dd></div>
-          <div class="result"><dt>Итог</dt><dd>Каждая позиция записана один раз; пользователь видит подтверждение.</dd></div>
+          <div><dt>Бот</dt><dd>Обновляет лист «Заявка», запускает перерасчёт, передаёт заказ центральному сервису и показывает полученный номер с кнопками статуса и новой заявки.</dd></div>
+          <div class="result"><dt>Итог</dt><dd>Центральный сервис создал заявку, бот сохранил её внешний номер и только после этого очистил отправленный черновик.</dd></div>
         </dl>
         <details>
           <summary>Примеры фраз</summary>
           <ul><li>«Отправить поставщику»</li><li>«Проверить статус»</li><li>«Новая заявка»</li></ul>
         </details>
         <details>
-          <summary>Связанные pytest-тесты · 2</summary>
-          <ul class="tests"><li><a href="../../tests/submission/test_submission.py">tests/submission/test_submission.py</a><span>test_successful_submission_clears_cart_checkpoint_and_marks_state_submitted</span></li><li><a href="../../tests/submission/test_submission.py">tests/submission/test_submission.py</a><span>test_submission_success_card_matches_n8n</span></li></ul>
+          <summary>Связанные pytest-тесты · 3</summary>
+          <ul class="tests"><li><a href="../../tests/submission/test_submission.py">tests/submission/test_submission.py</a><span>test_successful_submission_clears_cart_checkpoint_and_marks_state_submitted</span></li><li><a href="../../tests/submission/test_submission.py">tests/submission/test_submission.py</a><span>test_submission_success_card_matches_n8n</span></li><li><a href="../../tests/submission/test_submission.py">tests/submission/test_submission.py</a><span>test_submission_runs_all_external_stages_and_uses_external_order_number</span></li></ul>
         </details>
       </article>
 
@@ -724,27 +724,27 @@
 
       <article id="scenario-SUB-05" class="scenario-card"
         data-category="submission"
-        data-priority="critical" data-search="sub-05 временный сбой при отправке проверка и отправка ждёт результат либо повторяет действие после сообщения об ошибке. безопасно повторяет только допустимый этап и не создаёт вторую заявку. повторить отправку к черновику">
+        data-priority="critical" data-search="sub-05 сбой до или во время финальной отправки проверка и отправка следует инструкции бота: безопасно повторяет ранний этап либо передаёт внутренний код менеджеру. до центрального post предлагает безопасный повтор. после начала post не отправляет заявку повторно и просит проверить результат через менеджера по снабжению. повторить отправку не отправляйте её повторно сообщить код менеджеру">
         <div class="card-top">
           <span class="scenario-id">SUB-05</span>
           <span class="priority priority-critical">Критический</span>
         </div>
-        <h3>Временный сбой при отправке</h3>
+        <h3>Сбой до или во время финальной отправки</h3>
         <p class="category-label">Проверка и отправка</p>
         <div class="channels"><span>Системный</span></div>
         <dl>
-          <div><dt>Перед началом</dt><dd>Telegram, Google Sheets или сеть временно не отвечают.</dd></div>
-          <div><dt>Пользователь</dt><dd>Ждёт результат либо повторяет действие после сообщения об ошибке.</dd></div>
-          <div><dt>Бот</dt><dd>Безопасно повторяет только допустимый этап и не создаёт вторую заявку.</dd></div>
-          <div class="result"><dt>Итог</dt><dd>Успешно записанная заявка не дублируется; подтверждённая ошибка отображается после исчерпания повторов.</dd></div>
+          <div><dt>Перед началом</dt><dd>Google Sheets, центральный скрипт, Telegram или сеть временно не отвечают.</dd></div>
+          <div><dt>Пользователь</dt><dd>Следует инструкции бота: безопасно повторяет ранний этап либо передаёт внутренний код менеджеру.</dd></div>
+          <div><dt>Бот</dt><dd>До центрального POST предлагает безопасный повтор. После начала POST не отправляет заявку повторно и просит проверить результат через менеджера по снабжению.</dd></div>
+          <div class="result"><dt>Итог</dt><dd>Неоднозначный сетевой ответ не приводит к автоматическому дублю заказа поставщикам.</dd></div>
         </dl>
         <details>
           <summary>Примеры фраз</summary>
-          <ul><li>«Повторить отправку»</li><li>«К черновику»</li></ul>
+          <ul><li>«Повторить отправку»</li><li>«Не отправляйте её повторно»</li><li>«Сообщить код менеджеру»</li></ul>
         </details>
         <details>
-          <summary>Связанные pytest-тесты · 2</summary>
-          <ul class="tests"><li><a href="../../tests/submission/test_submission.py">tests/submission/test_submission.py</a><span>test_transient_submission_error_is_retried_without_premature_failure_card</span></li><li><a href="../../tests/submission/test_submission.py">tests/submission/test_submission.py</a><span>test_retry_delivers_success_card_after_order_was_already_finalized</span></li></ul>
+          <summary>Связанные pytest-тесты · 4</summary>
+          <ul class="tests"><li><a href="../../tests/submission/test_submission.py">tests/submission/test_submission.py</a><span>test_transient_pre_dispatch_error_can_be_retried_safely</span></li><li><a href="../../tests/submission/test_submission.py">tests/submission/test_submission.py</a><span>test_ambiguous_dispatch_failure_is_never_automatically_retried</span></li><li><a href="../../tests/submission/test_submission.py">tests/submission/test_submission.py</a><span>test_redelivery_after_started_dispatch_does_not_send_second_post</span></li><li><a href="../../tests/submission/test_submission_guards.py">tests/submission/test_submission_guards.py</a><span>test_submission_retry_is_blocked_after_uncertain_dispatch</span></li></ul>
         </details>
       </article>
 

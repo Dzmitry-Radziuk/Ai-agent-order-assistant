@@ -63,12 +63,14 @@ class Settings(BaseSettings):
     google_registration_sheet: str = "Чаты"
     venue_directory_cache_ttl_seconds: int = Field(default=120, ge=30, le=3600)
     google_catalog_sheet: str = "Заявка"
-    google_history_sheet: str = "История товары(API)"
     google_order_status_sheet: str = "История"
     google_product_add_sheet: str = "Добавить"
     google_recalc_url: str
     google_recalc_token: SecretStr = SecretStr("")
     google_recalc_sheet: str = "Заявка"
+    google_order_submission_url: str
+    google_order_submission_secret: SecretStr
+    google_order_submission_timeout_seconds: float = Field(default=60.0, ge=5.0, le=180.0)
     catalog_cache_ttl_seconds: int = Field(default=60, ge=5, le=3600)
 
     default_department: str = "Кухня"
@@ -99,6 +101,9 @@ class Settings(BaseSettings):
             "TELEGRAM_BOT_TOKEN": self.telegram_bot_token.get_secret_value(),
             "OPENAI_API_KEY": self.openai_api_key.get_secret_value(),
             "GOOGLE_RECALC_TOKEN": self.google_recalc_token.get_secret_value(),
+            "GOOGLE_ORDER_SUBMISSION_SECRET": (
+                self.google_order_submission_secret.get_secret_value()
+            ),
         }
         placeholders = [
             name
@@ -111,6 +116,7 @@ class Settings(BaseSettings):
             "GOOGLE_VENUE_DIRECTORY_URL": self.google_venue_directory_url,
             "GOOGLE_REGISTRATION_SPREADSHEET_ID": self.google_registration_spreadsheet_id,
             "GOOGLE_RECALC_URL": self.google_recalc_url,
+            "GOOGLE_ORDER_SUBMISSION_URL": self.google_order_submission_url,
         }
         missing_config = [
             name
@@ -125,6 +131,8 @@ class Settings(BaseSettings):
             raise ValueError("GOOGLE_VENUE_DIRECTORY_URL must use HTTPS in production")
         if not self.google_recalc_url.startswith("https://"):
             raise ValueError("GOOGLE_RECALC_URL must use HTTPS in production")
+        if not self.google_order_submission_url.startswith("https://"):
+            raise ValueError("GOOGLE_ORDER_SUBMISSION_URL must use HTTPS in production")
         if "bot:bot@" in self.database_url or "replace_" in self.database_url:
             raise ValueError("DATABASE_URL must contain production database credentials")
         if self.langfuse_enabled and not (

@@ -10,12 +10,17 @@ from restaurant_bot.domain.models import (
     PendingSubmission,
     SessionStage,
 )
-from restaurant_bot.integrations.cache import google_history_lock_key
-from restaurant_bot.integrations.google_sheets import GoogleSheetsError
+from restaurant_bot.integrations.cache import google_submission_lock_key
+from restaurant_bot.integrations.google_sheets import (
+    GoogleSheetsError,
+    OrderSubmissionResult,
+    PreparedOrderSubmission,
+)
 from restaurant_bot.services import submission as submission_module
 from restaurant_bot.services.submission import (
     SubmissionService,
     build_order_status_text,
+    submission_dispatch_uncertain_reply,
     submission_failure_reply,
     submission_success_reply,
 )
@@ -195,35 +200,56 @@ def test_order_status_limits_to_ten_tracked_orders_and_formats_delivery_date() -
     assert "24 июля 2026" in text
 
 
-def test_google_history_lock_is_isolated_by_venue_spreadsheet() -> None:
+def _record(**overrides: object) -> SimpleNamespace:
+    """Создаёт тестовую запись этапов отправки."""
+    values = {
+        "catalog_updated": False,
+        "recalc_done": False,
+        "dispatch_started": False,
+        "dispatch_completed": False,
+        "dispatch_uncertain_notified": False,
+        "external_order_no": None,
+        "last_error": None,
+    }
+    values.update(overrides)
+    return SimpleNamespace(**values)
+
+
+def _prepared_request(order_no: str = "ORDER-1") -> PreparedOrderSubmission:
+    """Создаёт безопасный тестовый запрос без реального HTTP-вызова."""
+    return PreparedOrderSubmission(
+        url="https://example.test/submit",
+        payload={"clientRequestId": order_no},
+        timeout_seconds=60,
+    )
+
+
+def test_google_submission_lock_is_isolated_by_venue_spreadsheet() -> None:
     """Разные таблицы заведений не конкурируют за одну блокировку."""
-    first_key = google_history_lock_key("venue-sheet-1")
-    same_key = google_history_lock_key("  venue-sheet-1  ")
-    second_key = google_history_lock_key("venue-sheet-2")
+    first_key = google_submission_lock_key("venue-sheet-1")
+    same_key = google_submission_lock_key("  venue-sheet-1  ")
+    second_key = google_submission_lock_key("venue-sheet-2")
 
     assert first_key == same_key
     assert first_key != second_key
     assert "venue-sheet-1" not in first_key
 
 
-def test_transient_submission_error_is_retried_without_premature_failure_card(
+def test_transient_pre_dispatch_error_can_be_retried_safely(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Проверяет, что transient отправка заявки ошибка является повторяется без premature сбой карточка."""
+    """Разрешает повтор до начала необратимого вызова центрального скрипта."""
     service = object.__new__(SubmissionService)
     service.redis = MagicMock()
+    service.redis.lock.return_value = nullcontext()
     service.telegram = MagicMock()
     service.sheets = MagicMock()
-    service.sheets.append_history.side_effect = TimeoutError("temporary timeout")
-    pending = PendingSubmission(
-        order_no="20260722-retry",
-        spreadsheet_id="venue-sheet",
-        rows=[{"Комментарий": "холодным"}],
-    )
+    service.catalog_cache = MagicMock()
+    service.sheets.increment_catalog_quantities.side_effect = TimeoutError("temporary timeout")
+    pending = PendingSubmission(order_no="ORDER-RETRY", spreadsheet_id="venue-sheet", rows=[])
     service._load_pending = MagicMock(return_value=pending)  # type: ignore[method-assign]
-    service._record = MagicMock(  # type: ignore[method-assign]
-        return_value=SimpleNamespace(history_written=False)
-    )
+    service._record = MagicMock(return_value=_record())  # type: ignore[method-assign]
+    service._get_record = MagicMock(return_value=_record())  # type: ignore[method-assign]
     service._remember_transient_error = MagicMock()  # type: ignore[method-assign]
     service._fail = MagicMock()  # type: ignore[method-assign]
     monkeypatch.setattr(submission_module, "chat_lock", lambda *_args, **_kwargs: nullcontext())
@@ -231,47 +257,53 @@ def test_transient_submission_error_is_retried_without_premature_failure_card(
     with pytest.raises(TimeoutError, match="temporary timeout"):
         service.submit("123", report_failure=False)
 
-    service._remember_transient_error.assert_called_once_with("20260722-retry", "temporary timeout")
+    service._remember_transient_error.assert_called_once_with("ORDER-RETRY", "temporary timeout")
     service._fail.assert_not_called()
-    service.telegram.send_reply.assert_not_called()
+    service.sheets.prepare_order_submission.assert_not_called()
+    service.sheets.send_order_submission.assert_not_called()
 
 
 def test_retry_delivers_success_card_after_order_was_already_finalized(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Проверяет, что повтор delivers успех карточка after заказ was уже finalized."""
+    """Повторно доставляет подтверждение уже завершённой заявки."""
     service = object.__new__(SubmissionService)
     service.redis = MagicMock()
     service._load_pending = MagicMock(return_value=None)  # type: ignore[method-assign]
-    state = ConversationState(last_order_no="20260722-complete", status="submitted")
+    state = ConversationState(last_order_no="№00V63II4-000024", status="submitted")
     service._load_unnotified_completion = MagicMock(  # type: ignore[method-assign]
-        return_value=("20260722-complete", state)
+        return_value=("ORDER-INTERNAL", "№00V63II4-000024", state)
     )
     service._send_completion = MagicMock()  # type: ignore[method-assign]
     monkeypatch.setattr(submission_module, "chat_lock", lambda *_args, **_kwargs: nullcontext())
 
     service.submit("123")
 
-    service._send_completion.assert_called_once_with("123", state, "20260722-complete")
+    service._send_completion.assert_called_once_with(
+        "123",
+        state,
+        "№00V63II4-000024",
+        "ORDER-INTERNAL",
+    )
 
 
 def test_success_card_is_checkpointed_only_after_telegram_accepts_it() -> None:
-    """Проверяет, что успех карточка является checkpointed только after Telegram принимает it."""
+    """Фиксирует уведомление только после успешного ответа Telegram."""
     service = object.__new__(SubmissionService)
     service.telegram = MagicMock()
     service._checkpoint = MagicMock()  # type: ignore[method-assign]
     state = ConversationState(last_order_no="A-1", status="submitted")
 
-    service._send_completion("123", state, "A-1")
+    service._send_completion("123", state, "A-1", "ORDER-INTERNAL")
 
     service.telegram.send_reply.assert_called_once()
-    service._checkpoint.assert_called_once_with("A-1", "completion_notified")
+    service._checkpoint.assert_called_once_with("ORDER-INTERNAL", "completion_notified")
 
 
-def test_submission_runs_all_external_stages_and_checkpoints(
+def test_submission_runs_all_external_stages_and_uses_external_order_number(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Выполняет этапы отправки строго по контрольным точкам."""
+    """Обновляет заявку, вызывает скрипт один раз и сохраняет внешний номер."""
     service = object.__new__(SubmissionService)
     service.redis = MagicMock()
     service.redis.lock.return_value = nullcontext()
@@ -283,39 +315,126 @@ def test_submission_runs_all_external_stages_and_checkpoints(
         spreadsheet_id="venue-sheet",
         rows=[{"№ Заявки": "ORDER-1"}],
     )
-    service._load_pending = MagicMock(return_value=pending)  # type: ignore[method-assign]
-    service._record = MagicMock(  # type: ignore[method-assign]
-        return_value=SimpleNamespace(history_written=False)
+    result = OrderSubmissionResult(
+        order_number="№00V63II4-000024",
+        base_rows=2,
+        request_rows=1,
+        notifications={"telegram": {"sent": True}},
     )
+    service.sheets.prepare_order_submission.return_value = _prepared_request()
+    service.sheets.send_order_submission.return_value = result
+    service._load_pending = MagicMock(return_value=pending)  # type: ignore[method-assign]
+    service._record = MagicMock(return_value=_record())  # type: ignore[method-assign]
     service._get_record = MagicMock(  # type: ignore[method-assign]
         side_effect=[
-            SimpleNamespace(catalog_updated=False),
-            SimpleNamespace(recalc_done=False),
+            _record(),
+            _record(catalog_updated=True),
+            _record(catalog_updated=True, recalc_done=True),
         ]
     )
     service._checkpoint = MagicMock()  # type: ignore[method-assign]
-    final_state = ConversationState(last_order_no="ORDER-1", status="submitted")
+    service._mark_dispatch_started = MagicMock()  # type: ignore[method-assign]
+    service._mark_dispatch_completed = MagicMock()  # type: ignore[method-assign]
+    final_state = ConversationState(last_order_no=result.order_number, status="submitted")
     service._finalize = MagicMock(return_value=final_state)  # type: ignore[method-assign]
     service._send_completion = MagicMock()  # type: ignore[method-assign]
     monkeypatch.setattr(submission_module, "chat_lock", lambda *_args, **_kwargs: nullcontext())
 
     service.submit("chat-1")
 
-    service.sheets.append_history.assert_called_once_with(pending.rows, "venue-sheet")
-    service.sheets.increment_catalog_quantities.assert_called_once_with(pending.rows, "venue-sheet")
+    service.sheets.increment_catalog_quantities.assert_called_once_with(
+        pending.rows,
+        "venue-sheet",
+    )
     service.sheets.trigger_recalculation.assert_called_once_with("ORDER-1", "venue-sheet")
+    service.sheets.prepare_order_submission.assert_called_once_with("venue-sheet", "ORDER-1")
+    service._mark_dispatch_started.assert_called_once_with("ORDER-1")
+    service.sheets.send_order_submission.assert_called_once_with(_prepared_request())
+    service._mark_dispatch_completed.assert_called_once_with("ORDER-1", result)
     assert [call.args for call in service._checkpoint.call_args_list] == [
-        ("ORDER-1", "history_written"),
         ("ORDER-1", "catalog_updated"),
         ("ORDER-1", "recalc_done"),
     ]
     service.catalog_cache.invalidate.assert_called_once_with("venue-sheet")
     service.redis.lock.assert_called_once_with(
-        google_history_lock_key("venue-sheet"),
-        timeout=120,
-        blocking_timeout=120,
+        google_submission_lock_key("venue-sheet"),
+        timeout=300,
+        blocking_timeout=300,
     )
-    service._send_completion.assert_called_once_with("chat-1", final_state, "ORDER-1")
+    service._finalize.assert_called_once_with("chat-1", "ORDER-1", result.order_number)
+    service._send_completion.assert_called_once_with(
+        "chat-1",
+        final_state,
+        result.order_number,
+        "ORDER-1",
+    )
+
+
+def test_ambiguous_dispatch_failure_is_never_automatically_retried(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Запрещает второй POST, когда результат первого вызова неизвестен."""
+    service = object.__new__(SubmissionService)
+    service.redis = MagicMock()
+    service.redis.lock.return_value = nullcontext()
+    service.telegram = MagicMock()
+    service.sheets = MagicMock()
+    service.catalog_cache = MagicMock()
+    service.sheets.prepare_order_submission.return_value = _prepared_request("ORDER-2")
+    service.sheets.send_order_submission.side_effect = TimeoutError("read timeout")
+    pending = PendingSubmission(order_no="ORDER-2", spreadsheet_id="venue-sheet", rows=[])
+    service._load_pending = MagicMock(return_value=pending)  # type: ignore[method-assign]
+    service._record = MagicMock(return_value=_record())  # type: ignore[method-assign]
+    completed_pre_dispatch = _record(catalog_updated=True, recalc_done=True)
+    service._get_record = MagicMock(return_value=completed_pre_dispatch)  # type: ignore[method-assign]
+    service._checkpoint = MagicMock()  # type: ignore[method-assign]
+    service._mark_dispatch_started = MagicMock()  # type: ignore[method-assign]
+    service._mark_dispatch_uncertain = MagicMock()  # type: ignore[method-assign]
+    service._send_dispatch_uncertain_once = MagicMock()  # type: ignore[method-assign]
+    service._finalize = MagicMock()  # type: ignore[method-assign]
+    service._fail = MagicMock()  # type: ignore[method-assign]
+    monkeypatch.setattr(submission_module, "chat_lock", lambda *_args, **_kwargs: nullcontext())
+
+    service.submit("chat-2")
+
+    service._mark_dispatch_started.assert_called_once_with("ORDER-2")
+    service.sheets.send_order_submission.assert_called_once()
+    service._mark_dispatch_uncertain.assert_called_once_with("chat-2", "ORDER-2", "read timeout")
+    service._send_dispatch_uncertain_once.assert_called_once_with("chat-2", "ORDER-2")
+    service._finalize.assert_not_called()
+    service._fail.assert_not_called()
+
+
+def test_redelivery_after_started_dispatch_does_not_send_second_post(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Не повторяет центральный вызов после восстановления фоновой задачи."""
+    service = object.__new__(SubmissionService)
+    service.redis = MagicMock()
+    service.redis.lock.return_value = nullcontext()
+    service.telegram = MagicMock()
+    service.sheets = MagicMock()
+    service.catalog_cache = MagicMock()
+    pending = PendingSubmission(order_no="ORDER-3", spreadsheet_id="venue-sheet", rows=[])
+    service._load_pending = MagicMock(return_value=pending)  # type: ignore[method-assign]
+    service._record = MagicMock(return_value=_record())  # type: ignore[method-assign]
+    service._get_record = MagicMock(  # type: ignore[method-assign]
+        return_value=_record(dispatch_started=True, last_error="worker restarted")
+    )
+    service._mark_dispatch_uncertain = MagicMock()  # type: ignore[method-assign]
+    service._send_dispatch_uncertain_once = MagicMock()  # type: ignore[method-assign]
+    monkeypatch.setattr(submission_module, "chat_lock", lambda *_args, **_kwargs: nullcontext())
+
+    service.submit("chat-3")
+
+    service.sheets.prepare_order_submission.assert_not_called()
+    service.sheets.send_order_submission.assert_not_called()
+    service._mark_dispatch_uncertain.assert_called_once_with(
+        "chat-3",
+        "ORDER-3",
+        "worker restarted",
+    )
+    service._send_dispatch_uncertain_once.assert_called_once_with("chat-3", "ORDER-3")
 
 
 def test_submission_without_venue_spreadsheet_never_writes_to_google(
@@ -327,74 +446,71 @@ def test_submission_without_venue_spreadsheet_never_writes_to_google(
     service.telegram = MagicMock()
     service.sheets = MagicMock()
     service.catalog_cache = MagicMock()
-    pending = PendingSubmission(order_no="ORDER-NO-SHEET", rows=[{"№ Заявки": "ORDER-NO-SHEET"}])
+    pending = PendingSubmission(order_no="ORDER-NO-SHEET", rows=[])
     service._load_pending = MagicMock(return_value=pending)  # type: ignore[method-assign]
-    service._record = MagicMock(  # type: ignore[method-assign]
-        return_value=SimpleNamespace(history_written=False)
-    )
+    service._record = MagicMock(return_value=_record())  # type: ignore[method-assign]
     service._remember_transient_error = MagicMock()  # type: ignore[method-assign]
     monkeypatch.setattr(submission_module, "chat_lock", lambda *_args, **_kwargs: nullcontext())
 
     with pytest.raises(GoogleSheetsError, match="spreadsheet ID is required"):
         service.submit("chat-no-sheet", report_failure=False)
 
-    service.sheets.assert_not_called()
     assert service.sheets.mock_calls == []
 
 
-def test_submission_failure_is_persisted_and_reported_after_final_retry(
+def test_submission_failure_is_reported_before_dispatch_starts(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Показывает карточку сбоя только после исчерпания повторов."""
-    service = object.__new__(SubmissionService)
-    service.redis = MagicMock()
-    service.redis.lock.return_value = nullcontext()
-    service.telegram = MagicMock()
-    service.sheets = MagicMock()
-    service.sheets.append_history.side_effect = RuntimeError("Google unavailable")
-    pending = PendingSubmission(
-        order_no="ORDER-2",
-        spreadsheet_id="venue-sheet",
-        rows=[{"№ Заявки": "ORDER-2"}],
-    )
-    service._load_pending = MagicMock(return_value=pending)  # type: ignore[method-assign]
-    service._record = MagicMock(  # type: ignore[method-assign]
-        return_value=SimpleNamespace(history_written=False)
-    )
-    failed_state = ConversationState(ui_revision=3)
-    service._fail = MagicMock(return_value=failed_state)  # type: ignore[method-assign]
-    service._remember_transient_error = MagicMock()  # type: ignore[method-assign]
-    monkeypatch.setattr(submission_module, "chat_lock", lambda *_args, **_kwargs: nullcontext())
-
-    with pytest.raises(RuntimeError, match="Google unavailable"):
-        service.submit("chat-2", report_failure=True)
-
-    service._fail.assert_called_once_with("chat-2", "ORDER-2", "Google unavailable")
-    reply = service.telegram.send_reply.call_args.args[1]
-    assert "Отправка не завершена" in reply.text
-    assert reply.rows[0][0].callback_data == "v2:submit:r3"
-    service._remember_transient_error.assert_not_called()
-
-
-def test_notification_failure_after_finalize_never_rolls_back_order(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Не откатывает заявку после успешной записи из-за сбоя Telegram."""
+    """Показывает безопасный повтор, если центральный вызов ещё не начинался."""
     service = object.__new__(SubmissionService)
     service.redis = MagicMock()
     service.redis.lock.return_value = nullcontext()
     service.telegram = MagicMock()
     service.sheets = MagicMock()
     service.catalog_cache = MagicMock()
-    pending = PendingSubmission(order_no="ORDER-3", spreadsheet_id="venue-sheet", rows=[])
+    service.sheets.increment_catalog_quantities.side_effect = RuntimeError("Google unavailable")
+    pending = PendingSubmission(order_no="ORDER-4", spreadsheet_id="venue-sheet", rows=[])
     service._load_pending = MagicMock(return_value=pending)  # type: ignore[method-assign]
-    service._record = MagicMock(  # type: ignore[method-assign]
-        return_value=SimpleNamespace(history_written=True)
+    service._record = MagicMock(return_value=_record())  # type: ignore[method-assign]
+    service._get_record = MagicMock(return_value=_record())  # type: ignore[method-assign]
+    failed_state = ConversationState(ui_revision=3)
+    service._fail = MagicMock(return_value=failed_state)  # type: ignore[method-assign]
+    service._remember_transient_error = MagicMock()  # type: ignore[method-assign]
+    monkeypatch.setattr(submission_module, "chat_lock", lambda *_args, **_kwargs: nullcontext())
+
+    with pytest.raises(RuntimeError, match="Google unavailable"):
+        service.submit("chat-4", report_failure=True)
+
+    service._fail.assert_called_once_with("chat-4", "ORDER-4", "Google unavailable")
+    reply = service.telegram.send_reply.call_args.args[1]
+    assert "Отправка не завершена" in reply.text
+    assert reply.rows[0][0].callback_data == "v2:submit:r3"
+    service.sheets.send_order_submission.assert_not_called()
+    service._remember_transient_error.assert_not_called()
+
+
+def test_notification_failure_after_finalize_never_rolls_back_order(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Не откатывает заявку после успешного скрипта из-за сбоя Telegram."""
+    service = object.__new__(SubmissionService)
+    service.redis = MagicMock()
+    service.redis.lock.return_value = nullcontext()
+    service.telegram = MagicMock()
+    service.sheets = MagicMock()
+    service.catalog_cache = MagicMock()
+    pending = PendingSubmission(order_no="ORDER-5", spreadsheet_id="venue-sheet", rows=[])
+    completed = _record(
+        catalog_updated=True,
+        recalc_done=True,
+        dispatch_started=True,
+        dispatch_completed=True,
+        external_order_no="EXTERNAL-5",
     )
-    service._get_record = MagicMock(  # type: ignore[method-assign]
-        side_effect=[SimpleNamespace(catalog_updated=True), SimpleNamespace(recalc_done=True)]
-    )
-    final_state = ConversationState(last_order_no="ORDER-3", status="submitted")
+    service._load_pending = MagicMock(return_value=pending)  # type: ignore[method-assign]
+    service._record = MagicMock(return_value=completed)  # type: ignore[method-assign]
+    service._get_record = MagicMock(return_value=completed)  # type: ignore[method-assign]
+    final_state = ConversationState(last_order_no="EXTERNAL-5", status="submitted")
     service._finalize = MagicMock(return_value=final_state)  # type: ignore[method-assign]
     service._send_completion = MagicMock(  # type: ignore[method-assign]
         side_effect=TimeoutError("Telegram timeout")
@@ -404,7 +520,19 @@ def test_notification_failure_after_finalize_never_rolls_back_order(
     monkeypatch.setattr(submission_module, "chat_lock", lambda *_args, **_kwargs: nullcontext())
 
     with pytest.raises(TimeoutError, match="Telegram timeout"):
-        service.submit("chat-3")
+        service.submit("chat-5")
 
-    service._remember_transient_error.assert_called_once_with("ORDER-3", "Telegram timeout")
+    service.sheets.send_order_submission.assert_not_called()
+    service._remember_transient_error.assert_called_once_with("ORDER-5", "Telegram timeout")
     service._fail.assert_not_called()
+
+
+def test_dispatch_uncertain_reply_has_no_repeat_button() -> None:
+    """Не предлагает пользователю опасный повтор заявки."""
+    state = ConversationState(ui_revision=7)
+
+    reply = submission_dispatch_uncertain_reply(state, "ORDER-6")
+
+    assert "не отправляйте её повторно" in reply.text.lower()
+    assert "ORDER-6" in reply.text
+    assert reply.rows == []

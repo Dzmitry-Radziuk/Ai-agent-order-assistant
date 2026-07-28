@@ -55,9 +55,16 @@ class SubmissionRecord(Base):
     trace_id: Mapped[str] = mapped_column(String(36), nullable=False, default="", index=True)
     telegram_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     payload: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
-    history_written: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     catalog_updated: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     recalc_done: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    dispatch_started: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    dispatch_completed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    dispatch_uncertain_notified: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False
+    )
+    external_order_no: Mapped[str | None] = mapped_column(String(64), index=True)
+    dispatch_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    dispatch_completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     finalized: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     completion_notified: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     last_error: Mapped[str | None] = mapped_column(Text)

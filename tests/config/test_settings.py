@@ -50,6 +50,8 @@ def test_get_settings_reads_dotenv_in_production(
                 "GOOGLE_REGISTRATION_SPREADSHEET_ID=registration-sheet-id",
                 "GOOGLE_RECALC_URL=https://script.google.com/macros/s/script-id/exec",
                 "GOOGLE_RECALC_TOKEN=recalc-secret",
+                "GOOGLE_ORDER_SUBMISSION_URL=https://script.google.com/macros/s/submit-id/exec",
+                "GOOGLE_ORDER_SUBMISSION_SECRET=submit-secret",
                 "DATABASE_URL=postgresql+psycopg://bot:strong-password@postgres:5432/bot",
             )
         ),
@@ -65,6 +67,8 @@ def test_get_settings_reads_dotenv_in_production(
         "GOOGLE_VENUE_DIRECTORY_URL",
         "GOOGLE_REGISTRATION_SPREADSHEET_ID",
         "GOOGLE_RECALC_URL",
+        "GOOGLE_ORDER_SUBMISSION_URL",
+        "GOOGLE_ORDER_SUBMISSION_SECRET",
     ):
         monkeypatch.delenv(name, raising=False)
     get_settings.cache_clear()
@@ -105,5 +109,25 @@ def test_production_rejects_placeholder_google_configuration() -> None:
             google_registration_spreadsheet_id="replace_me",
             google_recalc_url="https://script.google.com/macros/s/replace_me/exec",
             google_recalc_token="recalc-secret",
+            database_url="postgresql+psycopg://bot:strong-password@postgres:5432/bot",
+        )
+
+
+def test_production_rejects_placeholder_submission_secret() -> None:
+    """Не запускает production без секрета центрального скрипта."""
+    with pytest.raises(ValidationError, match="GOOGLE_ORDER_SUBMISSION_SECRET"):
+        Settings(
+            app_env="production",
+            public_base_url="https://bot.company.test",
+            telegram_bot_token="telegram-secret",
+            telegram_webhook_secret="12345678901234567890123456789012",
+            openai_api_key="openai-secret",
+            google_service_account_file=Path("/run/secrets/google.json"),
+            google_venue_directory_url="https://docs.google.com/spreadsheets/d/sheet/gviz/tq",
+            google_registration_spreadsheet_id="registration-sheet-id",
+            google_recalc_url="https://script.google.com/macros/s/recalc-id/exec",
+            google_recalc_token="recalc-secret",
+            google_order_submission_url="https://script.google.com/macros/s/submit-id/exec",
+            google_order_submission_secret="replace_me",
             database_url="postgresql+psycopg://bot:strong-password@postgres:5432/bot",
         )

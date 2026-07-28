@@ -6,26 +6,12 @@ from pydantic import SecretStr
 from restaurant_bot.domain.models import CatalogProduct, DepartmentQuantities
 from restaurant_bot.integrations import google_sheets as google_sheets_module
 from restaurant_bot.integrations.google_sheets import (
-    HISTORY_HEADERS,
     GoogleSheetsError,
     GoogleSheetsGateway,
+    PreparedOrderSubmission,
 )
 
 VENUE_SPREADSHEET_ID = "venue-sheet"
-
-
-def test_history_value_uses_source_contract_headers(settings) -> None:  # type: ignore[no-untyped-def]
-    """Проверяет, что история значение использует исходный контракт заголовки."""
-    gateway = GoogleSheetsGateway(settings)
-    row = {"№ Заявки": "20260722-001", "Кол-во": 10, "_department": "Кухня"}
-    assert gateway._history_value(row, "№ Заявки") == "20260722-001"
-    assert gateway._history_value(row, "Кол-во") == 10
-
-
-def test_history_value_does_not_export_internal_fields(settings) -> None:  # type: ignore[no-untyped-def]
-    """Проверяет, что история значение выполняет не экспортирует внутренние fields."""
-    gateway = GoogleSheetsGateway(settings)
-    assert gateway._history_value({"_department": "Кухня"}, "Неизвестная колонка") == ""
 
 
 def test_gateway_rejects_missing_venue_spreadsheet(settings) -> None:  # type: ignore[no-untyped-def]
@@ -122,40 +108,6 @@ def test_product_add_accepts_verified_write_after_lost_ssl_response(settings, mo
     sleep.assert_not_called()
 
 
-def test_history_write_uses_first_empty_a_to_s_row(settings) -> None:  # type: ignore[no-untyped-def]
-    """Проверяет, что история запись использует первый пустой результат a в s строка."""
-    gateway = GoogleSheetsGateway(settings)
-    gateway.service = MagicMock()
-    gateway._get_values = MagicMock(  # type: ignore[method-assign]
-        return_value=[[*HISTORY_HEADERS, "Стадия"], [], [], ["A-OLD"]]
-    )
-
-    gateway.append_history(
-        [{"№ Заявки": "A-1", "Комментарий": "только охлаждённое", "Стадия": "Новая заявка"}],
-        VENUE_SPREADSHEET_ID,
-    )
-
-    call = gateway.service.spreadsheets.return_value.values.return_value.update.call_args.kwargs
-    assert call["range"] == f"'{settings.google_history_sheet}'!A2:S2"
-    assert len(call["body"]["values"][0]) == 19
-    assert call["body"]["values"][0][14] == "только охлаждённое"
-    gateway.service.spreadsheets.return_value.values.return_value.append.assert_not_called()
-
-
-def test_history_write_appends_only_when_there_is_no_empty_row(settings) -> None:  # type: ignore[no-untyped-def]
-    """Проверяет, что история запись appends только когда there является без пустой результат строка."""
-    gateway = GoogleSheetsGateway(settings)
-    gateway.service = MagicMock()
-    gateway._get_values = MagicMock(  # type: ignore[method-assign]
-        return_value=[list(HISTORY_HEADERS), ["A-OLD"]]
-    )
-
-    gateway.append_history([{"№ Заявки": "A-NEW"}], VENUE_SPREADSHEET_ID)
-
-    call = gateway.service.spreadsheets.return_value.values.return_value.append.call_args.kwargs
-    assert call["range"] == f"'{settings.google_history_sheet}'!A:S"
-
-
 def test_read_rows_keeps_first_duplicate_header_value(settings) -> None:  # type: ignore[no-untyped-def]
     """Проверяет, что чтение строки сохраняет первый дубликат header значение."""
     gateway = GoogleSheetsGateway(settings)
@@ -184,7 +136,6 @@ def test_order_statuses_are_read_from_aggregated_history_sheet(settings) -> None
         VENUE_SPREADSHEET_ID,
     )
     assert settings.google_order_status_sheet == "История"
-    assert settings.google_history_sheet == "История товары(API)"
 
 
 def test_order_statuses_accept_legacy_order_number_columns(settings) -> None:  # type: ignore[no-untyped-def]
@@ -277,6 +228,86 @@ def test_catalog_update_writes_quantity_and_merged_comment(settings) -> None:  #
             "values": [["хранить в холоде; без замены"]],
         },
     ]
+
+
+def test_order_submission_is_prepared_from_venue_spreadsheet(settings) -> None:  # type: ignore[no-untyped-def]
+    """Готовит контракт Web App по метаданным таблицы заведения."""
+    gateway = GoogleSheetsGateway(settings)
+    gateway.service = MagicMock()
+    gateway.service.spreadsheets.return_value.get.return_value.execute.return_value = {
+        "properties": {"title": "Тестовый ресторан лист Заказа"}
+    }
+
+    request = gateway.prepare_order_submission(VENUE_SPREADSHEET_ID, "internal-order-1")
+
+    gateway.service.spreadsheets.return_value.get.assert_called_once_with(
+        spreadsheetId=VENUE_SPREADSHEET_ID,
+        fields="properties.title",
+    )
+    assert request.url == settings.google_order_submission_url
+    assert request.timeout_seconds == settings.google_order_submission_timeout_seconds
+    assert request.payload["sourceSpreadsheetId"] == VENUE_SPREADSHEET_ID
+    assert request.payload["sourceSpreadsheetName"] == "Тестовый ресторан лист Заказа"
+    assert request.payload["sourceSpreadsheetUrl"].endswith(f"/d/{VENUE_SPREADSHEET_ID}/edit")
+    assert request.payload["clientRequestId"] == "internal-order-1"
+    assert request.payload["secret"] == "test-submit-secret"
+    assert "test-submit-secret" not in repr(request)
+
+
+def test_order_submission_calls_web_app_once_and_returns_external_number(
+    settings,
+    monkeypatch,
+) -> None:  # type: ignore[no-untyped-def]
+    """Разбирает успешный ответ центрального Web App."""
+    response = MagicMock()
+    response.json.return_value = {
+        "ok": True,
+        "result": {
+            "orderNumber": "№00V63II4-000025",
+            "baseRows": 3,
+            "requestRows": 2,
+            "notifications": {"telegram": {"attempted": True, "sent": True}},
+        },
+    }
+    post = MagicMock(return_value=response)
+    monkeypatch.setattr(google_sheets_module.httpx, "post", post)
+    request = PreparedOrderSubmission(
+        url=settings.google_order_submission_url,
+        payload={"secret": "secret", "sourceSpreadsheetId": VENUE_SPREADSHEET_ID},
+        timeout_seconds=60,
+    )
+
+    result = GoogleSheetsGateway.send_order_submission(request)
+
+    post.assert_called_once_with(
+        settings.google_order_submission_url,
+        json=request.payload,
+        timeout=60,
+        follow_redirects=True,
+    )
+    response.raise_for_status.assert_called_once()
+    assert result.order_number == "№00V63II4-000025"
+    assert result.base_rows == 3
+    assert result.request_rows == 2
+    assert result.notifications["telegram"]["sent"] is True
+
+
+def test_order_submission_rejects_response_without_external_number(
+    settings,
+    monkeypatch,
+) -> None:  # type: ignore[no-untyped-def]
+    """Не считает отправку завершённой без номера центральной заявки."""
+    response = MagicMock()
+    response.json.return_value = {"ok": True, "result": {"baseRows": 3, "requestRows": 2}}
+    monkeypatch.setattr(google_sheets_module.httpx, "post", MagicMock(return_value=response))
+    request = PreparedOrderSubmission(
+        url=settings.google_order_submission_url,
+        payload={"secret": "secret"},
+        timeout_seconds=60,
+    )
+
+    with pytest.raises(GoogleSheetsError, match="orderNumber"):
+        GoogleSheetsGateway.send_order_submission(request)
 
 
 def test_recalculation_uses_the_same_body_as_n8n(settings, monkeypatch) -> None:  # type: ignore[no-untyped-def]

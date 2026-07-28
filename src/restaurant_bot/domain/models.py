@@ -289,10 +289,6 @@ class PendingSubmission(BaseModel):
     telegram_user_id: str = ""
     telegram_chat_id: str = ""
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
-    history_written: bool = False
-    catalog_updated: bool = False
-    recalc_done: bool = False
-    finalized: bool = False
     rows: list[dict[str, Any]] = Field(default_factory=list)
     last_error: str = ""
     failed_stage: str = ""
