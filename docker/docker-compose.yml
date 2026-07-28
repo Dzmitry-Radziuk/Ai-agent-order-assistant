@@ -1,28 +1,68 @@
 services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-bot}
+      POSTGRES_USER: ${POSTGRES_USER:-bot}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-bot}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  redis:
+    image: redis:8-alpine
+    command:
+      [
+        "redis-server",
+        "--appendonly",
+        "yes",
+        "--auto-aof-rewrite-percentage",
+        "100",
+        "--auto-aof-rewrite-min-size",
+        "64mb",
+        "--maxmemory",
+        "${REDIS_MAXMEMORY:-256mb}",
+        "--maxmemory-policy",
+        "noeviction",
+      ]
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
   migrate:
-    image: ${IMAGE_NAME}:${IMAGE_TAG:-latest}
-    command: ["alembic", "-c", "alembic.ini", "upgrade", "head"]
-    env_file:
-      - .env
-    networks:
-      - backend
+    build: .
+    env_file: .env
+    command: ["alembic", "upgrade", "head"]
+    volumes:
+      - ./secrets/google-service-account.json:/run/secrets/google-service-account.json:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
 
   api:
-    container_name: ${CONTAINER_NAME:-orders-assistant}-api
-    image: ${IMAGE_NAME}:${IMAGE_TAG:-latest}
-    restart: unless-stopped
+    build: .
+    env_file: .env
+    command: ["uvicorn", "restaurant_bot.api.app:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "${UVICORN_WORKERS:-2}"]
     ports:
-      - "${DEPLOY_PORT:-8001}:${CONTAINER_PORT:-8000}"
-    env_file:
-      - .env
+      - "${API_BIND_HOST:-127.0.0.1}:${API_PORT:-8000}:8000"
     volumes:
-      - type: bind
-        source: ${GOOGLE_SERVICE_ACCOUNT_JSON:?GOOGLE_SERVICE_ACCOUNT_JSON CI/CD file variable is required}
-        target: /run/secrets/google-service-account.json
-        read_only: true
-    networks:
-      - backend
+      - ./secrets/google-service-account.json:/run/secrets/google-service-account.json:ro
     depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
       migrate:
         condition: service_completed_successfully
     healthcheck:
@@ -31,55 +71,77 @@ services:
       timeout: 5s
       retries: 5
       start_period: 20s
+    restart: unless-stopped
+    init: true
+    stop_grace_period: 30s
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   worker:
-    container_name: ${CONTAINER_NAME:-orders-assistant}-worker
-    image: ${IMAGE_NAME}:${IMAGE_TAG:-latest}
-    restart: unless-stopped
-    env_file:
-      - .env
-    volumes:
-      - type: bind
-        source: ${GOOGLE_SERVICE_ACCOUNT_JSON:?GOOGLE_SERVICE_ACCOUNT_JSON CI/CD file variable is required}
-        target: /run/secrets/google-service-account.json
-        read_only: true
+    build: .
+    env_file: .env
     command: ["celery", "-A", "restaurant_bot.workers.celery_app.celery_app", "worker", "-l", "INFO", "--concurrency=${CELERY_CONCURRENCY:-10}"]
+    volumes:
+      - ./secrets/google-service-account.json:/run/secrets/google-service-account.json:ro
     depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
       migrate:
         condition: service_completed_successfully
-    networks:
-      - backend
     healthcheck:
       test: ["CMD-SHELL", "celery -A restaurant_bot.workers.celery_app.celery_app inspect ping --timeout=5 | grep -q pong"]
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 20s
+    restart: unless-stopped
+    init: true
+    stop_grace_period: 90s
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   beat:
-    container_name: ${CONTAINER_NAME:-orders-assistant}-beat
-    image: ${IMAGE_NAME}:${IMAGE_TAG:-latest}
-    restart: unless-stopped
-    env_file:
-      - .env
+    build: .
+    env_file: .env
+    command:
+      [
+        "celery",
+        "-A",
+        "restaurant_bot.workers.celery_app.celery_app",
+        "beat",
+        "-l",
+        "INFO",
+        "--schedule=/tmp/celerybeat-schedule",
+      ]
     volumes:
-      - type: bind
-        source: ${GOOGLE_SERVICE_ACCOUNT_JSON:?GOOGLE_SERVICE_ACCOUNT_JSON CI/CD file variable is required}
-        target: /run/secrets/google-service-account.json
-        read_only: true
-    command: ["celery", "-A", "restaurant_bot.workers.celery_app.celery_app", "beat", "-l", "INFO", "--schedule=/tmp/celerybeat-schedule"]
+      - ./secrets/google-service-account.json:/run/secrets/google-service-account.json:ro
     depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
       migrate:
         condition: service_completed_successfully
-    networks:
-      - backend
-    healthcheck:
-      test: ["CMD-SHELL", "python -c \"import os; os.kill(1, 0)\""]
-      interval: 30s
-      timeout: 5s
-      retries: 3
+    restart: unless-stopped
+    init: true
+    stop_grace_period: 30s
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      options:
+        max-size: "10m"
+        max-file: "3"
 
-networks:
-  backend:
-    external: true
-    name: ${NETWORK_NAME:-auto-snab}
+volumes:
+  postgres_data:
+  redis_data:
