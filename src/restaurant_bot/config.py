@@ -64,6 +64,7 @@ class Settings(BaseSettings):
     venue_directory_cache_ttl_seconds: int = Field(default=120, ge=30, le=3600)
     google_catalog_sheet: str = "Заявка"
     google_history_sheet: str = "История товары(API)"
+    google_order_status_sheet: str = "История"
     google_product_add_sheet: str = "Добавить"
     google_recalc_url: str
     google_recalc_token: SecretStr = SecretStr("")

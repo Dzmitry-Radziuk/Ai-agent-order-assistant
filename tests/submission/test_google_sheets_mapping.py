@@ -166,6 +166,42 @@ def test_read_rows_keeps_first_duplicate_header_value(settings) -> None:  # type
     assert gateway.read_rows("История", VENUE_SPREADSHEET_ID)[0]["Стадия"] == "Новая заявка"
 
 
+def test_order_statuses_are_read_from_aggregated_history_sheet(settings) -> None:  # type: ignore[no-untyped-def]
+    """Читает статусы из «Истории», не используя старый лист товарных строк."""
+    gateway = GoogleSheetsGateway(settings)
+    gateway.read_rows = MagicMock(  # type: ignore[method-assign]
+        return_value=[
+            {"Номер заявки": "A-1", "Стадия": "Новая заявка"},
+            {"Номер заявки": "A-2", "Стадия": "Подтверждена"},
+        ]
+    )
+
+    rows = gateway.read_order_statuses([" A-1 "], VENUE_SPREADSHEET_ID)
+
+    assert rows == [{"Номер заявки": "A-1", "Стадия": "Новая заявка"}]
+    gateway.read_rows.assert_called_once_with(
+        settings.google_order_status_sheet,
+        VENUE_SPREADSHEET_ID,
+    )
+    assert settings.google_order_status_sheet == "История"
+    assert settings.google_history_sheet == "История товары(API)"
+
+
+def test_order_statuses_accept_legacy_order_number_columns(settings) -> None:  # type: ignore[no-untyped-def]
+    """Поддерживает старые названия номера заявки во время перехода."""
+    gateway = GoogleSheetsGateway(settings)
+    gateway.read_rows = MagicMock(  # type: ignore[method-assign]
+        return_value=[
+            {"№ Заявки": "A-1", "Стадия": "Новая заявка"},
+            {"ID заявки": "A-2", "Стадия": "Подтверждена"},
+        ]
+    )
+
+    rows = gateway.read_order_statuses(["A-1", "A-2"], VENUE_SPREADSHEET_ID)
+
+    assert [row.get("№ Заявки") or row.get("ID заявки") for row in rows] == ["A-1", "A-2"]
+
+
 def test_live_catalog_headers_fill_submission_metadata(settings) -> None:  # type: ignore[no-untyped-def]
     """Проверяет, что реальная каталог заголовки fill отправка заявки metadata."""
     gateway = GoogleSheetsGateway(settings)

@@ -609,9 +609,9 @@ flowchart LR
 
 **Действие пользователя:** Просит показать статусы.
 
-**Ответ бота:** Показывает последние отслеживаемые заявки, сгруппированные по номеру.
+**Ответ бота:** Показывает последние отслеживаемые заявки из листа «История»: отдельно по каждому поставщику, со списком товаров, статусом, датой поставки и контактом, если они заполнены.
 
-**Результат:** Пользователь видит статус и дату доставки, не затрагивая текущий черновик.
+**Результат:** Пользователь видит понятный статус каждого поставщика, не затрагивая текущий черновик.
 
 **Примеры фраз:**
 
@@ -622,6 +622,9 @@ flowchart LR
 **Автоматическая проверка:**
 
 - [`tests/submission/test_submission.py`](../tests/submission/test_submission.py) → `test_order_status_renderer_groups_rows_by_order_number`
+- [`tests/submission/test_submission.py`](../tests/submission/test_submission.py) → `test_order_status_renderer_uses_aggregated_history_fields`
+- [`tests/submission/test_submission.py`](../tests/submission/test_submission.py) → `test_order_status_renderer_shows_each_supplier_separately`
+- [`tests/submission/test_submission.py`](../tests/submission/test_submission.py) → `test_order_status_renderer_handles_history_without_delivery_date`
 - [`tests/submission/test_submission.py`](../tests/submission/test_submission.py) → `test_order_status_limits_to_ten_tracked_orders_and_formats_delivery_date`
 
 #### SUB-05 · Временный сбой при отправке

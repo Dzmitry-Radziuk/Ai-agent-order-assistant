@@ -467,11 +467,14 @@
       "channels": ["Текст", "Голос", "Кнопка"],
       "precondition": "У пользователя есть хотя бы одна отправленная заявка.",
       "user_action": "Просит показать статусы.",
-      "bot_response": "Показывает последние отслеживаемые заявки, сгруппированные по номеру.",
-      "result": "Пользователь видит статус и дату доставки, не затрагивая текущий черновик.",
+      "bot_response": "Показывает последние отслеживаемые заявки из листа «История»: отдельно по каждому поставщику, со списком товаров, статусом, датой поставки и контактом, если они заполнены.",
+      "result": "Пользователь видит понятный статус каждого поставщика, не затрагивая текущий черновик.",
       "examples": ["Проверь статус последней заявки", "Мои заявки", "Заявка ушла?"],
       "test_refs": [
         "tests/submission/test_submission.py::test_order_status_renderer_groups_rows_by_order_number",
+        "tests/submission/test_submission.py::test_order_status_renderer_uses_aggregated_history_fields",
+        "tests/submission/test_submission.py::test_order_status_renderer_shows_each_supplier_separately",
+        "tests/submission/test_submission.py::test_order_status_renderer_handles_history_without_delivery_date",
         "tests/submission/test_submission.py::test_order_status_limits_to_ten_tracked_orders_and_formats_delivery_date"
       ]
     },

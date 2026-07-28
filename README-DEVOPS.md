@@ -320,7 +320,8 @@ Redis не публикуется наружу и не используется 
 | `GOOGLE_REGISTRATION_SPREADSHEET_ID` | Да | Нет | Таблица регистрации |
 | `GOOGLE_REGISTRATION_SHEET` | Нет | Нет | `Чаты` |
 | `GOOGLE_CATALOG_SHEET` | Нет | Нет | `Заявка` |
-| `GOOGLE_HISTORY_SHEET` | Нет | Нет | `История товары(API)` |
+| `GOOGLE_HISTORY_SHEET` | Нет | Нет | `История товары(API)`, переходная запись товарных строк |
+| `GOOGLE_ORDER_STATUS_SHEET` | Нет | Нет | `История`, источник статусов заявок |
 | `GOOGLE_PRODUCT_ADD_SHEET` | Нет | Нет | `Добавить` |
 | `GOOGLE_RECALC_URL` | Да | Ограниченный доступ | HTTPS URL Apps Script |
 | `GOOGLE_RECALC_TOKEN` | Да | Да | Token проверки вызова Apps Script |
@@ -400,6 +401,7 @@ GOOGLE_REGISTRATION_SPREADSHEET_ID
 GOOGLE_REGISTRATION_SHEET
 GOOGLE_CATALOG_SHEET
 GOOGLE_HISTORY_SHEET
+GOOGLE_ORDER_STATUS_SHEET
 GOOGLE_PRODUCT_ADD_SHEET
 GOOGLE_RECALC_URL
 GOOGLE_RECALC_SHEET
@@ -1048,10 +1050,10 @@ docker image prune
 - [ ] Локальный и публичный `/health/ready` отвечают `200`.
 - [ ] Webhook установлен на правильный домен.
 - [ ] `/start`, текст, голос, фото и кнопки проверены.
-- [ ] Заявка записана в историю.
+- [ ] Заявка записана в `История товары(API)` на переходном этапе.
 - [ ] Комментарии записаны.
 - [ ] Apps Script перерасчёта вызван.
-- [ ] «Мои заявки» работает.
+- [ ] «Мои заявки» читает статусы из листа `История`.
 
 ### Надёжность
 

@@ -412,13 +412,16 @@ class GoogleSheetsGateway:
     def read_order_statuses(
         self, order_numbers: list[str], spreadsheet_id: str
     ) -> list[dict[str, Any]]:
-        """Читает статусы отправленных заявок."""
+        """Читает статусы заявок из автоматически формируемого листа."""
         if not order_numbers:
             return []
-        wanted = set(order_numbers)
-        rows = self.read_rows(self.settings.google_history_sheet, spreadsheet_id)
+        wanted = {clean_text(order_number) for order_number in order_numbers}
+        rows = self.read_rows(self.settings.google_order_status_sheet, spreadsheet_id)
         return [
-            row for row in rows if clean_text(row.get("№ Заявки") or row.get("ID заявки")) in wanted
+            row
+            for row in rows
+            if clean_text(row.get("Номер заявки") or row.get("№ Заявки") or row.get("ID заявки"))
+            in wanted
         ]
 
     def trigger_recalculation(self, order_no: str, spreadsheet_id: str) -> None:

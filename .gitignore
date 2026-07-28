@@ -4,6 +4,7 @@ deploy/.gitlab.env
 __pycache__/
 .pytest_cache/
 .pytest-run/
+test-artifacts/
 .tmp/
 .planning/
 .mypy_cache/

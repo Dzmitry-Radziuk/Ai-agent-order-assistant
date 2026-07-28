@@ -62,6 +62,95 @@ def test_order_status_renderer_groups_rows_by_order_number() -> None:
     assert "Говядина" in text
 
 
+def test_order_status_renderer_uses_aggregated_history_fields() -> None:
+    """Показывает поставщика, товары и контакты из сводного листа «История»."""
+    text = build_order_status_text(
+        [
+            {
+                "Номер заявки": "A-1",
+                "Условное название поставщика": "Раджабов",
+                "Список товаров": "Кухня:\n1. Говядина — 3 кг",
+                "Стадия": "Заявка подтверждена",
+                "ФИО менеджера Поставщика": "Иван Петров",
+                "Телефон": "+375 29 000-00-00",
+                "Дата поставки": "24.07.2026",
+            }
+        ],
+        type("State", (), {"last_order_no": "A-1", "submitted_order_numbers": []})(),
+    )
+
+    assert "Поставщик: <b>Раджабов</b>" in text
+    assert "Статус: <b>Заявка подтверждена</b>" in text
+    assert "Кухня:\n1. Говядина — 3 кг" in text
+    assert "Дата поставки: <b>24 июля 2026</b>" in text
+    assert "Контакт поставщика: Иван Петров, +375 29 000-00-00" in text
+
+
+def test_order_status_renderer_shows_each_supplier_separately() -> None:
+    """Не смешивает статусы разных поставщиков одной заявки."""
+    text = build_order_status_text(
+        [
+            {
+                "Номер заявки": "A-1",
+                "Условное название поставщика": "Раджабов",
+                "Список товаров": "Говядина — 3 кг",
+                "Стадия": "Подтверждена",
+            },
+            {
+                "Номер заявки": "A-1",
+                "Условное название поставщика": "МБР",
+                "Список товаров": "Сироп Роза — 2 шт",
+                "Стадия": "Ожидает подтверждения",
+            },
+        ],
+        type("State", (), {"last_order_no": "A-1", "submitted_order_numbers": []})(),
+    )
+
+    assert text.count("Поставщик:") == 2
+    assert "Поставщик: <b>Раджабов</b>" in text
+    assert "Поставщик: <b>МБР</b>" in text
+    assert "Статус: <b>Подтверждена</b>" in text
+    assert "Статус: <b>Ожидает подтверждения</b>" in text
+
+
+def test_order_status_renderer_handles_history_without_delivery_date() -> None:
+    """Работает с текущей «Историей», где дата поставки ещё отсутствует."""
+    text = build_order_status_text(
+        [
+            {
+                "Номер заявки": "A-1",
+                "Условное название поставщика": "Раджабов",
+                "Список товаров": "Говядина — 3 кг",
+                "Стадия": "Новая заявка",
+            }
+        ],
+        type("State", (), {"last_order_no": "A-1", "submitted_order_numbers": []})(),
+    )
+
+    assert "Статус: <b>Новая заявка</b>" in text
+    assert "Дата поставки:" not in text
+
+
+def test_order_status_renderer_escapes_sheet_html_and_preserves_lines() -> None:
+    """Не позволяет данным таблицы внедрить HTML в Telegram-сообщение."""
+    text = build_order_status_text(
+        [
+            {
+                "Номер заявки": "A-1",
+                "Условное название поставщика": "<Раджабов>",
+                "Список товаров": "Кухня:\n<script>товар</script>",
+                "Стадия": "<b>Новая</b>",
+            }
+        ],
+        type("State", (), {"last_order_no": "A-1", "submitted_order_numbers": []})(),
+    )
+
+    assert "&lt;Раджабов&gt;" in text
+    assert "Кухня:\n&lt;script&gt;товар&lt;/script&gt;" in text
+    assert "<script>" not in text
+    assert "Статус: <b>&lt;b&gt;Новая&lt;/b&gt;</b>" in text
+
+
 def test_successful_submission_clears_cart_checkpoint_and_marks_state_submitted() -> None:
     """Проверяет, что успешная отправка заявки очищает черновик checkpoint и marks состояние submitted."""
     state = ConversationState(

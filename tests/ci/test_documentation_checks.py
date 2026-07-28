@@ -1,7 +1,7 @@
 from pathlib import Path
 
 from scripts.check_docs_updated import evaluate_documentation_impact
-from scripts.check_markdown_links import broken_links, normalize_target
+from scripts.check_markdown_links import broken_links, markdown_files, normalize_target
 
 
 def test_code_change_without_docs_is_detected() -> None:
@@ -50,3 +50,15 @@ def test_broken_links_reports_missing_target(tmp_path: Path) -> None:
     readme.write_text("[Missing](docs/missing.md)\n", encoding="utf-8")
 
     assert broken_links(tmp_path) == ["README.md:1 -> docs/missing.md"]
+
+
+def test_markdown_check_ignores_test_artifacts(tmp_path: Path) -> None:
+    """Не проверяет Markdown-файлы, созданные внутри тестовых артефактов."""
+    readme = tmp_path / "README.md"
+    readme.write_text("# Проект\n", encoding="utf-8")
+    artifact_dir = tmp_path / "test-artifacts" / "pytest"
+    artifact_dir.mkdir(parents=True)
+    (artifact_dir / "README.md").write_text("[Missing](docs/missing.md)\n", encoding="utf-8")
+
+    assert markdown_files(tmp_path) == [readme]
+    assert broken_links(tmp_path) == []

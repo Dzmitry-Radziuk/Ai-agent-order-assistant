@@ -698,7 +698,7 @@
 
       <article id="scenario-SUB-04" class="scenario-card"
         data-category="submission"
-        data-priority="important" data-search="sub-04 статус отправленных заявок проверка и отправка просит показать статусы. показывает последние отслеживаемые заявки, сгруппированные по номеру. проверь статус последней заявки мои заявки заявка ушла?">
+        data-priority="important" data-search="sub-04 статус отправленных заявок проверка и отправка просит показать статусы. показывает последние отслеживаемые заявки из листа «история»: отдельно по каждому поставщику, со списком товаров, статусом, датой поставки и контактом, если они заполнены. проверь статус последней заявки мои заявки заявка ушла?">
         <div class="card-top">
           <span class="scenario-id">SUB-04</span>
           <span class="priority priority-important">Важный</span>
@@ -709,16 +709,16 @@
         <dl>
           <div><dt>Перед началом</dt><dd>У пользователя есть хотя бы одна отправленная заявка.</dd></div>
           <div><dt>Пользователь</dt><dd>Просит показать статусы.</dd></div>
-          <div><dt>Бот</dt><dd>Показывает последние отслеживаемые заявки, сгруппированные по номеру.</dd></div>
-          <div class="result"><dt>Итог</dt><dd>Пользователь видит статус и дату доставки, не затрагивая текущий черновик.</dd></div>
+          <div><dt>Бот</dt><dd>Показывает последние отслеживаемые заявки из листа «История»: отдельно по каждому поставщику, со списком товаров, статусом, датой поставки и контактом, если они заполнены.</dd></div>
+          <div class="result"><dt>Итог</dt><dd>Пользователь видит понятный статус каждого поставщика, не затрагивая текущий черновик.</dd></div>
         </dl>
         <details>
           <summary>Примеры фраз</summary>
           <ul><li>«Проверь статус последней заявки»</li><li>«Мои заявки»</li><li>«Заявка ушла?»</li></ul>
         </details>
         <details>
-          <summary>Связанные pytest-тесты · 2</summary>
-          <ul class="tests"><li><a href="../../tests/submission/test_submission.py">tests/submission/test_submission.py</a><span>test_order_status_renderer_groups_rows_by_order_number</span></li><li><a href="../../tests/submission/test_submission.py">tests/submission/test_submission.py</a><span>test_order_status_limits_to_ten_tracked_orders_and_formats_delivery_date</span></li></ul>
+          <summary>Связанные pytest-тесты · 5</summary>
+          <ul class="tests"><li><a href="../../tests/submission/test_submission.py">tests/submission/test_submission.py</a><span>test_order_status_renderer_groups_rows_by_order_number</span></li><li><a href="../../tests/submission/test_submission.py">tests/submission/test_submission.py</a><span>test_order_status_renderer_uses_aggregated_history_fields</span></li><li><a href="../../tests/submission/test_submission.py">tests/submission/test_submission.py</a><span>test_order_status_renderer_shows_each_supplier_separately</span></li><li><a href="../../tests/submission/test_submission.py">tests/submission/test_submission.py</a><span>test_order_status_renderer_handles_history_without_delivery_date</span></li><li><a href="../../tests/submission/test_submission.py">tests/submission/test_submission.py</a><span>test_order_status_limits_to_ten_tracked_orders_and_formats_delivery_date</span></li></ul>
         </details>
       </article>
 

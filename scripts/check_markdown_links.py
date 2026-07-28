@@ -18,6 +18,7 @@ IGNORED_DIRECTORIES = {
     ".ruff_cache",
     ".tmp",
     ".venv",
+    "test-artifacts",
 }
 
 
@@ -26,7 +27,7 @@ def markdown_files(root: Path) -> list[Path]:
     return sorted(
         path
         for path in root.rglob("*.md")
-        if not any(part in IGNORED_DIRECTORIES for part in path.parts)
+        if not any(part in IGNORED_DIRECTORIES for part in path.relative_to(root).parts)
     )
 
 

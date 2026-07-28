@@ -91,6 +91,111 @@ def _format_delivery_date(value: Any) -> str:
     return raw
 
 
+def _escape_multiline(value: Any) -> str:
+    """Экранирует многострочный текст, сохраняя переносы строк."""
+    return "\n".join(escape(line) for line in str(value or "").splitlines() if line.strip())
+
+
+def _is_aggregated_status_row(row: dict[str, Any]) -> bool:
+    """Определяет строку нового сводного листа «История»."""
+    return bool(
+        _status_value(
+            row,
+            "Список товаров",
+            "Условное название поставщика",
+            "Условное наз-ие заведения",
+        )
+    )
+
+
+def _append_aggregated_order_status(lines: list[str], order_rows: list[dict[str, Any]]) -> None:
+    """Добавляет в карточку сводные статусы поставщиков одной заявки."""
+    for row_index, row in enumerate(order_rows):
+        supplier = _status_value(
+            row,
+            "Условное название поставщика",
+            "Основной поставщик (Условное наз-ие)",
+            "supplier",
+        )
+        stage = _status_value(
+            row,
+            "Стадия",
+            "Статус",
+            "status",
+            default="Ожидает обработки",
+        )
+        delivery = _format_delivery_date(
+            _status_value(
+                row,
+                "Дата поставки",
+                "Дата доставки",
+                "Ожидаемая дата доставки",
+                "delivery_date",
+            )
+        )
+        product_list = _status_value(
+            row,
+            "Список товаров",
+            "Товары",
+            "product_list",
+        )
+        manager = _status_value(row, "ФИО менеджера Поставщика", "Менеджер", "manager")
+        phone = _status_value(row, "Телефон", "Телефон поставщика", "phone")
+
+        if supplier:
+            lines.append(f"Поставщик: <b>{escape(supplier)}</b>")
+        lines.append(f"Статус: <b>{escape(stage)}</b>")
+        if delivery:
+            lines.append(f"Дата поставки: <b>{escape(delivery)}</b>")
+        if product_list:
+            lines.extend(["Товары:", _escape_multiline(product_list)])
+        if manager or phone:
+            contact = ", ".join(escape(value) for value in (manager, phone) if value)
+            lines.append(f"Контакт поставщика: {contact}")
+        if row_index < len(order_rows) - 1:
+            lines.append("")
+
+
+def _append_legacy_order_status(lines: list[str], order_rows: list[dict[str, Any]]) -> None:
+    """Добавляет старые построчные статусы для обратной совместимости."""
+    details = [
+        {
+            "product": _status_value(
+                row,
+                "Наименование у поставщика",
+                "Наименование у Поставщика",
+                "product_name",
+                default="Товар",
+            ),
+            "stage": _status_value(row, "Стадия", "Статус", "status", default="Ожидает обработки"),
+            "delivery": _format_delivery_date(
+                _status_value(
+                    row,
+                    "Дата доставки",
+                    "Ожидаемая дата доставки",
+                    "Дата поставки",
+                    "delivery_date",
+                )
+            ),
+        }
+        for row in order_rows
+    ]
+    stages = list(dict.fromkeys(item["stage"] for item in details if item["stage"]))
+    deliveries = list(dict.fromkeys(item["delivery"] for item in details if item["delivery"]))
+    if len(stages) == 1:
+        lines.append(f"Статус: <b>{escape(stages[0])}</b>")
+    if len(deliveries) == 1:
+        lines.append(f"Дата поставки: <b>{escape(deliveries[0])}</b>")
+    lines.append("Товары:")
+    for item in details:
+        product_line = f"• <b>{escape(item['product'])}</b>"
+        if len(stages) > 1:
+            product_line += f" — {escape(item['stage'])}"
+        if len(deliveries) > 1 and item["delivery"]:
+            product_line += f" ({escape(item['delivery'])})"
+        lines.append(product_line)
+
+
 def build_order_status_text(rows: list[dict[str, Any]], state: Any) -> str:
     """Формирует карточку статусов заявок."""
     tracked = list(
@@ -113,45 +218,11 @@ def build_order_status_text(rows: list[dict[str, Any]], state: Any) -> str:
 
     lines = ["<b>Мои заявки</b>", ""]
     for index, (order_no, order_rows) in enumerate(shown):
-        details = [
-            {
-                "product": _status_value(
-                    row,
-                    "Наименование у поставщика",
-                    "Наименование у Поставщика",
-                    "product_name",
-                    default="Товар",
-                ),
-                "stage": _status_value(
-                    row, "Стадия", "Статус", "status", default="Ожидает обработки"
-                ),
-                "delivery": _format_delivery_date(
-                    _status_value(
-                        row,
-                        "Дата доставки",
-                        "Ожидаемая дата доставки",
-                        "Дата поставки",
-                        "delivery_date",
-                    )
-                ),
-            }
-            for row in order_rows
-        ]
-        stages = list(dict.fromkeys(item["stage"] for item in details if item["stage"]))
-        deliveries = list(dict.fromkeys(item["delivery"] for item in details if item["delivery"]))
         lines.append(f"{index + 1}. <b>Заявка {escape(order_no)}</b>")
-        if len(stages) == 1:
-            lines.append(f"Статус: <b>{escape(stages[0])}</b>")
-        if len(deliveries) == 1:
-            lines.append(f"Дата доставки: <b>{escape(deliveries[0])}</b>")
-        lines.append("Товары:")
-        for item in details:
-            product_line = f"• <b>{escape(item['product'])}</b>"
-            if len(stages) > 1:
-                product_line += f" — {escape(item['stage'])}"
-            if len(deliveries) > 1 and item["delivery"]:
-                product_line += f" ({escape(item['delivery'])})"
-            lines.append(product_line)
+        if any(_is_aggregated_status_row(row) for row in order_rows):
+            _append_aggregated_order_status(lines, order_rows)
+        else:
+            _append_legacy_order_status(lines, order_rows)
         if index < len(shown) - 1:
             lines.append("")
     return "\n".join(lines)
