@@ -44,9 +44,6 @@ services:
         target: /run/secrets/google-service-account.json
         read_only: true
     command: ["celery", "-A", "restaurant_bot.workers.celery_app.celery_app", "worker", "-l", "INFO", "--concurrency=${CELERY_CONCURRENCY:-10}"]
-    depends_on:
-      migrate:
-        condition: service_completed_successfully
     networks:
       - backend
     healthcheck:
@@ -68,9 +65,6 @@ services:
         target: /run/secrets/google-service-account.json
         read_only: true
     command: ["celery", "-A", "restaurant_bot.workers.celery_app.celery_app", "beat", "-l", "INFO", "--schedule=/tmp/celerybeat-schedule"]
-    depends_on:
-      migrate:
-        condition: service_completed_successfully
     networks:
       - backend
     healthcheck:
