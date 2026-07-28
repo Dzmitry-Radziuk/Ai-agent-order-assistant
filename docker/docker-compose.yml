@@ -15,6 +15,11 @@ services:
       - "${DEPLOY_PORT:-8001}:${CONTAINER_PORT:-8000}"
     env_file:
       - .env
+    volumes:
+      - type: bind
+        source: ${GOOGLE_SERVICE_ACCOUNT_JSON:?GOOGLE_SERVICE_ACCOUNT_JSON CI/CD file variable is required}
+        target: /run/secrets/google-service-account.json
+        read_only: true
     networks:
       - backend
     depends_on:
@@ -33,6 +38,11 @@ services:
     restart: unless-stopped
     env_file:
       - .env
+    volumes:
+      - type: bind
+        source: ${GOOGLE_SERVICE_ACCOUNT_JSON:?GOOGLE_SERVICE_ACCOUNT_JSON CI/CD file variable is required}
+        target: /run/secrets/google-service-account.json
+        read_only: true
     command: ["celery", "-A", "restaurant_bot.workers.celery_app.celery_app", "worker", "-l", "INFO", "--concurrency=${CELERY_CONCURRENCY:-10}"]
     depends_on:
       migrate:
@@ -52,6 +62,11 @@ services:
     restart: unless-stopped
     env_file:
       - .env
+    volumes:
+      - type: bind
+        source: ${GOOGLE_SERVICE_ACCOUNT_JSON:?GOOGLE_SERVICE_ACCOUNT_JSON CI/CD file variable is required}
+        target: /run/secrets/google-service-account.json
+        read_only: true
     command: ["celery", "-A", "restaurant_bot.workers.celery_app.celery_app", "beat", "-l", "INFO", "--schedule=/tmp/celerybeat-schedule"]
     depends_on:
       migrate:
