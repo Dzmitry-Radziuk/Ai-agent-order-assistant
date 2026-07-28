@@ -345,9 +345,7 @@ def _recover_missing_item_comments(
             source_counts[source] = source_counts.get(source, 0) + 1
 
     for item in items:
-        if clean_text(item.get("comment")) or clean_text(
-            item.get("user_comment_to_supplier")
-        ):
+        if clean_text(item.get("comment")) or clean_text(item.get("user_comment_to_supplier")):
             continue
         source = normalize_text(item.get("source_line")).strip(" .,;:-—–")
         query = normalize_text(item.get("product_query")).strip(" .,;:-—–")
@@ -431,9 +429,7 @@ def recover_omitted_explicit_items(payload: dict[str, Any], source_text: str) ->
     global_comment = _strip_global_comment_scope(clean_text(payload.get("global_comment")))
     payload["global_comment"] = global_comment
     _recover_missing_item_comments(restored, global_comment)
-    payload["items"] = collapse_comment_shadow_items(
-        restored, global_comment
-    )
+    payload["items"] = collapse_comment_shadow_items(restored, global_comment)
     return payload
 
 

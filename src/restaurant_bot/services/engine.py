@@ -590,9 +590,7 @@ class ConversationEngine:
             if command.global_comment:
                 self._apply_global_comment(state, command.global_comment)
             if command.global_comment and not command.items:
-                active_count = sum(
-                    item.status != ItemStatus.SKIPPED for item in state.cart
-                )
+                active_count = sum(item.status != ItemStatus.SKIPPED for item in state.cart)
                 return EngineResult(
                     state=state,
                     reply=BotReply(
@@ -818,8 +816,7 @@ class ConversationEngine:
             return False
         words = re.findall(r"[a-zа-яё]+", normalize_text(text), flags=re.I)
         return any(
-            word in UNIT_ALIASES and normalize_unit(word) == normalized_expected
-            for word in words
+            word in UNIT_ALIASES and normalize_unit(word) == normalized_expected for word in words
         )
 
     def _contextual_quantity_command(

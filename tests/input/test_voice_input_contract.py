@@ -227,10 +227,7 @@ def test_global_comment_is_not_duplicated_as_a_product() -> None:
 
 def test_local_comments_are_recovered_when_ai_leaves_them_only_in_source_lines() -> None:
     """Восстанавливает разные локальные комментарии и отделяет их от общего."""
-    source = (
-        "срп трхн в бутылках 10 штук "
-        "срп роза 1 штука в банках и всё желательно на завтра"
-    )
+    source = "срп трхн в бутылках 10 штук срп роза 1 штука в банках и всё желательно на завтра"
     payload = {
         "intent": Intent.ADD_ITEMS,
         "global_comment": "всё желательно на завтра",

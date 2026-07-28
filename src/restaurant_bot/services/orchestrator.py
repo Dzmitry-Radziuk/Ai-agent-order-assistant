@@ -777,11 +777,7 @@ class UpdateOrchestrator:
                 f"{names}. Он может сказать номер, например «первый» или «вариант два», "
                 "либо полное или частичное название. Верни только произнесённый русский текст."
             )
-        if (
-            current
-            and state.stage == SessionStage.AWAIT_UNIT_QUANTITY
-            and current.catalog_unit
-        ):
+        if current and state.stage == SessionStage.AWAIT_UNIT_QUANTITY and current.catalog_unit:
             expected_unit = normalize_unit(current.catalog_unit)
             product_name = current.catalog_name or current.source_query
             return (
@@ -852,14 +848,8 @@ class UpdateOrchestrator:
             if transcript_words & label_words and transcript_words != label_words:
                 return True
         current = state.current_item()
-        if (
-            current
-            and state.stage == SessionStage.AWAIT_UNIT_QUANTITY
-            and current.catalog_unit
-        ):
-            quantity, spoken_unit = parse_quantity_unit(
-                re.sub(r"[.!?]+$", "", transcript).strip()
-            )
+        if current and state.stage == SessionStage.AWAIT_UNIT_QUANTITY and current.catalog_unit:
+            quantity, spoken_unit = parse_quantity_unit(re.sub(r"[.!?]+$", "", transcript).strip())
             if (
                 quantity is not None
                 and spoken_unit

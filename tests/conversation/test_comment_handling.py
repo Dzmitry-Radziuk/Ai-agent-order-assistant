@@ -105,15 +105,11 @@ def test_late_global_comment_applies_to_existing_and_new_items_without_overlap(
 ) -> None:  # type: ignore[no-untyped-def]
     """Применяет поздний общий комментарий ко всей заявке без повторения у нового товара."""
     engine = ConversationEngine(settings)
-    existing = engine._build_item(
-        ExtractedItem(product_query="срп трхн", quantity=10, unit="шт")
-    )
+    existing = engine._build_item(ExtractedItem(product_query="срп трхн", quantity=10, unit="шт"))
     existing.catalog_product_id = "tarhun"
     existing.catalog_name = "Сироп Тархун, 1л"
     existing.status = ItemStatus.MATCHED
-    skipped = engine._build_item(
-        ExtractedItem(product_query="кальмар", quantity=1, unit="шт")
-    )
+    skipped = engine._build_item(ExtractedItem(product_query="кальмар", quantity=1, unit="шт"))
     skipped.status = ItemStatus.SKIPPED
     state = ConversationState(restaurant="Кафе", cart=[skipped, existing])
     catalog = [
@@ -215,9 +211,7 @@ def test_recovered_local_comments_reach_each_own_order_row(settings) -> None:  #
 def test_standalone_global_comment_updates_active_draft_once(settings) -> None:  # type: ignore[no-untyped-def]
     """Обрабатывает отдельную голосовую команду общего комментария без ложных товаров."""
     engine = ConversationEngine(settings)
-    first = engine._build_item(
-        ExtractedItem(product_query="сироп тархун", quantity=10, unit="шт")
-    )
+    first = engine._build_item(ExtractedItem(product_query="сироп тархун", quantity=10, unit="шт"))
     first.status = ItemStatus.MATCHED
     second = engine._build_item(
         ExtractedItem(
