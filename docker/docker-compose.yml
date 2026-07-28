@@ -4,6 +4,8 @@ services:
     command: ["alembic", "-c", "alembic.ini", "upgrade", "head"]
     env_file:
       - .env
+    volumes:
+      - ./secrets/google-service-account.json:/run/secrets/google-service-account.json:ro
     networks:
       - backend
 
@@ -16,10 +18,7 @@ services:
     env_file:
       - .env
     volumes:
-      - type: bind
-        source: ${GOOGLE_SERVICE_ACCOUNT_JSON:?GOOGLE_SERVICE_ACCOUNT_JSON CI/CD file variable is required}
-        target: /run/secrets/google-service-account.json
-        read_only: true
+      - ./secrets/google-service-account.json:/run/secrets/google-service-account.json:ro
     networks:
       - backend
     depends_on:
@@ -39,10 +38,7 @@ services:
     env_file:
       - .env
     volumes:
-      - type: bind
-        source: ${GOOGLE_SERVICE_ACCOUNT_JSON:?GOOGLE_SERVICE_ACCOUNT_JSON CI/CD file variable is required}
-        target: /run/secrets/google-service-account.json
-        read_only: true
+      - ./secrets/google-service-account.json:/run/secrets/google-service-account.json:ro
     command: ["celery", "-A", "restaurant_bot.workers.celery_app.celery_app", "worker", "-l", "INFO", "--concurrency=${CELERY_CONCURRENCY:-10}"]
     networks:
       - backend
@@ -60,10 +56,7 @@ services:
     env_file:
       - .env
     volumes:
-      - type: bind
-        source: ${GOOGLE_SERVICE_ACCOUNT_JSON:?GOOGLE_SERVICE_ACCOUNT_JSON CI/CD file variable is required}
-        target: /run/secrets/google-service-account.json
-        read_only: true
+      - ./secrets/google-service-account.json:/run/secrets/google-service-account.json:ro
     command: ["celery", "-A", "restaurant_bot.workers.celery_app.celery_app", "beat", "-l", "INFO", "--schedule=/tmp/celerybeat-schedule"]
     networks:
       - backend
