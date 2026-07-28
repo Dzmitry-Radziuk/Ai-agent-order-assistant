@@ -52,6 +52,11 @@
       display: block; width: 22px; height: 22px; margin-bottom: 8px; border-radius: 50%;
       background: var(--green); color: white; text-align: center; line-height: 22px;
     }
+    .journey-tests { margin-top: 16px; color: var(--muted); font-size: 13px; line-height: 1.8; }
+    .journey-tests a {
+      display: inline-block; margin-left: 5px; padding: 1px 7px; border-radius: 7px;
+      background: var(--green-soft); text-decoration: none;
+    }
     .toolbar {
       position: sticky; top: 0; z-index: 5; margin: 24px 0 18px; padding: 14px;
       background: #f4f7f4ed; backdrop-filter: blur(12px); border: 1px solid var(--line); border-radius: 16px;
@@ -122,7 +127,7 @@
       <h2>Как проходит заявка</h2>
       <p>Основные маршруты без технических деталей.</p>
     </div>
-    <div class="journeys"><section class="journey"><h3>Обычная заявка</h3><p>Основной путь сотрудника кафе от первого сообщения до отправленной заявки.</p><div class="journey-steps"><span><b>1</b>Добавить товары</span><span><b>2</b>Уточнить позиции</span><span><b>3</b>Проверить черновик</span><span><b>4</b>Проверить минималку</span><span><b>5</b>Подтвердить</span><span><b>6</b>Получить номер</span></div></section><section class="journey"><h3>Фотография таблицы</h3><p>Количество берётся только из фактически заполненных колонок заказа, а не из фасовки или справочных данных.</p><div class="journey-steps"><span><b>1</b>Получить фото</span><span><b>2</b>Определить тип таблицы</span><span><b>3</b>Прочитать Зал/Бар/Кухня</span><span><b>4</b>Учесть правки ручкой</span><span><b>5</b>Сохранить комментарии</span><span><b>6</b>Показать черновик</span></div></section><section class="journey"><h3>Команда с отрицанием</h3><p>Отрицание имеет приоритет: бот не должен добавлять, объединять или отправлять вопреки словам пользователя.</p><div class="journey-steps"><span><b>1</b>Получить фразу</span><span><b>2</b>Найти отрицание</span><span><b>3</b>Определить текущий экран</span><span><b>4</b>Отменить только текущее действие</span><span><b>5</b>Сохранить черновик</span></div></section><section class="journey"><h3>Новая заявка</h3><p>После отправки новый заказ начинается сразу, а активный черновик очищается только после подтверждения.</p><div class="journey-steps"><span><b>1</b>Сказать «новый заказ»</span><span><b>2</b>Проверить состояние</span><span><b>3</b>Запросить подтверждение при черновике</span><span><b>4</b>Сохранить историю</span><span><b>5</b>Открыть пустую заявку</span></div></section></div>
+    <div class="journeys"><section class="journey"><h3>Обычная заявка</h3><p>Основной путь сотрудника кафе от первого сообщения до отправленной заявки.</p><div class="journey-steps"><span><b>1</b>Добавить товары</span><span><b>2</b>Уточнить позиции</span><span><b>3</b>Проверить черновик</span><span><b>4</b>Проверить минималку</span><span><b>5</b>Подтвердить</span><span><b>6</b>Получить номер</span></div><div class="journey-tests"><b>Проверяется сценариями:</b> <a href="#scenario-INP-01">INP-01</a> <a href="#scenario-INP-02">INP-02</a> <a href="#scenario-REC-01">REC-01</a> <a href="#scenario-REC-02">REC-02</a> <a href="#scenario-REC-03">REC-03</a> <a href="#scenario-REC-04">REC-04</a> <a href="#scenario-REC-05">REC-05</a> <a href="#scenario-REC-06">REC-06</a> <a href="#scenario-DRF-01">DRF-01</a> <a href="#scenario-SUB-01">SUB-01</a> <a href="#scenario-SUB-02">SUB-02</a> <a href="#scenario-SUB-03">SUB-03</a> <a href="#scenario-SUB-04">SUB-04</a></div></section><section class="journey"><h3>Фотография таблицы</h3><p>Количество берётся только из фактически заполненных колонок заказа, а не из фасовки или справочных данных.</p><div class="journey-steps"><span><b>1</b>Получить фото</span><span><b>2</b>Определить тип таблицы</span><span><b>3</b>Прочитать Зал/Бар/Кухня</span><span><b>4</b>Учесть правки ручкой</span><span><b>5</b>Сохранить комментарии</span><span><b>6</b>Показать черновик</span></div><div class="journey-tests"><b>Проверяется сценариями:</b> <a href="#scenario-INP-03">INP-03</a> <a href="#scenario-INP-04">INP-04</a> <a href="#scenario-INP-05">INP-05</a> <a href="#scenario-REC-06">REC-06</a> <a href="#scenario-RCV-02">RCV-02</a></div></section><section class="journey"><h3>Команда с отрицанием</h3><p>Отрицание имеет приоритет: бот не должен добавлять, объединять или отправлять вопреки словам пользователя.</p><div class="journey-steps"><span><b>1</b>Получить фразу</span><span><b>2</b>Найти отрицание</span><span><b>3</b>Определить текущий экран</span><span><b>4</b>Отменить только текущее действие</span><span><b>5</b>Сохранить черновик</span></div><div class="journey-tests"><b>Проверяется сценариями:</b> <a href="#scenario-REC-05">REC-05</a> <a href="#scenario-SAF-01">SAF-01</a> <a href="#scenario-SAF-02">SAF-02</a> <a href="#scenario-SAF-03">SAF-03</a></div></section><section class="journey"><h3>Новая заявка</h3><p>После отправки новый заказ начинается сразу, а активный черновик очищается только после подтверждения.</p><div class="journey-steps"><span><b>1</b>Сказать «новый заказ»</span><span><b>2</b>Проверить состояние</span><span><b>3</b>Запросить подтверждение при черновике</span><span><b>4</b>Сохранить историю</span><span><b>5</b>Открыть пустую заявку</span></div><div class="journey-tests"><b>Проверяется сценариями:</b> <a href="#scenario-DRF-04">DRF-04</a> <a href="#scenario-DRF-05">DRF-05</a> <a href="#scenario-SUB-03">SUB-03</a></div></section></div>
 
     <div class="section-heading">
       <h2>Все пользовательские сценарии</h2>
@@ -143,7 +148,8 @@
       <p id="visible-count"></p>
     </section>
     <section class="scenario-grid" id="scenario-grid">
-      <article class="scenario-card" data-category="registration"
+      <article id="scenario-REG-01" class="scenario-card"
+        data-category="registration"
         data-priority="critical" data-search="reg-01 подключение по коду заведения подключение заведения отправляет код заведения и подтверждает найденное название. показывает название заведения, спрашивает подтверждение и только после согласия сохраняет привязку. 12345 /start 12345 да, подключить">
         <div class="card-top">
           <span class="scenario-id">REG-01</span>
@@ -168,7 +174,8 @@
         </details>
       </article>
 
-      <article class="scenario-card" data-category="registration"
+      <article id="scenario-REG-02" class="scenario-card"
+        data-category="registration"
         data-priority="critical" data-search="reg-02 отказ или смена заведения подключение заведения отказывается или подтверждает смену заведения. при отказе ничего не записывает; для смены запрашивает дополнительное подтверждение. нет отмена да, изменить">
         <div class="card-top">
           <span class="scenario-id">REG-02</span>
@@ -193,7 +200,8 @@
         </details>
       </article>
 
-      <article class="scenario-card" data-category="input"
+      <article id="scenario-INP-01" class="scenario-card"
+        data-category="input"
         data-priority="important" data-search="inp-01 добавление товаров текстом добавление товаров отправляет один товар или список товаров с количеством. распознаёт отдельные позиции, сопоставляет их с каталогом и показывает результат. картофель 5 кг сливки 33% — 12 шт сироп роза 6 шт
 говядина 5 кг">
         <div class="card-top">
@@ -220,7 +228,8 @@
         </details>
       </article>
 
-      <article class="scenario-card" data-category="input"
+      <article id="scenario-INP-02" class="scenario-card"
+        data-category="input"
         data-priority="critical" data-search="inp-02 добавление товаров голосом добавление товаров называет товары, количества и комментарии обычной разговорной фразой. показывает этап распознавания, превращает речь в позиции и не переносит количество между соседними товарами. добавь пять килограммов картофеля сыр пармезан два килограмма и сливки десять штук">
         <div class="card-top">
           <span class="scenario-id">INP-02</span>
@@ -245,7 +254,8 @@
         </details>
       </article>
 
-      <article class="scenario-card" data-category="input"
+      <article id="scenario-INP-03" class="scenario-card"
+        data-category="input"
         data-priority="critical" data-search="inp-03 фото оригинальной таблицы заказа добавление товаров отправляет фотографию распечатанной или заполненной таблицы. берёт количество только из заполненных колонок заказа, сохраняет комментарии и игнорирует фасовку, остатки и справочные числа. распечатанная таблица с количеством в колонке «бар» таблица с заполненными «зал» и «кухня» фото, где у товара указан комментарий поставщику">
         <div class="card-top">
           <span class="scenario-id">INP-03</span>
@@ -270,7 +280,8 @@
         </details>
       </article>
 
-      <article class="scenario-card" data-category="input"
+      <article id="scenario-INP-04" class="scenario-card"
+        data-category="input"
         data-priority="important" data-search="inp-04 фото рукописного списка добавление товаров отправляет фотографию списка, написанного от руки. использует только явно указанные количества и сопоставляет названия с каталогом. сироп роза — 6 шт говядина — 5 кг курица — 1 кг">
         <div class="card-top">
           <span class="scenario-id">INP-04</span>
@@ -295,7 +306,8 @@
         </details>
       </article>
 
-      <article class="scenario-card" data-category="input"
+      <article id="scenario-INP-05" class="scenario-card"
+        data-category="input"
         data-priority="critical" data-search="inp-05 зачёркнутое количество и правка ручкой добавление товаров отправляет фотографию таблицы с ручной корректировкой. считает зачёркнутое значение недействительным и использует только разборчивую рукописную замену. 5 зачёркнуто, рядом написано 7 100 кг зачёркнуто, от руки указано 10 шт">
         <div class="card-top">
           <span class="scenario-id">INP-05</span>
@@ -320,7 +332,8 @@
         </details>
       </article>
 
-      <article class="scenario-card" data-category="recognition"
+      <article id="scenario-REC-01" class="scenario-card"
+        data-category="recognition"
         data-priority="critical" data-search="rec-01 не указано количество уточнение товаров отправляет название без количества, затем отвечает числом. просит уточнить количество именно для текущего товара и не создаёт новую строку. сыр пармезан нужно 5 кг пять">
         <div class="card-top">
           <span class="scenario-id">REC-01</span>
@@ -345,7 +358,8 @@
         </details>
       </article>
 
-      <article class="scenario-card" data-category="recognition"
+      <article id="scenario-REC-02" class="scenario-card"
+        data-category="recognition"
         data-priority="critical" data-search="rec-02 единица не совпадает с каталогом уточнение товаров выбирает единицу каталога либо вводит корректное количество. не меняет единицу молча, показывает различие и предлагает безопасные варианты. сыр швейцарский 100 кг используй как в каталоге нужно 10 штук">
         <div class="card-top">
           <span class="scenario-id">REC-02</span>
@@ -370,7 +384,8 @@
         </details>
       </article>
 
-      <article class="scenario-card" data-category="recognition"
+      <article id="scenario-REC-03" class="scenario-card"
+        data-category="recognition"
         data-priority="critical" data-search="rec-03 несколько похожих товаров уточнение товаров выбирает номер, кнопку или однозначное название варианта. показывает кандидатов и не выбирает первый вариант автоматически. первый вариант выбираю второй сироп роза">
         <div class="card-top">
           <span class="scenario-id">REC-03</span>
@@ -395,7 +410,8 @@
         </details>
       </article>
 
-      <article class="scenario-card" data-category="recognition"
+      <article id="scenario-REC-04" class="scenario-card"
+        data-category="recognition"
         data-priority="important" data-search="rec-04 товар не найден в каталоге уточнение товаров меняет название, ищет у всех поставщиков, не добавляет позицию или отправляет запрос снабженцу. показывает понятные варианты и не подставляет случайный товар. изменить название искать у всех поставщиков отправить запрос снабженцу">
         <div class="card-top">
           <span class="scenario-id">REC-04</span>
@@ -420,7 +436,8 @@
         </details>
       </article>
 
-      <article class="scenario-card" data-category="recognition"
+      <article id="scenario-REC-05" class="scenario-card"
+        data-category="recognition"
         data-priority="critical" data-search="rec-05 повтор уже добавленного товара уточнение товаров подтверждает прибавление нового количества или отказывается от повторного добавления. показывает текущее и итоговое количество; без подтверждения значения не складывает. добавить — будет 15 кг не добавлять повторно не объединяй">
         <div class="card-top">
           <span class="scenario-id">REC-05</span>
@@ -445,7 +462,8 @@
         </details>
       </article>
 
-      <article class="scenario-card" data-category="recognition"
+      <article id="scenario-REC-06" class="scenario-card"
+        data-category="recognition"
         data-priority="important" data-search="rec-06 комментарий к товару или ко всей заявке уточнение товаров сообщает сорт, качество, упаковку, дату доставки или другое пожелание. отделяет комментарий от названия и сохраняет его до отправки. говядина 5 кг, обязательно мраморная сливки 12 шт, по 1 литру комментарий ко всей заявке: привезти утром">
         <div class="card-top">
           <span class="scenario-id">REC-06</span>
@@ -470,7 +488,8 @@
         </details>
       </article>
 
-      <article class="scenario-card" data-category="draft"
+      <article id="scenario-DRF-01" class="scenario-card"
+        data-category="draft"
         data-priority="important" data-search="drf-01 показать текущий черновик работа с черновиком просит показать заявку или возвращается кнопкой. открывает актуальный черновик, не добавляя слова команды как товар. покажи черновик что у меня в заявке? вернись в корзину">
         <div class="card-top">
           <span class="scenario-id">DRF-01</span>
@@ -495,7 +514,8 @@
         </details>
       </article>
 
-      <article class="scenario-card" data-category="draft"
+      <article id="scenario-DRF-02" class="scenario-card"
+        data-category="draft"
         data-priority="important" data-search="drf-02 продолжить добавление товаров работа с черновиком просит добавить ещё товары и отправляет следующий список. переходит в режим добавления, сохраняя существующий черновик. добавить ещё товары давай внесём ещё что-нибудь хочу еще позиции">
         <div class="card-top">
           <span class="scenario-id">DRF-02</span>
@@ -520,7 +540,8 @@
         </details>
       </article>
 
-      <article class="scenario-card" data-category="draft"
+      <article id="scenario-DRF-03" class="scenario-card"
+        data-category="draft"
         data-priority="critical" data-search="drf-03 очистить текущую заявку работа с черновиком явно просит полностью очистить заявку. удаляет только текущий черновик и возвращает экран новой заявки. очисти заявку удали всё из корзины сбрось черновик">
         <div class="card-top">
           <span class="scenario-id">DRF-03</span>
@@ -545,7 +566,8 @@
         </details>
       </article>
 
-      <article class="scenario-card" data-category="draft"
+      <article id="scenario-DRF-04" class="scenario-card"
+        data-category="draft"
         data-priority="critical" data-search="drf-04 новая заявка при активном черновике работа с черновиком говорит «новый заказ», затем подтверждает или отменяет очистку. предупреждает о сохранённом черновике и не очищает его без отдельного подтверждения. новый заказ да, начать новую нет, оставить черновик">
         <div class="card-top">
           <span class="scenario-id">DRF-04</span>
@@ -570,7 +592,8 @@
         </details>
       </article>
 
-      <article class="scenario-card" data-category="draft"
+      <article id="scenario-DRF-05" class="scenario-card"
+        data-category="draft"
         data-priority="critical" data-search="drf-05 новая заявка после отправки работа с черновиком говорит «новый заказ» или нажимает кнопку «новая заявка». сразу открывает пустой черновик без лишнего подтверждения. новый заказ хочу оформить ещё одну заявку новая заявка">
         <div class="card-top">
           <span class="scenario-id">DRF-05</span>
@@ -595,7 +618,8 @@
         </details>
       </article>
 
-      <article class="scenario-card" data-category="submission"
+      <article id="scenario-SUB-01" class="scenario-card"
+        data-category="submission"
         data-priority="critical" data-search="sub-01 переход к финальной проверке проверка и отправка просит оформить или отправить заявку. сначала проверяет незавершённые позиции и показывает итоговую карточку. оформи заявку я всё добавил перейти к проверке заявки">
         <div class="card-top">
           <span class="scenario-id">SUB-01</span>
@@ -620,7 +644,8 @@
         </details>
       </article>
 
-      <article class="scenario-card" data-category="submission"
+      <article id="scenario-SUB-02" class="scenario-card"
+        data-category="submission"
         data-priority="important" data-search="sub-02 не набрана минимальная сумма поставщика проверка и отправка открывает предупреждение и выбирает: добавить товары либо принять риск. показывает поставщика и недостающую сумму, предлагает понятные действия. проверь минималку добавить товары поставщика отправить как есть">
         <div class="card-top">
           <span class="scenario-id">SUB-02</span>
@@ -645,7 +670,8 @@
         </details>
       </article>
 
-      <article class="scenario-card" data-category="submission"
+      <article id="scenario-SUB-03" class="scenario-card"
+        data-category="submission"
         data-priority="critical" data-search="sub-03 успешная отправка и номер заявки проверка и отправка нажимает «отправить поставщику». записывает заявку, очищает отправленный черновик и показывает номер с кнопками статуса и новой заявки. отправить поставщику проверить статус новая заявка">
         <div class="card-top">
           <span class="scenario-id">SUB-03</span>
@@ -670,7 +696,8 @@
         </details>
       </article>
 
-      <article class="scenario-card" data-category="submission"
+      <article id="scenario-SUB-04" class="scenario-card"
+        data-category="submission"
         data-priority="important" data-search="sub-04 статус отправленных заявок проверка и отправка просит показать статусы. показывает последние отслеживаемые заявки, сгруппированные по номеру. проверь статус последней заявки мои заявки заявка ушла?">
         <div class="card-top">
           <span class="scenario-id">SUB-04</span>
@@ -695,7 +722,8 @@
         </details>
       </article>
 
-      <article class="scenario-card" data-category="submission"
+      <article id="scenario-SUB-05" class="scenario-card"
+        data-category="submission"
         data-priority="critical" data-search="sub-05 временный сбой при отправке проверка и отправка ждёт результат либо повторяет действие после сообщения об ошибке. безопасно повторяет только допустимый этап и не создаёт вторую заявку. повторить отправку к черновику">
         <div class="card-top">
           <span class="scenario-id">SUB-05</span>
@@ -720,7 +748,8 @@
         </details>
       </article>
 
-      <article class="scenario-card" data-category="safety"
+      <article id="scenario-SAF-01" class="scenario-card"
+        data-category="safety"
         data-priority="critical" data-search="saf-01 «не добавляй» не добавляет товар защита от неверного действия отказывается от текущей позиции естественной фразой. пропускает только текущую позицию и не воспринимает отрицание как подтверждение. не добавляй эту позицию убери этот товар нет, это не нужно">
         <div class="card-top">
           <span class="scenario-id">SAF-01</span>
@@ -745,7 +774,8 @@
         </details>
       </article>
 
-      <article class="scenario-card" data-category="safety"
+      <article id="scenario-SAF-02" class="scenario-card"
+        data-category="safety"
         data-priority="critical" data-search="saf-02 «не отправляй» отменяет отправку защита от неверного действия отказывается от отправки. возвращает к безопасному экрану и не ставит задачу отправки. не отправляй нет, не надо отправлять я передумал">
         <div class="card-top">
           <span class="scenario-id">SAF-02</span>
@@ -770,7 +800,8 @@
         </details>
       </article>
 
-      <article class="scenario-card" data-category="safety"
+      <article id="scenario-SAF-03" class="scenario-card"
+        data-category="safety"
         data-priority="critical" data-search="saf-03 отрицание не запускает новую заявку защита от неверного действия произносит фразу с отрицанием либо товар, в названии которого встречаются командные слова. учитывает отрицание и контекст; не очищает заявку и не маршрутизирует товар как команду. не начинай новый заказ новый картофель 5 кг не хочу новую заявку">
         <div class="card-top">
           <span class="scenario-id">SAF-03</span>
@@ -795,7 +826,8 @@
         </details>
       </article>
 
-      <article class="scenario-card" data-category="safety"
+      <article id="scenario-SAF-04" class="scenario-card"
+        data-category="safety"
         data-priority="critical" data-search="saf-04 устаревшая кнопка не меняет черновик защита от неверного действия нажимает ранее показанный вариант товара или действие. проверяет ревизию состояния и отклоняет устаревшее действие. нажатие старой кнопки выбора повторное нажатие после обновления карточки">
         <div class="card-top">
           <span class="scenario-id">SAF-04</span>
@@ -820,7 +852,8 @@
         </details>
       </article>
 
-      <article class="scenario-card" data-category="recovery"
+      <article id="scenario-RCV-01" class="scenario-card"
+        data-category="recovery"
         data-priority="edge" data-search="rcv-01 голос не удалось распознать сбои и восстановление отправляет голосовое сообщение. использует резервную модель, а при пустом результате просит повторить или написать текстом. неразборчивое аудио тихая запись пустая голосовая команда">
         <div class="card-top">
           <span class="scenario-id">RCV-01</span>
@@ -845,7 +878,8 @@
         </details>
       </article>
 
-      <article class="scenario-card" data-category="recovery"
+      <article id="scenario-RCV-02" class="scenario-card"
+        data-category="recovery"
         data-priority="critical" data-search="rcv-02 на фото нет заполненных количеств сбои и восстановление отправляет такую фотографию. не использует фасовку, остаток или случайное число как количество заказа. пустой бланк заказа таблица только с фасовкой фото без рукописных количеств">
         <div class="card-top">
           <span class="scenario-id">RCV-02</span>
@@ -870,7 +904,8 @@
         </details>
       </article>
 
-      <article class="scenario-card" data-category="recovery"
+      <article id="scenario-RCV-03" class="scenario-card"
+        data-category="recovery"
         data-priority="edge" data-search="rcv-03 недоступен справочник заведений сбои и восстановление отправляет код подключения. сообщает, что код сейчас не удалось проверить, и предлагает повторить позже. 12345 /start 12345">
         <div class="card-top">
           <span class="scenario-id">RCV-03</span>
@@ -895,7 +930,8 @@
         </details>
       </article>
 
-      <article class="scenario-card" data-category="recovery"
+      <article id="scenario-RCV-04" class="scenario-card"
+        data-category="recovery"
         data-priority="edge" data-search="rcv-04 общая ошибка обработки сообщения сбои и восстановление отправляет сообщение любого поддерживаемого типа. фиксирует безопасную контрольную точку и показывает короткое сообщение без внутренних данных. повторить сообщение открыть черновик после ошибки">
         <div class="card-top">
           <span class="scenario-id">RCV-04</span>
@@ -921,8 +957,8 @@
       </article>
     </section>
   </main>
-  <footer>Локальный каталог · версия 1.0 · работает без интернета</footer>
-  <script id="catalog-meta" type="application/json">{"version": "1.0", "total": 31, "linked": 31}</script>
+  <footer>Локальный каталог · версия 1.1 · работает без интернета</footer>
+  <script id="catalog-meta" type="application/json">{"version": "1.1", "total": 31, "linked": 31}</script>
   <script>
     (() => {
       const cards = [...document.querySelectorAll(".scenario-card")];

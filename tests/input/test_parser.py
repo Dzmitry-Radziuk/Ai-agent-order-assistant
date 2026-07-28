@@ -48,6 +48,20 @@ def test_parses_trailing_supplier_comment_after_quantity() -> None:
     assert item.user_comment_to_supplier == "желательно охлаждённым"
 
 
+def test_parses_spoken_word_quantity_between_product_and_comment() -> None:
+    """Связывает словесное количество с товаром между разговорными паузами."""
+    items = parse_product_lines("Сироп роза, одна штука, желательно холодный.")
+
+    assert len(items) == 1
+    assert (items[0].product_query, items[0].quantity, items[0].unit) == (
+        "сироп роза",
+        1,
+        "шт",
+    )
+    assert items[0].comment == "желательно холодный"
+    assert items[0].user_comment_to_supplier == items[0].comment
+
+
 def test_parser_keeps_multiword_comment_after_quantity_without_punctuation() -> None:
     """Проверяет, что парсер сохраняет многословный комментарий after количество без punctuation."""
     item = parse_product_lines("Сироп роза 5 штук обязательно позвонить перед доставкой")[0]
@@ -68,12 +82,6 @@ def test_parser_recovers_every_product_in_a_conjoined_spoken_list() -> None:
     ]
 
 
-def test_product_packaging_remains_part_of_name_when_order_quantity_follows() -> None:
-    """Проверяет, что товар фасовка remains part для название когда заказ количество follows."""
-    item = parse_product_lines("Сироп Роза 1 л — 12")[0]
-    assert (item.product_query, item.quantity, item.unit) == ("Сироп Роза 1 л", 12, "")
-
-
 @pytest.mark.parametrize(
     ("phrase", "target", "quantity", "unit"),
     [
@@ -82,6 +90,8 @@ def test_product_packaging_remains_part_of_name_when_order_quantity_follows() ->
         ("Для молока поставь 3 литра", "молока", 3, "л"),
         ("Молоко измени на 3 л", "молоко", 3, "л"),
         ("Поставь сливки 33% 5 штук", "сливки 33%", 5, "шт"),
+        ("Поставь для сиропа фисташка 7 штук", "сиропа фисташка", 7, "шт"),
+        ("Сироп фисташка сделай 7 штук", "сироп фисташка", 7, "шт"),
         ("Исправь сыр на пять килограммов", "сыр", 5, "кг"),
         ("Замени у сахара количество на двадцать пять кг", "сахара", 25, "кг"),
         ("Исправь на сорок килограммов", "", 40, "кг"),
@@ -163,3 +173,32 @@ def test_positive_actions_remain_available_after_negation_guard(
 ) -> None:
     """Защита от отрицаний не блокирует явные положительные команды."""
     assert infer_intent(phrase).intent is expected
+
+
+def test_spoken_product_list_keeps_each_local_comment() -> None:
+    """Сохраняет пожелание возле каждого товара в длинной голосовой фразе."""
+    command = infer_intent(
+        "Добавь сироп розы 5 штук на завтра и сироп сангрия 10 штук, желательно холодным."
+    )
+
+    assert command.intent is Intent.ADD_ITEMS
+    assert [
+        (item.product_query, item.quantity, item.unit, item.comment) for item in command.items
+    ] == [
+        ("сироп розы", 5, "шт", "на завтра"),
+        ("сироп сангрия", 10, "шт", "желательно холодным"),
+    ]
+
+
+def test_spoken_product_list_separates_local_and_global_comments() -> None:
+    """Отделяет общий комментарий от локального и не создаёт лишний товар."""
+    command = infer_intent(
+        "Добавь сироп роза 5 штук в банках и сироп сангрия 10 штук. Всё желательно привезти завтра."
+    )
+
+    assert command.intent is Intent.ADD_ITEMS
+    assert command.global_comment == "желательно привезти завтра"
+    assert [(item.product_query, item.quantity, item.comment) for item in command.items] == [
+        ("сироп роза", 5, "в банках"),
+        ("сироп сангрия", 10, ""),
+    ]

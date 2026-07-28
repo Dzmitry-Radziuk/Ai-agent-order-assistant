@@ -430,7 +430,7 @@ class ConversationEngine:
             return EngineResult(
                 state=state,
                 reply=BotReply(
-                    text="Ок. Пришли ещё товары текстом, голосом или фото — я добавлю их в текущий черновик.",
+                    text="Отправьте товары текстом, голосом или фото — я добавлю их в текущий черновик заказа.",
                     rows=[[Button(text="📦 Показать черновик", callback_data="v2:back")]],
                 ),
             )
@@ -2096,31 +2096,86 @@ class ConversationEngine:
         if not target and state.current_item():
             state.current_item().status = ItemStatus.SKIPPED  # type: ignore[union-attr]
             return self._advance(state)
-        scored = []
-        for item in state.cart:
-            names = [item.source_query, item.catalog_name]
-            score = max(
-                (self._contains_score(target, normalize_text(name)) for name in names), default=0
-            )
-            scored.append((score, item))
-        scored.sort(key=lambda pair: pair[0], reverse=True)
-        if scored and scored[0][0] > 0:
-            scored[0][1].status = ItemStatus.SKIPPED
+        item = self._find_cart_item(state, command.target_query)
+        if item is not None:
+            item.status = ItemStatus.SKIPPED
             return EngineResult(state=state, reply=cart_reply(state, title="Позиция удалена"))
         return EngineResult(state=state, reply=BotReply(text="Не нашёл такую позицию в черновике."))
 
     @staticmethod
     def _contains_score(target: str, candidate: str) -> int:
-        """Проверяет наличие оценки в тексте."""
+        """Оценивает совпадение названий с учётом пунктуации и окончаний."""
         if not target or not candidate:
             return 0
         if target == candidate:
-            return 3
+            return 100
         if target in candidate or candidate in target:
-            return 2
-        target_tokens = set(target.split())
-        candidate_tokens = set(candidate.split())
-        return 1 if target_tokens & candidate_tokens else 0
+            return 80
+        target_tokens = re.findall(r"[a-zа-яё0-9%]+", target, flags=re.I)
+        candidate_tokens = re.findall(r"[a-zа-яё0-9%]+", candidate, flags=re.I)
+        if not target_tokens or not candidate_tokens:
+            return 0
+
+        exact_matches = 0
+        inflected_matches = 0
+        for target_token in target_tokens:
+            if target_token in candidate_tokens:
+                exact_matches += 1
+                continue
+            if any(
+                ConversationEngine._tokens_share_stem(target_token, candidate_token)
+                for candidate_token in candidate_tokens
+            ):
+                inflected_matches += 1
+        return exact_matches * 12 + inflected_matches * 10
+
+    @staticmethod
+    def _tokens_share_stem(left: str, right: str) -> bool:
+        """Сравнивает формы одного слова без агрессивного морфологического угадывания."""
+        shorter_length = min(len(left), len(right))
+        if shorter_length < 3:
+            return False
+        common_length = 0
+        for left_char, right_char in zip(left, right, strict=False):
+            if left_char != right_char:
+                break
+            common_length += 1
+        if shorter_length <= 4:
+            return common_length >= 3 and abs(len(left) - len(right)) <= 2
+        return common_length >= 4
+
+    def _find_cart_item(
+        self,
+        state: ConversationState,
+        target_query: str,
+    ) -> CartItem | None:
+        """Находит только однозначно названную позицию черновика."""
+        if not target_query:
+            return None
+        by_id = next((row for row in state.cart if row.id == target_query), None)
+        if by_id is not None:
+            return by_id
+
+        target = normalize_text(target_query)
+        scored = sorted(
+            (
+                (
+                    max(
+                        self._contains_score(target, normalize_text(row.source_query)),
+                        self._contains_score(target, normalize_text(row.catalog_name)),
+                    ),
+                    row,
+                )
+                for row in state.cart
+            ),
+            key=lambda pair: pair[0],
+            reverse=True,
+        )
+        if not scored or scored[0][0] <= 0:
+            return None
+        if len(scored) > 1 and scored[0][0] == scored[1][0]:
+            return None
+        return scored[0][1]
 
     def _edit_quantity(self, command: ParsedCommand, state: ConversationState) -> EngineResult:
         """Изменяет количество выбранной позиции."""
@@ -2129,15 +2184,7 @@ class ConversationEngine:
         target = normalize_text(command.target_query)
         item = state.current_item()
         if target:
-            item = next((row for row in state.cart if row.id == command.target_query), None)
-            if item is None:
-                item = max(
-                    state.cart,
-                    key=lambda row: self._contains_score(
-                        target, normalize_text(row.catalog_name or row.source_query)
-                    ),
-                    default=None,
-                )
+            item = self._find_cart_item(state, command.target_query)
         if item is None:
             return EngineResult(
                 state=state, reply=BotReply(text="Позиция для изменения не найдена.")

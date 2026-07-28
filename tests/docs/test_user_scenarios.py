@@ -40,6 +40,16 @@ def test_markdown_contains_mermaid_and_all_scenario_ids() -> None:
     assert all(f"#### {scenario['id']} ·" in markdown for scenario in catalog["scenarios"])
 
 
+def test_every_journey_is_linked_to_tested_scenarios() -> None:
+    """Связывает каждый шаговый маршрут с покрытыми pytest сценариями."""
+    catalog = load_catalog()
+    scenarios = {scenario["id"]: scenario for scenario in catalog["scenarios"]}
+
+    for journey in catalog["journeys"]:
+        assert journey["scenario_ids"]
+        assert all(scenarios[scenario_id]["test_refs"] for scenario_id in journey["scenario_ids"])
+
+
 def test_html_catalog_is_autonomous_and_filterable() -> None:
     """Проверяет автономность HTML и наличие поиска по карточкам."""
     catalog = load_catalog()
@@ -49,3 +59,8 @@ def test_html_catalog_is_autonomous_and_filterable() -> None:
     assert 'id="search"' in page
     assert 'class="scenario-card"' in page
     assert page.count('class="scenario-card"') == len(catalog["scenarios"])
+    assert all(
+        f'href="#scenario-{scenario_id}"' in page
+        for journey in catalog["journeys"]
+        for scenario_id in journey["scenario_ids"]
+    )

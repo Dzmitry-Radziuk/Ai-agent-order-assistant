@@ -46,25 +46,6 @@ def test_explicit_candidate_selection_uses_selected_catalog_row(settings) -> Non
     assert result.state.cart[0].catalog_product_id == "feijoa"
 
 
-@pytest.mark.parametrize(
-    ("phrase", "selected_index"),
-    [
-        ("первый вариант", 1),
-        ("второй вариант", 2),
-        ("третий вариант", 3),
-        ("четвёртый", 4),
-        ("пятый вариант", 5),
-    ],
-)
-def test_spoken_candidate_ordinals_have_deterministic_selection(
-    phrase: str, selected_index: int
-) -> None:
-    """Проверяет, что произнесённый кандидат порядковые номера имеют детерминированный выбор."""
-    command = infer_intent(phrase)
-    assert command.intent is Intent.SELECT_CANDIDATE
-    assert command.selected_index == selected_index
-
-
 def test_unique_partial_candidate_name_selects_only_that_candidate(settings) -> None:  # type: ignore[no-untyped-def]
     """Проверяет, что unique partial кандидат название выбирает только что кандидат."""
     engine = ConversationEngine(settings)

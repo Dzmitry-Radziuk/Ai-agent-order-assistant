@@ -240,7 +240,10 @@ def test_global_add_more_voice_command_wins_on_local_issue_cards(
 
     assert result.state.stage is SessionStage.COLLECTING
     assert result.state.cart[0].status is status
-    assert "Пришли ещё товары" in result.reply.text
+    assert (
+        result.reply.text == "Отправьте товары текстом, голосом или фото — я добавлю их в текущий "
+        "черновик заказа."
+    )
 
 
 def test_voice_adds_items_for_the_only_supplier_below_minimum(settings) -> None:  # type: ignore[no-untyped-def]

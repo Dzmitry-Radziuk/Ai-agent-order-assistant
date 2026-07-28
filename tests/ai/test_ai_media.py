@@ -345,6 +345,42 @@ def test_single_product_with_comment_still_uses_semantic_ai(settings) -> None:  
     assert command.items[0].comment == "обязательно свежий"
 
 
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Сироп роза, одна штука, желательно холодный.",
+        "Сироп роза одна штука, желательно холодный.",
+        "Сироп роза, желательно холодным, одна штука.",
+        "Одна штука сиропа роза, желательно холодного.",
+    ],
+)
+def test_spoken_word_quantity_survives_ai_normalization(settings, text: str) -> None:  # type: ignore[no-untyped-def]
+    """Не отделяет словесное количество от товара после корректного AI-разбора."""
+    parsed = ParsedInputSchema(
+        intent=Intent.ADD_ITEMS,
+        items=[
+            ExtractedItem(
+                product_query="Сироп роза",
+                quantity=1,
+                comment="желательно холодный",
+                source_line=text,
+            )
+        ],
+    )
+    service = _service(settings, SimpleNamespace(responses=_Responses(parsed)))
+
+    command = service.parse_text(text)
+
+    assert command.intent is Intent.ADD_ITEMS
+    assert len(command.items) == 1
+    assert (command.items[0].product_query, command.items[0].quantity, command.items[0].unit) == (
+        "Сироп роза",
+        1,
+        "шт",
+    )
+    assert command.items[0].comment == "желательно холодный"
+
+
 def test_text_timeout_returns_deterministic_product_fallback(settings) -> None:  # type: ignore[no-untyped-def]
     """Не теряет распознанный товар при сетевом таймауте ИИ."""
     service = _service(settings, SimpleNamespace(responses=_TimeoutResponses()))
@@ -357,6 +393,39 @@ def test_text_timeout_returns_deterministic_product_fallback(settings) -> None: 
     assert command.items[0].quantity == 5
     assert command.items[0].unit == "шт"
     assert command.items[0].comment == "обязательно охлаждённым"
+
+
+def test_text_timeout_keeps_comments_for_every_spoken_product(settings) -> None:  # type: ignore[no-untyped-def]
+    """Не смешивает товары и комментарии при тайм-ауте смыслового разбора."""
+    service = _service(settings, SimpleNamespace(responses=_TimeoutResponses()))
+
+    command = service.parse_text(
+        "Добавь сироп розы 5 штук на завтра и сироп сангрия 10 штук, желательно холодным."
+    )
+
+    assert command.intent is Intent.ADD_ITEMS
+    assert [
+        (item.product_query, item.quantity, item.unit, item.comment) for item in command.items
+    ] == [
+        ("сироп розы", 5, "шт", "на завтра"),
+        ("сироп сангрия", 10, "шт", "желательно холодным"),
+    ]
+
+
+def test_text_timeout_preserves_explicit_global_comment(settings) -> None:  # type: ignore[no-untyped-def]
+    """Сохраняет общий комментарий отдельно при недоступности OpenAI."""
+    service = _service(settings, SimpleNamespace(responses=_TimeoutResponses()))
+
+    command = service.parse_text(
+        "Добавь сироп роза 5 штук в банках и сироп сангрия 10 штук. Всё желательно привезти завтра."
+    )
+
+    assert command.intent is Intent.ADD_ITEMS
+    assert command.global_comment == "желательно привезти завтра"
+    assert [(item.product_query, item.quantity, item.comment) for item in command.items] == [
+        ("сироп роза", 5, "в банках"),
+        ("сироп сангрия", 10, ""),
+    ]
 
 
 def test_hyphenated_multiline_product_list_skips_ai_and_keeps_quantities(

@@ -358,6 +358,38 @@ def test_semantic_voice_action_can_only_choose_a_visible_button() -> None:
     orchestrator.openai.choose_visible_action.assert_called_once()
 
 
+def test_real_product_with_quantity_is_not_replaced_by_visible_add_action() -> None:
+    """Не заменяет распознанный товар навигационной кнопкой текущего экрана."""
+    orchestrator = object.__new__(UpdateOrchestrator)
+    orchestrator.openai = MagicMock()
+    parsed = ParsedCommand(
+        intent=Intent.ADD_ITEMS,
+        items=[
+            ExtractedItem(
+                product_query="Сироп роза",
+                quantity=1,
+                unit="шт",
+                comment="желательно холодный",
+            )
+        ],
+    )
+    orchestrator.openai.parse_text.return_value = parsed
+    state = ConversationState(
+        stage=SessionStage.AWAIT_ADD_MORE_CONFIRM,
+        visible_actions=[
+            {"label": "Да, добавить товары", "action_id": "v2:add:r6"},
+        ],
+    )
+
+    command = orchestrator._parse_text_in_context(
+        "Сироп роза, одна штука, желательно холодный.",
+        state,
+    )
+
+    assert command is parsed
+    orchestrator.openai.choose_visible_action.assert_not_called()
+
+
 def test_semantic_action_does_not_accept_an_unavailable_callback() -> None:
     """Не выполняет действие, которого нет среди видимых кнопок."""
     orchestrator = object.__new__(UpdateOrchestrator)

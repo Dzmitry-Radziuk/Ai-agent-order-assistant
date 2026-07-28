@@ -124,6 +124,28 @@ def _clear_unknown_item_placeholders(items: list[dict[str, Any]]) -> None:
                 item[field] = ""
 
 
+def _query_is_already_represented(known_query: str, recovered_query: str) -> bool:
+    """Сравнивает многословные названия с учётом разговорных окончаний."""
+    if (
+        known_query == recovered_query
+        or known_query in recovered_query
+        or recovered_query in known_query
+    ):
+        return True
+    known_tokens = re.findall(r"[a-zа-я0-9%]+", known_query, flags=re.I)
+    recovered_tokens = re.findall(r"[a-zа-я0-9%]+", recovered_query, flags=re.I)
+    if len(known_tokens) < 2:
+        return False
+    return all(
+        any(
+            known == recovered
+            or (len(known) >= 4 and len(recovered) >= 4 and known[:4] == recovered[:4])
+            for recovered in recovered_tokens
+        )
+        for known in known_tokens
+    )
+
+
 def restore_explicit_order_terms(
     items: list[dict[str, Any]], source_text: str = ""
 ) -> list[dict[str, Any]]:
@@ -417,7 +439,7 @@ def recover_omitted_explicit_items(payload: dict[str, Any], source_text: str) ->
         # Do not replace a model-selected name (for example a corrected
         # spelling), but append an explicitly spoken product the model omitted.
         if any(
-            known == recovered_query or known in recovered_query or recovered_query in known
+            _query_is_already_represented(known, recovered_query)
             for known in known_queries
             if known
         ):
@@ -746,10 +768,21 @@ class OpenAIService:
         raw_source = clean_text(text)
         source = raw_source.rstrip(" .!?")
         item_source = clean_text(item.source_line).rstrip(" .!?")
+        unit_pattern = "|".join(
+            sorted((re.escape(unit) for unit in UNIT_ALIASES), key=len, reverse=True)
+        )
+        has_numeric_order_quantity = bool(
+            re.search(
+                rf"\d+(?:[,.]\d+)?\s*(?:{unit_pattern})\s*$",
+                source,
+                flags=re.I,
+            )
+        )
         return bool(
             source
             and raw_source.endswith((".", "!", "?"))
             and item_source == source
+            and has_numeric_order_quantity
             and item.product_query
             and item.quantity is not None
             and item.quantity > 0

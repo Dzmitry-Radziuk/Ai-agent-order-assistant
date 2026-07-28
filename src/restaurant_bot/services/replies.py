@@ -324,7 +324,7 @@ def empty_draft_reply() -> BotReply:
     """Формирует ответ для пустого черновика."""
     return BotReply(
         text="🧾 <b>Черновик пуст</b>\n\nОтправьте товары текстом, голосом или фото.",
-        rows=[[Button(text="➕ Начать", callback_data="v2:add")]],
+        rows=[[Button(text="Начать", callback_data="v2:add")]],
     )
 
 
@@ -332,7 +332,11 @@ def added_items_question_reply(state: ConversationState, added_count: int) -> Bo
     """Спрашивает, хочет ли пользователь добавить ещё товары."""
     ready = _active_items(state)
     added = ready[-added_count:] if added_count > 0 else []
-    title = "Товар добавлен" if len(added) == 1 else "Товары добавлены"
+    title = (
+        "Товар добавлен в черновик заказа"
+        if len(added) == 1
+        else "Товары добавлены в черновик заказа"
+    )
     lines = [f"✅ <b>{title}</b>"]
     for item in added[:5]:
         lines.append(

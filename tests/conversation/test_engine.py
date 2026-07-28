@@ -337,7 +337,7 @@ def test_empty_draft_uses_the_source_n8n_start_card(settings) -> None:  # type: 
         == "🧾 <b>Черновик пуст</b>\n\nОтправьте товары текстом, голосом или фото."
     )
     assert [[button.text, button.callback_data] for row in result.reply.rows for button in row] == [
-        ["➕ Начать", "v2:add"]
+        ["Начать", "v2:add"]
     ]
 
 

@@ -169,11 +169,19 @@ def test_new_order_navigation_does_not_override_negation_or_product_quantity(
 @pytest.mark.parametrize(
     ("phrase", "selected_index"),
     [
+        ("первый вариант", 1),
+        ("второй вариант", 2),
+        ("третий вариант", 3),
+        ("четвёртый", 4),
+        ("пятый вариант", 5),
         ("Давай первый вариант", 1),
         ("Беру номер два", 2),
         ("Мне третий", 3),
         ("Выбери вариант четыре", 4),
         ("Пятый", 5),
+        ("Возьми третью", 3),
+        ("Подойдёт первый", 1),
+        ("Нужна четвёртая", 4),
     ],
 )
 def test_live_voice_candidate_selection_variants(phrase: str, selected_index: int) -> None:
@@ -226,22 +234,6 @@ def test_common_text_and_voice_phrasings_are_deterministic(
 
     assert command.intent is intent
     assert command.items == []
-
-
-@pytest.mark.parametrize(
-    ("phrase", "selected_index"),
-    [
-        ("Возьми третью", 3),
-        ("Подойдёт первый", 1),
-        ("Нужна четвёртая", 4),
-    ],
-)
-def test_more_candidate_selection_phrasings(phrase: str, selected_index: int) -> None:
-    """Проверяет, что ещё кандидат выбор phrasings."""
-    command = infer_intent(phrase)
-
-    assert command.intent is Intent.SELECT_CANDIDATE
-    assert command.selected_index == selected_index
 
 
 @pytest.mark.parametrize(

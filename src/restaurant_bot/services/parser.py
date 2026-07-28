@@ -840,6 +840,11 @@ _EDIT_PATTERNS = [
         re.I,
     ),
     re.compile(
+        rf"^(?P<target>.+?)\s+{_EDIT_ACTION}(?:\s+(?:количество|кол-во))?"
+        rf"\s+{_EDIT_AMOUNT}$",
+        re.I,
+    ),
+    re.compile(
         rf"^{_EDIT_ACTION}\s+(?:у\s+)?(?P<target>.+?)\s+(?:на|до)\s+{_EDIT_AMOUNT}$",
         re.I,
     ),
@@ -858,6 +863,7 @@ _SELECT_RE = re.compile(r"^(?:вариант|номер|выбери)?\s*([1-5])
 def _clean_command_target(value: str) -> str:
     """Убирает служебные слова перед названием товара."""
     target = clean_text(value)
+    target = re.sub(r"^для\s+", "", target, flags=re.I)
     target = re.sub(
         r"^(?:(?:этот|эту|это|данный|данную|текущий|текущую)\s+)?"
         r"(?:товар|позицию|строку|пункт)\s+",
@@ -1017,9 +1023,15 @@ def infer_intent(text: str, callback_data: str = "") -> ParsedCommand:
     ):
         return ParsedCommand(intent=Intent.SUBMIT_AS_IS, text=text)
 
-    items = parse_product_lines(text)
+    product_text, global_comment = _extract_global_comment(text)
+    items = parse_product_lines(product_text)
     if items:
-        return ParsedCommand(intent=Intent.ADD_ITEMS, text=text, items=items)
+        return ParsedCommand(
+            intent=Intent.ADD_ITEMS,
+            text=text,
+            items=items,
+            global_comment=global_comment,
+        )
     return ParsedCommand(intent=Intent.UNKNOWN, text=text)
 
 
@@ -1118,6 +1130,46 @@ def parse_callback(data: str) -> ParsedCommand:
     )
 
 
+def _is_standalone_quantity(value: str) -> bool:
+    """Проверяет, что фрагмент содержит только количество и единицу."""
+    tokens = [
+        token.strip(" .,:;—–-")
+        for token in normalize_text(value).split()
+        if token.strip(" .,:;—–-")
+    ]
+    parsed = parse_number_words(tokens, 0)
+    if parsed is None:
+        return False
+    _, end = parsed
+    if end < len(tokens) and tokens[end] in UNIT_ALIASES:
+        end += 1
+    return end == len(tokens)
+
+
+def _extract_global_comment(text: str) -> tuple[str, str]:
+    """Отделяет явно помеченный общий комментарий от списка товаров."""
+    original = str(text or "")
+    source = clean_text(original)
+    match = re.fullmatch(
+        r"(?P<products>.+?)"
+        r"(?:[.!?;]\s*|\s*,?\s+(?:и|а)\s+)"
+        r"(?:(?:все|всё|всем|для всех)"
+        r"(?:\s+(?:товаров|товары|позиций|позиции))?|"
+        r"общ(?:ий|его)\s+комментар(?:ий|ия))"
+        r"(?:\s*[,;:—–-]\s*|\s+)"
+        r"(?P<comment>.+?)\s*[.!?]*",
+        source,
+        flags=re.I,
+    )
+    if match is None:
+        return original, ""
+    products = clean_text(match.group("products")).strip(" ,;:.!?—–-")
+    comment = clean_text(match.group("comment")).strip(" ,;:.!?—–-")
+    if not products or not comment:
+        return original, ""
+    return products, comment
+
+
 def parse_product_lines(text: str) -> list[ExtractedItem]:
     """Разбирает список товаров из текста."""
     source = str(text or "").replace(";", "\n").strip()
@@ -1125,7 +1177,9 @@ def parse_product_lines(text: str) -> list[ExtractedItem]:
         return []
     lines = [clean_text(line) for line in re.split(r"\n+", source) if clean_text(line)]
     if len(lines) == 1 and source.count(",") >= 2:
-        lines = [clean_text(line) for line in source.split(",") if clean_text(line)]
+        comma_parts = [clean_text(line) for line in source.split(",") if clean_text(line)]
+        if not any(_is_standalone_quantity(part) for part in comma_parts):
+            lines = comma_parts
 
     items: list[ExtractedItem] = []
     unit_pattern = "|".join(sorted((re.escape(key) for key in UNIT_ALIASES), key=len, reverse=True))
@@ -1151,6 +1205,8 @@ def parse_product_lines(text: str) -> list[ExtractedItem]:
         stripped = re.sub(
             r"^(?:добавь|добавить|закажи|заказать|нужно|надо)\s+", "", line, flags=re.I
         )
+        if _is_standalone_quantity(stripped):
+            continue
         packaging_spans = [match.span() for match in packaging.finditer(stripped)]
         quantity_marks = [
             mark
@@ -1166,24 +1222,43 @@ def parse_product_lines(text: str) -> list[ExtractedItem]:
         if len(quantity_marks) >= 2 and not re.search(r"[—–-]\s*\d", stripped):
             recovered: list[ExtractedItem] = []
             start = 0
-            for mark in quantity_marks:
+            for index, mark in enumerate(quantity_marks):
                 name = re.sub(
                     r"^(?:и|а также|а)\s+",
                     "",
                     stripped[start : mark.start()].strip(),
                     flags=re.I,
-                ).strip(" ,;:-—–")
+                ).strip(" .,;:!?-—–")
                 if not name:
                     continue
+                comment = ""
+                if index + 1 < len(quantity_marks):
+                    between = stripped[mark.end() : quantity_marks[index + 1].start()]
+                    separators = list(
+                        re.finditer(
+                            r"(?:\s+(?:и|а также|а)\s+|[,.;!?]\s*)",
+                            between,
+                            flags=re.I,
+                        )
+                    )
+                    if separators:
+                        separator = separators[-1]
+                        comment = clean_text(between[: separator.start()]).strip(" .,;:!?-—–")
+                        start = mark.end() + separator.end()
+                    else:
+                        start = mark.end()
+                else:
+                    comment = clean_text(stripped[mark.end() :]).strip(" .,;:!?-—–")
                 recovered.append(
                     ExtractedItem(
                         product_query=name,
                         quantity=float(mark.group(1).replace(",", ".")),
                         unit=normalize_unit(mark.group("unit") or ""),
+                        comment=comment,
+                        user_comment_to_supplier=comment,
                         source_line=line,
                     )
                 )
-                start = mark.end()
             if recovered:
                 items.extend(recovered)
                 continue
@@ -1270,7 +1345,11 @@ def parse_product_lines(text: str) -> list[ExtractedItem]:
                 )
                 continue
 
-        tokens = normalize_text(stripped).split()
+        tokens = [
+            token.strip(" .,:;—–-")
+            for token in normalize_text(stripped).split()
+            if token.strip(" .,:;—–-")
+        ]
         for index in range(len(tokens)):
             parsed = parse_number_words(tokens, index)
             if not parsed:
@@ -1288,6 +1367,20 @@ def parse_product_lines(text: str) -> list[ExtractedItem]:
             elif end == len(tokens):
                 name = " ".join(tokens[:index])
             else:
+                name = " ".join(tokens[:index])
+                comment = " ".join(tokens[end:])
+                if name:
+                    items.append(
+                        ExtractedItem(
+                            product_query=name,
+                            quantity=quantity,
+                            unit=unit,
+                            comment=comment,
+                            user_comment_to_supplier=comment,
+                            source_line=line,
+                        )
+                    )
+                    break
                 continue
             if name:
                 items.append(

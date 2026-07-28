@@ -104,6 +104,27 @@ def validate_catalog(catalog: dict[str, Any], source_directory: Path) -> None:
             if function_name not in functions:
                 raise ValueError(f"{scenario['id']}: тест не найден {reference}")
 
+    journey_titles: set[str] = set()
+    for journey in catalog["journeys"]:
+        required = {"title", "description", "steps", "diagram", "scenario_ids"}
+        missing = required - journey.keys()
+        if missing:
+            raise ValueError(
+                f"Маршрут {journey.get('title', 'UNKNOWN')}: отсутствуют {sorted(missing)}"
+            )
+        if journey["title"] in journey_titles:
+            raise ValueError(f"Повторяющийся маршрут: {journey['title']}")
+        journey_titles.add(journey["title"])
+        if not journey["steps"] or not journey["diagram"].strip():
+            raise ValueError(f"Маршрут {journey['title']}: нужны шаги и Mermaid-схема")
+        if not journey["scenario_ids"]:
+            raise ValueError(f"Маршрут {journey['title']}: не связан со сценариями")
+        unknown_scenarios = set(journey["scenario_ids"]) - scenario_ids
+        if unknown_scenarios:
+            raise ValueError(
+                f"Маршрут {journey['title']}: неизвестные сценарии {sorted(unknown_scenarios)}"
+            )
+
     if source_directory.resolve() != SOURCE_PATH.parent.resolve():
         return
 
@@ -165,6 +186,9 @@ def render_markdown(catalog: dict[str, Any]) -> str:
                 "```mermaid",
                 journey["diagram"].strip(),
                 "```",
+                "",
+                "**Проверяется сценариями:** "
+                + ", ".join(f"`{scenario_id}`" for scenario_id in journey["scenario_ids"]),
                 "",
             ]
         )
@@ -253,7 +277,8 @@ def _scenario_card(scenario: dict[str, Any], category_title: str) -> str:
         tests = "<li>Прямая автоматическая проверка пока не привязана.</li>"
     channels = "".join(f"<span>{html.escape(channel)}</span>" for channel in scenario["channels"])
     return f"""
-      <article class="scenario-card" data-category="{html.escape(scenario["category"])}"
+      <article id="scenario-{html.escape(scenario["id"])}" class="scenario-card"
+        data-category="{html.escape(scenario["category"])}"
         data-priority="{html.escape(priority)}" data-search="{html.escape(search_text)}">
         <div class="card-top">
           <span class="scenario-id">{html.escape(scenario["id"])}</span>
@@ -297,6 +322,11 @@ def render_html(catalog: dict[str, Any]) -> str:
             + "".join(
                 f"<span><b>{index}</b>{html.escape(step)}</span>"
                 for index, step in enumerate(journey["steps"], start=1)
+            )
+            + '</div><div class="journey-tests"><b>Проверяется сценариями:</b> '
+            + " ".join(
+                f'<a href="#scenario-{html.escape(scenario_id)}">{html.escape(scenario_id)}</a>'
+                for scenario_id in journey["scenario_ids"]
             )
             + "</div></section>"
         )
@@ -368,6 +398,11 @@ def render_html(catalog: dict[str, Any]) -> str:
     .journey-steps b {{
       display: block; width: 22px; height: 22px; margin-bottom: 8px; border-radius: 50%;
       background: var(--green); color: white; text-align: center; line-height: 22px;
+    }}
+    .journey-tests {{ margin-top: 16px; color: var(--muted); font-size: 13px; line-height: 1.8; }}
+    .journey-tests a {{
+      display: inline-block; margin-left: 5px; padding: 1px 7px; border-radius: 7px;
+      background: var(--green-soft); text-decoration: none;
     }}
     .toolbar {{
       position: sticky; top: 0; z-index: 5; margin: 24px 0 18px; padding: 14px;
