@@ -1,0 +1,968 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Пользовательские сценарии AutoSnab</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --ink: #16201c;
+      --muted: #607068;
+      --paper: #f4f7f4;
+      --card: #ffffff;
+      --green: #1d6b4c;
+      --green-soft: #e7f3ec;
+      --line: #dce5df;
+      --critical: #b42318;
+      --important: #9a6700;
+      --edge: #475467;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: var(--paper); color: var(--ink); }
+    header {
+      padding: 48px max(24px, calc((100vw - 1180px) / 2));
+      background: linear-gradient(135deg, #143d2d, #1f7654);
+      color: white;
+    }
+    header p { max-width: 760px; margin: 12px 0 0; color: #dceee5; font-size: 18px; line-height: 1.55; }
+    h1 { margin: 0; font-size: clamp(32px, 5vw, 54px); line-height: 1.05; }
+    main { width: min(1180px, calc(100% - 32px)); margin: 0 auto 64px; }
+    .summary {
+      display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px;
+      margin: -25px 0 34px;
+    }
+    .metric { background: var(--card); padding: 18px 20px; border-radius: 16px; box-shadow: 0 10px 30px #10271c14; }
+    .metric b { display: block; font-size: 28px; color: var(--green); }
+    .metric span { color: var(--muted); font-size: 14px; }
+    .section-heading { margin: 34px 0 16px; }
+    .section-heading h2 { margin: 0 0 6px; font-size: 28px; }
+    .section-heading p { margin: 0; color: var(--muted); }
+    .journeys { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+    .journey { background: var(--card); border: 1px solid var(--line); border-radius: 18px; padding: 22px; }
+    .journey h3 { margin: 0 0 6px; }
+    .journey p { color: var(--muted); margin: 0 0 18px; line-height: 1.5; }
+    .journey-steps { display: flex; align-items: stretch; gap: 8px; overflow-x: auto; padding-bottom: 4px; }
+    .journey-steps span {
+      min-width: 120px; flex: 1; padding: 12px; border-radius: 12px; background: var(--green-soft);
+      color: #214c39; font-size: 13px; position: relative;
+    }
+    .journey-steps b {
+      display: block; width: 22px; height: 22px; margin-bottom: 8px; border-radius: 50%;
+      background: var(--green); color: white; text-align: center; line-height: 22px;
+    }
+    .toolbar {
+      position: sticky; top: 0; z-index: 5; margin: 24px 0 18px; padding: 14px;
+      background: #f4f7f4ed; backdrop-filter: blur(12px); border: 1px solid var(--line); border-radius: 16px;
+    }
+    .toolbar-row { display: flex; gap: 10px; flex-wrap: wrap; }
+    input {
+      flex: 1 1 320px; border: 1px solid #bdcbc2; border-radius: 12px; padding: 12px 14px;
+      background: white; font: inherit;
+    }
+    button {
+      border: 1px solid #bdcbc2; border-radius: 999px; padding: 9px 13px; background: white;
+      color: var(--ink); cursor: pointer; font: inherit; font-size: 13px;
+    }
+    button:hover, button.active { border-color: var(--green); background: var(--green); color: white; }
+    .category-filters { margin-top: 10px; display: flex; gap: 7px; overflow-x: auto; padding-bottom: 2px; }
+    #visible-count { color: var(--muted); font-size: 13px; margin: 10px 2px 0; }
+    .scenario-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+    .scenario-card { background: var(--card); border: 1px solid var(--line); border-radius: 18px; padding: 22px; }
+    .scenario-card[hidden] { display: none; }
+    .card-top { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+    .scenario-id { color: var(--green); font-weight: 750; letter-spacing: .04em; }
+    .priority { font-size: 12px; border-radius: 999px; padding: 5px 9px; font-weight: 700; }
+    .priority-critical { color: var(--critical); background: #fee4e2; }
+    .priority-important { color: var(--important); background: #fef0c7; }
+    .priority-edge { color: var(--edge); background: #eaecf0; }
+    .scenario-card h3 { margin: 13px 0 4px; font-size: 21px; }
+    .category-label { margin: 0 0 12px; color: var(--muted); font-size: 13px; }
+    .channels { display: flex; gap: 6px; margin-bottom: 16px; }
+    .channels span { color: #315c48; background: var(--green-soft); border-radius: 8px; padding: 5px 8px; font-size: 12px; }
+    dl { margin: 0; }
+    dl div { border-top: 1px solid #edf1ee; padding: 12px 0; }
+    dt { color: var(--muted); font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; }
+    dd { margin: 5px 0 0; line-height: 1.48; }
+    dl .result { border-radius: 12px; border: 0; background: var(--green-soft); padding: 12px; margin: 4px 0 12px; }
+    details { border-top: 1px solid var(--line); padding: 11px 0 0; margin-top: 10px; }
+    summary { cursor: pointer; color: var(--green); font-weight: 650; }
+    li { margin: 7px 0; line-height: 1.4; }
+    .tests span { display: block; color: var(--muted); font-family: ui-monospace, monospace; font-size: 11px; }
+    a { color: var(--green); }
+    footer { color: var(--muted); text-align: center; padding: 24px; }
+    @media (max-width: 820px) {
+      .summary, .journeys, .scenario-grid { grid-template-columns: 1fr; }
+      header { padding-top: 36px; padding-bottom: 50px; }
+      .toolbar { position: static; }
+    }
+    @media print {
+      .toolbar { display: none; }
+      .scenario-grid { grid-template-columns: 1fr; }
+      .scenario-card { break-inside: avoid; }
+      body { background: white; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Пользовательские сценарии AutoSnab</h1>
+    <p>Понятная карта поведения Telegram-бота: что делает сотрудник кафе, как отвечает бот и каким тестом подтверждён результат.</p>
+  </header>
+  <main>
+    <section class="summary" aria-label="Сводка">
+      <div class="metric"><b>31</b><span>сценариев</span></div>
+      <div class="metric"><b>31</b><span>связаны с pytest</span></div>
+      <div class="metric"><b>20</b><span>критических</span></div>
+      <div class="metric"><b>7</b><span>разделов</span></div>
+    </section>
+
+    <div class="section-heading">
+      <h2>Как проходит заявка</h2>
+      <p>Основные маршруты без технических деталей.</p>
+    </div>
+    <div class="journeys"><section class="journey"><h3>Обычная заявка</h3><p>Основной путь сотрудника кафе от первого сообщения до отправленной заявки.</p><div class="journey-steps"><span><b>1</b>Добавить товары</span><span><b>2</b>Уточнить позиции</span><span><b>3</b>Проверить черновик</span><span><b>4</b>Проверить минималку</span><span><b>5</b>Подтвердить</span><span><b>6</b>Получить номер</span></div></section><section class="journey"><h3>Фотография таблицы</h3><p>Количество берётся только из фактически заполненных колонок заказа, а не из фасовки или справочных данных.</p><div class="journey-steps"><span><b>1</b>Получить фото</span><span><b>2</b>Определить тип таблицы</span><span><b>3</b>Прочитать Зал/Бар/Кухня</span><span><b>4</b>Учесть правки ручкой</span><span><b>5</b>Сохранить комментарии</span><span><b>6</b>Показать черновик</span></div></section><section class="journey"><h3>Команда с отрицанием</h3><p>Отрицание имеет приоритет: бот не должен добавлять, объединять или отправлять вопреки словам пользователя.</p><div class="journey-steps"><span><b>1</b>Получить фразу</span><span><b>2</b>Найти отрицание</span><span><b>3</b>Определить текущий экран</span><span><b>4</b>Отменить только текущее действие</span><span><b>5</b>Сохранить черновик</span></div></section><section class="journey"><h3>Новая заявка</h3><p>После отправки новый заказ начинается сразу, а активный черновик очищается только после подтверждения.</p><div class="journey-steps"><span><b>1</b>Сказать «новый заказ»</span><span><b>2</b>Проверить состояние</span><span><b>3</b>Запросить подтверждение при черновике</span><span><b>4</b>Сохранить историю</span><span><b>5</b>Открыть пустую заявку</span></div></section></div>
+
+    <div class="section-heading">
+      <h2>Все пользовательские сценарии</h2>
+      <p>Ищите по фразе, действию, названию или идентификатору.</p>
+    </div>
+    <section class="toolbar" aria-label="Фильтры">
+      <div class="toolbar-row">
+        <input id="search" type="search" placeholder="Например: не добавляй, фото, новый заказ…" autocomplete="off">
+        <button type="button" class="active" data-priority="all">Все</button>
+        <button type="button" data-priority="critical">Критические</button>
+        <button type="button" data-priority="important">Важные</button>
+        <button type="button" data-priority="edge">Защитные</button>
+      </div>
+      <div class="category-filters">
+        <button type="button" class="active" data-category="all">Все разделы</button>
+        <button type="button" data-category="registration">Подключение заведения</button><button type="button" data-category="input">Добавление товаров</button><button type="button" data-category="recognition">Уточнение товаров</button><button type="button" data-category="draft">Работа с черновиком</button><button type="button" data-category="submission">Проверка и отправка</button><button type="button" data-category="safety">Защита от неверного действия</button><button type="button" data-category="recovery">Сбои и восстановление</button>
+      </div>
+      <p id="visible-count"></p>
+    </section>
+    <section class="scenario-grid" id="scenario-grid">
+      <article class="scenario-card" data-category="registration"
+        data-priority="critical" data-search="reg-01 подключение по коду заведения подключение заведения отправляет код заведения и подтверждает найденное название. показывает название заведения, спрашивает подтверждение и только после согласия сохраняет привязку. 12345 /start 12345 да, подключить">
+        <div class="card-top">
+          <span class="scenario-id">REG-01</span>
+          <span class="priority priority-critical">Критический</span>
+        </div>
+        <h3>Подключение по коду заведения</h3>
+        <p class="category-label">Подключение заведения</p>
+        <div class="channels"><span>Текст</span><span>Кнопка</span></div>
+        <dl>
+          <div><dt>Перед началом</dt><dd>Пользователь ещё не подключён к заведению и находится в личном чате с ботом.</dd></div>
+          <div><dt>Пользователь</dt><dd>Отправляет код заведения и подтверждает найденное название.</dd></div>
+          <div><dt>Бот</dt><dd>Показывает название заведения, спрашивает подтверждение и только после согласия сохраняет привязку.</dd></div>
+          <div class="result"><dt>Итог</dt><dd>Пользователь получает доступ только к каталогу и таблице выбранного заведения.</dd></div>
+        </dl>
+        <details>
+          <summary>Примеры фраз</summary>
+          <ul><li>«12345»</li><li>«/start 12345»</li><li>«Да, подключить»</li></ul>
+        </details>
+        <details>
+          <summary>Связанные pytest-тесты · 2</summary>
+          <ul class="tests"><li><a href="../../tests/venue/test_venue_registration.py">tests/venue/test_venue_registration.py</a><span>test_all_registration_entry_points_use_one_lookup</span></li><li><a href="../../tests/venue/test_venue_registration.py">tests/venue/test_venue_registration.py</a><span>test_successful_binding_is_synced_before_success_is_shown</span></li></ul>
+        </details>
+      </article>
+
+      <article class="scenario-card" data-category="registration"
+        data-priority="critical" data-search="reg-02 отказ или смена заведения подключение заведения отказывается или подтверждает смену заведения. при отказе ничего не записывает; для смены запрашивает дополнительное подтверждение. нет отмена да, изменить">
+        <div class="card-top">
+          <span class="scenario-id">REG-02</span>
+          <span class="priority priority-critical">Критический</span>
+        </div>
+        <h3>Отказ или смена заведения</h3>
+        <p class="category-label">Подключение заведения</p>
+        <div class="channels"><span>Текст</span><span>Кнопка</span></div>
+        <dl>
+          <div><dt>Перед началом</dt><dd>Бот предлагает подключить новое заведение либо заменить действующую привязку.</dd></div>
+          <div><dt>Пользователь</dt><dd>Отказывается или подтверждает смену заведения.</dd></div>
+          <div><dt>Бот</dt><dd>При отказе ничего не записывает; для смены запрашивает дополнительное подтверждение.</dd></div>
+          <div class="result"><dt>Итог</dt><dd>Случайное сообщение или нажатие не переключает пользователя на чужое заведение.</dd></div>
+        </dl>
+        <details>
+          <summary>Примеры фраз</summary>
+          <ul><li>«Нет»</li><li>«Отмена»</li><li>«Да, изменить»</li></ul>
+        </details>
+        <details>
+          <summary>Связанные pytest-тесты · 2</summary>
+          <ul class="tests"><li><a href="../../tests/venue/test_venue_registration.py">tests/venue/test_venue_registration.py</a><span>test_declining_confirmation_never_writes</span></li><li><a href="../../tests/venue/test_venue_registration.py">tests/venue/test_venue_registration.py</a><span>test_switch_requires_an_extra_confirmation</span></li></ul>
+        </details>
+      </article>
+
+      <article class="scenario-card" data-category="input"
+        data-priority="important" data-search="inp-01 добавление товаров текстом добавление товаров отправляет один товар или список товаров с количеством. распознаёт отдельные позиции, сопоставляет их с каталогом и показывает результат. картофель 5 кг сливки 33% — 12 шт сироп роза 6 шт
+говядина 5 кг">
+        <div class="card-top">
+          <span class="scenario-id">INP-01</span>
+          <span class="priority priority-important">Важный</span>
+        </div>
+        <h3>Добавление товаров текстом</h3>
+        <p class="category-label">Добавление товаров</p>
+        <div class="channels"><span>Текст</span></div>
+        <dl>
+          <div><dt>Перед началом</dt><dd>Заведение подключено, каталог доступен.</dd></div>
+          <div><dt>Пользователь</dt><dd>Отправляет один товар или список товаров с количеством.</dd></div>
+          <div><dt>Бот</dt><dd>Распознаёт отдельные позиции, сопоставляет их с каталогом и показывает результат.</dd></div>
+          <div class="result"><dt>Итог</dt><dd>Найденные товары появляются в черновике с указанным количеством.</dd></div>
+        </dl>
+        <details>
+          <summary>Примеры фраз</summary>
+          <ul><li>«Картофель 5 кг»</li><li>«Сливки 33% — 12 шт»</li><li>«Сироп роза 6 шт
+Говядина 5 кг»</li></ul>
+        </details>
+        <details>
+          <summary>Связанные pytest-тесты · 2</summary>
+          <ul class="tests"><li><a href="../../tests/conversation/test_engine.py">tests/conversation/test_engine.py</a><span>test_add_exact_product_to_draft</span></li><li><a href="../../tests/ai/test_ai_media.py">tests/ai/test_ai_media.py</a><span>test_hyphenated_multiline_product_list_skips_ai_and_keeps_quantities</span></li></ul>
+        </details>
+      </article>
+
+      <article class="scenario-card" data-category="input"
+        data-priority="critical" data-search="inp-02 добавление товаров голосом добавление товаров называет товары, количества и комментарии обычной разговорной фразой. показывает этап распознавания, превращает речь в позиции и не переносит количество между соседними товарами. добавь пять килограммов картофеля сыр пармезан два килограмма и сливки десять штук">
+        <div class="card-top">
+          <span class="scenario-id">INP-02</span>
+          <span class="priority priority-critical">Критический</span>
+        </div>
+        <h3>Добавление товаров голосом</h3>
+        <p class="category-label">Добавление товаров</p>
+        <div class="channels"><span>Голос</span></div>
+        <dl>
+          <div><dt>Перед началом</dt><dd>Заведение подключено, Telegram и сервис распознавания голоса доступны.</dd></div>
+          <div><dt>Пользователь</dt><dd>Называет товары, количества и комментарии обычной разговорной фразой.</dd></div>
+          <div><dt>Бот</dt><dd>Показывает этап распознавания, превращает речь в позиции и не переносит количество между соседними товарами.</dd></div>
+          <div class="result"><dt>Итог</dt><dd>В черновик попадают только произнесённые товары и количества.</dd></div>
+        </dl>
+        <details>
+          <summary>Примеры фраз</summary>
+          <ul><li>«Добавь пять килограммов картофеля»</li><li>«Сыр пармезан два килограмма и сливки десять штук»</li></ul>
+        </details>
+        <details>
+          <summary>Связанные pytest-тесты · 2</summary>
+          <ul class="tests"><li><a href="../../tests/conversation/test_orchestrator_pipeline.py">tests/conversation/test_orchestrator_pipeline.py</a><span>test_voice_pipeline_shows_progress_before_transcription</span></li><li><a href="../../tests/input/test_voice_input_contract.py">tests/input/test_voice_input_contract.py</a><span>test_shared_source_line_does_not_copy_last_quantity_to_every_product</span></li></ul>
+        </details>
+      </article>
+
+      <article class="scenario-card" data-category="input"
+        data-priority="critical" data-search="inp-03 фото оригинальной таблицы заказа добавление товаров отправляет фотографию распечатанной или заполненной таблицы. берёт количество только из заполненных колонок заказа, сохраняет комментарии и игнорирует фасовку, остатки и справочные числа. распечатанная таблица с количеством в колонке «бар» таблица с заполненными «зал» и «кухня» фото, где у товара указан комментарий поставщику">
+        <div class="card-top">
+          <span class="scenario-id">INP-03</span>
+          <span class="priority priority-critical">Критический</span>
+        </div>
+        <h3>Фото оригинальной таблицы заказа</h3>
+        <p class="category-label">Добавление товаров</p>
+        <div class="channels"><span>Фото</span><span>Файл-изображение</span></div>
+        <dl>
+          <div><dt>Перед началом</dt><dd>На фотографии есть таблица заказа с колонками «Зал», «Бар» или «Кухня».</dd></div>
+          <div><dt>Пользователь</dt><dd>Отправляет фотографию распечатанной или заполненной таблицы.</dd></div>
+          <div><dt>Бот</dt><dd>Берёт количество только из заполненных колонок заказа, сохраняет комментарии и игнорирует фасовку, остатки и справочные числа.</dd></div>
+          <div class="result"><dt>Итог</dt><dd>Распознанное количество записывается в заявку как количество для «Кухни». Строки без заказа не добавляются.</dd></div>
+        </dl>
+        <details>
+          <summary>Примеры фраз</summary>
+          <ul><li>«Распечатанная таблица с количеством в колонке «Бар»»</li><li>«Таблица с заполненными «Зал» и «Кухня»»</li><li>«Фото, где у товара указан комментарий поставщику»</li></ul>
+        </details>
+        <details>
+          <summary>Связанные pytest-тесты · 3</summary>
+          <ul class="tests"><li><a href="../../tests/ai/test_ai_media.py">tests/ai/test_ai_media.py</a><span>test_client_order_sheet_uses_the_selected_department_quantity</span></li><li><a href="../../tests/ai/test_ai_media.py">tests/ai/test_ai_media.py</a><span>test_client_order_sheet_sums_only_filled_department_order_cells</span></li><li><a href="../../tests/ai/test_photo_prompt_contract.py">tests/ai/test_photo_prompt_contract.py</a><span>test_photo_prompt_excludes_packaging_and_stock_from_order_quantity</span></li></ul>
+        </details>
+      </article>
+
+      <article class="scenario-card" data-category="input"
+        data-priority="important" data-search="inp-04 фото рукописного списка добавление товаров отправляет фотографию списка, написанного от руки. использует только явно указанные количества и сопоставляет названия с каталогом. сироп роза — 6 шт говядина — 5 кг курица — 1 кг">
+        <div class="card-top">
+          <span class="scenario-id">INP-04</span>
+          <span class="priority priority-important">Важный</span>
+        </div>
+        <h3>Фото рукописного списка</h3>
+        <p class="category-label">Добавление товаров</p>
+        <div class="channels"><span>Фото</span><span>Файл-изображение</span></div>
+        <dl>
+          <div><dt>Перед началом</dt><dd>На фотографии нет стандартной таблицы, но видны названия и явно написанные количества.</dd></div>
+          <div><dt>Пользователь</dt><dd>Отправляет фотографию списка, написанного от руки.</dd></div>
+          <div><dt>Бот</dt><dd>Использует только явно указанные количества и сопоставляет названия с каталогом.</dd></div>
+          <div class="result"><dt>Итог</dt><dd>Позиции с количеством попадают в черновик; бот не придумывает отсутствующие значения.</dd></div>
+        </dl>
+        <details>
+          <summary>Примеры фраз</summary>
+          <ul><li>«Сироп роза — 6 шт»</li><li>«Говядина — 5 кг»</li><li>«Курица — 1 кг»</li></ul>
+        </details>
+        <details>
+          <summary>Связанные pytest-тесты · 2</summary>
+          <ul class="tests"><li><a href="../../tests/conversation/test_engine.py">tests/conversation/test_engine.py</a><span>test_handwritten_photo_quantity_survives_catalog_matching</span></li><li><a href="../../tests/ai/test_ai_media.py">tests/ai/test_ai_media.py</a><span>test_free_list_keeps_explicit_quantity_even_if_model_calls_it_order_column</span></li></ul>
+        </details>
+      </article>
+
+      <article class="scenario-card" data-category="input"
+        data-priority="critical" data-search="inp-05 зачёркнутое количество и правка ручкой добавление товаров отправляет фотографию таблицы с ручной корректировкой. считает зачёркнутое значение недействительным и использует только разборчивую рукописную замену. 5 зачёркнуто, рядом написано 7 100 кг зачёркнуто, от руки указано 10 шт">
+        <div class="card-top">
+          <span class="scenario-id">INP-05</span>
+          <span class="priority priority-critical">Критический</span>
+        </div>
+        <h3>Зачёркнутое количество и правка ручкой</h3>
+        <p class="category-label">Добавление товаров</p>
+        <div class="channels"><span>Фото</span></div>
+        <dl>
+          <div><dt>Перед началом</dt><dd>Печатное количество зачёркнуто, рядом написано новое значение.</dd></div>
+          <div><dt>Пользователь</dt><dd>Отправляет фотографию таблицы с ручной корректировкой.</dd></div>
+          <div><dt>Бот</dt><dd>Считает зачёркнутое значение недействительным и использует только разборчивую рукописную замену.</dd></div>
+          <div class="result"><dt>Итог</dt><dd>В черновике остаётся одно актуальное количество без сложения со старым.</dd></div>
+        </dl>
+        <details>
+          <summary>Примеры фраз</summary>
+          <ul><li>«5 зачёркнуто, рядом написано 7»</li><li>«100 кг зачёркнуто, от руки указано 10 шт»</li></ul>
+        </details>
+        <details>
+          <summary>Связанные pytest-тесты · 2</summary>
+          <ul class="tests"><li><a href="../../tests/ai/test_ai_media.py">tests/ai/test_ai_media.py</a><span>test_handwritten_replacement_wins_over_crossed_out_client_sheet_quantity</span></li><li><a href="../../tests/conversation/test_engine.py">tests/conversation/test_engine.py</a><span>test_crossed_out_photo_quantity_uses_only_handwritten_replacement</span></li></ul>
+        </details>
+      </article>
+
+      <article class="scenario-card" data-category="recognition"
+        data-priority="critical" data-search="rec-01 не указано количество уточнение товаров отправляет название без количества, затем отвечает числом. просит уточнить количество именно для текущего товара и не создаёт новую строку. сыр пармезан нужно 5 кг пять">
+        <div class="card-top">
+          <span class="scenario-id">REC-01</span>
+          <span class="priority priority-critical">Критический</span>
+        </div>
+        <h3>Не указано количество</h3>
+        <p class="category-label">Уточнение товаров</p>
+        <div class="channels"><span>Текст</span><span>Голос</span><span>Фото</span></div>
+        <dl>
+          <div><dt>Перед началом</dt><dd>Товар найден в каталоге, но положительное количество отсутствует.</dd></div>
+          <div><dt>Пользователь</dt><dd>Отправляет название без количества, затем отвечает числом.</dd></div>
+          <div><dt>Бот</dt><dd>Просит уточнить количество именно для текущего товара и не создаёт новую строку.</dd></div>
+          <div class="result"><dt>Итог</dt><dd>После ответа товар один раз появляется в черновике с введённым количеством.</dd></div>
+        </dl>
+        <details>
+          <summary>Примеры фраз</summary>
+          <ul><li>«Сыр пармезан»</li><li>«Нужно 5 кг»</li><li>«Пять»</li></ul>
+        </details>
+        <details>
+          <summary>Связанные pytest-тесты · 2</summary>
+          <ul class="tests"><li><a href="../../tests/conversation/test_engine.py">tests/conversation/test_engine.py</a><span>test_missing_quantity_starts_clarification</span></li><li><a href="../../tests/quantity/test_quantity_flow.py">tests/quantity/test_quantity_flow.py</a><span>test_quantity_answer_completes_current_missing_item_without_new_cart_line</span></li></ul>
+        </details>
+      </article>
+
+      <article class="scenario-card" data-category="recognition"
+        data-priority="critical" data-search="rec-02 единица не совпадает с каталогом уточнение товаров выбирает единицу каталога либо вводит корректное количество. не меняет единицу молча, показывает различие и предлагает безопасные варианты. сыр швейцарский 100 кг используй как в каталоге нужно 10 штук">
+        <div class="card-top">
+          <span class="scenario-id">REC-02</span>
+          <span class="priority priority-critical">Критический</span>
+        </div>
+        <h3>Единица не совпадает с каталогом</h3>
+        <p class="category-label">Уточнение товаров</p>
+        <div class="channels"><span>Текст</span><span>Голос</span><span>Кнопка</span></div>
+        <dl>
+          <div><dt>Перед началом</dt><dd>Пользователь указал килограммы для товара, который заказывается в штуках, или наоборот.</dd></div>
+          <div><dt>Пользователь</dt><dd>Выбирает единицу каталога либо вводит корректное количество.</dd></div>
+          <div><dt>Бот</dt><dd>Не меняет единицу молча, показывает различие и предлагает безопасные варианты.</dd></div>
+          <div class="result"><dt>Итог</dt><dd>В черновике хранится количество в допустимой единице каталога.</dd></div>
+        </dl>
+        <details>
+          <summary>Примеры фраз</summary>
+          <ul><li>«Сыр Швейцарский 100 кг»</li><li>«Используй как в каталоге»</li><li>«Нужно 10 штук»</li></ul>
+        </details>
+        <details>
+          <summary>Связанные pytest-тесты · 2</summary>
+          <ul class="tests"><li><a href="../../tests/quantity/test_unit_handling.py">tests/quantity/test_unit_handling.py</a><span>test_incompatible_unit_requires_confirmation_instead_of_silent_change</span></li><li><a href="../../tests/quantity/test_voice_quantity_context.py">tests/quantity/test_voice_quantity_context.py</a><span>test_voice_unit_mismatch_accepts_catalog_unit_and_spoken_quantity</span></li></ul>
+        </details>
+      </article>
+
+      <article class="scenario-card" data-category="recognition"
+        data-priority="critical" data-search="rec-03 несколько похожих товаров уточнение товаров выбирает номер, кнопку или однозначное название варианта. показывает кандидатов и не выбирает первый вариант автоматически. первый вариант выбираю второй сироп роза">
+        <div class="card-top">
+          <span class="scenario-id">REC-03</span>
+          <span class="priority priority-critical">Критический</span>
+        </div>
+        <h3>Несколько похожих товаров</h3>
+        <p class="category-label">Уточнение товаров</p>
+        <div class="channels"><span>Текст</span><span>Голос</span><span>Кнопка</span></div>
+        <dl>
+          <div><dt>Перед началом</dt><dd>По названию найдено несколько подходящих строк каталога.</dd></div>
+          <div><dt>Пользователь</dt><dd>Выбирает номер, кнопку или однозначное название варианта.</dd></div>
+          <div><dt>Бот</dt><dd>Показывает кандидатов и не выбирает первый вариант автоматически.</dd></div>
+          <div class="result"><dt>Итог</dt><dd>В черновик попадает только явно выбранный товар.</dd></div>
+        </dl>
+        <details>
+          <summary>Примеры фраз</summary>
+          <ul><li>«Первый вариант»</li><li>«Выбираю второй»</li><li>«Сироп роза»</li></ul>
+        </details>
+        <details>
+          <summary>Связанные pytest-тесты · 2</summary>
+          <ul class="tests"><li><a href="../../tests/catalog/test_candidate_selection.py">tests/catalog/test_candidate_selection.py</a><span>test_explicit_candidate_selection_uses_selected_catalog_row</span></li><li><a href="../../tests/catalog/test_candidate_selection.py">tests/catalog/test_candidate_selection.py</a><span>test_common_candidate_word_does_not_silently_choose_a_product</span></li></ul>
+        </details>
+      </article>
+
+      <article class="scenario-card" data-category="recognition"
+        data-priority="important" data-search="rec-04 товар не найден в каталоге уточнение товаров меняет название, ищет у всех поставщиков, не добавляет позицию или отправляет запрос снабженцу. показывает понятные варианты и не подставляет случайный товар. изменить название искать у всех поставщиков отправить запрос снабженцу">
+        <div class="card-top">
+          <span class="scenario-id">REC-04</span>
+          <span class="priority priority-important">Важный</span>
+        </div>
+        <h3>Товар не найден в каталоге</h3>
+        <p class="category-label">Уточнение товаров</p>
+        <div class="channels"><span>Текст</span><span>Голос</span><span>Кнопка</span></div>
+        <dl>
+          <div><dt>Перед началом</dt><dd>Ни один товар каталога не подходит достаточно уверенно.</dd></div>
+          <div><dt>Пользователь</dt><dd>Меняет название, ищет у всех поставщиков, не добавляет позицию или отправляет запрос снабженцу.</dd></div>
+          <div><dt>Бот</dt><dd>Показывает понятные варианты и не подставляет случайный товар.</dd></div>
+          <div class="result"><dt>Итог</dt><dd>Неизвестная позиция не загрязняет заявку; запрос снабженцу хранится отдельно от черновика.</dd></div>
+        </dl>
+        <details>
+          <summary>Примеры фраз</summary>
+          <ul><li>«Изменить название»</li><li>«Искать у всех поставщиков»</li><li>«Отправить запрос снабженцу»</li></ul>
+        </details>
+        <details>
+          <summary>Связанные pytest-тесты · 2</summary>
+          <ul class="tests"><li><a href="../../tests/catalog/test_candidate_selection.py">tests/catalog/test_candidate_selection.py</a><span>test_not_found_product_uses_human_copy_for_text_and_voice</span></li><li><a href="../../tests/product_add/test_product_add.py">tests/product_add/test_product_add.py</a><span>test_product_add_request_list_keeps_request_separate_from_cart</span></li></ul>
+        </details>
+      </article>
+
+      <article class="scenario-card" data-category="recognition"
+        data-priority="critical" data-search="rec-05 повтор уже добавленного товара уточнение товаров подтверждает прибавление нового количества или отказывается от повторного добавления. показывает текущее и итоговое количество; без подтверждения значения не складывает. добавить — будет 15 кг не добавлять повторно не объединяй">
+        <div class="card-top">
+          <span class="scenario-id">REC-05</span>
+          <span class="priority priority-critical">Критический</span>
+        </div>
+        <h3>Повтор уже добавленного товара</h3>
+        <p class="category-label">Уточнение товаров</p>
+        <div class="channels"><span>Текст</span><span>Голос</span><span>Кнопка</span></div>
+        <dl>
+          <div><dt>Перед началом</dt><dd>В черновике уже есть такой же товар.</dd></div>
+          <div><dt>Пользователь</dt><dd>Подтверждает прибавление нового количества или отказывается от повторного добавления.</dd></div>
+          <div><dt>Бот</dt><dd>Показывает текущее и итоговое количество; без подтверждения значения не складывает.</dd></div>
+          <div class="result"><dt>Итог</dt><dd>Количество увеличивается ровно на подтверждённое значение либо остаётся прежним.</dd></div>
+        </dl>
+        <details>
+          <summary>Примеры фраз</summary>
+          <ul><li>«Добавить — будет 15 кг»</li><li>«Не добавлять повторно»</li><li>«Не объединяй»</li></ul>
+        </details>
+        <details>
+          <summary>Связанные pytest-тесты · 2</summary>
+          <ul class="tests"><li><a href="../../tests/quantity/test_duplicate_quantity.py">tests/quantity/test_duplicate_quantity.py</a><span>test_duplicate_merge_adds_only_the_confirmed_increment</span></li><li><a href="../../tests/conversation/test_voice_route_safety.py">tests/conversation/test_voice_route_safety.py</a><span>test_negative_duplicate_phrases_never_merge_quantities</span></li></ul>
+        </details>
+      </article>
+
+      <article class="scenario-card" data-category="recognition"
+        data-priority="important" data-search="rec-06 комментарий к товару или ко всей заявке уточнение товаров сообщает сорт, качество, упаковку, дату доставки или другое пожелание. отделяет комментарий от названия и сохраняет его до отправки. говядина 5 кг, обязательно мраморная сливки 12 шт, по 1 литру комментарий ко всей заявке: привезти утром">
+        <div class="card-top">
+          <span class="scenario-id">REC-06</span>
+          <span class="priority priority-important">Важный</span>
+        </div>
+        <h3>Комментарий к товару или ко всей заявке</h3>
+        <p class="category-label">Уточнение товаров</p>
+        <div class="channels"><span>Текст</span><span>Голос</span><span>Фото</span></div>
+        <dl>
+          <div><dt>Перед началом</dt><dd>Пользователь добавляет пожелание после товара или явно задаёт общий комментарий.</dd></div>
+          <div><dt>Пользователь</dt><dd>Сообщает сорт, качество, упаковку, дату доставки или другое пожелание.</dd></div>
+          <div><dt>Бот</dt><dd>Отделяет комментарий от названия и сохраняет его до отправки.</dd></div>
+          <div class="result"><dt>Итог</dt><dd>Комментарий попадает в нужную строку Google Sheets и не превращается в отдельный товар.</dd></div>
+        </dl>
+        <details>
+          <summary>Примеры фраз</summary>
+          <ul><li>«Говядина 5 кг, обязательно мраморная»</li><li>«Сливки 12 шт, по 1 литру»</li><li>«Комментарий ко всей заявке: привезти утром»</li></ul>
+        </details>
+        <details>
+          <summary>Связанные pytest-тесты · 2</summary>
+          <ul class="tests"><li><a href="../../tests/conversation/test_comment_handling.py">tests/conversation/test_comment_handling.py</a><span>test_comment_is_not_part_of_product_name_and_reaches_submission_row</span></li><li><a href="../../tests/conversation/test_comment_handling.py">tests/conversation/test_comment_handling.py</a><span>test_global_comment_is_appended_to_every_item_comment_and_order_row</span></li></ul>
+        </details>
+      </article>
+
+      <article class="scenario-card" data-category="draft"
+        data-priority="important" data-search="drf-01 показать текущий черновик работа с черновиком просит показать заявку или возвращается кнопкой. открывает актуальный черновик, не добавляя слова команды как товар. покажи черновик что у меня в заявке? вернись в корзину">
+        <div class="card-top">
+          <span class="scenario-id">DRF-01</span>
+          <span class="priority priority-important">Важный</span>
+        </div>
+        <h3>Показать текущий черновик</h3>
+        <p class="category-label">Работа с черновиком</p>
+        <div class="channels"><span>Текст</span><span>Голос</span><span>Кнопка</span></div>
+        <dl>
+          <div><dt>Перед началом</dt><dd>Пользователь находится на любом шаге диалога.</dd></div>
+          <div><dt>Пользователь</dt><dd>Просит показать заявку или возвращается кнопкой.</dd></div>
+          <div><dt>Бот</dt><dd>Открывает актуальный черновик, не добавляя слова команды как товар.</dd></div>
+          <div class="result"><dt>Итог</dt><dd>Пользователь видит текущие позиции, количества и доступные действия.</dd></div>
+        </dl>
+        <details>
+          <summary>Примеры фраз</summary>
+          <ul><li>«Покажи черновик»</li><li>«Что у меня в заявке?»</li><li>«Вернись в корзину»</li></ul>
+        </details>
+        <details>
+          <summary>Связанные pytest-тесты · 2</summary>
+          <ul class="tests"><li><a href="../../tests/conversation/test_global_voice_navigation.py">tests/conversation/test_global_voice_navigation.py</a><span>test_global_voice_show_cart_works_from_every_stage</span></li><li><a href="../../tests/input/test_voice_route_matrix.py">tests/input/test_voice_route_matrix.py</a><span>test_free_form_navigation_does_not_consume_real_product_names</span></li></ul>
+        </details>
+      </article>
+
+      <article class="scenario-card" data-category="draft"
+        data-priority="important" data-search="drf-02 продолжить добавление товаров работа с черновиком просит добавить ещё товары и отправляет следующий список. переходит в режим добавления, сохраняя существующий черновик. добавить ещё товары давай внесём ещё что-нибудь хочу еще позиции">
+        <div class="card-top">
+          <span class="scenario-id">DRF-02</span>
+          <span class="priority priority-important">Важный</span>
+        </div>
+        <h3>Продолжить добавление товаров</h3>
+        <p class="category-label">Работа с черновиком</p>
+        <div class="channels"><span>Текст</span><span>Голос</span><span>Кнопка</span></div>
+        <dl>
+          <div><dt>Перед началом</dt><dd>В черновике уже есть обработанные позиции.</dd></div>
+          <div><dt>Пользователь</dt><dd>Просит добавить ещё товары и отправляет следующий список.</dd></div>
+          <div><dt>Бот</dt><dd>Переходит в режим добавления, сохраняя существующий черновик.</dd></div>
+          <div class="result"><dt>Итог</dt><dd>Новые позиции добавляются к текущей заявке.</dd></div>
+        </dl>
+        <details>
+          <summary>Примеры фраз</summary>
+          <ul><li>«Добавить ещё товары»</li><li>«Давай внесём ещё что-нибудь»</li><li>«Хочу еще позиции»</li></ul>
+        </details>
+        <details>
+          <summary>Связанные pytest-тесты · 2</summary>
+          <ul class="tests"><li><a href="../../tests/input/test_voice_route_matrix.py">tests/input/test_voice_route_matrix.py</a><span>test_live_voice_wording_routes_before_product_parsing</span></li><li><a href="../../tests/conversation/test_add_more_prompt.py">tests/conversation/test_add_more_prompt.py</a><span>test_successful_addition_asks_whether_to_add_more</span></li></ul>
+        </details>
+      </article>
+
+      <article class="scenario-card" data-category="draft"
+        data-priority="critical" data-search="drf-03 очистить текущую заявку работа с черновиком явно просит полностью очистить заявку. удаляет только текущий черновик и возвращает экран новой заявки. очисти заявку удали всё из корзины сбрось черновик">
+        <div class="card-top">
+          <span class="scenario-id">DRF-03</span>
+          <span class="priority priority-critical">Критический</span>
+        </div>
+        <h3>Очистить текущую заявку</h3>
+        <p class="category-label">Работа с черновиком</p>
+        <div class="channels"><span>Текст</span><span>Голос</span><span>Кнопка</span></div>
+        <dl>
+          <div><dt>Перед началом</dt><dd>В черновике есть товары или незавершённые уточнения.</dd></div>
+          <div><dt>Пользователь</dt><dd>Явно просит полностью очистить заявку.</dd></div>
+          <div><dt>Бот</dt><dd>Удаляет только текущий черновик и возвращает экран новой заявки.</dd></div>
+          <div class="result"><dt>Итог</dt><dd>Черновик пуст; история ранее отправленных заявок не удаляется.</dd></div>
+        </dl>
+        <details>
+          <summary>Примеры фраз</summary>
+          <ul><li>«Очисти заявку»</li><li>«Удали всё из корзины»</li><li>«Сбрось черновик»</li></ul>
+        </details>
+        <details>
+          <summary>Связанные pytest-тесты · 1</summary>
+          <ul class="tests"><li><a href="../../tests/conversation/test_state_transitions.py">tests/conversation/test_state_transitions.py</a><span>test_clear_cart_removes_draft_and_returns_to_collecting</span></li></ul>
+        </details>
+      </article>
+
+      <article class="scenario-card" data-category="draft"
+        data-priority="critical" data-search="drf-04 новая заявка при активном черновике работа с черновиком говорит «новый заказ», затем подтверждает или отменяет очистку. предупреждает о сохранённом черновике и не очищает его без отдельного подтверждения. новый заказ да, начать новую нет, оставить черновик">
+        <div class="card-top">
+          <span class="scenario-id">DRF-04</span>
+          <span class="priority priority-critical">Критический</span>
+        </div>
+        <h3>Новая заявка при активном черновике</h3>
+        <p class="category-label">Работа с черновиком</p>
+        <div class="channels"><span>Текст</span><span>Голос</span><span>Кнопка</span></div>
+        <dl>
+          <div><dt>Перед началом</dt><dd>Текущая заявка ещё не отправлена и содержит товары.</dd></div>
+          <div><dt>Пользователь</dt><dd>Говорит «новый заказ», затем подтверждает или отменяет очистку.</dd></div>
+          <div><dt>Бот</dt><dd>Предупреждает о сохранённом черновике и не очищает его без отдельного подтверждения.</dd></div>
+          <div class="result"><dt>Итог</dt><dd>При подтверждении открывается пустая заявка; при отказе старый черновик сохраняется.</dd></div>
+        </dl>
+        <details>
+          <summary>Примеры фраз</summary>
+          <ul><li>«Новый заказ»</li><li>«Да, начать новую»</li><li>«Нет, оставить черновик»</li></ul>
+        </details>
+        <details>
+          <summary>Связанные pytest-тесты · 2</summary>
+          <ul class="tests"><li><a href="../../tests/conversation/test_new_order_flow.py">tests/conversation/test_new_order_flow.py</a><span>test_new_order_with_active_draft_requires_confirmation</span></li><li><a href="../../tests/conversation/test_new_order_flow.py">tests/conversation/test_new_order_flow.py</a><span>test_rejecting_new_order_keeps_active_draft</span></li></ul>
+        </details>
+      </article>
+
+      <article class="scenario-card" data-category="draft"
+        data-priority="critical" data-search="drf-05 новая заявка после отправки работа с черновиком говорит «новый заказ» или нажимает кнопку «новая заявка». сразу открывает пустой черновик без лишнего подтверждения. новый заказ хочу оформить ещё одну заявку новая заявка">
+        <div class="card-top">
+          <span class="scenario-id">DRF-05</span>
+          <span class="priority priority-critical">Критический</span>
+        </div>
+        <h3>Новая заявка после отправки</h3>
+        <p class="category-label">Работа с черновиком</p>
+        <div class="channels"><span>Текст</span><span>Голос</span><span>Кнопка</span></div>
+        <dl>
+          <div><dt>Перед началом</dt><dd>Предыдущая заявка успешно отправлена.</dd></div>
+          <div><dt>Пользователь</dt><dd>Говорит «новый заказ» или нажимает кнопку «Новая заявка».</dd></div>
+          <div><dt>Бот</dt><dd>Сразу открывает пустой черновик без лишнего подтверждения.</dd></div>
+          <div class="result"><dt>Итог</dt><dd>История и номер предыдущей заявки сохраняются, новая заявка начинается с нуля.</dd></div>
+        </dl>
+        <details>
+          <summary>Примеры фраз</summary>
+          <ul><li>«Новый заказ»</li><li>«Хочу оформить ещё одну заявку»</li><li>«Новая заявка»</li></ul>
+        </details>
+        <details>
+          <summary>Связанные pytest-тесты · 2</summary>
+          <ul class="tests"><li><a href="../../tests/conversation/test_new_order_flow.py">tests/conversation/test_new_order_flow.py</a><span>test_new_order_after_submission_starts_empty_draft_and_preserves_history</span></li><li><a href="../../tests/conversation/test_new_order_flow.py">tests/conversation/test_new_order_flow.py</a><span>test_success_card_new_order_callback_preserves_tracking</span></li></ul>
+        </details>
+      </article>
+
+      <article class="scenario-card" data-category="submission"
+        data-priority="critical" data-search="sub-01 переход к финальной проверке проверка и отправка просит оформить или отправить заявку. сначала проверяет незавершённые позиции и показывает итоговую карточку. оформи заявку я всё добавил перейти к проверке заявки">
+        <div class="card-top">
+          <span class="scenario-id">SUB-01</span>
+          <span class="priority priority-critical">Критический</span>
+        </div>
+        <h3>Переход к финальной проверке</h3>
+        <p class="category-label">Проверка и отправка</p>
+        <div class="channels"><span>Текст</span><span>Голос</span><span>Кнопка</span></div>
+        <dl>
+          <div><dt>Перед началом</dt><dd>В черновике есть товары.</dd></div>
+          <div><dt>Пользователь</dt><dd>Просит оформить или отправить заявку.</dd></div>
+          <div><dt>Бот</dt><dd>Сначала проверяет незавершённые позиции и показывает итоговую карточку.</dd></div>
+          <div class="result"><dt>Итог</dt><dd>До явного финального подтверждения внешняя отправка не запускается.</dd></div>
+        </dl>
+        <details>
+          <summary>Примеры фраз</summary>
+          <ul><li>«Оформи заявку»</li><li>«Я всё добавил»</li><li>«Перейти к проверке заявки»</li></ul>
+        </details>
+        <details>
+          <summary>Связанные pytest-тесты · 2</summary>
+          <ul class="tests"><li><a href="../../tests/conversation/test_state_transitions.py">tests/conversation/test_state_transitions.py</a><span>test_submit_request_opens_final_review_without_enqueuing</span></li><li><a href="../../tests/submission/test_submission_guards.py">tests/submission/test_submission_guards.py</a><span>test_submit_request_stops_on_first_unresolved_item</span></li></ul>
+        </details>
+      </article>
+
+      <article class="scenario-card" data-category="submission"
+        data-priority="important" data-search="sub-02 не набрана минимальная сумма поставщика проверка и отправка открывает предупреждение и выбирает: добавить товары либо принять риск. показывает поставщика и недостающую сумму, предлагает понятные действия. проверь минималку добавить товары поставщика отправить как есть">
+        <div class="card-top">
+          <span class="scenario-id">SUB-02</span>
+          <span class="priority priority-important">Важный</span>
+        </div>
+        <h3>Не набрана минимальная сумма поставщика</h3>
+        <p class="category-label">Проверка и отправка</p>
+        <div class="channels"><span>Текст</span><span>Голос</span><span>Кнопка</span></div>
+        <dl>
+          <div><dt>Перед началом</dt><dd>Хотя бы у одного поставщика сумма заказа меньше минимальной.</dd></div>
+          <div><dt>Пользователь</dt><dd>Открывает предупреждение и выбирает: добавить товары либо принять риск.</dd></div>
+          <div><dt>Бот</dt><dd>Показывает поставщика и недостающую сумму, предлагает понятные действия.</dd></div>
+          <div class="result"><dt>Итог</dt><dd>Пользователь осознанно дополняет заявку или отправляет её как есть.</dd></div>
+        </dl>
+        <details>
+          <summary>Примеры фраз</summary>
+          <ul><li>«Проверь минималку»</li><li>«Добавить товары поставщика»</li><li>«Отправить как есть»</li></ul>
+        </details>
+        <details>
+          <summary>Связанные pytest-тесты · 1</summary>
+          <ul class="tests"><li><a href="../../tests/supplier/test_supplier_minimum.py">tests/supplier/test_supplier_minimum.py</a><span>test_supplier_minimum_warning_shows_gap_and_recovery_actions</span></li></ul>
+        </details>
+      </article>
+
+      <article class="scenario-card" data-category="submission"
+        data-priority="critical" data-search="sub-03 успешная отправка и номер заявки проверка и отправка нажимает «отправить поставщику». записывает заявку, очищает отправленный черновик и показывает номер с кнопками статуса и новой заявки. отправить поставщику проверить статус новая заявка">
+        <div class="card-top">
+          <span class="scenario-id">SUB-03</span>
+          <span class="priority priority-critical">Критический</span>
+        </div>
+        <h3>Успешная отправка и номер заявки</h3>
+        <p class="category-label">Проверка и отправка</p>
+        <div class="channels"><span>Кнопка</span></div>
+        <dl>
+          <div><dt>Перед началом</dt><dd>Все обязательные уточнения завершены, пользователь подтверждает отправку.</dd></div>
+          <div><dt>Пользователь</dt><dd>Нажимает «Отправить поставщику».</dd></div>
+          <div><dt>Бот</dt><dd>Записывает заявку, очищает отправленный черновик и показывает номер с кнопками статуса и новой заявки.</dd></div>
+          <div class="result"><dt>Итог</dt><dd>Каждая позиция записана один раз; пользователь видит подтверждение.</dd></div>
+        </dl>
+        <details>
+          <summary>Примеры фраз</summary>
+          <ul><li>«Отправить поставщику»</li><li>«Проверить статус»</li><li>«Новая заявка»</li></ul>
+        </details>
+        <details>
+          <summary>Связанные pytest-тесты · 2</summary>
+          <ul class="tests"><li><a href="../../tests/submission/test_submission.py">tests/submission/test_submission.py</a><span>test_successful_submission_clears_cart_checkpoint_and_marks_state_submitted</span></li><li><a href="../../tests/submission/test_submission.py">tests/submission/test_submission.py</a><span>test_submission_success_card_matches_n8n</span></li></ul>
+        </details>
+      </article>
+
+      <article class="scenario-card" data-category="submission"
+        data-priority="important" data-search="sub-04 статус отправленных заявок проверка и отправка просит показать статусы. показывает последние отслеживаемые заявки, сгруппированные по номеру. проверь статус последней заявки мои заявки заявка ушла?">
+        <div class="card-top">
+          <span class="scenario-id">SUB-04</span>
+          <span class="priority priority-important">Важный</span>
+        </div>
+        <h3>Статус отправленных заявок</h3>
+        <p class="category-label">Проверка и отправка</p>
+        <div class="channels"><span>Текст</span><span>Голос</span><span>Кнопка</span></div>
+        <dl>
+          <div><dt>Перед началом</dt><dd>У пользователя есть хотя бы одна отправленная заявка.</dd></div>
+          <div><dt>Пользователь</dt><dd>Просит показать статусы.</dd></div>
+          <div><dt>Бот</dt><dd>Показывает последние отслеживаемые заявки, сгруппированные по номеру.</dd></div>
+          <div class="result"><dt>Итог</dt><dd>Пользователь видит статус и дату доставки, не затрагивая текущий черновик.</dd></div>
+        </dl>
+        <details>
+          <summary>Примеры фраз</summary>
+          <ul><li>«Проверь статус последней заявки»</li><li>«Мои заявки»</li><li>«Заявка ушла?»</li></ul>
+        </details>
+        <details>
+          <summary>Связанные pytest-тесты · 2</summary>
+          <ul class="tests"><li><a href="../../tests/submission/test_submission.py">tests/submission/test_submission.py</a><span>test_order_status_renderer_groups_rows_by_order_number</span></li><li><a href="../../tests/submission/test_submission.py">tests/submission/test_submission.py</a><span>test_order_status_limits_to_ten_tracked_orders_and_formats_delivery_date</span></li></ul>
+        </details>
+      </article>
+
+      <article class="scenario-card" data-category="submission"
+        data-priority="critical" data-search="sub-05 временный сбой при отправке проверка и отправка ждёт результат либо повторяет действие после сообщения об ошибке. безопасно повторяет только допустимый этап и не создаёт вторую заявку. повторить отправку к черновику">
+        <div class="card-top">
+          <span class="scenario-id">SUB-05</span>
+          <span class="priority priority-critical">Критический</span>
+        </div>
+        <h3>Временный сбой при отправке</h3>
+        <p class="category-label">Проверка и отправка</p>
+        <div class="channels"><span>Системный</span></div>
+        <dl>
+          <div><dt>Перед началом</dt><dd>Telegram, Google Sheets или сеть временно не отвечают.</dd></div>
+          <div><dt>Пользователь</dt><dd>Ждёт результат либо повторяет действие после сообщения об ошибке.</dd></div>
+          <div><dt>Бот</dt><dd>Безопасно повторяет только допустимый этап и не создаёт вторую заявку.</dd></div>
+          <div class="result"><dt>Итог</dt><dd>Успешно записанная заявка не дублируется; подтверждённая ошибка отображается после исчерпания повторов.</dd></div>
+        </dl>
+        <details>
+          <summary>Примеры фраз</summary>
+          <ul><li>«Повторить отправку»</li><li>«К черновику»</li></ul>
+        </details>
+        <details>
+          <summary>Связанные pytest-тесты · 2</summary>
+          <ul class="tests"><li><a href="../../tests/submission/test_submission.py">tests/submission/test_submission.py</a><span>test_transient_submission_error_is_retried_without_premature_failure_card</span></li><li><a href="../../tests/submission/test_submission.py">tests/submission/test_submission.py</a><span>test_retry_delivers_success_card_after_order_was_already_finalized</span></li></ul>
+        </details>
+      </article>
+
+      <article class="scenario-card" data-category="safety"
+        data-priority="critical" data-search="saf-01 «не добавляй» не добавляет товар защита от неверного действия отказывается от текущей позиции естественной фразой. пропускает только текущую позицию и не воспринимает отрицание как подтверждение. не добавляй эту позицию убери этот товар нет, это не нужно">
+        <div class="card-top">
+          <span class="scenario-id">SAF-01</span>
+          <span class="priority priority-critical">Критический</span>
+        </div>
+        <h3>«Не добавляй» не добавляет товар</h3>
+        <p class="category-label">Защита от неверного действия</p>
+        <div class="channels"><span>Текст</span><span>Голос</span></div>
+        <dl>
+          <div><dt>Перед началом</dt><dd>Бот уточняет товар, единицу, дубликат или запрос снабженцу.</dd></div>
+          <div><dt>Пользователь</dt><dd>Отказывается от текущей позиции естественной фразой.</dd></div>
+          <div><dt>Бот</dt><dd>Пропускает только текущую позицию и не воспринимает отрицание как подтверждение.</dd></div>
+          <div class="result"><dt>Итог</dt><dd>Товар не появляется в черновике, остальные позиции сохраняются.</dd></div>
+        </dl>
+        <details>
+          <summary>Примеры фраз</summary>
+          <ul><li>«Не добавляй эту позицию»</li><li>«Убери этот товар»</li><li>«Нет, это не нужно»</li></ul>
+        </details>
+        <details>
+          <summary>Связанные pytest-тесты · 2</summary>
+          <ul class="tests"><li><a href="../../tests/conversation/test_voice_route_safety.py">tests/conversation/test_voice_route_safety.py</a><span>test_negative_item_phrases_skip_unit_mismatch_without_confirming_quantity</span></li><li><a href="../../tests/input/test_voice_route_matrix.py">tests/input/test_voice_route_matrix.py</a><span>test_common_text_and_voice_phrasings_are_deterministic</span></li></ul>
+        </details>
+      </article>
+
+      <article class="scenario-card" data-category="safety"
+        data-priority="critical" data-search="saf-02 «не отправляй» отменяет отправку защита от неверного действия отказывается от отправки. возвращает к безопасному экрану и не ставит задачу отправки. не отправляй нет, не надо отправлять я передумал">
+        <div class="card-top">
+          <span class="scenario-id">SAF-02</span>
+          <span class="priority priority-critical">Критический</span>
+        </div>
+        <h3>«Не отправляй» отменяет отправку</h3>
+        <p class="category-label">Защита от неверного действия</p>
+        <div class="channels"><span>Текст</span><span>Голос</span></div>
+        <dl>
+          <div><dt>Перед началом</dt><dd>Пользователь находится на финальной проверке или подтверждении отправки.</dd></div>
+          <div><dt>Пользователь</dt><dd>Отказывается от отправки.</dd></div>
+          <div><dt>Бот</dt><dd>Возвращает к безопасному экрану и не ставит задачу отправки.</dd></div>
+          <div class="result"><dt>Итог</dt><dd>Google Sheets не изменяется, черновик остаётся доступным.</dd></div>
+        </dl>
+        <details>
+          <summary>Примеры фраз</summary>
+          <ul><li>«Не отправляй»</li><li>«Нет, не надо отправлять»</li><li>«Я передумал»</li></ul>
+        </details>
+        <details>
+          <summary>Связанные pytest-тесты · 1</summary>
+          <ul class="tests"><li><a href="../../tests/conversation/test_voice_route_safety.py">tests/conversation/test_voice_route_safety.py</a><span>test_negative_submit_phrases_never_submit_order</span></li></ul>
+        </details>
+      </article>
+
+      <article class="scenario-card" data-category="safety"
+        data-priority="critical" data-search="saf-03 отрицание не запускает новую заявку защита от неверного действия произносит фразу с отрицанием либо товар, в названии которого встречаются командные слова. учитывает отрицание и контекст; не очищает заявку и не маршрутизирует товар как команду. не начинай новый заказ новый картофель 5 кг не хочу новую заявку">
+        <div class="card-top">
+          <span class="scenario-id">SAF-03</span>
+          <span class="priority priority-critical">Критический</span>
+        </div>
+        <h3>Отрицание не запускает новую заявку</h3>
+        <p class="category-label">Защита от неверного действия</p>
+        <div class="channels"><span>Текст</span><span>Голос</span></div>
+        <dl>
+          <div><dt>Перед началом</dt><dd>У пользователя есть активный или отправленный заказ.</dd></div>
+          <div><dt>Пользователь</dt><dd>Произносит фразу с отрицанием либо товар, в названии которого встречаются командные слова.</dd></div>
+          <div><dt>Бот</dt><dd>Учитывает отрицание и контекст; не очищает заявку и не маршрутизирует товар как команду.</dd></div>
+          <div class="result"><dt>Итог</dt><dd>Состояние заявки не меняется ошибочно.</dd></div>
+        </dl>
+        <details>
+          <summary>Примеры фраз</summary>
+          <ul><li>«Не начинай новый заказ»</li><li>«Новый картофель 5 кг»</li><li>«Не хочу новую заявку»</li></ul>
+        </details>
+        <details>
+          <summary>Связанные pytest-тесты · 2</summary>
+          <ul class="tests"><li><a href="../../tests/input/test_voice_route_matrix.py">tests/input/test_voice_route_matrix.py</a><span>test_new_order_navigation_does_not_override_negation_or_product_quantity</span></li><li><a href="../../tests/input/test_voice_route_matrix.py">tests/input/test_voice_route_matrix.py</a><span>test_command_words_inside_product_lines_remain_products</span></li></ul>
+        </details>
+      </article>
+
+      <article class="scenario-card" data-category="safety"
+        data-priority="critical" data-search="saf-04 устаревшая кнопка не меняет черновик защита от неверного действия нажимает ранее показанный вариант товара или действие. проверяет ревизию состояния и отклоняет устаревшее действие. нажатие старой кнопки выбора повторное нажатие после обновления карточки">
+        <div class="card-top">
+          <span class="scenario-id">SAF-04</span>
+          <span class="priority priority-critical">Критический</span>
+        </div>
+        <h3>Устаревшая кнопка не меняет черновик</h3>
+        <p class="category-label">Защита от неверного действия</p>
+        <div class="channels"><span>Кнопка</span></div>
+        <dl>
+          <div><dt>Перед началом</dt><dd>Пользователь нажимает кнопку из старого сообщения после изменения заявки.</dd></div>
+          <div><dt>Пользователь</dt><dd>Нажимает ранее показанный вариант товара или действие.</dd></div>
+          <div><dt>Бот</dt><dd>Проверяет ревизию состояния и отклоняет устаревшее действие.</dd></div>
+          <div class="result"><dt>Итог</dt><dd>Актуальный черновик остаётся неизменным.</dd></div>
+        </dl>
+        <details>
+          <summary>Примеры фраз</summary>
+          <ul><li>«Нажатие старой кнопки выбора»</li><li>«Повторное нажатие после обновления карточки»</li></ul>
+        </details>
+        <details>
+          <summary>Связанные pytest-тесты · 1</summary>
+          <ul class="tests"><li><a href="../../tests/telegram/test_callback_contract.py">tests/telegram/test_callback_contract.py</a><span>test_stale_callback_cannot_mutate_current_draft</span></li></ul>
+        </details>
+      </article>
+
+      <article class="scenario-card" data-category="recovery"
+        data-priority="edge" data-search="rcv-01 голос не удалось распознать сбои и восстановление отправляет голосовое сообщение. использует резервную модель, а при пустом результате просит повторить или написать текстом. неразборчивое аудио тихая запись пустая голосовая команда">
+        <div class="card-top">
+          <span class="scenario-id">RCV-01</span>
+          <span class="priority priority-edge">Защитный</span>
+        </div>
+        <h3>Голос не удалось распознать</h3>
+        <p class="category-label">Сбои и восстановление</p>
+        <div class="channels"><span>Голос</span></div>
+        <dl>
+          <div><dt>Перед началом</dt><dd>Основная транскрипция пустая либо аудио не содержит понятной команды.</dd></div>
+          <div><dt>Пользователь</dt><dd>Отправляет голосовое сообщение.</dd></div>
+          <div><dt>Бот</dt><dd>Использует резервную модель, а при пустом результате просит повторить или написать текстом.</dd></div>
+          <div class="result"><dt>Итог</dt><dd>Пустая транскрипция не выбирает товар и не меняет черновик.</dd></div>
+        </dl>
+        <details>
+          <summary>Примеры фраз</summary>
+          <ul><li>«Неразборчивое аудио»</li><li>«Тихая запись»</li><li>«Пустая голосовая команда»</li></ul>
+        </details>
+        <details>
+          <summary>Связанные pytest-тесты · 2</summary>
+          <ul class="tests"><li><a href="../../tests/ai/test_ai_media.py">tests/ai/test_ai_media.py</a><span>test_voice_transcription_uses_fallback_when_primary_returns_empty</span></li><li><a href="../../tests/input/test_voice_input_contract.py">tests/input/test_voice_input_contract.py</a><span>test_empty_voice_add_items_uses_the_source_recovery_card</span></li></ul>
+        </details>
+      </article>
+
+      <article class="scenario-card" data-category="recovery"
+        data-priority="critical" data-search="rcv-02 на фото нет заполненных количеств сбои и восстановление отправляет такую фотографию. не использует фасовку, остаток или случайное число как количество заказа. пустой бланк заказа таблица только с фасовкой фото без рукописных количеств">
+        <div class="card-top">
+          <span class="scenario-id">RCV-02</span>
+          <span class="priority priority-critical">Критический</span>
+        </div>
+        <h3>На фото нет заполненных количеств</h3>
+        <p class="category-label">Сбои и восстановление</p>
+        <div class="channels"><span>Фото</span><span>Файл-изображение</span></div>
+        <dl>
+          <div><dt>Перед началом</dt><dd>На фотографии видны названия и справочные числа, но нет заполненного заказа.</dd></div>
+          <div><dt>Пользователь</dt><dd>Отправляет такую фотографию.</dd></div>
+          <div><dt>Бот</dt><dd>Не использует фасовку, остаток или случайное число как количество заказа.</dd></div>
+          <div class="result"><dt>Итог</dt><dd>В черновик не добавляются строки без доказанного положительного количества.</dd></div>
+        </dl>
+        <details>
+          <summary>Примеры фраз</summary>
+          <ul><li>«Пустой бланк заказа»</li><li>«Таблица только с фасовкой»</li><li>«Фото без рукописных количеств»</li></ul>
+        </details>
+        <details>
+          <summary>Связанные pytest-тесты · 2</summary>
+          <ul class="tests"><li><a href="../../tests/ai/test_ai_media.py">tests/ai/test_ai_media.py</a><span>test_photo_drops_every_item_without_actual_order_quantity</span></li><li><a href="../../tests/conversation/test_engine.py">tests/conversation/test_engine.py</a><span>test_photo_without_order_quantities_does_not_create_draft_items</span></li></ul>
+        </details>
+      </article>
+
+      <article class="scenario-card" data-category="recovery"
+        data-priority="edge" data-search="rcv-03 недоступен справочник заведений сбои и восстановление отправляет код подключения. сообщает, что код сейчас не удалось проверить, и предлагает повторить позже. 12345 /start 12345">
+        <div class="card-top">
+          <span class="scenario-id">RCV-03</span>
+          <span class="priority priority-edge">Защитный</span>
+        </div>
+        <h3>Недоступен справочник заведений</h3>
+        <p class="category-label">Сбои и восстановление</p>
+        <div class="channels"><span>Текст</span></div>
+        <dl>
+          <div><dt>Перед началом</dt><dd>Справочник не настроен или временно недоступен.</dd></div>
+          <div><dt>Пользователь</dt><dd>Отправляет код подключения.</dd></div>
+          <div><dt>Бот</dt><dd>Сообщает, что код сейчас не удалось проверить, и предлагает повторить позже.</dd></div>
+          <div class="result"><dt>Итог</dt><dd>Бот не создаёт ложную привязку и не показывает технический traceback пользователю.</dd></div>
+        </dl>
+        <details>
+          <summary>Примеры фраз</summary>
+          <ul><li>«12345»</li><li>«/start 12345»</li></ul>
+        </details>
+        <details>
+          <summary>Связанные pytest-тесты · 2</summary>
+          <ul class="tests"><li><a href="../../tests/venue/test_venue_registration.py">tests/venue/test_venue_registration.py</a><span>test_directory_reports_missing_configuration_before_http_call</span></li><li><a href="../../tests/venue/test_venue_registration.py">tests/venue/test_venue_registration.py</a><span>test_directory_does_not_cache_transport_errors</span></li></ul>
+        </details>
+      </article>
+
+      <article class="scenario-card" data-category="recovery"
+        data-priority="edge" data-search="rcv-04 общая ошибка обработки сообщения сбои и восстановление отправляет сообщение любого поддерживаемого типа. фиксирует безопасную контрольную точку и показывает короткое сообщение без внутренних данных. повторить сообщение открыть черновик после ошибки">
+        <div class="card-top">
+          <span class="scenario-id">RCV-04</span>
+          <span class="priority priority-edge">Защитный</span>
+        </div>
+        <h3>Общая ошибка обработки сообщения</h3>
+        <p class="category-label">Сбои и восстановление</p>
+        <div class="channels"><span>Текст</span><span>Голос</span><span>Фото</span></div>
+        <dl>
+          <div><dt>Перед началом</dt><dd>Во время обработки возникает непредвиденная техническая ошибка.</dd></div>
+          <div><dt>Пользователь</dt><dd>Отправляет сообщение любого поддерживаемого типа.</dd></div>
+          <div><dt>Бот</dt><dd>Фиксирует безопасную контрольную точку и показывает короткое сообщение без внутренних данных.</dd></div>
+          <div class="result"><dt>Итог</dt><dd>Пользователь может повторить действие; секреты и traceback не попадают в обычный ответ.</dd></div>
+        </dl>
+        <details>
+          <summary>Примеры фраз</summary>
+          <ul><li>«Повторить сообщение»</li><li>«Открыть черновик после ошибки»</li></ul>
+        </details>
+        <details>
+          <summary>Связанные pytest-тесты · 2</summary>
+          <ul class="tests"><li><a href="../../tests/conversation/test_orchestrator_pipeline.py">tests/conversation/test_orchestrator_pipeline.py</a><span>test_pipeline_failure_is_checkpointed_and_user_gets_safe_reply</span></li><li><a href="../../tests/conversation/test_orchestrator_pipeline.py">tests/conversation/test_orchestrator_pipeline.py</a><span>test_checkpointed_result_retries_only_telegram_delivery</span></li></ul>
+        </details>
+      </article>
+    </section>
+  </main>
+  <footer>Локальный каталог · версия 1.0 · работает без интернета</footer>
+  <script id="catalog-meta" type="application/json">{"version": "1.0", "total": 31, "linked": 31}</script>
+  <script>
+    (() => {
+      const cards = [...document.querySelectorAll(".scenario-card")];
+      const search = document.querySelector("#search");
+      const count = document.querySelector("#visible-count");
+      let priority = "all";
+      let category = "all";
+
+      const applyFilters = () => {
+        const query = search.value.trim().toLocaleLowerCase("ru");
+        let visible = 0;
+        cards.forEach((card) => {
+          const matches = (priority === "all" || card.dataset.priority === priority)
+            && (category === "all" || card.dataset.category === category)
+            && (!query || card.dataset.search.includes(query));
+          card.hidden = !matches;
+          if (matches) visible += 1;
+        });
+        count.textContent = `Показано: ${visible} из ${cards.length}`;
+      };
+
+      document.querySelectorAll("[data-priority]").forEach((button) => {
+        button.addEventListener("click", () => {
+          document.querySelectorAll("[data-priority]").forEach((item) => item.classList.remove("active"));
+          button.classList.add("active");
+          priority = button.dataset.priority;
+          applyFilters();
+        });
+      });
+      document.querySelectorAll(".category-filters [data-category]").forEach((button) => {
+        button.addEventListener("click", () => {
+          document.querySelectorAll(".category-filters [data-category]").forEach((item) => item.classList.remove("active"));
+          button.classList.add("active");
+          category = button.dataset.category;
+          applyFilters();
+        });
+      });
+      search.addEventListener("input", applyFilters);
+      applyFilters();
+    })();
+  </script>
+</body>
+</html>

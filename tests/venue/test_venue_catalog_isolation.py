@@ -1,3 +1,4 @@
+import json
 from unittest.mock import MagicMock
 
 import pytest
@@ -39,3 +40,48 @@ def test_catalog_cache_rejects_missing_venue_spreadsheet(settings) -> None:  # t
 
     redis.get.assert_not_called()
     sheets.load_catalog.assert_not_called()
+
+
+def test_forced_catalog_refresh_bypasses_cached_order_values(settings) -> None:  # type: ignore[no-untyped-def]
+    """При финальной проверке читает актуальные значения из Google Sheets."""
+    redis = MagicMock()
+    redis.get.return_value = json.dumps(
+        [
+            CatalogProduct(
+                product_id="beef",
+                name="Говядина",
+                supplier_current_sum=350,
+            ).model_dump(mode="json")
+        ],
+        ensure_ascii=False,
+    )
+    sheets = MagicMock()
+    sheets.load_catalog.return_value = [
+        CatalogProduct(
+            product_id="beef",
+            name="Говядина",
+            supplier_current_sum=2900,
+        )
+    ]
+
+    catalog = CatalogCache(settings, redis, sheets).get("sheet-a", force_refresh=True)
+
+    assert catalog[0].supplier_current_sum == 2900
+    sheets.load_catalog.assert_called_once_with("sheet-a")
+
+
+def test_forced_catalog_refresh_falls_back_to_cache_on_google_failure(settings) -> None:  # type: ignore[no-untyped-def]
+    """Не прерывает заявку при временном сбое финального чтения Google Sheets."""
+    cached = CatalogProduct(
+        product_id="beef",
+        name="Говядина",
+        supplier_current_sum=2550,
+    )
+    redis = MagicMock()
+    redis.get.return_value = json.dumps([cached.model_dump(mode="json")], ensure_ascii=False)
+    sheets = MagicMock()
+    sheets.load_catalog.side_effect = TimeoutError("temporary Google timeout")
+
+    catalog = CatalogCache(settings, redis, sheets).get("sheet-a", force_refresh=True)
+
+    assert catalog == [cached]

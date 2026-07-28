@@ -1,0 +1,588 @@
+{
+  "title": "Пользовательские сценарии AutoSnab",
+  "version": "1.0",
+  "categories": [
+    {
+      "id": "registration",
+      "title": "Подключение заведения",
+      "description": "Первый вход, подтверждение заведения и безопасное переключение между заведениями."
+    },
+    {
+      "id": "input",
+      "title": "Добавление товаров",
+      "description": "Текст, голос, фотографии таблиц и рукописные списки."
+    },
+    {
+      "id": "recognition",
+      "title": "Уточнение товаров",
+      "description": "Количество, единицы, комментарии, дубликаты и выбор подходящего товара."
+    },
+    {
+      "id": "draft",
+      "title": "Работа с черновиком",
+      "description": "Просмотр, продолжение, очистка и начало новой заявки."
+    },
+    {
+      "id": "submission",
+      "title": "Проверка и отправка",
+      "description": "Минимальная сумма, подтверждение, отправка и просмотр статуса."
+    },
+    {
+      "id": "safety",
+      "title": "Защита от неверного действия",
+      "description": "Отрицания, устаревшие кнопки и фразы, которые нельзя маршрутизировать ошибочно."
+    },
+    {
+      "id": "recovery",
+      "title": "Сбои и восстановление",
+      "description": "Понятное и безопасное поведение при недоступности внешних сервисов."
+    }
+  ],
+  "journeys": [
+    {
+      "title": "Обычная заявка",
+      "description": "Основной путь сотрудника кафе от первого сообщения до отправленной заявки.",
+      "steps": [
+        "Добавить товары",
+        "Уточнить позиции",
+        "Проверить черновик",
+        "Проверить минималку",
+        "Подтвердить",
+        "Получить номер"
+      ],
+      "diagram": "flowchart LR\n    A[Текст, голос или фото] --> B[Распознавание товаров]\n    B --> C{Нужны уточнения?}\n    C -->|Да| D[Количество, единица или товар]\n    D --> C\n    C -->|Нет| E[Черновик]\n    E --> F[Финальная проверка]\n    F --> G[Отправка поставщикам]\n    G --> H[Номер и статус заявки]"
+    },
+    {
+      "title": "Фотография таблицы",
+      "description": "Количество берётся только из фактически заполненных колонок заказа, а не из фасовки или справочных данных.",
+      "steps": [
+        "Получить фото",
+        "Определить тип таблицы",
+        "Прочитать Зал/Бар/Кухня",
+        "Учесть правки ручкой",
+        "Сохранить комментарии",
+        "Показать черновик"
+      ],
+      "diagram": "flowchart LR\n    A[Фото таблицы] --> B{Тип документа}\n    B -->|Оригинал заказа| C[Колонки Зал, Бар, Кухня]\n    B -->|Свободный список| D[Явные рукописные количества]\n    C --> E{Есть зачёркивание?}\n    E -->|Да| F[Взять рукописную замену]\n    E -->|Нет| G[Взять заполненную ячейку]\n    D --> H[Сопоставить с каталогом]\n    F --> H\n    G --> H\n    H --> I[Записать всё в Кухню]"
+    },
+    {
+      "title": "Команда с отрицанием",
+      "description": "Отрицание имеет приоритет: бот не должен добавлять, объединять или отправлять вопреки словам пользователя.",
+      "steps": [
+        "Получить фразу",
+        "Найти отрицание",
+        "Определить текущий экран",
+        "Отменить только текущее действие",
+        "Сохранить черновик"
+      ],
+      "diagram": "flowchart LR\n    A[Фраза пользователя] --> B{Есть отрицание?}\n    B -->|Нет| C[Обычная маршрутизация]\n    B -->|Да| D{Текущий экран}\n    D -->|Товар| E[Не добавлять товар]\n    D -->|Отправка| F[Не отправлять заявку]\n    D -->|Новая заявка| G[Оставить текущий черновик]\n    E --> H[Показать безопасный следующий шаг]\n    F --> H\n    G --> H"
+    },
+    {
+      "title": "Новая заявка",
+      "description": "После отправки новый заказ начинается сразу, а активный черновик очищается только после подтверждения.",
+      "steps": [
+        "Сказать «новый заказ»",
+        "Проверить состояние",
+        "Запросить подтверждение при черновике",
+        "Сохранить историю",
+        "Открыть пустую заявку"
+      ],
+      "diagram": "flowchart LR\n    A[Новый заказ] --> B{Есть активный черновик?}\n    B -->|Да| C[Запросить подтверждение]\n    C -->|Отмена| D[Оставить черновик]\n    C -->|Подтверждение| E[Очистить текущую заявку]\n    B -->|Нет или заявка отправлена| E\n    E --> F[Новый пустой черновик]\n    F --> G[История отправленных заявок сохранена]"
+    }
+  ],
+  "scenarios": [
+    {
+      "id": "REG-01",
+      "category": "registration",
+      "title": "Подключение по коду заведения",
+      "priority": "critical",
+      "channels": ["Текст", "Кнопка"],
+      "precondition": "Пользователь ещё не подключён к заведению и находится в личном чате с ботом.",
+      "user_action": "Отправляет код заведения и подтверждает найденное название.",
+      "bot_response": "Показывает название заведения, спрашивает подтверждение и только после согласия сохраняет привязку.",
+      "result": "Пользователь получает доступ только к каталогу и таблице выбранного заведения.",
+      "examples": ["12345", "/start 12345", "Да, подключить"],
+      "test_refs": [
+        "tests/venue/test_venue_registration.py::test_all_registration_entry_points_use_one_lookup",
+        "tests/venue/test_venue_registration.py::test_successful_binding_is_synced_before_success_is_shown"
+      ]
+    },
+    {
+      "id": "REG-02",
+      "category": "registration",
+      "title": "Отказ или смена заведения",
+      "priority": "critical",
+      "channels": ["Текст", "Кнопка"],
+      "precondition": "Бот предлагает подключить новое заведение либо заменить действующую привязку.",
+      "user_action": "Отказывается или подтверждает смену заведения.",
+      "bot_response": "При отказе ничего не записывает; для смены запрашивает дополнительное подтверждение.",
+      "result": "Случайное сообщение или нажатие не переключает пользователя на чужое заведение.",
+      "examples": ["Нет", "Отмена", "Да, изменить"],
+      "test_refs": [
+        "tests/venue/test_venue_registration.py::test_declining_confirmation_never_writes",
+        "tests/venue/test_venue_registration.py::test_switch_requires_an_extra_confirmation"
+      ]
+    },
+    {
+      "id": "INP-01",
+      "category": "input",
+      "title": "Добавление товаров текстом",
+      "priority": "important",
+      "channels": ["Текст"],
+      "precondition": "Заведение подключено, каталог доступен.",
+      "user_action": "Отправляет один товар или список товаров с количеством.",
+      "bot_response": "Распознаёт отдельные позиции, сопоставляет их с каталогом и показывает результат.",
+      "result": "Найденные товары появляются в черновике с указанным количеством.",
+      "examples": ["Картофель 5 кг", "Сливки 33% — 12 шт", "Сироп роза 6 шт\nГовядина 5 кг"],
+      "test_refs": [
+        "tests/conversation/test_engine.py::test_add_exact_product_to_draft",
+        "tests/ai/test_ai_media.py::test_hyphenated_multiline_product_list_skips_ai_and_keeps_quantities"
+      ]
+    },
+    {
+      "id": "INP-02",
+      "category": "input",
+      "title": "Добавление товаров голосом",
+      "priority": "critical",
+      "channels": ["Голос"],
+      "precondition": "Заведение подключено, Telegram и сервис распознавания голоса доступны.",
+      "user_action": "Называет товары, количества и комментарии обычной разговорной фразой.",
+      "bot_response": "Показывает этап распознавания, превращает речь в позиции и не переносит количество между соседними товарами.",
+      "result": "В черновик попадают только произнесённые товары и количества.",
+      "examples": ["Добавь пять килограммов картофеля", "Сыр пармезан два килограмма и сливки десять штук"],
+      "test_refs": [
+        "tests/conversation/test_orchestrator_pipeline.py::test_voice_pipeline_shows_progress_before_transcription",
+        "tests/input/test_voice_input_contract.py::test_shared_source_line_does_not_copy_last_quantity_to_every_product"
+      ]
+    },
+    {
+      "id": "INP-03",
+      "category": "input",
+      "title": "Фото оригинальной таблицы заказа",
+      "priority": "critical",
+      "channels": ["Фото", "Файл-изображение"],
+      "precondition": "На фотографии есть таблица заказа с колонками «Зал», «Бар» или «Кухня».",
+      "user_action": "Отправляет фотографию распечатанной или заполненной таблицы.",
+      "bot_response": "Берёт количество только из заполненных колонок заказа, сохраняет комментарии и игнорирует фасовку, остатки и справочные числа.",
+      "result": "Распознанное количество записывается в заявку как количество для «Кухни». Строки без заказа не добавляются.",
+      "examples": ["Распечатанная таблица с количеством в колонке «Бар»", "Таблица с заполненными «Зал» и «Кухня»", "Фото, где у товара указан комментарий поставщику"],
+      "test_refs": [
+        "tests/ai/test_ai_media.py::test_client_order_sheet_uses_the_selected_department_quantity",
+        "tests/ai/test_ai_media.py::test_client_order_sheet_sums_only_filled_department_order_cells",
+        "tests/ai/test_photo_prompt_contract.py::test_photo_prompt_excludes_packaging_and_stock_from_order_quantity"
+      ]
+    },
+    {
+      "id": "INP-04",
+      "category": "input",
+      "title": "Фото рукописного списка",
+      "priority": "important",
+      "channels": ["Фото", "Файл-изображение"],
+      "precondition": "На фотографии нет стандартной таблицы, но видны названия и явно написанные количества.",
+      "user_action": "Отправляет фотографию списка, написанного от руки.",
+      "bot_response": "Использует только явно указанные количества и сопоставляет названия с каталогом.",
+      "result": "Позиции с количеством попадают в черновик; бот не придумывает отсутствующие значения.",
+      "examples": ["Сироп роза — 6 шт", "Говядина — 5 кг", "Курица — 1 кг"],
+      "test_refs": [
+        "tests/conversation/test_engine.py::test_handwritten_photo_quantity_survives_catalog_matching",
+        "tests/ai/test_ai_media.py::test_free_list_keeps_explicit_quantity_even_if_model_calls_it_order_column"
+      ]
+    },
+    {
+      "id": "INP-05",
+      "category": "input",
+      "title": "Зачёркнутое количество и правка ручкой",
+      "priority": "critical",
+      "channels": ["Фото"],
+      "precondition": "Печатное количество зачёркнуто, рядом написано новое значение.",
+      "user_action": "Отправляет фотографию таблицы с ручной корректировкой.",
+      "bot_response": "Считает зачёркнутое значение недействительным и использует только разборчивую рукописную замену.",
+      "result": "В черновике остаётся одно актуальное количество без сложения со старым.",
+      "examples": ["5 зачёркнуто, рядом написано 7", "100 кг зачёркнуто, от руки указано 10 шт"],
+      "test_refs": [
+        "tests/ai/test_ai_media.py::test_handwritten_replacement_wins_over_crossed_out_client_sheet_quantity",
+        "tests/conversation/test_engine.py::test_crossed_out_photo_quantity_uses_only_handwritten_replacement"
+      ]
+    },
+    {
+      "id": "REC-01",
+      "category": "recognition",
+      "title": "Не указано количество",
+      "priority": "critical",
+      "channels": ["Текст", "Голос", "Фото"],
+      "precondition": "Товар найден в каталоге, но положительное количество отсутствует.",
+      "user_action": "Отправляет название без количества, затем отвечает числом.",
+      "bot_response": "Просит уточнить количество именно для текущего товара и не создаёт новую строку.",
+      "result": "После ответа товар один раз появляется в черновике с введённым количеством.",
+      "examples": ["Сыр пармезан", "Нужно 5 кг", "Пять"],
+      "test_refs": [
+        "tests/conversation/test_engine.py::test_missing_quantity_starts_clarification",
+        "tests/quantity/test_quantity_flow.py::test_quantity_answer_completes_current_missing_item_without_new_cart_line"
+      ]
+    },
+    {
+      "id": "REC-02",
+      "category": "recognition",
+      "title": "Единица не совпадает с каталогом",
+      "priority": "critical",
+      "channels": ["Текст", "Голос", "Кнопка"],
+      "precondition": "Пользователь указал килограммы для товара, который заказывается в штуках, или наоборот.",
+      "user_action": "Выбирает единицу каталога либо вводит корректное количество.",
+      "bot_response": "Не меняет единицу молча, показывает различие и предлагает безопасные варианты.",
+      "result": "В черновике хранится количество в допустимой единице каталога.",
+      "examples": ["Сыр Швейцарский 100 кг", "Используй как в каталоге", "Нужно 10 штук"],
+      "test_refs": [
+        "tests/quantity/test_unit_handling.py::test_incompatible_unit_requires_confirmation_instead_of_silent_change",
+        "tests/quantity/test_voice_quantity_context.py::test_voice_unit_mismatch_accepts_catalog_unit_and_spoken_quantity"
+      ]
+    },
+    {
+      "id": "REC-03",
+      "category": "recognition",
+      "title": "Несколько похожих товаров",
+      "priority": "critical",
+      "channels": ["Текст", "Голос", "Кнопка"],
+      "precondition": "По названию найдено несколько подходящих строк каталога.",
+      "user_action": "Выбирает номер, кнопку или однозначное название варианта.",
+      "bot_response": "Показывает кандидатов и не выбирает первый вариант автоматически.",
+      "result": "В черновик попадает только явно выбранный товар.",
+      "examples": ["Первый вариант", "Выбираю второй", "Сироп роза"],
+      "test_refs": [
+        "tests/catalog/test_candidate_selection.py::test_explicit_candidate_selection_uses_selected_catalog_row",
+        "tests/catalog/test_candidate_selection.py::test_common_candidate_word_does_not_silently_choose_a_product"
+      ]
+    },
+    {
+      "id": "REC-04",
+      "category": "recognition",
+      "title": "Товар не найден в каталоге",
+      "priority": "important",
+      "channels": ["Текст", "Голос", "Кнопка"],
+      "precondition": "Ни один товар каталога не подходит достаточно уверенно.",
+      "user_action": "Меняет название, ищет у всех поставщиков, не добавляет позицию или отправляет запрос снабженцу.",
+      "bot_response": "Показывает понятные варианты и не подставляет случайный товар.",
+      "result": "Неизвестная позиция не загрязняет заявку; запрос снабженцу хранится отдельно от черновика.",
+      "examples": ["Изменить название", "Искать у всех поставщиков", "Отправить запрос снабженцу"],
+      "test_refs": [
+        "tests/catalog/test_candidate_selection.py::test_not_found_product_uses_human_copy_for_text_and_voice",
+        "tests/product_add/test_product_add.py::test_product_add_request_list_keeps_request_separate_from_cart"
+      ]
+    },
+    {
+      "id": "REC-05",
+      "category": "recognition",
+      "title": "Повтор уже добавленного товара",
+      "priority": "critical",
+      "channels": ["Текст", "Голос", "Кнопка"],
+      "precondition": "В черновике уже есть такой же товар.",
+      "user_action": "Подтверждает прибавление нового количества или отказывается от повторного добавления.",
+      "bot_response": "Показывает текущее и итоговое количество; без подтверждения значения не складывает.",
+      "result": "Количество увеличивается ровно на подтверждённое значение либо остаётся прежним.",
+      "examples": ["Добавить — будет 15 кг", "Не добавлять повторно", "Не объединяй"],
+      "test_refs": [
+        "tests/quantity/test_duplicate_quantity.py::test_duplicate_merge_adds_only_the_confirmed_increment",
+        "tests/conversation/test_voice_route_safety.py::test_negative_duplicate_phrases_never_merge_quantities"
+      ]
+    },
+    {
+      "id": "REC-06",
+      "category": "recognition",
+      "title": "Комментарий к товару или ко всей заявке",
+      "priority": "important",
+      "channels": ["Текст", "Голос", "Фото"],
+      "precondition": "Пользователь добавляет пожелание после товара или явно задаёт общий комментарий.",
+      "user_action": "Сообщает сорт, качество, упаковку, дату доставки или другое пожелание.",
+      "bot_response": "Отделяет комментарий от названия и сохраняет его до отправки.",
+      "result": "Комментарий попадает в нужную строку Google Sheets и не превращается в отдельный товар.",
+      "examples": ["Говядина 5 кг, обязательно мраморная", "Сливки 12 шт, по 1 литру", "Комментарий ко всей заявке: привезти утром"],
+      "test_refs": [
+        "tests/conversation/test_comment_handling.py::test_comment_is_not_part_of_product_name_and_reaches_submission_row",
+        "tests/conversation/test_comment_handling.py::test_global_comment_is_appended_to_every_item_comment_and_order_row"
+      ]
+    },
+    {
+      "id": "DRF-01",
+      "category": "draft",
+      "title": "Показать текущий черновик",
+      "priority": "important",
+      "channels": ["Текст", "Голос", "Кнопка"],
+      "precondition": "Пользователь находится на любом шаге диалога.",
+      "user_action": "Просит показать заявку или возвращается кнопкой.",
+      "bot_response": "Открывает актуальный черновик, не добавляя слова команды как товар.",
+      "result": "Пользователь видит текущие позиции, количества и доступные действия.",
+      "examples": ["Покажи черновик", "Что у меня в заявке?", "Вернись в корзину"],
+      "test_refs": [
+        "tests/conversation/test_global_voice_navigation.py::test_global_voice_show_cart_works_from_every_stage",
+        "tests/input/test_voice_route_matrix.py::test_free_form_navigation_does_not_consume_real_product_names"
+      ]
+    },
+    {
+      "id": "DRF-02",
+      "category": "draft",
+      "title": "Продолжить добавление товаров",
+      "priority": "important",
+      "channels": ["Текст", "Голос", "Кнопка"],
+      "precondition": "В черновике уже есть обработанные позиции.",
+      "user_action": "Просит добавить ещё товары и отправляет следующий список.",
+      "bot_response": "Переходит в режим добавления, сохраняя существующий черновик.",
+      "result": "Новые позиции добавляются к текущей заявке.",
+      "examples": ["Добавить ещё товары", "Давай внесём ещё что-нибудь", "Хочу еще позиции"],
+      "test_refs": [
+        "tests/input/test_voice_route_matrix.py::test_live_voice_wording_routes_before_product_parsing",
+        "tests/conversation/test_add_more_prompt.py::test_successful_addition_asks_whether_to_add_more"
+      ]
+    },
+    {
+      "id": "DRF-03",
+      "category": "draft",
+      "title": "Очистить текущую заявку",
+      "priority": "critical",
+      "channels": ["Текст", "Голос", "Кнопка"],
+      "precondition": "В черновике есть товары или незавершённые уточнения.",
+      "user_action": "Явно просит полностью очистить заявку.",
+      "bot_response": "Удаляет только текущий черновик и возвращает экран новой заявки.",
+      "result": "Черновик пуст; история ранее отправленных заявок не удаляется.",
+      "examples": ["Очисти заявку", "Удали всё из корзины", "Сбрось черновик"],
+      "test_refs": [
+        "tests/conversation/test_state_transitions.py::test_clear_cart_removes_draft_and_returns_to_collecting"
+      ]
+    },
+    {
+      "id": "DRF-04",
+      "category": "draft",
+      "title": "Новая заявка при активном черновике",
+      "priority": "critical",
+      "channels": ["Текст", "Голос", "Кнопка"],
+      "precondition": "Текущая заявка ещё не отправлена и содержит товары.",
+      "user_action": "Говорит «новый заказ», затем подтверждает или отменяет очистку.",
+      "bot_response": "Предупреждает о сохранённом черновике и не очищает его без отдельного подтверждения.",
+      "result": "При подтверждении открывается пустая заявка; при отказе старый черновик сохраняется.",
+      "examples": ["Новый заказ", "Да, начать новую", "Нет, оставить черновик"],
+      "test_refs": [
+        "tests/conversation/test_new_order_flow.py::test_new_order_with_active_draft_requires_confirmation",
+        "tests/conversation/test_new_order_flow.py::test_rejecting_new_order_keeps_active_draft"
+      ]
+    },
+    {
+      "id": "DRF-05",
+      "category": "draft",
+      "title": "Новая заявка после отправки",
+      "priority": "critical",
+      "channels": ["Текст", "Голос", "Кнопка"],
+      "precondition": "Предыдущая заявка успешно отправлена.",
+      "user_action": "Говорит «новый заказ» или нажимает кнопку «Новая заявка».",
+      "bot_response": "Сразу открывает пустой черновик без лишнего подтверждения.",
+      "result": "История и номер предыдущей заявки сохраняются, новая заявка начинается с нуля.",
+      "examples": ["Новый заказ", "Хочу оформить ещё одну заявку", "Новая заявка"],
+      "test_refs": [
+        "tests/conversation/test_new_order_flow.py::test_new_order_after_submission_starts_empty_draft_and_preserves_history",
+        "tests/conversation/test_new_order_flow.py::test_success_card_new_order_callback_preserves_tracking"
+      ]
+    },
+    {
+      "id": "SUB-01",
+      "category": "submission",
+      "title": "Переход к финальной проверке",
+      "priority": "critical",
+      "channels": ["Текст", "Голос", "Кнопка"],
+      "precondition": "В черновике есть товары.",
+      "user_action": "Просит оформить или отправить заявку.",
+      "bot_response": "Сначала проверяет незавершённые позиции и показывает итоговую карточку.",
+      "result": "До явного финального подтверждения внешняя отправка не запускается.",
+      "examples": ["Оформи заявку", "Я всё добавил", "Перейти к проверке заявки"],
+      "test_refs": [
+        "tests/conversation/test_state_transitions.py::test_submit_request_opens_final_review_without_enqueuing",
+        "tests/submission/test_submission_guards.py::test_submit_request_stops_on_first_unresolved_item"
+      ]
+    },
+    {
+      "id": "SUB-02",
+      "category": "submission",
+      "title": "Не набрана минимальная сумма поставщика",
+      "priority": "important",
+      "channels": ["Текст", "Голос", "Кнопка"],
+      "precondition": "Хотя бы у одного поставщика сумма заказа меньше минимальной.",
+      "user_action": "Открывает предупреждение и выбирает: добавить товары либо принять риск.",
+      "bot_response": "Показывает поставщика и недостающую сумму, предлагает понятные действия.",
+      "result": "Пользователь осознанно дополняет заявку или отправляет её как есть.",
+      "examples": ["Проверь минималку", "Добавить товары поставщика", "Отправить как есть"],
+      "test_refs": [
+        "tests/supplier/test_supplier_minimum.py::test_supplier_minimum_warning_shows_gap_and_recovery_actions"
+      ]
+    },
+    {
+      "id": "SUB-03",
+      "category": "submission",
+      "title": "Успешная отправка и номер заявки",
+      "priority": "critical",
+      "channels": ["Кнопка"],
+      "precondition": "Все обязательные уточнения завершены, пользователь подтверждает отправку.",
+      "user_action": "Нажимает «Отправить поставщику».",
+      "bot_response": "Записывает заявку, очищает отправленный черновик и показывает номер с кнопками статуса и новой заявки.",
+      "result": "Каждая позиция записана один раз; пользователь видит подтверждение.",
+      "examples": ["Отправить поставщику", "Проверить статус", "Новая заявка"],
+      "test_refs": [
+        "tests/submission/test_submission.py::test_successful_submission_clears_cart_checkpoint_and_marks_state_submitted",
+        "tests/submission/test_submission.py::test_submission_success_card_matches_n8n"
+      ]
+    },
+    {
+      "id": "SUB-04",
+      "category": "submission",
+      "title": "Статус отправленных заявок",
+      "priority": "important",
+      "channels": ["Текст", "Голос", "Кнопка"],
+      "precondition": "У пользователя есть хотя бы одна отправленная заявка.",
+      "user_action": "Просит показать статусы.",
+      "bot_response": "Показывает последние отслеживаемые заявки, сгруппированные по номеру.",
+      "result": "Пользователь видит статус и дату доставки, не затрагивая текущий черновик.",
+      "examples": ["Проверь статус последней заявки", "Мои заявки", "Заявка ушла?"],
+      "test_refs": [
+        "tests/submission/test_submission.py::test_order_status_renderer_groups_rows_by_order_number",
+        "tests/submission/test_submission.py::test_order_status_limits_to_ten_tracked_orders_and_formats_delivery_date"
+      ]
+    },
+    {
+      "id": "SUB-05",
+      "category": "submission",
+      "title": "Временный сбой при отправке",
+      "priority": "critical",
+      "channels": ["Системный"],
+      "precondition": "Telegram, Google Sheets или сеть временно не отвечают.",
+      "user_action": "Ждёт результат либо повторяет действие после сообщения об ошибке.",
+      "bot_response": "Безопасно повторяет только допустимый этап и не создаёт вторую заявку.",
+      "result": "Успешно записанная заявка не дублируется; подтверждённая ошибка отображается после исчерпания повторов.",
+      "examples": ["Повторить отправку", "К черновику"],
+      "test_refs": [
+        "tests/submission/test_submission.py::test_transient_submission_error_is_retried_without_premature_failure_card",
+        "tests/submission/test_submission.py::test_retry_delivers_success_card_after_order_was_already_finalized"
+      ]
+    },
+    {
+      "id": "SAF-01",
+      "category": "safety",
+      "title": "«Не добавляй» не добавляет товар",
+      "priority": "critical",
+      "channels": ["Текст", "Голос"],
+      "precondition": "Бот уточняет товар, единицу, дубликат или запрос снабженцу.",
+      "user_action": "Отказывается от текущей позиции естественной фразой.",
+      "bot_response": "Пропускает только текущую позицию и не воспринимает отрицание как подтверждение.",
+      "result": "Товар не появляется в черновике, остальные позиции сохраняются.",
+      "examples": ["Не добавляй эту позицию", "Убери этот товар", "Нет, это не нужно"],
+      "test_refs": [
+        "tests/conversation/test_voice_route_safety.py::test_negative_item_phrases_skip_unit_mismatch_without_confirming_quantity",
+        "tests/input/test_voice_route_matrix.py::test_common_text_and_voice_phrasings_are_deterministic"
+      ]
+    },
+    {
+      "id": "SAF-02",
+      "category": "safety",
+      "title": "«Не отправляй» отменяет отправку",
+      "priority": "critical",
+      "channels": ["Текст", "Голос"],
+      "precondition": "Пользователь находится на финальной проверке или подтверждении отправки.",
+      "user_action": "Отказывается от отправки.",
+      "bot_response": "Возвращает к безопасному экрану и не ставит задачу отправки.",
+      "result": "Google Sheets не изменяется, черновик остаётся доступным.",
+      "examples": ["Не отправляй", "Нет, не надо отправлять", "Я передумал"],
+      "test_refs": [
+        "tests/conversation/test_voice_route_safety.py::test_negative_submit_phrases_never_submit_order"
+      ]
+    },
+    {
+      "id": "SAF-03",
+      "category": "safety",
+      "title": "Отрицание не запускает новую заявку",
+      "priority": "critical",
+      "channels": ["Текст", "Голос"],
+      "precondition": "У пользователя есть активный или отправленный заказ.",
+      "user_action": "Произносит фразу с отрицанием либо товар, в названии которого встречаются командные слова.",
+      "bot_response": "Учитывает отрицание и контекст; не очищает заявку и не маршрутизирует товар как команду.",
+      "result": "Состояние заявки не меняется ошибочно.",
+      "examples": ["Не начинай новый заказ", "Новый картофель 5 кг", "Не хочу новую заявку"],
+      "test_refs": [
+        "tests/input/test_voice_route_matrix.py::test_new_order_navigation_does_not_override_negation_or_product_quantity",
+        "tests/input/test_voice_route_matrix.py::test_command_words_inside_product_lines_remain_products"
+      ]
+    },
+    {
+      "id": "SAF-04",
+      "category": "safety",
+      "title": "Устаревшая кнопка не меняет черновик",
+      "priority": "critical",
+      "channels": ["Кнопка"],
+      "precondition": "Пользователь нажимает кнопку из старого сообщения после изменения заявки.",
+      "user_action": "Нажимает ранее показанный вариант товара или действие.",
+      "bot_response": "Проверяет ревизию состояния и отклоняет устаревшее действие.",
+      "result": "Актуальный черновик остаётся неизменным.",
+      "examples": ["Нажатие старой кнопки выбора", "Повторное нажатие после обновления карточки"],
+      "test_refs": [
+        "tests/telegram/test_callback_contract.py::test_stale_callback_cannot_mutate_current_draft"
+      ]
+    },
+    {
+      "id": "RCV-01",
+      "category": "recovery",
+      "title": "Голос не удалось распознать",
+      "priority": "edge",
+      "channels": ["Голос"],
+      "precondition": "Основная транскрипция пустая либо аудио не содержит понятной команды.",
+      "user_action": "Отправляет голосовое сообщение.",
+      "bot_response": "Использует резервную модель, а при пустом результате просит повторить или написать текстом.",
+      "result": "Пустая транскрипция не выбирает товар и не меняет черновик.",
+      "examples": ["Неразборчивое аудио", "Тихая запись", "Пустая голосовая команда"],
+      "test_refs": [
+        "tests/ai/test_ai_media.py::test_voice_transcription_uses_fallback_when_primary_returns_empty",
+        "tests/input/test_voice_input_contract.py::test_empty_voice_add_items_uses_the_source_recovery_card"
+      ]
+    },
+    {
+      "id": "RCV-02",
+      "category": "recovery",
+      "title": "На фото нет заполненных количеств",
+      "priority": "critical",
+      "channels": ["Фото", "Файл-изображение"],
+      "precondition": "На фотографии видны названия и справочные числа, но нет заполненного заказа.",
+      "user_action": "Отправляет такую фотографию.",
+      "bot_response": "Не использует фасовку, остаток или случайное число как количество заказа.",
+      "result": "В черновик не добавляются строки без доказанного положительного количества.",
+      "examples": ["Пустой бланк заказа", "Таблица только с фасовкой", "Фото без рукописных количеств"],
+      "test_refs": [
+        "tests/ai/test_ai_media.py::test_photo_drops_every_item_without_actual_order_quantity",
+        "tests/conversation/test_engine.py::test_photo_without_order_quantities_does_not_create_draft_items"
+      ]
+    },
+    {
+      "id": "RCV-03",
+      "category": "recovery",
+      "title": "Недоступен справочник заведений",
+      "priority": "edge",
+      "channels": ["Текст"],
+      "precondition": "Справочник не настроен или временно недоступен.",
+      "user_action": "Отправляет код подключения.",
+      "bot_response": "Сообщает, что код сейчас не удалось проверить, и предлагает повторить позже.",
+      "result": "Бот не создаёт ложную привязку и не показывает технический traceback пользователю.",
+      "examples": ["12345", "/start 12345"],
+      "test_refs": [
+        "tests/venue/test_venue_registration.py::test_directory_reports_missing_configuration_before_http_call",
+        "tests/venue/test_venue_registration.py::test_directory_does_not_cache_transport_errors"
+      ]
+    },
+    {
+      "id": "RCV-04",
+      "category": "recovery",
+      "title": "Общая ошибка обработки сообщения",
+      "priority": "edge",
+      "channels": ["Текст", "Голос", "Фото"],
+      "precondition": "Во время обработки возникает непредвиденная техническая ошибка.",
+      "user_action": "Отправляет сообщение любого поддерживаемого типа.",
+      "bot_response": "Фиксирует безопасную контрольную точку и показывает короткое сообщение без внутренних данных.",
+      "result": "Пользователь может повторить действие; секреты и traceback не попадают в обычный ответ.",
+      "examples": ["Повторить сообщение", "Открыть черновик после ошибки"],
+      "test_refs": [
+        "tests/conversation/test_orchestrator_pipeline.py::test_pipeline_failure_is_checkpointed_and_user_gets_safe_reply",
+        "tests/conversation/test_orchestrator_pipeline.py::test_checkpointed_result_retries_only_telegram_delivery"
+      ]
+    }
+  ]
+}

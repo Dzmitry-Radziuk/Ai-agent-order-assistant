@@ -553,6 +553,20 @@ python -m pytest tests/ai/test_ai_media.py::test_ai_cannot_turn_a_product_name_i
 
 Production-код проверяется Ruff на короткие однострочные docstring. Docstring пишутся на русском языке.
 
+## Пользовательские сценарии
+
+- [Полный каталог сценариев](docs/USER_SCENARIOS.md) — действия сотрудника кафе, ответы бота, результаты и Mermaid-схемы;
+- [HTML-каталог](docs/user-scenarios/index.html) — локальная страница с поиском и фильтрами;
+- [Единый источник](docs/user-scenarios/scenarios.json) — данные, из которых генерируются оба представления.
+
+Чтобы обновить Markdown и HTML после изменения сценариев:
+
+```powershell
+.\.venv\Scripts\python.exe scripts\generate_user_scenarios.py
+```
+
+HTML-файл автономный: его можно открыть двойным щелчком в браузере, сервер и интернет не нужны.
+
 ## GitLab CI
 
 CI использует корпоративные шаблоны DevOps. Фактическая последовательность:
@@ -634,6 +648,7 @@ docker compose logs migrate api worker
 
 ## Документация для эксплуатации
 
+- [docs/USER_SCENARIOS.md](docs/USER_SCENARIOS.md) — пользовательские маршруты, ожидаемые ответы и связанные pytest-тесты;
 - [README-DEVOPS.md](README-DEVOPS.md) — сервер, GitLab Variables, первый deploy, CI/CD, backup, rollback, мониторинг;
 - [SECURITY.md](SECURITY.md) — требования безопасности;
 - [tests/README.md](tests/README.md) — структура тестов.

@@ -288,6 +288,111 @@ def collapse_comment_shadow_items(
     return [item for index, item in enumerate(items) if index not in shadow_indexes]
 
 
+def _strip_global_comment_scope(value: str) -> str:
+    """Удаляет слова охвата из начала уже распознанного общего комментария."""
+    comment = clean_text(value).strip(" .,;:-—–")
+    if not comment:
+        return ""
+    comment = re.sub(
+        r"^(?:(?:и|а)\s+)?(?:все|всё|всем|для всех)"
+        r"(?:\s+(?:товаров|товары|позиций|позиции))?"
+        r"(?:\s*[,;:—–-]\s*|\s+)",
+        "",
+        comment,
+        flags=re.I,
+    )
+    return clean_text(comment).strip(" .,;:-—–")
+
+
+def _remove_matching_quantity(
+    text: str,
+    quantity: float | None,
+    unit: str,
+) -> tuple[str, bool]:
+    """Удаляет из остатка строки указанное заказанное количество."""
+    if quantity is None:
+        return text, True
+    words = list(re.finditer(r"\d+(?:[,.]\d+)?|[a-zа-яё]+", text, flags=re.I))
+    tokens = [normalize_text(match.group()) for match in words]
+    expected_unit = normalize_unit(unit)
+    for index in range(len(tokens)):
+        parsed = parse_number_words(tokens, index)
+        if parsed is None:
+            continue
+        parsed_quantity, end = parsed
+        if abs(parsed_quantity - quantity) > 1e-9:
+            continue
+        actual_unit = ""
+        span_end = words[end - 1].end()
+        if end < len(tokens) and tokens[end] in UNIT_ALIASES:
+            actual_unit = normalize_unit(tokens[end])
+            span_end = words[end].end()
+        if expected_unit and actual_unit != expected_unit:
+            continue
+        return f"{text[: words[index].start()]} {text[span_end:]}", True
+    return text, False
+
+
+def _recover_missing_item_comments(
+    items: list[dict[str, Any]],
+    global_comment: str,
+) -> None:
+    """Восстанавливает пропущенный локальный комментарий из строки его товара."""
+    source_counts: dict[str, int] = {}
+    for item in items:
+        source = normalize_text(item.get("source_line")).strip(" .,;:-—–")
+        if source:
+            source_counts[source] = source_counts.get(source, 0) + 1
+
+    for item in items:
+        if clean_text(item.get("comment")) or clean_text(
+            item.get("user_comment_to_supplier")
+        ):
+            continue
+        source = normalize_text(item.get("source_line")).strip(" .,;:-—–")
+        query = normalize_text(item.get("product_query")).strip(" .,;:-—–")
+        if not source or not query or source_counts.get(source, 0) != 1:
+            continue
+        query_match = re.search(
+            rf"(?<![a-zа-яё0-9]){re.escape(query)}(?![a-zа-яё0-9])",
+            source,
+            flags=re.I,
+        )
+        if query_match is None:
+            continue
+
+        remainder = f"{source[: query_match.start()]} {source[query_match.end() :]}"
+        normalized_global = normalize_text(global_comment).strip(" .,;:-—–")
+        if normalized_global:
+            remainder = re.sub(
+                re.escape(normalized_global),
+                " ",
+                remainder,
+                count=1,
+                flags=re.I,
+            )
+        remainder, quantity_removed = _remove_matching_quantity(
+            remainder,
+            to_float(item.get("quantity")),
+            clean_text(item.get("unit")),
+        )
+        if not quantity_removed:
+            continue
+        remainder = re.sub(
+            r"(?:\b(?:и|а)\s+)?(?:все|всё|всем|для всех)"
+            r"(?:\s+(?:товаров|товары|позиций|позиции))?\s*$",
+            " ",
+            remainder,
+            flags=re.I,
+        )
+        remainder = re.sub(r"^(?:и|а также|а)\s+", "", remainder, flags=re.I)
+        remainder = re.sub(r"\s+(?:и|а также|а)$", "", remainder, flags=re.I)
+        recovered = clean_text(remainder).strip(" .,;:-—–")
+        if recovered:
+            item["comment"] = recovered
+            item["user_comment_to_supplier"] = recovered
+
+
 def recover_omitted_explicit_items(payload: dict[str, Any], source_text: str) -> dict[str, Any]:
     """Восстанавливает пропущенные явно названные товары."""
     items = list(payload.get("items") or [])
@@ -323,8 +428,11 @@ def recover_omitted_explicit_items(payload: dict[str, Any], source_text: str) ->
         known_queries.append(recovered_query)
 
     restored = restore_explicit_order_terms(items, source_text)
+    global_comment = _strip_global_comment_scope(clean_text(payload.get("global_comment")))
+    payload["global_comment"] = global_comment
+    _recover_missing_item_comments(restored, global_comment)
     payload["items"] = collapse_comment_shadow_items(
-        restored, clean_text(payload.get("global_comment"))
+        restored, global_comment
     )
     return payload
 
@@ -362,6 +470,8 @@ _TEXT_SYSTEM = """
 - Пример: «говядина 10 кг мраморная без кожи» → product_query="говядина", quantity=10, unit="кг", comment="мраморная без кожи".
 - Пример с опечаткой: «сироп рза холодным» → product_query="сироп рза", comment="холодным".
 - Пример общего комментария: «всё привезти до 9 утра» → global_comment="привезти до 9 утра" и не создавай из него товар.
+- Пример локальных и общего комментариев: «сироп тархун в бутылках 10 шт, сироп роза 1 шт в банках, и всё желательно на завтра»
+  → у тархуна comment="в бутылках", у розы comment="в банках", global_comment="желательно на завтра".
 - Не выдумывай товар, количество, бренд, поставщика или характеристики.
 - Если количество без единицы, сохрани число, а unit оставь пустым.
 - Число в фасовке или объёме внутри названия не является количеством заказа, если заказанное количество указано отдельно после тире или в конце.
@@ -556,6 +666,12 @@ class OpenAIService:
             if item.get("user_comment_to_supplier") and not item.get("comment"):
                 item["comment"] = item["user_comment_to_supplier"]
         command = ParsedCommand.model_validate(payload)
+        if command.global_comment and not command.items:
+            # A standalone request such as «добавь общий комментарий:
+            # желательно на завтра» modifies the current draft.  It is not a
+            # request to add products, even if the deterministic fallback
+            # split the words «комментарий» and «общий» into fake items.
+            command = command.model_copy(update={"intent": Intent.ADD_ITEMS})
         if (
             command.intent == Intent.ADD_MORE
             and deterministic.intent == Intent.ADD_ITEMS

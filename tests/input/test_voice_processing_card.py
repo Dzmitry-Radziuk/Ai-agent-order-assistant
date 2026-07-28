@@ -5,10 +5,12 @@ import httpx
 from openai import APITimeoutError
 
 from restaurant_bot.domain.models import (
+    CartItem,
     ConversationState,
     ExtractedItem,
     InputKind,
     Intent,
+    ItemStatus,
     ParsedCommand,
     SessionStage,
     TelegramEvent,
@@ -103,6 +105,81 @@ def test_exact_visible_action_with_terminal_punctuation_does_not_retry_transcrip
         "К черновику.",
         state,
     )
+
+
+def _awaiting_kilograms_state() -> ConversationState:
+    """Создаёт состояние ожидания количества текущего товара в килограммах."""
+    item = CartItem(
+        id="squid",
+        source_query="Кальмар командорский",
+        catalog_product_id="squid-product",
+        catalog_name="Кальмар командорский",
+        quantity=1,
+        unit="шт",
+        catalog_unit="кг",
+        status=ItemStatus.UNIT_MISMATCH,
+    )
+    return ConversationState(
+        stage=SessionStage.AWAIT_UNIT_QUANTITY,
+        current_issue_item_id=item.id,
+        cart=[item],
+    )
+
+
+def test_unexpected_unit_in_short_quantity_voice_triggers_high_accuracy_retry() -> None:
+    """Перепроверяет короткий голос, если модель спутала граммы с килограммами."""
+    state = _awaiting_kilograms_state()
+
+    assert UpdateOrchestrator._requires_high_accuracy_transcription("Один грамм.", state)
+    assert not UpdateOrchestrator._requires_high_accuracy_transcription(
+        "Один килограмм.",
+        state,
+    )
+
+
+def test_quantity_voice_prompt_contains_expected_catalog_unit() -> None:
+    """Передаёт модели товар и ожидаемую единицу открытой карточки."""
+    prompt = UpdateOrchestrator._voice_transcription_prompt(_awaiting_kilograms_state())
+
+    assert "Кальмар командорский" in prompt
+    assert "в кг" in prompt
+    assert "грамм" in prompt
+    assert "килограмм" in prompt
+
+
+def test_high_accuracy_retry_corrects_gram_kilogram_confusion(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    """Использует уточнённую расшифровку перед применением количества."""
+    audio = tmp_path / "voice.ogg"
+    audio.write_bytes(b"voice")
+    orchestrator = object.__new__(UpdateOrchestrator)
+    orchestrator.telegram = MagicMock()
+    orchestrator.telegram.download_file.return_value = SimpleNamespace(
+        path=audio,
+        mime_type="audio/ogg",
+    )
+    orchestrator.openai = MagicMock()
+    orchestrator.openai.transcribe.side_effect = [
+        "Один грамм.",
+        "Один килограмм.",
+    ]
+    orchestrator._parse_text_in_context = MagicMock(
+        return_value=ParsedCommand(intent=Intent.EDIT_QUANTITY, edit_quantity=1, edit_unit="кг")
+    )
+    state = _awaiting_kilograms_state()
+    event = TelegramEvent(
+        update_id=12,
+        chat_id="77",
+        input_type=InputKind.VOICE,
+        file_id="voice-3",
+        mime_type="audio/ogg",
+    )
+
+    command = orchestrator._parse(event, state)
+
+    assert command.text == "Один килограмм."
+    orchestrator._parse_text_in_context.assert_called_once_with("Один килограмм.", state)
+    assert orchestrator.openai.transcribe.call_count == 2
+    assert orchestrator.openai.transcribe.call_args_list[1].kwargs["high_accuracy"] is True
 
 
 def test_high_accuracy_retry_cannot_truncate_a_full_product_list() -> None:

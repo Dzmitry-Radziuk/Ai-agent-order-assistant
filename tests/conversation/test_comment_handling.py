@@ -100,6 +100,156 @@ def test_global_comment_is_appended_to_every_item_comment_and_order_row(settings
     ]
 
 
+def test_late_global_comment_applies_to_existing_and_new_items_without_overlap(
+    settings,
+) -> None:  # type: ignore[no-untyped-def]
+    """Применяет поздний общий комментарий ко всей заявке без повторения у нового товара."""
+    engine = ConversationEngine(settings)
+    existing = engine._build_item(
+        ExtractedItem(product_query="срп трхн", quantity=10, unit="шт")
+    )
+    existing.catalog_product_id = "tarhun"
+    existing.catalog_name = "Сироп Тархун, 1л"
+    existing.status = ItemStatus.MATCHED
+    skipped = engine._build_item(
+        ExtractedItem(product_query="кальмар", quantity=1, unit="шт")
+    )
+    skipped.status = ItemStatus.SKIPPED
+    state = ConversationState(restaurant="Кафе", cart=[skipped, existing])
+    catalog = [
+        CatalogProduct(
+            product_id="rose",
+            name="Сироп Роза, 1л",
+            supplier="МБР",
+            unit="шт",
+            comment="тест",
+        )
+    ]
+
+    result = engine.handle(
+        _event(),
+        ParsedCommand(
+            intent=Intent.ADD_ITEMS,
+            global_comment="желательно на завтра",
+            items=[
+                ExtractedItem(
+                    product_query="срп роза",
+                    quantity=1,
+                    unit="шт",
+                    comment="в банках и всё желательно на завтра",
+                )
+            ],
+        ),
+        state,
+        catalog,
+    )
+
+    assert result.state.cart[0].comment == ""
+    assert result.state.cart[1].comment == "желательно на завтра"
+    assert result.state.cart[2].comment == "тест; в банках; желательно на завтра"
+    pending = engine._prepare_submission(_event(), result.state)
+    assert pending.state.pending_submission is not None
+    assert [row["Комментарий"] for row in pending.state.pending_submission.rows] == [
+        "желательно на завтра",
+        "тест; в банках; желательно на завтра",
+    ]
+
+
+def test_recovered_local_comments_reach_each_own_order_row(settings) -> None:  # type: ignore[no-untyped-def]
+    """Записывает восстановленные локальные комментарии только в строки их товаров."""
+    engine = ConversationEngine(settings)
+    catalog = [
+        CatalogProduct(
+            product_id="tarhun",
+            name="Сироп Тархун, 1л",
+            supplier="МБР",
+            unit="шт",
+        ),
+        CatalogProduct(
+            product_id="rose",
+            name="Сироп Роза, 1л",
+            supplier="МБР",
+            unit="шт",
+        ),
+    ]
+    command = ParsedCommand(
+        intent=Intent.ADD_ITEMS,
+        global_comment="желательно на завтра",
+        items=[
+            ExtractedItem(
+                product_query="Сироп Тархун",
+                quantity=10,
+                unit="шт",
+                comment="в бутылках",
+                source_line="Сироп Тархун в бутылках 10 штук",
+            ),
+            ExtractedItem(
+                product_query="Сироп Роза",
+                quantity=1,
+                unit="шт",
+                comment="в банках",
+                source_line="Сироп Роза 1 штука в банках",
+            ),
+        ],
+    )
+
+    result = engine.handle(
+        _event(),
+        command,
+        ConversationState(restaurant="Кафе"),
+        catalog,
+    )
+
+    assert [item.comment for item in result.state.cart] == [
+        "в бутылках; желательно на завтра",
+        "в банках; желательно на завтра",
+    ]
+    pending = engine._prepare_submission(_event(), result.state)
+    assert pending.state.pending_submission is not None
+    assert [row["Комментарий"] for row in pending.state.pending_submission.rows] == [
+        "в бутылках; желательно на завтра",
+        "в банках; желательно на завтра",
+    ]
+
+
+def test_standalone_global_comment_updates_active_draft_once(settings) -> None:  # type: ignore[no-untyped-def]
+    """Обрабатывает отдельную голосовую команду общего комментария без ложных товаров."""
+    engine = ConversationEngine(settings)
+    first = engine._build_item(
+        ExtractedItem(product_query="сироп тархун", quantity=10, unit="шт")
+    )
+    first.status = ItemStatus.MATCHED
+    second = engine._build_item(
+        ExtractedItem(
+            product_query="сироп роза",
+            quantity=1,
+            unit="шт",
+            comment="в банках",
+        )
+    )
+    second.status = ItemStatus.MATCHED
+    state = ConversationState(cart=[first, second])
+    event = TelegramEvent(
+        update_id=2,
+        chat_id="123456",
+        input_type=InputKind.VOICE,
+        text="Добавь общий комментарий: желательно на завтра",
+    )
+    command = ParsedCommand(
+        intent=Intent.ADD_ITEMS,
+        text=event.text,
+        global_comment="желательно на завтра",
+    )
+
+    result = engine.handle(event, command, state, [])
+    repeated = engine.handle(event, command, result.state, [])
+
+    assert len(repeated.state.cart) == 2
+    assert repeated.state.cart[0].comment == "желательно на завтра"
+    assert repeated.state.cart[1].comment == "в банках; желательно на завтра"
+    assert "Применён ко всем товарам: 2" in repeated.reply.text
+
+
 def test_parser_keeps_trailing_comment_after_quantity_out_of_product_name() -> None:
     """Проверяет, что парсер сохраняет после количества комментарий after количество исключено для товар название."""
     items = parse_product_lines("сироп роза 10 штук охлаждённым")

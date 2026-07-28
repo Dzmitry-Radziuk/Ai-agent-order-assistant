@@ -77,6 +77,7 @@ from restaurant_bot.services.replies import (
 from restaurant_bot.services.text import (
     UNIT_ALIASES,
     convert_quantity,
+    escape,
     normalize_text,
     normalize_unit,
     parse_number_words,
@@ -119,6 +120,12 @@ class ConversationEngine:
         command = self._contextual_negative_command(command, event, state)
         command = self._contextual_quantity_command(command, event.text, state)
         command = self._contextual_voice_command(command, event, state)
+        if command.intent in {
+            Intent.SUBMIT_REQUEST,
+            Intent.SHOW_FINAL_REVIEW,
+            Intent.CHECK_MIN_SUM,
+        }:
+            self._refresh_cart_order_values(state, catalog)
         if (
             state.stage == SessionStage.AWAIT_ADD_MORE_CONFIRM
             and command.intent == Intent.ADD_ITEMS
@@ -580,6 +587,22 @@ class ConversationEngine:
                 )
 
         if command.intent == Intent.ADD_ITEMS:
+            if command.global_comment:
+                self._apply_global_comment(state, command.global_comment)
+            if command.global_comment and not command.items:
+                active_count = sum(
+                    item.status != ItemStatus.SKIPPED for item in state.cart
+                )
+                return EngineResult(
+                    state=state,
+                    reply=BotReply(
+                        text=(
+                            "✅ <b>Общий комментарий добавлен</b>\n\n"
+                            f"{escape(command.global_comment)}\n\n"
+                            f"Применён ко всем товарам: {active_count}."
+                        )
+                    ),
+                )
             if event.input_type == InputKind.VOICE and not command.items:
                 return EngineResult(state=state, reply=unrecognized_voice_reply(state))
             if event.input_type == InputKind.PHOTO and not command.items:
@@ -704,6 +727,7 @@ class ConversationEngine:
             Intent.CHECK_MIN_SUM,
             Intent.CLARIFY_CURRENT,
             Intent.CLEAR_CART,
+            Intent.ENTER_OTHER_QUANTITY,
             Intent.START_NEW_ORDER,
             Intent.GREETING,
             Intent.HELP,
@@ -745,9 +769,7 @@ class ConversationEngine:
     def _build_item(self, extracted: ExtractedItem, global_comment: str = "") -> CartItem:
         """Создаёт позицию черновика из распознанного товара."""
         item_comment = extracted.comment or extracted.user_comment_to_supplier
-        comments = [
-            part.strip() for part in (item_comment, global_comment) if part and part.strip()
-        ]
+        item_comment = self._remove_global_comment_overlap(item_comment, global_comment)
         return CartItem(
             id=uuid4().hex[:12],
             source_query=extracted.product_query,
@@ -758,7 +780,7 @@ class ConversationEngine:
             unit=normalize_unit(extracted.unit),
             department=extracted.department or self.settings.default_department,
             supplier_hint=extracted.supplier_hint,
-            comment="; ".join(dict.fromkeys(comments)),
+            comment=self._merge_comments(item_comment, global_comment),
         )
 
     @staticmethod
@@ -787,6 +809,18 @@ class ConversationEngine:
             if item.quantity is not None:
                 return item.quantity, item.unit
         return None, ""
+
+    @staticmethod
+    def _mentions_expected_unit(text: str, expected_unit: str) -> bool:
+        """Проверяет, упомянул ли пользователь единицу открытой позиции."""
+        normalized_expected = normalize_unit(expected_unit)
+        if not normalized_expected:
+            return False
+        words = re.findall(r"[a-zа-яё]+", normalize_text(text), flags=re.I)
+        return any(
+            word in UNIT_ALIASES and normalize_unit(word) == normalized_expected
+            for word in words
+        )
 
     def _contextual_quantity_command(
         self,
@@ -867,6 +901,21 @@ class ConversationEngine:
                 )
 
         if current.status == ItemStatus.UNIT_MISMATCH:
+            rejects_quantity_change = has_negated_action(
+                phrase,
+                "добав",
+                "введ",
+                "укаж",
+                "постав",
+                "закаж",
+                "возьм",
+                "измен",
+                "поменя",
+                "перевед",
+                "конверт",
+            )
+            if rejects_quantity_change:
+                return command
             if quantity is not None:
                 return command.model_copy(
                     update={
@@ -876,9 +925,9 @@ class ConversationEngine:
                         "target_query": "",
                     }
                 )
-            if add_to_current or "перевед" in phrase:
+            if add_to_current or "перевед" in phrase or "конверт" in phrase:
                 return command.model_copy(update={"intent": Intent.USE_CATALOG_UNIT})
-            if correction:
+            if correction or self._mentions_expected_unit(phrase, current.catalog_unit):
                 return command.model_copy(update={"intent": Intent.ENTER_OTHER_QUANTITY})
 
         if current.status == ItemStatus.MISSING_QTY and quantity is not None:
@@ -1608,6 +1657,27 @@ class ConversationEngine:
             item.suggested_quantity = None
         item.status = ItemStatus.MATCHED
 
+    def _refresh_cart_order_values(
+        self,
+        state: ConversationState,
+        catalog: list[CatalogProduct],
+    ) -> None:
+        """Обновляет сумму и количество из строки каждого выбранного товара."""
+        products_by_id = {product.product_id: product for product in catalog}
+        for item in state.cart:
+            if item.status != ItemStatus.MATCHED or not item.catalog_product_id:
+                continue
+            product = products_by_id.get(item.catalog_product_id)
+            if product is None:
+                continue
+            item.supplier_current_sum = product.supplier_current_sum
+            item.existing_quantity = (
+                product.department_quantities.for_department(item.department) or 0
+            )
+            item.supplier_minimum_amount = product.supplier_minimum_amount
+            item.minimum_multiple = product.minimum_multiple
+            item.suggested_quantity = self._suggested_quantity_for_multiple(item)
+
     @staticmethod
     def _reconcile_quantity_with_catalog_name(item: CartItem, product_name: str) -> None:
         """Отделяет количество заказа от фасовки в полном названии."""
@@ -1666,8 +1736,38 @@ class ConversationEngine:
                 key = comment.casefold()
                 if comment and key not in seen:
                     result.append(comment)
-                    seen.add(key)
+                seen.add(key)
         return "; ".join(result)
+
+    @staticmethod
+    def _remove_global_comment_overlap(item_comment: str, global_comment: str) -> str:
+        """Удаляет общую часть, которую ИИ также включил в комментарий позиции."""
+        item_text = " ".join(str(item_comment or "").split()).strip(" .,;")
+        global_text = " ".join(str(global_comment or "").split()).strip(" .,;")
+        if not item_text or not global_text:
+            return item_text
+        match = re.search(re.escape(global_text), item_text, flags=re.I)
+        if match is None:
+            return item_text
+        remaining = f"{item_text[: match.start()]} {item_text[match.end() :]}"
+        remaining = re.sub(
+            r"(?:\b(?:и|а)\s+)?(?:все|всё|всем|для всех)\s*(?=$|[,;])",
+            " ",
+            remaining,
+            flags=re.I,
+        )
+        remaining = re.sub(r"\s+", " ", remaining)
+        return remaining.strip(" .,;:-—–")
+
+    @staticmethod
+    def _apply_global_comment(state: ConversationState, global_comment: str) -> None:
+        """Добавляет общий комментарий один раз ко всем активным товарам заявки."""
+        for item in state.cart:
+            if item.status != ItemStatus.SKIPPED:
+                item.comment = ConversationEngine._merge_comments(
+                    item.comment,
+                    global_comment,
+                )
 
     @staticmethod
     def _remove_cart_comment_shadows(state: ConversationState) -> None:

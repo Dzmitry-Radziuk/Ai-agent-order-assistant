@@ -452,6 +452,24 @@ def test_explicit_global_comment_scope_still_uses_semantic_ai(settings) -> None:
         service.parse_text("сироп роза всем завтра")
 
 
+def test_standalone_global_comment_is_not_replaced_by_fake_deterministic_items(
+    settings,
+) -> None:  # type: ignore[no-untyped-def]
+    """Сохраняет отдельный общий комментарий как изменение текущего черновика."""
+    parsed = ParsedInputSchema(
+        intent=Intent.ADD_MORE,
+        global_comment="желательно на завтра",
+        items=[],
+    )
+    service = _service(settings, SimpleNamespace(responses=_Responses(parsed)))
+
+    command = service.parse_text("Добавь комментарий, желательно на завтра, общий.")
+
+    assert command.intent is Intent.ADD_ITEMS
+    assert command.global_comment == "желательно на завтра"
+    assert command.items == []
+
+
 @pytest.mark.parametrize(
     ("suffix", "expected_quantity"),
     [

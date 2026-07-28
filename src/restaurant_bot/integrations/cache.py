@@ -5,7 +5,7 @@ import json
 from collections.abc import Iterator
 from contextlib import contextmanager
 from time import perf_counter
-from typing import Any, cast
+from typing import Any
 
 import structlog
 from redis import Redis
@@ -48,19 +48,29 @@ class CatalogCache:
         if not spreadsheet_id.strip():
             raise GoogleSheetsError("Venue spreadsheet ID is required")
         key = self._key(spreadsheet_id)
-        if not force_refresh:
-            cached = self.redis.get(key)
-            if cached:
-                payload = json.loads(cast(str | bytes | bytearray, cached))
-                catalog = [CatalogProduct.model_validate(item) for item in payload]
-                logger.info(
-                    "catalog_cache_hit",
-                    spreadsheet_id=spreadsheet_id,
-                    product_count=len(catalog),
-                )
-                return catalog
+        cached = self.redis.get(key)
+        if cached and not force_refresh:
+            catalog = self._deserialize(cached)
+            logger.info(
+                "catalog_cache_hit",
+                spreadsheet_id=spreadsheet_id,
+                product_count=len(catalog),
+            )
+            return catalog
         started_at = perf_counter()
-        catalog = self.sheets.load_catalog(spreadsheet_id)
+        try:
+            catalog = self.sheets.load_catalog(spreadsheet_id)
+        except Exception as exc:
+            if not cached:
+                raise
+            catalog = self._deserialize(cached)
+            logger.warning(
+                "catalog_refresh_failed_using_cache",
+                spreadsheet_id=spreadsheet_id,
+                product_count=len(catalog),
+                error_type=type(exc).__name__,
+            )
+            return catalog
         self.redis.setex(
             key,
             self.settings.catalog_cache_ttl_seconds,
@@ -74,6 +84,12 @@ class CatalogCache:
             forced=force_refresh,
         )
         return catalog
+
+    @staticmethod
+    def _deserialize(cached: str | bytes | bytearray) -> list[CatalogProduct]:
+        """Восстанавливает проверенные товары из значения Redis."""
+        payload = json.loads(cached)
+        return [CatalogProduct.model_validate(item) for item in payload]
 
     def invalidate(self, spreadsheet_id: str) -> None:
         """Удаляет каталог заведения из кэша."""

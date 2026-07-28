@@ -1,3 +1,5 @@
+import pytest
+
 from restaurant_bot.domain.models import (
     ConversationState,
     ExtractedItem,
@@ -5,6 +7,7 @@ from restaurant_bot.domain.models import (
     Intent,
     ItemStatus,
     ParsedCommand,
+    SessionStage,
     TelegramEvent,
 )
 from restaurant_bot.services.engine import ConversationEngine
@@ -229,3 +232,100 @@ def test_voice_unit_mismatch_accepts_catalog_unit_and_spoken_quantity(settings) 
     assert changed.state.cart[0].status is ItemStatus.MATCHED
     assert changed.state.cart[0].quantity == 5
     assert changed.state.cart[0].unit == "кг"
+
+
+@pytest.mark.parametrize(
+    "phrase",
+    [
+        "Ввести в килограмм",
+        "Ввести в килограммы",
+        "Ввести в килограммах",
+        "Давайте укажем количество в килограммах",
+        "Хочу указать вес в кг",
+        "Лучше считать в килограммах",
+        "Мне нужно в кг",
+        "Поменяем единицы на килограммы",
+    ],
+)
+def test_voice_unit_entry_phrases_open_quantity_input_without_new_items(
+    settings,
+    phrase: str,
+) -> None:  # type: ignore[no-untyped-def]
+    """Понимает живую речь как действие открытой карточки, а не новый товар."""
+    engine = ConversationEngine(settings)
+    state = _unit_mismatch_state(engine)
+    state.stage = SessionStage.REVIEW
+    command = ParsedCommand(
+        intent=Intent.ADD_ITEMS,
+        text=phrase,
+        items=[ExtractedItem(product_query=phrase)],
+    )
+
+    result = engine.handle(_voice(phrase), command, state, [])
+
+    assert len(result.state.cart) == 1
+    assert result.state.cart[0].status is ItemStatus.UNIT_MISMATCH
+    assert result.state.stage is SessionStage.AWAIT_UNIT_QUANTITY
+    assert "Укажите количество в кг" in result.reply.text
+
+
+@pytest.mark.parametrize(
+    ("phrase", "expected"),
+    [
+        ("Поставь пять килограммов", 5),
+        ("Давай один килограмм", 1),
+        ("Мне нужно полтора кг", 1.5),
+        ("Закажи 2 кг", 2),
+        ("Пусть будет десять кило", 10),
+        ("Возьмём три килограмма", 3),
+        ("Укажи вес 4 кг", 4),
+    ],
+)
+def test_voice_quantity_phrases_fix_open_unit_card_from_review(
+    settings,
+    phrase: str,
+    expected: float,
+) -> None:  # type: ignore[no-untyped-def]
+    """Применяет произнесённое количество к текущей позиции из review."""
+    engine = ConversationEngine(settings)
+    state = _unit_mismatch_state(engine)
+    state.stage = SessionStage.REVIEW
+    command = ParsedCommand(
+        intent=Intent.ADD_ITEMS,
+        text=phrase,
+        items=[ExtractedItem(product_query=phrase)],
+    )
+
+    result = engine.handle(_voice(phrase), command, state, [])
+
+    assert len(result.state.cart) == 1
+    assert result.state.cart[0].status is ItemStatus.MATCHED
+    assert result.state.cart[0].quantity == expected
+    assert result.state.cart[0].unit == "кг"
+
+
+def test_voice_unit_entry_removes_previous_false_command_items(settings) -> None:  # type: ignore[no-untyped-def]
+    """Удаляет ложные товары, созданные прошлыми ответами на эту карточку."""
+    engine = ConversationEngine(settings)
+    state = _unit_mismatch_state(engine)
+    state.stage = SessionStage.REVIEW
+    for index, phrase in enumerate(("Ввести в килограммы", "Ввести в килограммах"), start=1):
+        false_item = engine._build_item(ExtractedItem(product_query=phrase))
+        false_item.id = f"false-{index}"
+        false_item.status = ItemStatus.NOT_FOUND
+        state.cart.append(false_item)
+
+    phrase = "Хочу указать вес в килограммах"
+    result = engine.handle(
+        _voice(phrase),
+        ParsedCommand(
+            intent=Intent.ADD_ITEMS,
+            text=phrase,
+            items=[ExtractedItem(product_query=phrase)],
+        ),
+        state,
+        [],
+    )
+
+    assert [item.id for item in result.state.cart] == ["unit"]
+    assert result.state.stage is SessionStage.AWAIT_UNIT_QUANTITY

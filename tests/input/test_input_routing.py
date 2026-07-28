@@ -31,6 +31,25 @@ def test_direct_commands_bypass_catalog_but_product_operations_read_it() -> None
     assert not UpdateOrchestrator._needs_catalog(ParsedCommand(intent=Intent.EDIT_QUANTITY))
     assert UpdateOrchestrator._needs_catalog(ParsedCommand(intent=Intent.ADD_ITEMS))
     assert UpdateOrchestrator._needs_catalog(ParsedCommand(intent=Intent.SELECT_CANDIDATE))
+    assert UpdateOrchestrator._needs_catalog(ParsedCommand(intent=Intent.SUBMIT_REQUEST))
+    assert UpdateOrchestrator._needs_catalog(ParsedCommand(intent=Intent.SHOW_FINAL_REVIEW))
+    assert UpdateOrchestrator._needs_catalog(ParsedCommand(intent=Intent.CHECK_MIN_SUM))
+
+
+def test_final_checks_require_fresh_catalog_values() -> None:
+    """Обходит кэш для проверок суммы и количества перед отправкой."""
+    assert UpdateOrchestrator._requires_fresh_catalog(
+        ParsedCommand(intent=Intent.SUBMIT_REQUEST)
+    )
+    assert UpdateOrchestrator._requires_fresh_catalog(
+        ParsedCommand(intent=Intent.SHOW_FINAL_REVIEW)
+    )
+    assert UpdateOrchestrator._requires_fresh_catalog(
+        ParsedCommand(intent=Intent.CHECK_MIN_SUM)
+    )
+    assert not UpdateOrchestrator._requires_fresh_catalog(
+        ParsedCommand(intent=Intent.ADD_ITEMS)
+    )
 
 
 def test_callback_input_preserves_callback_data_for_engine() -> None:

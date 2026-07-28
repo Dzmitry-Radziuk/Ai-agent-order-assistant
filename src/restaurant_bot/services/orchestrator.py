@@ -39,8 +39,8 @@ from restaurant_bot.repositories.updates import UpdateRepository
 from restaurant_bot.services.engine import ConversationEngine
 from restaurant_bot.services.input_normalizer import normalize_telegram_update
 from restaurant_bot.services.matching import is_broad_category_query
-from restaurant_bot.services.parser import infer_intent
-from restaurant_bot.services.text import normalize_text
+from restaurant_bot.services.parser import infer_intent, parse_quantity_unit
+from restaurant_bot.services.text import normalize_text, normalize_unit
 from restaurant_bot.services.venue_registration import (
     RegistrationResult,
     VenueContext,
@@ -223,15 +223,21 @@ class UpdateOrchestrator:
                             self._all_suppliers_processing_reply(),
                         )
                     stage_started = perf_counter()
-                    catalog = (
-                        self.catalog.get(state.spreadsheet_id)
-                        if self._needs_catalog(command)
-                        else []
-                    )
+                    catalog_needed = self._needs_catalog(command)
+                    fresh_catalog_required = self._requires_fresh_catalog(command)
+                    if catalog_needed:
+                        catalog = (
+                            self.catalog.get(state.spreadsheet_id, force_refresh=True)
+                            if fresh_catalog_required
+                            else self.catalog.get(state.spreadsheet_id)
+                        )
+                    else:
+                        catalog = []
                     timings["catalog_ms"] = round((perf_counter() - stage_started) * 1000)
                     log.info(
                         "catalog_ready",
-                        needed=self._needs_catalog(command),
+                        needed=catalog_needed,
+                        fresh=fresh_catalog_required,
                         product_count=len(catalog),
                         catalog_ms=timings["catalog_ms"],
                     )
@@ -771,6 +777,20 @@ class UpdateOrchestrator:
                 f"{names}. Он может сказать номер, например «первый» или «вариант два», "
                 "либо полное или частичное название. Верни только произнесённый русский текст."
             )
+        if (
+            current
+            and state.stage == SessionStage.AWAIT_UNIT_QUANTITY
+            and current.catalog_unit
+        ):
+            expected_unit = normalize_unit(current.catalog_unit)
+            product_name = current.catalog_name or current.source_query
+            return (
+                "Русская речь сотрудника кафе. Пользователь отвечает на просьбу указать "
+                f"количество товара «{product_name}» в {expected_unit}. Точно сохрани "
+                "произнесённое число и полное название единицы измерения. Особенно не "
+                "путай «грамм» и «килограмм». Ничего не заменяй и не придумывай. "
+                "Верни только произнесённый русский текст."
+            )
         visible_actions = getattr(state, "visible_actions", [])
         visible = "; ".join(
             action.get("label", "") for action in visible_actions[:10] if action.get("label")
@@ -832,6 +852,20 @@ class UpdateOrchestrator:
             if transcript_words & label_words and transcript_words != label_words:
                 return True
         current = state.current_item()
+        if (
+            current
+            and state.stage == SessionStage.AWAIT_UNIT_QUANTITY
+            and current.catalog_unit
+        ):
+            quantity, spoken_unit = parse_quantity_unit(
+                re.sub(r"[.!?]+$", "", transcript).strip()
+            )
+            if (
+                quantity is not None
+                and spoken_unit
+                and normalize_unit(spoken_unit) != normalize_unit(current.catalog_unit)
+            ):
+                return True
         if current is None or current.status != ItemStatus.AMBIGUOUS:
             return False
         command = infer_intent(transcript)
@@ -925,6 +959,18 @@ class UpdateOrchestrator:
             Intent.ADD_ITEMS,
             Intent.SELECT_CANDIDATE,
             Intent.SEARCH_ALL_SUPPLIERS,
+            Intent.SUBMIT_REQUEST,
+            Intent.SHOW_FINAL_REVIEW,
+            Intent.CHECK_MIN_SUM,
+        }
+
+    @staticmethod
+    def _requires_fresh_catalog(command: ParsedCommand) -> bool:
+        """Требует актуальные суммы и количества перед финальной проверкой."""
+        return command.intent in {
+            Intent.SUBMIT_REQUEST,
+            Intent.SHOW_FINAL_REVIEW,
+            Intent.CHECK_MIN_SUM,
         }
 
     def _resolve_ai_pending(

@@ -225,6 +225,70 @@ def test_global_comment_is_not_duplicated_as_a_product() -> None:
     ]
 
 
+def test_local_comments_are_recovered_when_ai_leaves_them_only_in_source_lines() -> None:
+    """Восстанавливает разные локальные комментарии и отделяет их от общего."""
+    source = (
+        "срп трхн в бутылках 10 штук "
+        "срп роза 1 штука в банках и всё желательно на завтра"
+    )
+    payload = {
+        "intent": Intent.ADD_ITEMS,
+        "global_comment": "всё желательно на завтра",
+        "items": [
+            {
+                "product_query": "срп трхн",
+                "quantity": 10,
+                "unit": "штук",
+                "comment": "",
+                "source_line": "срп трхн в бутылках 10 штук",
+            },
+            {
+                "product_query": "срп роза",
+                "quantity": 1,
+                "unit": "штука",
+                "comment": "",
+                "source_line": "срп роза 1 штука в банках",
+            },
+        ],
+    }
+
+    restored = recover_omitted_explicit_items(payload, source)
+
+    assert restored["global_comment"] == "желательно на завтра"
+    assert [item["comment"] for item in restored["items"]] == [
+        "в бутылках",
+        "в банках",
+    ]
+
+
+def test_shared_source_line_is_not_guessed_as_an_item_comment() -> None:
+    """Не приписывает одному товару остаток общей строки с несколькими товарами."""
+    source = "сироп тархун 10 штук и сироп роза 1 штука"
+    payload = {
+        "intent": Intent.ADD_ITEMS,
+        "items": [
+            {
+                "product_query": "сироп тархун",
+                "quantity": 10,
+                "unit": "шт",
+                "comment": "",
+                "source_line": source,
+            },
+            {
+                "product_query": "сироп роза",
+                "quantity": 1,
+                "unit": "шт",
+                "comment": "",
+                "source_line": source,
+            },
+        ],
+    }
+
+    restored = recover_omitted_explicit_items(payload, source)
+
+    assert [item.get("comment", "") for item in restored["items"]] == ["", ""]
+
+
 def test_voice_beef_cannot_gain_an_unspoken_qualifier_or_auto_select(settings) -> None:  # type: ignore[no-untyped-def]
     """Проверяет, что голос говядина не может получает an unspoken qualifier или auto select."""
     payload = {

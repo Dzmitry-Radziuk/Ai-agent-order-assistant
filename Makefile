@@ -1,4 +1,4 @@
-.PHONY: install format lint test docs-check check run worker migrate compose-up
+.PHONY: install format lint test scenarios docs-check check run worker migrate compose-up
 
 install:
 	pip install -e '.[dev]'
@@ -14,7 +14,11 @@ lint:
 test:
 	pytest --cov=restaurant_bot --cov-fail-under=84 --cov-report=term-missing
 
+scenarios:
+	python scripts/generate_user_scenarios.py
+
 docs-check:
+	python scripts/generate_user_scenarios.py --check
 	python scripts/check_markdown_links.py
 	python scripts/check_docs_updated.py --base HEAD^ --head HEAD
 
