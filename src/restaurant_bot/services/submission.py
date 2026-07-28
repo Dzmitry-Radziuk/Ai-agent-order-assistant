@@ -31,6 +31,7 @@ from restaurant_bot.services.replies import cart_reply
 from restaurant_bot.services.submission_presenter import (
     _callback_with_revision,
     build_order_status_text,
+    submission_disabled_reply,
     submission_dispatch_uncertain_reply,
     submission_failure_reply,
     submission_success_reply,
@@ -74,6 +75,18 @@ class SubmissionService:
                         external_order_no,
                         checkpoint_order_no,
                     )
+                return
+            if not getattr(
+                getattr(self, "settings", None),
+                "google_order_submission_enabled",
+                True,
+            ):
+                logger.warning(
+                    "submission_blocked_by_configuration",
+                    chat_id=chat_id,
+                    order_no=pending.order_no,
+                )
+                self.telegram.send_reply(chat_id, submission_disabled_reply())
                 return
             finalized = False
             try:

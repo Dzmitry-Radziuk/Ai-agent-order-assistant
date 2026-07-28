@@ -68,6 +68,17 @@ def submission_dispatch_uncertain_reply(state: Any, order_no: str) -> BotReply:
     )
 
 
+def submission_disabled_reply() -> BotReply:
+    """Предупреждает, что внешняя отправка отключена настройками."""
+    return BotReply(
+        text=(
+            "🛡 <b>Отправка отключена</b>\n\n"
+            "Черновик сохранён. Данные в таблицы и поставщикам не отправлялись.\n\n"
+            "Для локальной проверки это безопасный режим."
+        )
+    )
+
+
 def _status_value(row: dict[str, Any], *keys: str, default: str = "") -> str:
     """Возвращает первое заполненное поле статуса."""
     for key in keys:

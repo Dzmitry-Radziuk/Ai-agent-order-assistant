@@ -16,9 +16,9 @@
 
 | Показатель | Значение |
 |---|---:|
-| Всего сценариев | 31 |
-| Связаны с pytest | 31 |
-| Критические | 20 |
+| Всего сценариев | 32 |
+| Связаны с pytest | 32 |
+| Критические | 21 |
 | Важные | 8 |
 | Защитные | 3 |
 
@@ -652,6 +652,28 @@ flowchart LR
 - [`tests/submission/test_submission.py`](../tests/submission/test_submission.py) → `test_ambiguous_dispatch_failure_is_never_automatically_retried`
 - [`tests/submission/test_submission.py`](../tests/submission/test_submission.py) → `test_redelivery_after_started_dispatch_does_not_send_second_post`
 - [`tests/submission/test_submission_guards.py`](../tests/submission/test_submission_guards.py) → `test_submission_retry_is_blocked_after_uncertain_dispatch`
+
+#### SUB-06 · Локальная отправка защищена выключателем
+
+**Приоритет:** Критический<br>
+**Канал:** Кнопка, Системный<br>
+**Предусловие:** Бот работает с GOOGLE_ORDER_SUBMISSION_ENABLED=false.
+
+**Действие пользователя:** Подтверждает финальную отправку во время локальной проверки.
+
+**Ответ бота:** Сообщает, что отправка отключена, а черновик сохранён без записи в таблицы и отправки поставщикам.
+
+**Результат:** Случайное нажатие локально не вызывает Google Sheets и центральный Apps Script.
+
+**Примеры фраз:**
+
+- «Отправка отключена»
+- «Для локальной проверки это безопасный режим»
+
+**Автоматическая проверка:**
+
+- [`tests/submission/test_submission.py`](../tests/submission/test_submission.py) → `test_worker_guard_blocks_all_external_writes_when_submission_is_disabled`
+- [`tests/submission/test_submission_guards.py`](../tests/submission/test_submission_guards.py) → `test_disabled_submission_keeps_draft_and_does_not_enqueue`
 
 ### Защита от неверного действия
 

@@ -117,9 +117,9 @@
   </header>
   <main>
     <section class="summary" aria-label="Сводка">
-      <div class="metric"><b>31</b><span>сценариев</span></div>
-      <div class="metric"><b>31</b><span>связаны с pytest</span></div>
-      <div class="metric"><b>20</b><span>критических</span></div>
+      <div class="metric"><b>32</b><span>сценариев</span></div>
+      <div class="metric"><b>32</b><span>связаны с pytest</span></div>
+      <div class="metric"><b>21</b><span>критических</span></div>
       <div class="metric"><b>7</b><span>разделов</span></div>
     </section>
 
@@ -748,6 +748,32 @@
         </details>
       </article>
 
+      <article id="scenario-SUB-06" class="scenario-card"
+        data-category="submission"
+        data-priority="critical" data-search="sub-06 локальная отправка защищена выключателем проверка и отправка подтверждает финальную отправку во время локальной проверки. сообщает, что отправка отключена, а черновик сохранён без записи в таблицы и отправки поставщикам. отправка отключена для локальной проверки это безопасный режим">
+        <div class="card-top">
+          <span class="scenario-id">SUB-06</span>
+          <span class="priority priority-critical">Критический</span>
+        </div>
+        <h3>Локальная отправка защищена выключателем</h3>
+        <p class="category-label">Проверка и отправка</p>
+        <div class="channels"><span>Кнопка</span><span>Системный</span></div>
+        <dl>
+          <div><dt>Перед началом</dt><dd>Бот работает с GOOGLE_ORDER_SUBMISSION_ENABLED=false.</dd></div>
+          <div><dt>Пользователь</dt><dd>Подтверждает финальную отправку во время локальной проверки.</dd></div>
+          <div><dt>Бот</dt><dd>Сообщает, что отправка отключена, а черновик сохранён без записи в таблицы и отправки поставщикам.</dd></div>
+          <div class="result"><dt>Итог</dt><dd>Случайное нажатие локально не вызывает Google Sheets и центральный Apps Script.</dd></div>
+        </dl>
+        <details>
+          <summary>Примеры фраз</summary>
+          <ul><li>«Отправка отключена»</li><li>«Для локальной проверки это безопасный режим»</li></ul>
+        </details>
+        <details>
+          <summary>Связанные pytest-тесты · 2</summary>
+          <ul class="tests"><li><a href="../../tests/submission/test_submission.py">tests/submission/test_submission.py</a><span>test_worker_guard_blocks_all_external_writes_when_submission_is_disabled</span></li><li><a href="../../tests/submission/test_submission_guards.py">tests/submission/test_submission_guards.py</a><span>test_disabled_submission_keeps_draft_and_does_not_enqueue</span></li></ul>
+        </details>
+      </article>
+
       <article id="scenario-SAF-01" class="scenario-card"
         data-category="safety"
         data-priority="critical" data-search="saf-01 «не добавляй» не добавляет товар защита от неверного действия отказывается от текущей позиции естественной фразой. пропускает только текущую позицию и не воспринимает отрицание как подтверждение. не добавляй эту позицию убери этот товар нет, это не нужно">
@@ -958,7 +984,7 @@
     </section>
   </main>
   <footer>Локальный каталог · версия 1.1 · работает без интернета</footer>
-  <script id="catalog-meta" type="application/json">{"version": "1.1", "total": 31, "linked": 31}</script>
+  <script id="catalog-meta" type="application/json">{"version": "1.1", "total": 32, "linked": 32}</script>
   <script>
     (() => {
       const cards = [...document.querySelectorAll(".scenario-card")];

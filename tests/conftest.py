@@ -11,6 +11,7 @@ os.environ.setdefault("TELEGRAM_WEBHOOK_SECRET", "test-secret")
 os.environ.setdefault("OPENAI_API_KEY", "test-openai")
 os.environ.setdefault("GOOGLE_SERVICE_ACCOUNT_FILE", "/tmp/google.json")
 os.environ.setdefault("GOOGLE_RECALC_URL", "https://example.test/recalc")
+os.environ.setdefault("GOOGLE_ORDER_SUBMISSION_ENABLED", "true")
 os.environ.setdefault("GOOGLE_ORDER_SUBMISSION_URL", "https://example.test/submit")
 os.environ.setdefault("GOOGLE_ORDER_SUBMISSION_SECRET", "test-submit-secret")
 
@@ -26,6 +27,7 @@ def settings() -> Settings:
         openai_api_key="test-openai",
         google_service_account_file=Path("/tmp/google.json"),
         google_recalc_url="https://example.test/recalc",
+        google_order_submission_enabled=True,
         google_order_submission_url="https://example.test/submit",
         google_order_submission_secret="test-submit-secret",
     )

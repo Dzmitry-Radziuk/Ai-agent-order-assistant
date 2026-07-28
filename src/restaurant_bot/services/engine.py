@@ -74,7 +74,10 @@ from restaurant_bot.services.replies import (
     unrecognized_voice_reply,
     welcome_reply,
 )
-from restaurant_bot.services.submission_presenter import submission_dispatch_uncertain_reply
+from restaurant_bot.services.submission_presenter import (
+    submission_disabled_reply,
+    submission_dispatch_uncertain_reply,
+)
 from restaurant_bot.services.text import (
     UNIT_ALIASES,
     convert_quantity,
@@ -2223,6 +2226,11 @@ class ConversationEngine:
                     state,
                     state.pending_submission.order_no,
                 ),
+            )
+        if not self.settings.google_order_submission_enabled:
+            return EngineResult(
+                state=state,
+                reply=submission_disabled_reply(),
             )
         if (
             state.pending_submission

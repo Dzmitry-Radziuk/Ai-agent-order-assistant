@@ -498,6 +498,22 @@
       ]
     },
     {
+      "id": "SUB-06",
+      "category": "submission",
+      "title": "Локальная отправка защищена выключателем",
+      "priority": "critical",
+      "channels": ["Кнопка", "Системный"],
+      "precondition": "Бот работает с GOOGLE_ORDER_SUBMISSION_ENABLED=false.",
+      "user_action": "Подтверждает финальную отправку во время локальной проверки.",
+      "bot_response": "Сообщает, что отправка отключена, а черновик сохранён без записи в таблицы и отправки поставщикам.",
+      "result": "Случайное нажатие локально не вызывает Google Sheets и центральный Apps Script.",
+      "examples": ["Отправка отключена", "Для локальной проверки это безопасный режим"],
+      "test_refs": [
+        "tests/submission/test_submission.py::test_worker_guard_blocks_all_external_writes_when_submission_is_disabled",
+        "tests/submission/test_submission_guards.py::test_disabled_submission_keeps_draft_and_does_not_enqueue"
+      ]
+    },
+    {
       "id": "SAF-01",
       "category": "safety",
       "title": "«Не добавляй» не добавляет товар",

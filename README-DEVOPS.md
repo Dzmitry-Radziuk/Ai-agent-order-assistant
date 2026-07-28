@@ -325,6 +325,7 @@ Redis не публикуется наружу и не используется 
 | `GOOGLE_RECALC_URL` | Да | Ограниченный доступ | HTTPS URL Apps Script |
 | `GOOGLE_RECALC_TOKEN` | Да | Да | Token проверки вызова Apps Script |
 | `GOOGLE_RECALC_SHEET` | Нет | Нет | `Заявка` |
+| `GOOGLE_ORDER_SUBMISSION_ENABLED` | Да | Нет | `false` локально; в production обязательно `true` |
 | `GOOGLE_ORDER_SUBMISSION_URL` | Да | Ограниченный доступ | HTTPS URL центрального Apps Script отправки заявки |
 | `GOOGLE_ORDER_SUBMISSION_SECRET` | Да | Да | Общий секрет центрального Apps Script |
 | `GOOGLE_ORDER_SUBMISSION_TIMEOUT_SECONDS` | Нет | Нет | `60`, допустимо 5–180 секунд |
@@ -407,6 +408,7 @@ GOOGLE_ORDER_STATUS_SHEET
 GOOGLE_PRODUCT_ADD_SHEET
 GOOGLE_RECALC_URL
 GOOGLE_RECALC_SHEET
+GOOGLE_ORDER_SUBMISSION_ENABLED
 GOOGLE_ORDER_SUBMISSION_URL
 GOOGLE_ORDER_SUBMISSION_TIMEOUT_SECONDS
 DEFAULT_DEPARTMENT
@@ -1056,6 +1058,7 @@ docker image prune
 - [ ] `/start`, текст, голос, фото и кнопки проверены.
 - [ ] Количество и комментарии записаны в лист `Заявка` таблицы заведения.
 - [ ] Apps Script перерасчёта вызван.
+- [ ] `GOOGLE_ORDER_SUBMISSION_ENABLED=true` установлен только в production/staging, где разрешена реальная отправка.
 - [ ] Центральный Apps Script создал заявку и вернул внешний `Номер заявки`.
 - [ ] В центральных листах `Заявки` и `База Заявок` появились ожидаемые строки.
 - [ ] «Мои заявки» читает статусы из листа `История`.

@@ -20,6 +20,7 @@ from restaurant_bot.services import submission as submission_module
 from restaurant_bot.services.submission import (
     SubmissionService,
     build_order_status_text,
+    submission_disabled_reply,
     submission_dispatch_uncertain_reply,
     submission_failure_reply,
     submission_success_reply,
@@ -536,3 +537,34 @@ def test_dispatch_uncertain_reply_has_no_repeat_button() -> None:
     assert "не отправляйте её повторно" in reply.text.lower()
     assert "ORDER-6" in reply.text
     assert reply.rows == []
+
+
+def test_disabled_submission_reply_is_explicit_and_has_no_buttons() -> None:
+    """Объясняет безопасную блокировку без кнопки обхода."""
+    reply = submission_disabled_reply()
+
+    assert "Отправка отключена" in reply.text
+    assert "Данные в таблицы и поставщикам не отправлялись" in reply.text
+    assert reply.rows == []
+
+
+def test_worker_guard_blocks_all_external_writes_when_submission_is_disabled(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Не позволяет старой фоновой задаче обойти выключатель отправки."""
+    service = object.__new__(SubmissionService)
+    service.settings = SimpleNamespace(google_order_submission_enabled=False)
+    service.redis = MagicMock()
+    service.telegram = MagicMock()
+    service.sheets = MagicMock()
+    pending = PendingSubmission(order_no="ORDER-DISABLED", spreadsheet_id="venue-sheet", rows=[])
+    service._load_pending = MagicMock(return_value=pending)  # type: ignore[method-assign]
+    service._record = MagicMock()  # type: ignore[method-assign]
+    monkeypatch.setattr(submission_module, "chat_lock", lambda *_args, **_kwargs: nullcontext())
+
+    service.submit("chat-disabled")
+
+    service._record.assert_not_called()
+    assert service.sheets.mock_calls == []
+    reply = service.telegram.send_reply.call_args.args[1]
+    assert "Отправка отключена" in reply.text

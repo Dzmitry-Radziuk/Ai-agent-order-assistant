@@ -68,6 +68,7 @@ class Settings(BaseSettings):
     google_recalc_url: str
     google_recalc_token: SecretStr = SecretStr("")
     google_recalc_sheet: str = "Заявка"
+    google_order_submission_enabled: bool = False
     google_order_submission_url: str
     google_order_submission_secret: SecretStr
     google_order_submission_timeout_seconds: float = Field(default=60.0, ge=5.0, le=180.0)
@@ -133,6 +134,8 @@ class Settings(BaseSettings):
             raise ValueError("GOOGLE_RECALC_URL must use HTTPS in production")
         if not self.google_order_submission_url.startswith("https://"):
             raise ValueError("GOOGLE_ORDER_SUBMISSION_URL must use HTTPS in production")
+        if not self.google_order_submission_enabled:
+            raise ValueError("GOOGLE_ORDER_SUBMISSION_ENABLED must be true in production")
         if "bot:bot@" in self.database_url or "replace_" in self.database_url:
             raise ValueError("DATABASE_URL must contain production database credentials")
         if self.langfuse_enabled and not (
