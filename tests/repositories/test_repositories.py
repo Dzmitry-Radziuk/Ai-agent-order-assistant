@@ -126,6 +126,15 @@ def test_submission_repository_creates_checkpoint_record() -> None:
     assert result.payload["venue_code"] == "12345"
 
 
+def test_submission_record_keeps_legacy_history_checkpoint_schema() -> None:
+    """Сохраняет обязательное поле начальной миграции в ORM-модели."""
+    column = SubmissionRecord.__table__.c.history_written
+
+    assert column.nullable is False
+    assert column.default is not None
+    assert column.default.arg is False
+
+
 def test_venue_repository_reads_active_bindings() -> None:
     """Возвращает активные привязки пользователя и чата."""
     db = MagicMock()

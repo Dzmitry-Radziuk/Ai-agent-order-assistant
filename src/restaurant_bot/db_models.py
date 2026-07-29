@@ -55,6 +55,7 @@ class SubmissionRecord(Base):
     trace_id: Mapped[str] = mapped_column(String(36), nullable=False, default="", index=True)
     telegram_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     payload: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
+    history_written: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     catalog_updated: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     recalc_done: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     dispatch_started: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
