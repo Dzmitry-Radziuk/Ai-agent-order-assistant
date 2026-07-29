@@ -134,8 +134,6 @@ class Settings(BaseSettings):
             raise ValueError("GOOGLE_RECALC_URL must use HTTPS in production")
         if not self.google_order_submission_url.startswith("https://"):
             raise ValueError("GOOGLE_ORDER_SUBMISSION_URL must use HTTPS in production")
-        if not self.google_order_submission_enabled:
-            raise ValueError("GOOGLE_ORDER_SUBMISSION_ENABLED must be true in production")
         if "bot:bot@" in self.database_url or "replace_" in self.database_url:
             raise ValueError("DATABASE_URL must contain production database credentials")
         if self.langfuse_enabled and not (

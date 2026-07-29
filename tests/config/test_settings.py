@@ -50,7 +50,7 @@ def test_get_settings_reads_dotenv_in_production(
                 "GOOGLE_REGISTRATION_SPREADSHEET_ID=registration-sheet-id",
                 "GOOGLE_RECALC_URL=https://script.google.com/macros/s/script-id/exec",
                 "GOOGLE_RECALC_TOKEN=recalc-secret",
-                "GOOGLE_ORDER_SUBMISSION_ENABLED=true",
+                "GOOGLE_ORDER_SUBMISSION_ENABLED=false",
                 "GOOGLE_ORDER_SUBMISSION_URL=https://script.google.com/macros/s/submit-id/exec",
                 "GOOGLE_ORDER_SUBMISSION_SECRET=submit-secret",
                 "DATABASE_URL=postgresql+psycopg://bot:strong-password@postgres:5432/bot",
@@ -79,6 +79,7 @@ def test_get_settings_reads_dotenv_in_production(
 
     assert settings.app_env == "production"
     assert settings.telegram_bot_token.get_secret_value() == "telegram-secret"
+    assert settings.google_order_submission_enabled is False
     get_settings.cache_clear()
 
 
@@ -135,22 +136,23 @@ def test_production_rejects_placeholder_submission_secret() -> None:
         )
 
 
-def test_production_rejects_disabled_order_submission() -> None:
-    """Не запускает production со случайно выключенной отправкой заявок."""
-    with pytest.raises(ValidationError, match="GOOGLE_ORDER_SUBMISSION_ENABLED"):
-        Settings(
-            app_env="production",
-            public_base_url="https://bot.company.test",
-            telegram_bot_token="telegram-secret",
-            telegram_webhook_secret="12345678901234567890123456789012",
-            openai_api_key="openai-secret",
-            google_service_account_file=Path("/run/secrets/google.json"),
-            google_venue_directory_url="https://docs.google.com/spreadsheets/d/sheet/gviz/tq",
-            google_registration_spreadsheet_id="registration-sheet-id",
-            google_recalc_url="https://script.google.com/macros/s/recalc-id/exec",
-            google_recalc_token="recalc-secret",
-            google_order_submission_enabled=False,
-            google_order_submission_url="https://script.google.com/macros/s/submit-id/exec",
-            google_order_submission_secret="submit-secret",
-            database_url="postgresql+psycopg://bot:strong-password@postgres:5432/bot",
-        )
+def test_production_allows_disabled_order_submission() -> None:
+    """Запускает production с безопасно отключённой отправкой заявок."""
+    settings = Settings(
+        app_env="production",
+        public_base_url="https://bot.company.test",
+        telegram_bot_token="telegram-secret",
+        telegram_webhook_secret="12345678901234567890123456789012",
+        openai_api_key="openai-secret",
+        google_service_account_file=Path("/run/secrets/google.json"),
+        google_venue_directory_url="https://docs.google.com/spreadsheets/d/sheet/gviz/tq",
+        google_registration_spreadsheet_id="registration-sheet-id",
+        google_recalc_url="https://script.google.com/macros/s/recalc-id/exec",
+        google_recalc_token="recalc-secret",
+        google_order_submission_enabled=False,
+        google_order_submission_url="https://script.google.com/macros/s/submit-id/exec",
+        google_order_submission_secret="submit-secret",
+        database_url="postgresql+psycopg://bot:strong-password@postgres:5432/bot",
+    )
+
+    assert settings.google_order_submission_enabled is False
