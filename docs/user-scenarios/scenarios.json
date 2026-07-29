@@ -446,18 +446,18 @@
     {
       "id": "SUB-03",
       "category": "submission",
-      "title": "Успешная отправка и номер заявки",
+      "title": "Запись заявки в таблицу заказа",
       "priority": "critical",
-      "channels": ["Кнопка"],
-      "precondition": "Все обязательные уточнения завершены, пользователь подтверждает отправку.",
-      "user_action": "Нажимает «Отправить поставщику».",
-      "bot_response": "Обновляет лист «Заявка», запускает перерасчёт, передаёт заказ центральному сервису и показывает полученный номер с кнопками статуса и новой заявки.",
-      "result": "Центральный сервис создал заявку, бот сохранил её внешний номер и только после этого очистил отправленный черновик.",
-      "examples": ["Отправить поставщику", "Проверить статус", "Новая заявка"],
+      "channels": ["Текст", "Голос", "Кнопка"],
+      "precondition": "Все обязательные уточнения завершены, открыта финальная проверка.",
+      "user_action": "Нажимает «Отправить в таблицу заказа» или подтверждает запись текстом либо голосом.",
+      "bot_response": "Записывает товары и комментарии в лист «Заявка», запускает перерасчёт и сообщает, что заявка подготовлена для ручной отправки ответственным сотрудником.",
+      "result": "Черновик завершается только после успешной записи и перерасчёта. При выключенной автоматической отправке центральный сервис не вызывается.",
+      "examples": ["Отправить в таблицу заказа", "Запиши заявку", "Отправляй"],
       "test_refs": [
-        "tests/submission/test_submission.py::test_successful_submission_clears_cart_checkpoint_and_marks_state_submitted",
-        "tests/submission/test_submission.py::test_submission_success_card_matches_n8n",
-        "tests/submission/test_submission.py::test_submission_runs_all_external_stages_and_uses_external_order_number"
+        "tests/submission/test_submission.py::test_disabled_dispatch_writes_and_recalculates_but_never_calls_submission_script",
+        "tests/submission/test_submission.py::test_local_saved_reply_is_explicit_and_has_only_new_order_button",
+        "tests/conversation/test_state_transitions.py::test_submit_request_opens_final_review_without_enqueuing"
       ]
     },
     {

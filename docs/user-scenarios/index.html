@@ -672,27 +672,27 @@
 
       <article id="scenario-SUB-03" class="scenario-card"
         data-category="submission"
-        data-priority="critical" data-search="sub-03 успешная отправка и номер заявки проверка и отправка нажимает «отправить поставщику». обновляет лист «заявка», запускает перерасчёт, передаёт заказ центральному сервису и показывает полученный номер с кнопками статуса и новой заявки. отправить поставщику проверить статус новая заявка">
+        data-priority="critical" data-search="sub-03 запись заявки в таблицу заказа проверка и отправка нажимает «отправить в таблицу заказа» или подтверждает запись текстом либо голосом. записывает товары и комментарии в лист «заявка», запускает перерасчёт и сообщает, что заявка подготовлена для ручной отправки ответственным сотрудником. отправить в таблицу заказа запиши заявку отправляй">
         <div class="card-top">
           <span class="scenario-id">SUB-03</span>
           <span class="priority priority-critical">Критический</span>
         </div>
-        <h3>Успешная отправка и номер заявки</h3>
+        <h3>Запись заявки в таблицу заказа</h3>
         <p class="category-label">Проверка и отправка</p>
-        <div class="channels"><span>Кнопка</span></div>
+        <div class="channels"><span>Текст</span><span>Голос</span><span>Кнопка</span></div>
         <dl>
-          <div><dt>Перед началом</dt><dd>Все обязательные уточнения завершены, пользователь подтверждает отправку.</dd></div>
-          <div><dt>Пользователь</dt><dd>Нажимает «Отправить поставщику».</dd></div>
-          <div><dt>Бот</dt><dd>Обновляет лист «Заявка», запускает перерасчёт, передаёт заказ центральному сервису и показывает полученный номер с кнопками статуса и новой заявки.</dd></div>
-          <div class="result"><dt>Итог</dt><dd>Центральный сервис создал заявку, бот сохранил её внешний номер и только после этого очистил отправленный черновик.</dd></div>
+          <div><dt>Перед началом</dt><dd>Все обязательные уточнения завершены, открыта финальная проверка.</dd></div>
+          <div><dt>Пользователь</dt><dd>Нажимает «Отправить в таблицу заказа» или подтверждает запись текстом либо голосом.</dd></div>
+          <div><dt>Бот</dt><dd>Записывает товары и комментарии в лист «Заявка», запускает перерасчёт и сообщает, что заявка подготовлена для ручной отправки ответственным сотрудником.</dd></div>
+          <div class="result"><dt>Итог</dt><dd>Черновик завершается только после успешной записи и перерасчёта. При выключенной автоматической отправке центральный сервис не вызывается.</dd></div>
         </dl>
         <details>
           <summary>Примеры фраз</summary>
-          <ul><li>«Отправить поставщику»</li><li>«Проверить статус»</li><li>«Новая заявка»</li></ul>
+          <ul><li>«Отправить в таблицу заказа»</li><li>«Запиши заявку»</li><li>«Отправляй»</li></ul>
         </details>
         <details>
           <summary>Связанные pytest-тесты · 3</summary>
-          <ul class="tests"><li><a href="../../tests/submission/test_submission.py">tests/submission/test_submission.py</a><span>test_successful_submission_clears_cart_checkpoint_and_marks_state_submitted</span></li><li><a href="../../tests/submission/test_submission.py">tests/submission/test_submission.py</a><span>test_submission_success_card_matches_n8n</span></li><li><a href="../../tests/submission/test_submission.py">tests/submission/test_submission.py</a><span>test_submission_runs_all_external_stages_and_uses_external_order_number</span></li></ul>
+          <ul class="tests"><li><a href="../../tests/submission/test_submission.py">tests/submission/test_submission.py</a><span>test_disabled_dispatch_writes_and_recalculates_but_never_calls_submission_script</span></li><li><a href="../../tests/submission/test_submission.py">tests/submission/test_submission.py</a><span>test_local_saved_reply_is_explicit_and_has_only_new_order_button</span></li><li><a href="../../tests/conversation/test_state_transitions.py">tests/conversation/test_state_transitions.py</a><span>test_submit_request_opens_final_review_without_enqueuing</span></li></ul>
         </details>
       </article>
 

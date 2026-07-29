@@ -578,29 +578,29 @@ flowchart LR
 
 - [`tests/supplier/test_supplier_minimum.py`](../tests/supplier/test_supplier_minimum.py) → `test_supplier_minimum_warning_shows_gap_and_recovery_actions`
 
-#### SUB-03 · Успешная отправка и номер заявки
+#### SUB-03 · Запись заявки в таблицу заказа
 
 **Приоритет:** Критический<br>
-**Канал:** Кнопка<br>
-**Предусловие:** Все обязательные уточнения завершены, пользователь подтверждает отправку.
+**Канал:** Текст, Голос, Кнопка<br>
+**Предусловие:** Все обязательные уточнения завершены, открыта финальная проверка.
 
-**Действие пользователя:** Нажимает «Отправить поставщику».
+**Действие пользователя:** Нажимает «Отправить в таблицу заказа» или подтверждает запись текстом либо голосом.
 
-**Ответ бота:** Обновляет лист «Заявка», запускает перерасчёт, передаёт заказ центральному сервису и показывает полученный номер с кнопками статуса и новой заявки.
+**Ответ бота:** Записывает товары и комментарии в лист «Заявка», запускает перерасчёт и сообщает, что заявка подготовлена для ручной отправки ответственным сотрудником.
 
-**Результат:** Центральный сервис создал заявку, бот сохранил её внешний номер и только после этого очистил отправленный черновик.
+**Результат:** Черновик завершается только после успешной записи и перерасчёта. При выключенной автоматической отправке центральный сервис не вызывается.
 
 **Примеры фраз:**
 
-- «Отправить поставщику»
-- «Проверить статус»
-- «Новая заявка»
+- «Отправить в таблицу заказа»
+- «Запиши заявку»
+- «Отправляй»
 
 **Автоматическая проверка:**
 
-- [`tests/submission/test_submission.py`](../tests/submission/test_submission.py) → `test_successful_submission_clears_cart_checkpoint_and_marks_state_submitted`
-- [`tests/submission/test_submission.py`](../tests/submission/test_submission.py) → `test_submission_success_card_matches_n8n`
-- [`tests/submission/test_submission.py`](../tests/submission/test_submission.py) → `test_submission_runs_all_external_stages_and_uses_external_order_number`
+- [`tests/submission/test_submission.py`](../tests/submission/test_submission.py) → `test_disabled_dispatch_writes_and_recalculates_but_never_calls_submission_script`
+- [`tests/submission/test_submission.py`](../tests/submission/test_submission.py) → `test_local_saved_reply_is_explicit_and_has_only_new_order_button`
+- [`tests/conversation/test_state_transitions.py`](../tests/conversation/test_state_transitions.py) → `test_submit_request_opens_final_review_without_enqueuing`
 
 #### SUB-04 · Статус отправленных заявок
 
