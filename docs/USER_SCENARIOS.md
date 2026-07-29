@@ -16,9 +16,9 @@
 
 | Показатель | Значение |
 |---|---:|
-| Всего сценариев | 32 |
-| Связаны с pytest | 32 |
-| Критические | 21 |
+| Всего сценариев | 33 |
+| Связаны с pytest | 33 |
+| Критические | 22 |
 | Важные | 8 |
 | Защитные | 3 |
 
@@ -674,6 +674,30 @@ flowchart LR
 
 - [`tests/submission/test_submission.py`](../tests/submission/test_submission.py) → `test_worker_guard_blocks_all_external_writes_when_submission_is_disabled`
 - [`tests/submission/test_submission_guards.py`](../tests/submission/test_submission_guards.py) → `test_disabled_submission_keeps_draft_and_does_not_enqueue`
+
+#### SUB-07 · Проверка готовой Истории без отправки
+
+**Приоритет:** Критический<br>
+**Канал:** Текст, Голос, Кнопка<br>
+**Предусловие:** Локальная отправка выключена, у пользователя нет собственных номеров, а в листе «История» есть тестовая заявка.
+
+**Действие пользователя:** Просит показать статусы заявок.
+
+**Ответ бота:** Читает последнюю заявку из «Истории» и явно помечает её как тестовые данные, не отправленные через этого бота.
+
+**Результат:** Статусы проверяются только чтением; Google Sheets, центральный скрипт и поставщики не затрагиваются.
+
+**Примеры фраз:**
+
+- «Мои заявки»
+- «Проверить статус»
+- «Покажи последнюю заявку»
+
+**Автоматическая проверка:**
+
+- [`tests/submission/test_submission.py`](../tests/submission/test_submission.py) → `test_disabled_local_mode_reads_latest_history_without_sending`
+- [`tests/submission/test_submission.py`](../tests/submission/test_submission.py) → `test_enabled_mode_without_user_orders_does_not_show_test_history`
+- [`tests/submission/test_google_sheets_mapping.py`](../tests/submission/test_google_sheets_mapping.py) → `test_latest_order_statuses_use_first_complete_order_from_history`
 
 ### Защита от неверного действия
 

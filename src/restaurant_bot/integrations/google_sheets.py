@@ -351,6 +351,28 @@ class GoogleSheetsGateway:
             in wanted
         ]
 
+    def read_latest_order_statuses(self, spreadsheet_id: str) -> list[dict[str, Any]]:
+        """Читает последнюю заявку из «Истории» для безопасной локальной проверки."""
+        rows = self.read_rows(self.settings.google_order_status_sheet, spreadsheet_id)
+        latest_order_number = next(
+            (
+                clean_text(row.get("Номер заявки") or row.get("№ Заявки") or row.get("ID заявки"))
+                for row in rows
+                if clean_text(
+                    row.get("Номер заявки") or row.get("№ Заявки") or row.get("ID заявки")
+                )
+            ),
+            "",
+        )
+        if not latest_order_number:
+            return []
+        return [
+            row
+            for row in rows
+            if clean_text(row.get("Номер заявки") or row.get("№ Заявки") or row.get("ID заявки"))
+            == latest_order_number
+        ]
+
     def prepare_order_submission(
         self,
         spreadsheet_id: str,

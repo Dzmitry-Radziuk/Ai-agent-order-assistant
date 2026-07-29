@@ -153,6 +153,37 @@ def test_order_statuses_accept_legacy_order_number_columns(settings) -> None:  #
     assert [row.get("№ Заявки") or row.get("ID заявки") for row in rows] == ["A-1", "A-2"]
 
 
+def test_latest_order_statuses_use_first_complete_order_from_history(settings) -> None:  # type: ignore[no-untyped-def]
+    """Возвращает все строки самой новой заявки для локальной проверки."""
+    gateway = GoogleSheetsGateway(settings)
+    gateway.read_rows = MagicMock(  # type: ignore[method-assign]
+        return_value=[
+            {"Номер заявки": "", "Стадия": ""},
+            {"Номер заявки": "A-25", "Поставщик": "Первый"},
+            {"Номер заявки": "A-25", "Поставщик": "Второй"},
+            {"Номер заявки": "A-24", "Поставщик": "Старый"},
+        ]
+    )
+
+    rows = gateway.read_latest_order_statuses(VENUE_SPREADSHEET_ID)
+
+    assert [row["Поставщик"] for row in rows] == ["Первый", "Второй"]
+    gateway.read_rows.assert_called_once_with(
+        settings.google_order_status_sheet,
+        VENUE_SPREADSHEET_ID,
+    )
+
+
+def test_latest_order_statuses_return_empty_for_history_without_order_numbers(settings) -> None:  # type: ignore[no-untyped-def]
+    """Не принимает служебные или старые строки без номера заявки за статус."""
+    gateway = GoogleSheetsGateway(settings)
+    gateway.read_rows = MagicMock(  # type: ignore[method-assign]
+        return_value=[{"Номер заявки": "", "Стадия": "replace"}]
+    )
+
+    assert gateway.read_latest_order_statuses(VENUE_SPREADSHEET_ID) == []
+
+
 def test_live_catalog_headers_fill_submission_metadata(settings) -> None:  # type: ignore[no-untyped-def]
     """Проверяет, что реальная каталог заголовки fill отправка заявки metadata."""
     gateway = GoogleSheetsGateway(settings)

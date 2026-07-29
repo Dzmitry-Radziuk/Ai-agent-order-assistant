@@ -261,10 +261,17 @@ class SubmissionService:
         with chat_lock(self.redis, chat_id):
             with SessionLocal() as db:
                 _, state = SessionRepository(db).get_for_update(chat_id)
-            order_numbers = list(
-                dict.fromkeys([state.last_order_no, *state.submitted_order_numbers])
-            )[:10]
+            order_numbers = [
+                order_number
+                for order_number in dict.fromkeys(
+                    [state.last_order_no, *state.submitted_order_numbers]
+                )
+                if order_number
+            ][:10]
             if not order_numbers:
+                if not self.settings.google_order_submission_enabled:
+                    self._send_latest_test_status(chat_id, state)
+                    return
                 self.telegram.send_reply(
                     chat_id, BotReply(text="У вас пока нет отправленных заявок.")
                 )
@@ -273,7 +280,48 @@ class SubmissionService:
                 order_numbers,
                 self._require_venue_spreadsheet_id(state.spreadsheet_id),
             )
+            if not rows and not self.settings.google_order_submission_enabled:
+                self._send_latest_test_status(chat_id, state)
+                return
             self.telegram.send_reply(chat_id, BotReply(text=build_order_status_text(rows, state)))
+
+    def _send_latest_test_status(
+        self,
+        chat_id: str,
+        state: ConversationState,
+    ) -> None:
+        """Показывает последнюю готовую заявку из «Истории» без отправки."""
+        rows = self.sheets.read_latest_order_statuses(
+            self._require_venue_spreadsheet_id(state.spreadsheet_id)
+        )
+        if not rows:
+            self.telegram.send_reply(
+                chat_id,
+                BotReply(
+                    text=(
+                        "🧪 <b>Тестовые статусы</b>\n\n"
+                        "В листе «История» пока нет готовых заявок для проверки."
+                    )
+                ),
+            )
+            return
+        order_number = str(
+            rows[0].get("Номер заявки") or rows[0].get("№ Заявки") or rows[0].get("ID заявки") or ""
+        ).strip()
+        preview_state = state.model_copy(deep=True)
+        preview_state.last_order_no = order_number
+        preview_state.submitted_order_numbers = []
+        status_text = build_order_status_text(rows, preview_state)
+        self.telegram.send_reply(
+            chat_id,
+            BotReply(
+                text=(
+                    "🧪 <b>Тестовые данные из листа «История»</b>\n"
+                    "Заявка не отправлялась через этого бота.\n\n"
+                    f"{status_text}"
+                )
+            ),
+        )
 
     def submit_product_add(self, chat_id: str) -> None:
         """Отправляет запрос на добавление нового товара."""

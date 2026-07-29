@@ -568,3 +568,114 @@ def test_worker_guard_blocks_all_external_writes_when_submission_is_disabled(
     assert service.sheets.mock_calls == []
     reply = service.telegram.send_reply.call_args.args[1]
     assert "Отправка отключена" in reply.text
+
+
+def _mock_status_session(
+    monkeypatch: pytest.MonkeyPatch,
+    state: ConversationState,
+) -> None:
+    """Подменяет только чтение локальной сессии для тестов статусов."""
+    session = MagicMock()
+    session_context = MagicMock()
+    session_context.__enter__.return_value = session
+    session_context.__exit__.return_value = False
+    monkeypatch.setattr(submission_module, "SessionLocal", MagicMock(return_value=session_context))
+    repository = MagicMock()
+    repository.get_for_update.return_value = (MagicMock(), state)
+    monkeypatch.setattr(
+        submission_module,
+        "SessionRepository",
+        MagicMock(return_value=repository),
+    )
+    monkeypatch.setattr(submission_module, "chat_lock", lambda *_args, **_kwargs: nullcontext())
+
+
+def test_disabled_local_mode_reads_latest_history_without_sending(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Показывает подготовленные CEO статусы без номера в сессии пользователя."""
+    service = object.__new__(SubmissionService)
+    service.settings = SimpleNamespace(google_order_submission_enabled=False)
+    service.redis = MagicMock()
+    service.telegram = MagicMock()
+    service.sheets = MagicMock()
+    state = ConversationState(spreadsheet_id="venue-sheet")
+    _mock_status_session(monkeypatch, state)
+    service.sheets.read_latest_order_statuses.return_value = [
+        {
+            "Номер заявки": "№00V63II4-000025",
+            "Условное название поставщика": "Агробалтик",
+            "Список товаров": "Кухня:\n1. Мука — 4 шт",
+            "Стадия": "Отправлено поставщику",
+        }
+    ]
+
+    service.send_status("chat-status")
+
+    service.sheets.read_latest_order_statuses.assert_called_once_with("venue-sheet")
+    service.sheets.read_order_statuses.assert_not_called()
+    reply = service.telegram.send_reply.call_args.args[1]
+    assert "Тестовые данные из листа «История»" in reply.text
+    assert "Заявка не отправлялась через этого бота" in reply.text
+    assert "№00V63II4-000025" in reply.text
+    assert "Агробалтик" in reply.text
+
+
+def test_enabled_mode_without_user_orders_does_not_show_test_history(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Не показывает чужие тестовые строки после включения реальной отправки."""
+    service = object.__new__(SubmissionService)
+    service.settings = SimpleNamespace(google_order_submission_enabled=True)
+    service.redis = MagicMock()
+    service.telegram = MagicMock()
+    service.sheets = MagicMock()
+    _mock_status_session(
+        monkeypatch,
+        ConversationState(spreadsheet_id="venue-sheet"),
+    )
+
+    service.send_status("chat-status")
+
+    service.sheets.read_latest_order_statuses.assert_not_called()
+    service.sheets.read_order_statuses.assert_not_called()
+    reply = service.telegram.send_reply.call_args.args[1]
+    assert reply.text == "У вас пока нет отправленных заявок."
+
+
+def test_disabled_mode_falls_back_when_old_user_order_is_absent_from_history(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Показывает подготовленную Историю вместо отсутствующего старого номера."""
+    service = object.__new__(SubmissionService)
+    service.settings = SimpleNamespace(google_order_submission_enabled=False)
+    service.redis = MagicMock()
+    service.telegram = MagicMock()
+    service.sheets = MagicMock()
+    _mock_status_session(
+        monkeypatch,
+        ConversationState(
+            spreadsheet_id="venue-sheet",
+            last_order_no="OLD-LOCAL-ORDER",
+        ),
+    )
+    service.sheets.read_order_statuses.return_value = []
+    service.sheets.read_latest_order_statuses.return_value = [
+        {
+            "Номер заявки": "№00V63II4-000025",
+            "Условное название поставщика": "Агробалтик",
+            "Список товаров": "Кухня:\n1. Мука — 4 шт",
+            "Стадия": "Отправлено поставщику",
+        }
+    ]
+
+    service.send_status("chat-status")
+
+    service.sheets.read_order_statuses.assert_called_once_with(
+        ["OLD-LOCAL-ORDER"],
+        "venue-sheet",
+    )
+    service.sheets.read_latest_order_statuses.assert_called_once_with("venue-sheet")
+    reply = service.telegram.send_reply.call_args.args[1]
+    assert "Тестовые данные из листа «История»" in reply.text
+    assert "№00V63II4-000025" in reply.text
