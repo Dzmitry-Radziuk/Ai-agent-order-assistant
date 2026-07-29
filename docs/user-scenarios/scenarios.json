@@ -500,15 +500,16 @@
     {
       "id": "SUB-06",
       "category": "submission",
-      "title": "Подготовка заявки для ручной отправки",
+      "title": "Запись заявки для ручной отправки",
       "priority": "critical",
       "channels": ["Кнопка", "Системный"],
       "precondition": "Бот работает с GOOGLE_ORDER_SUBMISSION_ENABLED=false.",
-      "user_action": "Подтверждает подготовленную заявку.",
-      "bot_response": "Записывает количества и комментарии в лист «Заявка», запускает перерасчёт и сообщает, что заявку поставщикам отправит ответственный сотрудник.",
+      "user_action": "Подтверждает текущую заявку.",
+      "bot_response": "Сообщает «Заявка записана»: добавляет товары в таблицу заказа, запускает перерасчёт и объясняет, что заявку поставщикам отправит ответственный сотрудник. Технический номер пользователю не показывает.",
       "result": "Рабочая таблица заведения обновлена и пересчитана, а центральный Apps Script отправки не вызван.",
-      "examples": ["Заявка подготовлена", "Заявку поставщикам отправит ответственный сотрудник"],
+      "examples": ["Заявка записана", "Заявку поставщикам отправит ответственный сотрудник"],
       "test_refs": [
+        "tests/submission/test_submission.py::test_local_saved_reply_is_explicit_and_has_only_new_order_button",
         "tests/submission/test_submission.py::test_disabled_dispatch_writes_and_recalculates_but_never_calls_submission_script",
         "tests/submission/test_submission_guards.py::test_disabled_external_dispatch_still_enqueues_local_table_write"
       ]

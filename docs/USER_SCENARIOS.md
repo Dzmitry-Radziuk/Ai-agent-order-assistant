@@ -653,25 +653,26 @@ flowchart LR
 - [`tests/submission/test_submission.py`](../tests/submission/test_submission.py) → `test_redelivery_after_started_dispatch_does_not_send_second_post`
 - [`tests/submission/test_submission_guards.py`](../tests/submission/test_submission_guards.py) → `test_submission_retry_is_blocked_after_uncertain_dispatch`
 
-#### SUB-06 · Подготовка заявки для ручной отправки
+#### SUB-06 · Запись заявки для ручной отправки
 
 **Приоритет:** Критический<br>
 **Канал:** Кнопка, Системный<br>
 **Предусловие:** Бот работает с GOOGLE_ORDER_SUBMISSION_ENABLED=false.
 
-**Действие пользователя:** Подтверждает подготовленную заявку.
+**Действие пользователя:** Подтверждает текущую заявку.
 
-**Ответ бота:** Записывает количества и комментарии в лист «Заявка», запускает перерасчёт и сообщает, что заявку поставщикам отправит ответственный сотрудник.
+**Ответ бота:** Сообщает «Заявка записана»: добавляет товары в таблицу заказа, запускает перерасчёт и объясняет, что заявку поставщикам отправит ответственный сотрудник. Технический номер пользователю не показывает.
 
 **Результат:** Рабочая таблица заведения обновлена и пересчитана, а центральный Apps Script отправки не вызван.
 
 **Примеры фраз:**
 
-- «Заявка подготовлена»
+- «Заявка записана»
 - «Заявку поставщикам отправит ответственный сотрудник»
 
 **Автоматическая проверка:**
 
+- [`tests/submission/test_submission.py`](../tests/submission/test_submission.py) → `test_local_saved_reply_is_explicit_and_has_only_new_order_button`
 - [`tests/submission/test_submission.py`](../tests/submission/test_submission.py) → `test_disabled_dispatch_writes_and_recalculates_but_never_calls_submission_script`
 - [`tests/submission/test_submission_guards.py`](../tests/submission/test_submission_guards.py) → `test_disabled_external_dispatch_still_enqueues_local_table_write`
 

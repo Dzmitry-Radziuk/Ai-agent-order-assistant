@@ -586,17 +586,20 @@ def test_dispatch_uncertain_reply_has_no_repeat_button() -> None:
 
 
 def test_local_saved_reply_is_explicit_and_has_only_new_order_button() -> None:
-    """Объясняет подготовку заявки без утверждения об отправке."""
+    """Подтверждает запись заявки без утверждения об отправке."""
     reply = submission_local_saved_reply(
         type("State", (), {"ui_revision": 4})(),
         "ORDER-LOCAL",
     )
 
-    assert "Заявка подготовлена" in reply.text
-    assert "Товары записаны в лист «Заявка», расчёты обновлены" in reply.text
-    assert "Заявку поставщикам отправит ответственный сотрудник" in reply.text
+    assert reply.text == (
+        "✅ <b>Заявка записана</b>\n\n"
+        "Товары добавлены в таблицу заказа, расчёты обновлены.\n"
+        "Заявку поставщикам отправит ответственный сотрудник."
+    )
     assert "тест" not in reply.text.lower()
-    assert "ORDER-LOCAL" in reply.text
+    assert "ORDER-LOCAL" not in reply.text
+    assert "черновик" not in reply.text.lower()
     assert [(button.text, button.callback_data) for row in reply.rows for button in row] == [
         ("Новая заявка", "v2:clear:r4")
     ]

@@ -750,27 +750,27 @@
 
       <article id="scenario-SUB-06" class="scenario-card"
         data-category="submission"
-        data-priority="critical" data-search="sub-06 подготовка заявки для ручной отправки проверка и отправка подтверждает подготовленную заявку. записывает количества и комментарии в лист «заявка», запускает перерасчёт и сообщает, что заявку поставщикам отправит ответственный сотрудник. заявка подготовлена заявку поставщикам отправит ответственный сотрудник">
+        data-priority="critical" data-search="sub-06 запись заявки для ручной отправки проверка и отправка подтверждает текущую заявку. сообщает «заявка записана»: добавляет товары в таблицу заказа, запускает перерасчёт и объясняет, что заявку поставщикам отправит ответственный сотрудник. технический номер пользователю не показывает. заявка записана заявку поставщикам отправит ответственный сотрудник">
         <div class="card-top">
           <span class="scenario-id">SUB-06</span>
           <span class="priority priority-critical">Критический</span>
         </div>
-        <h3>Подготовка заявки для ручной отправки</h3>
+        <h3>Запись заявки для ручной отправки</h3>
         <p class="category-label">Проверка и отправка</p>
         <div class="channels"><span>Кнопка</span><span>Системный</span></div>
         <dl>
           <div><dt>Перед началом</dt><dd>Бот работает с GOOGLE_ORDER_SUBMISSION_ENABLED=false.</dd></div>
-          <div><dt>Пользователь</dt><dd>Подтверждает подготовленную заявку.</dd></div>
-          <div><dt>Бот</dt><dd>Записывает количества и комментарии в лист «Заявка», запускает перерасчёт и сообщает, что заявку поставщикам отправит ответственный сотрудник.</dd></div>
+          <div><dt>Пользователь</dt><dd>Подтверждает текущую заявку.</dd></div>
+          <div><dt>Бот</dt><dd>Сообщает «Заявка записана»: добавляет товары в таблицу заказа, запускает перерасчёт и объясняет, что заявку поставщикам отправит ответственный сотрудник. Технический номер пользователю не показывает.</dd></div>
           <div class="result"><dt>Итог</dt><dd>Рабочая таблица заведения обновлена и пересчитана, а центральный Apps Script отправки не вызван.</dd></div>
         </dl>
         <details>
           <summary>Примеры фраз</summary>
-          <ul><li>«Заявка подготовлена»</li><li>«Заявку поставщикам отправит ответственный сотрудник»</li></ul>
+          <ul><li>«Заявка записана»</li><li>«Заявку поставщикам отправит ответственный сотрудник»</li></ul>
         </details>
         <details>
-          <summary>Связанные pytest-тесты · 2</summary>
-          <ul class="tests"><li><a href="../../tests/submission/test_submission.py">tests/submission/test_submission.py</a><span>test_disabled_dispatch_writes_and_recalculates_but_never_calls_submission_script</span></li><li><a href="../../tests/submission/test_submission_guards.py">tests/submission/test_submission_guards.py</a><span>test_disabled_external_dispatch_still_enqueues_local_table_write</span></li></ul>
+          <summary>Связанные pytest-тесты · 3</summary>
+          <ul class="tests"><li><a href="../../tests/submission/test_submission.py">tests/submission/test_submission.py</a><span>test_local_saved_reply_is_explicit_and_has_only_new_order_button</span></li><li><a href="../../tests/submission/test_submission.py">tests/submission/test_submission.py</a><span>test_disabled_dispatch_writes_and_recalculates_but_never_calls_submission_script</span></li><li><a href="../../tests/submission/test_submission_guards.py">tests/submission/test_submission_guards.py</a><span>test_disabled_external_dispatch_still_enqueues_local_table_write</span></li></ul>
         </details>
       </article>
 
