@@ -3,7 +3,17 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import BigInteger, Boolean, DateTime, Integer, String, Text, UniqueConstraint, func
+from sqlalchemy import (
+    BigInteger,
+    Boolean,
+    DateTime,
+    Index,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+    func,
+)
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -100,6 +110,10 @@ class VenueBinding(Base):
 
     __tablename__ = "venue_bindings"
     __table_args__ = (
+        Index("ix_venue_bindings_user", "telegram_user_id"),
+        Index("ix_venue_bindings_chat", "telegram_chat_id"),
+        Index("ix_venue_bindings_code", "venue_code"),
+        Index("ix_venue_bindings_active", "is_active"),
         UniqueConstraint(
             "channel",
             "telegram_user_id",
@@ -111,15 +125,15 @@ class VenueBinding(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     channel: Mapped[str] = mapped_column(String(32), nullable=False, default="telegram")
-    telegram_user_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
-    telegram_chat_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    telegram_user_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    telegram_chat_id: Mapped[str] = mapped_column(String(64), nullable=False)
     username: Mapped[str] = mapped_column(String(128), nullable=False, default="")
-    venue_code: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    venue_code: Mapped[str] = mapped_column(String(32), nullable=False)
     venue_name: Mapped[str] = mapped_column(String(255), nullable=False)
     legal_name: Mapped[str | None] = mapped_column(String(255))
     spreadsheet_id: Mapped[str] = mapped_column(String(255), nullable=False)
     spreadsheet_url: Mapped[str | None] = mapped_column(Text)
-    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, index=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     sync_status: Mapped[str] = mapped_column(String(32), nullable=False, default="pending")
     sync_error: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

@@ -26,6 +26,16 @@ def _binding(code: str, *, active: bool = True, binding_id: int = 1) -> VenueBin
     )
 
 
+def test_venue_binding_model_preserves_migrated_index_names() -> None:
+    """Проверяет имена индексов, уже созданных миграцией 0002."""
+    assert {index.name for index in VenueBinding.__table__.indexes} == {
+        "ix_venue_bindings_active",
+        "ix_venue_bindings_chat",
+        "ix_venue_bindings_code",
+        "ix_venue_bindings_user",
+    }
+
+
 def test_session_repository_returns_empty_state_for_new_chat() -> None:
     """Возвращает начальное состояние для неизвестного чата."""
     db = MagicMock()
