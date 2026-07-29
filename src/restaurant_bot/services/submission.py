@@ -31,9 +31,9 @@ from restaurant_bot.services.replies import cart_reply
 from restaurant_bot.services.submission_presenter import (
     _callback_with_revision,
     build_order_status_text,
-    submission_disabled_reply,
     submission_dispatch_uncertain_reply,
     submission_failure_reply,
+    submission_local_saved_reply,
     submission_success_reply,
 )
 from restaurant_bot.services.text import escape
@@ -68,26 +68,26 @@ class SubmissionService:
                 logger.info("submission_without_pending_order", chat_id=chat_id)
                 completion = self._load_unnotified_completion(chat_id)
                 if completion is not None:
-                    checkpoint_order_no, external_order_no, state = completion
-                    self._send_completion(
-                        chat_id,
-                        state,
-                        external_order_no,
-                        checkpoint_order_no,
-                    )
+                    checkpoint_order_no, external_order_no, state, dispatched = completion
+                    if dispatched:
+                        self._send_completion(
+                            chat_id,
+                            state,
+                            external_order_no,
+                            checkpoint_order_no,
+                        )
+                    else:
+                        self._send_local_completion(
+                            chat_id,
+                            state,
+                            checkpoint_order_no,
+                        )
                 return
-            if not getattr(
+            dispatch_enabled = getattr(
                 getattr(self, "settings", None),
                 "google_order_submission_enabled",
                 True,
-            ):
-                logger.warning(
-                    "submission_blocked_by_configuration",
-                    chat_id=chat_id,
-                    order_no=pending.order_no,
-                )
-                self.telegram.send_reply(chat_id, submission_disabled_reply())
-                return
+            )
             finalized = False
             try:
                 record = self._record(chat_id, pending)
@@ -140,7 +140,9 @@ class SubmissionService:
                                 duration_ms=round((perf_counter() - stage_started) * 1000),
                             )
                         record = self._get_record(pending.order_no)
-                        if not record.dispatch_completed:
+                        if record.dispatch_completed:
+                            external_order_no = record.external_order_no or pending.order_no
+                        elif dispatch_enabled:
                             prepared = self.sheets.prepare_order_submission(
                                 spreadsheet_id,
                                 pending.order_no,
@@ -177,27 +179,48 @@ class SubmissionService:
                                     duration_ms=round((perf_counter() - stage_started) * 1000),
                                 )
                         else:
-                            external_order_no = record.external_order_no or pending.order_no
+                            external_order_no = pending.order_no
+                            logger.info(
+                                "submission_dispatch_skipped_by_configuration",
+                                chat_id=chat_id,
+                                order_no=pending.order_no,
+                            )
                 if dispatch_uncertain:
                     self._send_dispatch_uncertain_once(
                         chat_id,
                         pending.order_no,
                     )
                     return
-                final_state = self._finalize(
-                    chat_id,
-                    pending.order_no,
-                    external_order_no,
-                )
+                was_dispatched = dispatch_enabled or record.dispatch_completed
+                if was_dispatched:
+                    final_state = self._finalize(
+                        chat_id,
+                        pending.order_no,
+                        external_order_no,
+                    )
+                else:
+                    final_state = self._finalize(
+                        chat_id,
+                        pending.order_no,
+                        external_order_no,
+                        dispatched=False,
+                    )
                 finalized = True
-                self._send_completion(
-                    chat_id,
-                    final_state,
-                    external_order_no,
-                    pending.order_no,
-                )
+                if was_dispatched:
+                    self._send_completion(
+                        chat_id,
+                        final_state,
+                        external_order_no,
+                        pending.order_no,
+                    )
+                else:
+                    self._send_local_completion(
+                        chat_id,
+                        final_state,
+                        pending.order_no,
+                    )
                 logger.info(
-                    "submission_completed",
+                    "submission_completed" if was_dispatched else "submission_saved_locally",
                     chat_id=chat_id,
                     order_no=pending.order_no,
                     external_order_no=external_order_no,
@@ -231,10 +254,23 @@ class SubmissionService:
         )
         self._checkpoint(checkpoint_order_no, "completion_notified")
 
+    def _send_local_completion(
+        self,
+        chat_id: str,
+        state: ConversationState,
+        order_no: str,
+    ) -> None:
+        """Подтверждает локальную запись без утверждения об отправке."""
+        self.telegram.send_reply(
+            chat_id,
+            submission_local_saved_reply(state, order_no),
+        )
+        self._checkpoint(order_no, "completion_notified")
+
     @staticmethod
     def _load_unnotified_completion(
         chat_id: str,
-    ) -> tuple[str, str, ConversationState] | None:
+    ) -> tuple[str, str, ConversationState, bool] | None:
         """Загружает завершённую заявку без уведомления."""
         from sqlalchemy import select
 
@@ -254,7 +290,12 @@ class SubmissionService:
             if record is None:
                 return None
             _, state = SessionRepository(db).get_for_update(chat_id)
-            return record.order_no, record.external_order_no or record.order_no, state
+            return (
+                record.order_no,
+                record.external_order_no or record.order_no,
+                state,
+                record.dispatch_completed,
+            )
 
     def send_status(self, chat_id: str) -> None:
         """Отправляет пользователю статусы его заявок."""
@@ -653,14 +694,20 @@ class SubmissionService:
         chat_id: str,
         order_no: str,
         external_order_no: str,
+        *,
+        dispatched: bool = True,
     ) -> ConversationState:
-        """Финализирует успешно отправленную заявку."""
+        """Финализирует записанную заявку с учётом внешней отправки."""
         from sqlalchemy import select
 
         with SessionLocal.begin() as db:
             sessions = SessionRepository(db)
             row, state = sessions.get_for_update(chat_id)
-            self._apply_successful_submission_state(state, external_order_no)
+            self._apply_successful_submission_state(
+                state,
+                external_order_no,
+                status="submitted" if dispatched else "saved_locally",
+            )
             sessions.save(chat_id, state, row)
             record = db.scalar(
                 select(SubmissionRecord)
@@ -674,14 +721,24 @@ class SubmissionService:
                 self._append_submission_event(
                     OrderEventRepository(db),
                     pending,
-                    event_type="submission_completed",
+                    event_type=(
+                        "submission_completed" if dispatched else "submission_saved_locally"
+                    ),
                     idempotency_key=f"order:{order_no}:completed",
-                    details={"external_order_no": external_order_no},
+                    details={
+                        "external_order_no": external_order_no if dispatched else "",
+                        "dispatched": dispatched,
+                    },
                 )
             return state
 
     @staticmethod
-    def _apply_successful_submission_state(state: ConversationState, order_no: str) -> None:
+    def _apply_successful_submission_state(
+        state: ConversationState,
+        order_no: str,
+        *,
+        status: str = "submitted",
+    ) -> None:
         """Применяет успешное завершение отправки заявки."""
         if order_no not in state.submitted_order_numbers:
             state.submitted_order_numbers.append(order_no)
@@ -691,7 +748,7 @@ class SubmissionService:
         state.cart = []
         state.current_issue_item_id = ""
         state.stage = SessionStage.SUBMITTED
-        state.status = "submitted"
+        state.status = status
 
     def _fail(self, chat_id: str, order_no: str, error: str) -> ConversationState:
         """Сохраняет неуспешную отправку заявки."""

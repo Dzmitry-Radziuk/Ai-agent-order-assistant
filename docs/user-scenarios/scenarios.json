@@ -500,17 +500,17 @@
     {
       "id": "SUB-06",
       "category": "submission",
-      "title": "Локальная отправка защищена выключателем",
+      "title": "Локальная запись без отправки поставщикам",
       "priority": "critical",
       "channels": ["Кнопка", "Системный"],
       "precondition": "Бот работает с GOOGLE_ORDER_SUBMISSION_ENABLED=false.",
       "user_action": "Подтверждает финальную отправку во время локальной проверки.",
-      "bot_response": "Сообщает, что отправка отключена, а черновик сохранён без записи в таблицы и отправки поставщикам.",
-      "result": "Случайное нажатие локально не вызывает Google Sheets и центральный Apps Script.",
-      "examples": ["Отправка отключена", "Для локальной проверки это безопасный режим"],
+      "bot_response": "Записывает количества и комментарии в лист «Заявка», запускает перерасчёт и сообщает, что поставщикам ничего не отправлено.",
+      "result": "Тестовая таблица обновлена и пересчитана, но центральный Apps Script отправки не вызван.",
+      "examples": ["Заявка записана в тестовую таблицу", "Поставщикам ничего не отправлено"],
       "test_refs": [
-        "tests/submission/test_submission.py::test_worker_guard_blocks_all_external_writes_when_submission_is_disabled",
-        "tests/submission/test_submission_guards.py::test_disabled_submission_keeps_draft_and_does_not_enqueue"
+        "tests/submission/test_submission.py::test_disabled_dispatch_writes_and_recalculates_but_never_calls_submission_script",
+        "tests/submission/test_submission_guards.py::test_disabled_external_dispatch_still_enqueues_local_table_write"
       ]
     },
     {

@@ -34,6 +34,26 @@ def submission_success_reply(state: Any, order_no: str) -> BotReply:
     )
 
 
+def submission_local_saved_reply(state: Any, order_no: str) -> BotReply:
+    """Подтверждает запись тестовой заявки без отправки поставщикам."""
+    return BotReply(
+        text=(
+            "✅ <b>Заявка записана в тестовую таблицу</b>\n\n"
+            "Данные внесены в лист «Заявка», расчёты обновлены.\n"
+            "<b>Поставщикам ничего не отправлено.</b>\n\n"
+            f"Номер тестовой заявки: {escape(order_no)}"
+        ),
+        rows=[
+            [
+                Button(
+                    text="Новая заявка",
+                    callback_data=_callback_with_revision(state, "v2:clear"),
+                )
+            ]
+        ],
+    )
+
+
 def submission_failure_reply(state: Any, order_no: str) -> BotReply:
     """Формирует безопасную карточку незавершённой отправки."""
     return BotReply(
@@ -64,17 +84,6 @@ def submission_dispatch_uncertain_reply(state: Any, order_no: str) -> BotReply:
             "<b>Не отправляйте её повторно:</b> поставщики могли уже получить заказ.\n"
             "Сообщите менеджеру по снабжению этот код:\n"
             f"<code>{escape(order_no)}</code>"
-        )
-    )
-
-
-def submission_disabled_reply() -> BotReply:
-    """Предупреждает, что внешняя отправка отключена настройками."""
-    return BotReply(
-        text=(
-            "🛡 <b>Отправка отключена</b>\n\n"
-            "Черновик сохранён. Данные в таблицы и поставщикам не отправлялись.\n\n"
-            "Для локальной проверки это безопасный режим."
         )
     )
 

@@ -750,27 +750,27 @@
 
       <article id="scenario-SUB-06" class="scenario-card"
         data-category="submission"
-        data-priority="critical" data-search="sub-06 локальная отправка защищена выключателем проверка и отправка подтверждает финальную отправку во время локальной проверки. сообщает, что отправка отключена, а черновик сохранён без записи в таблицы и отправки поставщикам. отправка отключена для локальной проверки это безопасный режим">
+        data-priority="critical" data-search="sub-06 локальная запись без отправки поставщикам проверка и отправка подтверждает финальную отправку во время локальной проверки. записывает количества и комментарии в лист «заявка», запускает перерасчёт и сообщает, что поставщикам ничего не отправлено. заявка записана в тестовую таблицу поставщикам ничего не отправлено">
         <div class="card-top">
           <span class="scenario-id">SUB-06</span>
           <span class="priority priority-critical">Критический</span>
         </div>
-        <h3>Локальная отправка защищена выключателем</h3>
+        <h3>Локальная запись без отправки поставщикам</h3>
         <p class="category-label">Проверка и отправка</p>
         <div class="channels"><span>Кнопка</span><span>Системный</span></div>
         <dl>
           <div><dt>Перед началом</dt><dd>Бот работает с GOOGLE_ORDER_SUBMISSION_ENABLED=false.</dd></div>
           <div><dt>Пользователь</dt><dd>Подтверждает финальную отправку во время локальной проверки.</dd></div>
-          <div><dt>Бот</dt><dd>Сообщает, что отправка отключена, а черновик сохранён без записи в таблицы и отправки поставщикам.</dd></div>
-          <div class="result"><dt>Итог</dt><dd>Случайное нажатие локально не вызывает Google Sheets и центральный Apps Script.</dd></div>
+          <div><dt>Бот</dt><dd>Записывает количества и комментарии в лист «Заявка», запускает перерасчёт и сообщает, что поставщикам ничего не отправлено.</dd></div>
+          <div class="result"><dt>Итог</dt><dd>Тестовая таблица обновлена и пересчитана, но центральный Apps Script отправки не вызван.</dd></div>
         </dl>
         <details>
           <summary>Примеры фраз</summary>
-          <ul><li>«Отправка отключена»</li><li>«Для локальной проверки это безопасный режим»</li></ul>
+          <ul><li>«Заявка записана в тестовую таблицу»</li><li>«Поставщикам ничего не отправлено»</li></ul>
         </details>
         <details>
           <summary>Связанные pytest-тесты · 2</summary>
-          <ul class="tests"><li><a href="../../tests/submission/test_submission.py">tests/submission/test_submission.py</a><span>test_worker_guard_blocks_all_external_writes_when_submission_is_disabled</span></li><li><a href="../../tests/submission/test_submission_guards.py">tests/submission/test_submission_guards.py</a><span>test_disabled_submission_keeps_draft_and_does_not_enqueue</span></li></ul>
+          <ul class="tests"><li><a href="../../tests/submission/test_submission.py">tests/submission/test_submission.py</a><span>test_disabled_dispatch_writes_and_recalculates_but_never_calls_submission_script</span></li><li><a href="../../tests/submission/test_submission_guards.py">tests/submission/test_submission_guards.py</a><span>test_disabled_external_dispatch_still_enqueues_local_table_write</span></li></ul>
         </details>
       </article>
 

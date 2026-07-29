@@ -113,8 +113,8 @@ def test_submission_retry_is_blocked_after_uncertain_dispatch(settings) -> None:
     assert guarded.reply.rows == []
 
 
-def test_disabled_submission_keeps_draft_and_does_not_enqueue(settings) -> None:  # type: ignore[no-untyped-def]
-    """Оставляет черновик нетронутым, когда локальная отправка выключена."""
+def test_disabled_external_dispatch_still_enqueues_local_table_write(settings) -> None:  # type: ignore[no-untyped-def]
+    """Создаёт задачу записи в таблицу при выключенной внешней отправке."""
     disabled_settings = settings.model_copy(update={"google_order_submission_enabled": False})
     engine = ConversationEngine(disabled_settings)
     cart_item = engine._build_item(ExtractedItem(product_query="Сироп Роза", quantity=5, unit="шт"))
@@ -123,8 +123,8 @@ def test_disabled_submission_keeps_draft_and_does_not_enqueue(settings) -> None:
 
     guarded = engine._prepare_submission(_event(), state)
 
-    assert guarded.enqueue_submission is False
-    assert guarded.state.pending_submission is None
+    assert guarded.enqueue_submission is True
+    assert guarded.state.pending_submission is not None
+    assert guarded.state.pending_submission.rows[0]["Кол-во"] == 5
     assert guarded.state.cart == [cart_item]
-    assert "Отправка отключена" in guarded.reply.text
-    assert guarded.reply.rows == []
+    assert "Отправляю заявку" in guarded.reply.text

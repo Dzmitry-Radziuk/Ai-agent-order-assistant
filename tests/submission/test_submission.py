@@ -20,9 +20,9 @@ from restaurant_bot.services import submission as submission_module
 from restaurant_bot.services.submission import (
     SubmissionService,
     build_order_status_text,
-    submission_disabled_reply,
     submission_dispatch_uncertain_reply,
     submission_failure_reply,
+    submission_local_saved_reply,
     submission_success_reply,
 )
 
@@ -178,6 +178,27 @@ def test_successful_submission_clears_cart_checkpoint_and_marks_state_submitted(
     assert state.submitted_order_numbers == ["20260722-001"]
 
 
+def test_local_submission_clears_draft_and_marks_state_saved_locally() -> None:
+    """Завершает локальный черновик отдельно от реальной отправки."""
+    state = ConversationState(
+        order_trace_id="trace-local",
+        cart=[CartItem(id="rose", source_query="Сироп Роза")],
+        pending_submission=PendingSubmission(order_no="ORDER-LOCAL"),
+    )
+
+    SubmissionService._apply_successful_submission_state(
+        state,
+        "ORDER-LOCAL",
+        status="saved_locally",
+    )
+
+    assert state.cart == []
+    assert state.pending_submission is None
+    assert state.stage is SessionStage.SUBMITTED
+    assert state.status == "saved_locally"
+    assert state.last_order_no == "ORDER-LOCAL"
+
+
 def test_order_status_limits_to_ten_tracked_orders_and_formats_delivery_date() -> None:
     """Проверяет, что заказ статус ограничивает в ten отслеживаемые orders и форматирует delivery date."""
     numbers = [f"A-{index}" for index in range(12)]
@@ -273,7 +294,7 @@ def test_retry_delivers_success_card_after_order_was_already_finalized(
     service._load_pending = MagicMock(return_value=None)  # type: ignore[method-assign]
     state = ConversationState(last_order_no="№00V63II4-000024", status="submitted")
     service._load_unnotified_completion = MagicMock(  # type: ignore[method-assign]
-        return_value=("ORDER-INTERNAL", "№00V63II4-000024", state)
+        return_value=("ORDER-INTERNAL", "№00V63II4-000024", state, True)
     )
     service._send_completion = MagicMock()  # type: ignore[method-assign]
     monkeypatch.setattr(submission_module, "chat_lock", lambda *_args, **_kwargs: nullcontext())
@@ -285,6 +306,31 @@ def test_retry_delivers_success_card_after_order_was_already_finalized(
         state,
         "№00V63II4-000024",
         "ORDER-INTERNAL",
+    )
+
+
+def test_retry_delivers_local_saved_card_without_claiming_dispatch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Повторно доставляет подтверждение локальной записи без ложной отправки."""
+    service = object.__new__(SubmissionService)
+    service.redis = MagicMock()
+    service._load_pending = MagicMock(return_value=None)  # type: ignore[method-assign]
+    state = ConversationState(last_order_no="ORDER-LOCAL", status="saved_locally")
+    service._load_unnotified_completion = MagicMock(  # type: ignore[method-assign]
+        return_value=("ORDER-LOCAL", "ORDER-LOCAL", state, False)
+    )
+    service._send_completion = MagicMock()  # type: ignore[method-assign]
+    service._send_local_completion = MagicMock()  # type: ignore[method-assign]
+    monkeypatch.setattr(submission_module, "chat_lock", lambda *_args, **_kwargs: nullcontext())
+
+    service.submit("123")
+
+    service._send_completion.assert_not_called()
+    service._send_local_completion.assert_called_once_with(
+        "123",
+        state,
+        "ORDER-LOCAL",
     )
 
 
@@ -539,35 +585,76 @@ def test_dispatch_uncertain_reply_has_no_repeat_button() -> None:
     assert reply.rows == []
 
 
-def test_disabled_submission_reply_is_explicit_and_has_no_buttons() -> None:
-    """Объясняет безопасную блокировку без кнопки обхода."""
-    reply = submission_disabled_reply()
+def test_local_saved_reply_is_explicit_and_has_only_new_order_button() -> None:
+    """Объясняет запись в тестовую таблицу без утверждения об отправке."""
+    reply = submission_local_saved_reply(
+        type("State", (), {"ui_revision": 4})(),
+        "ORDER-LOCAL",
+    )
 
-    assert "Отправка отключена" in reply.text
-    assert "Данные в таблицы и поставщикам не отправлялись" in reply.text
-    assert reply.rows == []
+    assert "Заявка записана в тестовую таблицу" in reply.text
+    assert "Данные внесены в лист «Заявка», расчёты обновлены" in reply.text
+    assert "Поставщикам ничего не отправлено" in reply.text
+    assert "ORDER-LOCAL" in reply.text
+    assert [(button.text, button.callback_data) for row in reply.rows for button in row] == [
+        ("Новая заявка", "v2:clear:r4")
+    ]
 
 
-def test_worker_guard_blocks_all_external_writes_when_submission_is_disabled(
+def test_disabled_dispatch_writes_and_recalculates_but_never_calls_submission_script(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Не позволяет старой фоновой задаче обойти выключатель отправки."""
+    """Сохраняет тестовую заявку локально и блокирует только центральный POST."""
     service = object.__new__(SubmissionService)
     service.settings = SimpleNamespace(google_order_submission_enabled=False)
     service.redis = MagicMock()
+    service.redis.lock.return_value = nullcontext()
     service.telegram = MagicMock()
     service.sheets = MagicMock()
-    pending = PendingSubmission(order_no="ORDER-DISABLED", spreadsheet_id="venue-sheet", rows=[])
+    service.catalog_cache = MagicMock()
+    pending = PendingSubmission(
+        order_no="ORDER-LOCAL",
+        spreadsheet_id="venue-sheet",
+        rows=[{"ID товара": "rose", "Кол-во": 5}],
+    )
     service._load_pending = MagicMock(return_value=pending)  # type: ignore[method-assign]
-    service._record = MagicMock()  # type: ignore[method-assign]
+    service._record = MagicMock(return_value=_record())  # type: ignore[method-assign]
+    service._get_record = MagicMock(  # type: ignore[method-assign]
+        side_effect=[
+            _record(),
+            _record(catalog_updated=True),
+            _record(catalog_updated=True, recalc_done=True),
+        ]
+    )
+    service._checkpoint = MagicMock()  # type: ignore[method-assign]
+    final_state = ConversationState(last_order_no="ORDER-LOCAL", status="saved_locally")
+    service._finalize = MagicMock(return_value=final_state)  # type: ignore[method-assign]
+    service._send_local_completion = MagicMock()  # type: ignore[method-assign]
     monkeypatch.setattr(submission_module, "chat_lock", lambda *_args, **_kwargs: nullcontext())
 
-    service.submit("chat-disabled")
+    service.submit("chat-local")
 
-    service._record.assert_not_called()
-    assert service.sheets.mock_calls == []
-    reply = service.telegram.send_reply.call_args.args[1]
-    assert "Отправка отключена" in reply.text
+    service.sheets.increment_catalog_quantities.assert_called_once_with(
+        pending.rows,
+        "venue-sheet",
+    )
+    service.sheets.trigger_recalculation.assert_called_once_with(
+        "ORDER-LOCAL",
+        "venue-sheet",
+    )
+    service.sheets.prepare_order_submission.assert_not_called()
+    service.sheets.send_order_submission.assert_not_called()
+    service._finalize.assert_called_once_with(
+        "chat-local",
+        "ORDER-LOCAL",
+        "ORDER-LOCAL",
+        dispatched=False,
+    )
+    service._send_local_completion.assert_called_once_with(
+        "chat-local",
+        final_state,
+        "ORDER-LOCAL",
+    )
 
 
 def _mock_status_session(

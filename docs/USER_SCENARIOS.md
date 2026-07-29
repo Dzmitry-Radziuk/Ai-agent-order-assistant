@@ -653,7 +653,7 @@ flowchart LR
 - [`tests/submission/test_submission.py`](../tests/submission/test_submission.py) → `test_redelivery_after_started_dispatch_does_not_send_second_post`
 - [`tests/submission/test_submission_guards.py`](../tests/submission/test_submission_guards.py) → `test_submission_retry_is_blocked_after_uncertain_dispatch`
 
-#### SUB-06 · Локальная отправка защищена выключателем
+#### SUB-06 · Локальная запись без отправки поставщикам
 
 **Приоритет:** Критический<br>
 **Канал:** Кнопка, Системный<br>
@@ -661,19 +661,19 @@ flowchart LR
 
 **Действие пользователя:** Подтверждает финальную отправку во время локальной проверки.
 
-**Ответ бота:** Сообщает, что отправка отключена, а черновик сохранён без записи в таблицы и отправки поставщикам.
+**Ответ бота:** Записывает количества и комментарии в лист «Заявка», запускает перерасчёт и сообщает, что поставщикам ничего не отправлено.
 
-**Результат:** Случайное нажатие локально не вызывает Google Sheets и центральный Apps Script.
+**Результат:** Тестовая таблица обновлена и пересчитана, но центральный Apps Script отправки не вызван.
 
 **Примеры фраз:**
 
-- «Отправка отключена»
-- «Для локальной проверки это безопасный режим»
+- «Заявка записана в тестовую таблицу»
+- «Поставщикам ничего не отправлено»
 
 **Автоматическая проверка:**
 
-- [`tests/submission/test_submission.py`](../tests/submission/test_submission.py) → `test_worker_guard_blocks_all_external_writes_when_submission_is_disabled`
-- [`tests/submission/test_submission_guards.py`](../tests/submission/test_submission_guards.py) → `test_disabled_submission_keeps_draft_and_does_not_enqueue`
+- [`tests/submission/test_submission.py`](../tests/submission/test_submission.py) → `test_disabled_dispatch_writes_and_recalculates_but_never_calls_submission_script`
+- [`tests/submission/test_submission_guards.py`](../tests/submission/test_submission_guards.py) → `test_disabled_external_dispatch_still_enqueues_local_table_write`
 
 #### SUB-07 · Проверка готовой Истории без отправки
 
