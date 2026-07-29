@@ -750,23 +750,23 @@
 
       <article id="scenario-SUB-06" class="scenario-card"
         data-category="submission"
-        data-priority="critical" data-search="sub-06 локальная запись без отправки поставщикам проверка и отправка подтверждает финальную отправку во время локальной проверки. записывает количества и комментарии в лист «заявка», запускает перерасчёт и сообщает, что поставщикам ничего не отправлено. заявка записана в тестовую таблицу поставщикам ничего не отправлено">
+        data-priority="critical" data-search="sub-06 подготовка заявки для ручной отправки проверка и отправка подтверждает подготовленную заявку. записывает количества и комментарии в лист «заявка», запускает перерасчёт и сообщает, что заявку поставщикам отправит ответственный сотрудник. заявка подготовлена заявку поставщикам отправит ответственный сотрудник">
         <div class="card-top">
           <span class="scenario-id">SUB-06</span>
           <span class="priority priority-critical">Критический</span>
         </div>
-        <h3>Локальная запись без отправки поставщикам</h3>
+        <h3>Подготовка заявки для ручной отправки</h3>
         <p class="category-label">Проверка и отправка</p>
         <div class="channels"><span>Кнопка</span><span>Системный</span></div>
         <dl>
           <div><dt>Перед началом</dt><dd>Бот работает с GOOGLE_ORDER_SUBMISSION_ENABLED=false.</dd></div>
-          <div><dt>Пользователь</dt><dd>Подтверждает финальную отправку во время локальной проверки.</dd></div>
-          <div><dt>Бот</dt><dd>Записывает количества и комментарии в лист «Заявка», запускает перерасчёт и сообщает, что поставщикам ничего не отправлено.</dd></div>
-          <div class="result"><dt>Итог</dt><dd>Тестовая таблица обновлена и пересчитана, но центральный Apps Script отправки не вызван.</dd></div>
+          <div><dt>Пользователь</dt><dd>Подтверждает подготовленную заявку.</dd></div>
+          <div><dt>Бот</dt><dd>Записывает количества и комментарии в лист «Заявка», запускает перерасчёт и сообщает, что заявку поставщикам отправит ответственный сотрудник.</dd></div>
+          <div class="result"><dt>Итог</dt><dd>Рабочая таблица заведения обновлена и пересчитана, а центральный Apps Script отправки не вызван.</dd></div>
         </dl>
         <details>
           <summary>Примеры фраз</summary>
-          <ul><li>«Заявка записана в тестовую таблицу»</li><li>«Поставщикам ничего не отправлено»</li></ul>
+          <ul><li>«Заявка подготовлена»</li><li>«Заявку поставщикам отправит ответственный сотрудник»</li></ul>
         </details>
         <details>
           <summary>Связанные pytest-тесты · 2</summary>
@@ -776,27 +776,27 @@
 
       <article id="scenario-SUB-07" class="scenario-card"
         data-category="submission"
-        data-priority="critical" data-search="sub-07 проверка готовой истории без отправки проверка и отправка просит показать статусы заявок. читает последнюю заявку из «истории» и явно помечает её как тестовые данные, не отправленные через этого бота. мои заявки проверить статус покажи последнюю заявку">
+        data-priority="critical" data-search="sub-07 последние реальные заявки и голосовой выбор проверка и отправка просит показать статусы заявок. фильтрует «историю» по текущему заведению, показывает пять последних заявок и открывает выбранную кнопку или голосом. более старые заявки доступны на следующих страницах. мои заявки покажи вторую заявку следующие вернись к списку заявок">
         <div class="card-top">
           <span class="scenario-id">SUB-07</span>
           <span class="priority priority-critical">Критический</span>
         </div>
-        <h3>Проверка готовой Истории без отправки</h3>
+        <h3>Последние реальные заявки и голосовой выбор</h3>
         <p class="category-label">Проверка и отправка</p>
         <div class="channels"><span>Текст</span><span>Голос</span><span>Кнопка</span></div>
         <dl>
-          <div><dt>Перед началом</dt><dd>Локальная отправка выключена, у пользователя нет собственных номеров, а в листе «История» есть тестовая заявка.</dd></div>
+          <div><dt>Перед началом</dt><dd>Ответственный сотрудник отправил заявку, и её данные появились в листе «История».</dd></div>
           <div><dt>Пользователь</dt><dd>Просит показать статусы заявок.</dd></div>
-          <div><dt>Бот</dt><dd>Читает последнюю заявку из «Истории» и явно помечает её как тестовые данные, не отправленные через этого бота.</dd></div>
-          <div class="result"><dt>Итог</dt><dd>Статусы проверяются только чтением; Google Sheets, центральный скрипт и поставщики не затрагиваются.</dd></div>
+          <div><dt>Бот</dt><dd>Фильтрует «Историю» по текущему заведению, показывает пять последних заявок и открывает выбранную кнопку или голосом. Более старые заявки доступны на следующих страницах.</dd></div>
+          <div class="result"><dt>Итог</dt><dd>Пользователь видит только реальные заявки своего заведения; просмотр ничего не записывает и не отправляет повторно.</dd></div>
         </dl>
         <details>
           <summary>Примеры фраз</summary>
-          <ul><li>«Мои заявки»</li><li>«Проверить статус»</li><li>«Покажи последнюю заявку»</li></ul>
+          <ul><li>«Мои заявки»</li><li>«Покажи вторую заявку»</li><li>«Следующие»</li><li>«Вернись к списку заявок»</li></ul>
         </details>
         <details>
-          <summary>Связанные pytest-тесты · 3</summary>
-          <ul class="tests"><li><a href="../../tests/submission/test_submission.py">tests/submission/test_submission.py</a><span>test_disabled_local_mode_reads_latest_history_without_sending</span></li><li><a href="../../tests/submission/test_submission.py">tests/submission/test_submission.py</a><span>test_enabled_mode_without_user_orders_does_not_show_test_history</span></li><li><a href="../../tests/submission/test_google_sheets_mapping.py">tests/submission/test_google_sheets_mapping.py</a><span>test_latest_order_statuses_use_first_complete_order_from_history</span></li></ul>
+          <summary>Связанные pytest-тесты · 5</summary>
+          <ul class="tests"><li><a href="../../tests/submission/test_submission.py">tests/submission/test_submission.py</a><span>test_statuses_show_five_recent_orders_of_current_venue</span></li><li><a href="../../tests/submission/test_submission.py">tests/submission/test_submission.py</a><span>test_statuses_open_selected_order_from_shown_list</span></li><li><a href="../../tests/submission/test_google_sheets_mapping.py">tests/submission/test_google_sheets_mapping.py</a><span>test_latest_order_statuses_filter_foreign_venue_before_selecting_order</span></li><li><a href="../../tests/telegram/test_telegram_commands.py">tests/telegram/test_telegram_commands.py</a><span>test_voice_can_open_order_by_spoken_position</span></li><li><a href="../../tests/telegram/test_telegram_commands.py">tests/telegram/test_telegram_commands.py</a><span>test_voice_can_open_next_order_status_page</span></li></ul>
         </details>
       </article>
 

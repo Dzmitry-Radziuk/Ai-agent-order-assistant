@@ -500,14 +500,14 @@
     {
       "id": "SUB-06",
       "category": "submission",
-      "title": "Локальная запись без отправки поставщикам",
+      "title": "Подготовка заявки для ручной отправки",
       "priority": "critical",
       "channels": ["Кнопка", "Системный"],
       "precondition": "Бот работает с GOOGLE_ORDER_SUBMISSION_ENABLED=false.",
-      "user_action": "Подтверждает финальную отправку во время локальной проверки.",
-      "bot_response": "Записывает количества и комментарии в лист «Заявка», запускает перерасчёт и сообщает, что поставщикам ничего не отправлено.",
-      "result": "Тестовая таблица обновлена и пересчитана, но центральный Apps Script отправки не вызван.",
-      "examples": ["Заявка записана в тестовую таблицу", "Поставщикам ничего не отправлено"],
+      "user_action": "Подтверждает подготовленную заявку.",
+      "bot_response": "Записывает количества и комментарии в лист «Заявка», запускает перерасчёт и сообщает, что заявку поставщикам отправит ответственный сотрудник.",
+      "result": "Рабочая таблица заведения обновлена и пересчитана, а центральный Apps Script отправки не вызван.",
+      "examples": ["Заявка подготовлена", "Заявку поставщикам отправит ответственный сотрудник"],
       "test_refs": [
         "tests/submission/test_submission.py::test_disabled_dispatch_writes_and_recalculates_but_never_calls_submission_script",
         "tests/submission/test_submission_guards.py::test_disabled_external_dispatch_still_enqueues_local_table_write"
@@ -516,18 +516,20 @@
     {
       "id": "SUB-07",
       "category": "submission",
-      "title": "Проверка готовой Истории без отправки",
+      "title": "Последние реальные заявки и голосовой выбор",
       "priority": "critical",
       "channels": ["Текст", "Голос", "Кнопка"],
-      "precondition": "Локальная отправка выключена, у пользователя нет собственных номеров, а в листе «История» есть тестовая заявка.",
+      "precondition": "Ответственный сотрудник отправил заявку, и её данные появились в листе «История».",
       "user_action": "Просит показать статусы заявок.",
-      "bot_response": "Читает последнюю заявку из «Истории» и явно помечает её как тестовые данные, не отправленные через этого бота.",
-      "result": "Статусы проверяются только чтением; Google Sheets, центральный скрипт и поставщики не затрагиваются.",
-      "examples": ["Мои заявки", "Проверить статус", "Покажи последнюю заявку"],
+      "bot_response": "Фильтрует «Историю» по текущему заведению, показывает пять последних заявок и открывает выбранную кнопку или голосом. Более старые заявки доступны на следующих страницах.",
+      "result": "Пользователь видит только реальные заявки своего заведения; просмотр ничего не записывает и не отправляет повторно.",
+      "examples": ["Мои заявки", "Покажи вторую заявку", "Следующие", "Вернись к списку заявок"],
       "test_refs": [
-        "tests/submission/test_submission.py::test_disabled_local_mode_reads_latest_history_without_sending",
-        "tests/submission/test_submission.py::test_enabled_mode_without_user_orders_does_not_show_test_history",
-        "tests/submission/test_google_sheets_mapping.py::test_latest_order_statuses_use_first_complete_order_from_history"
+        "tests/submission/test_submission.py::test_statuses_show_five_recent_orders_of_current_venue",
+        "tests/submission/test_submission.py::test_statuses_open_selected_order_from_shown_list",
+        "tests/submission/test_google_sheets_mapping.py::test_latest_order_statuses_filter_foreign_venue_before_selecting_order",
+        "tests/telegram/test_telegram_commands.py::test_voice_can_open_order_by_spoken_position",
+        "tests/telegram/test_telegram_commands.py::test_voice_can_open_next_order_status_page"
       ]
     },
     {

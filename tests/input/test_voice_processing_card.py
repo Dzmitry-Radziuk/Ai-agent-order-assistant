@@ -300,7 +300,7 @@ def test_visible_action_timeout_returns_unknown_instead_of_product() -> None:
     state = ConversationState(
         stage=SessionStage.AWAIT_SUBMIT_CONFIRM,
         visible_actions=[
-            {"label": "Отправить поставщику", "action_id": "v2:submit:r7"},
+            {"label": "Отправить в таблицу заказа", "action_id": "v2:submit:r7"},
             {"label": "К черновику", "action_id": "v2:back:r7"},
         ],
     )

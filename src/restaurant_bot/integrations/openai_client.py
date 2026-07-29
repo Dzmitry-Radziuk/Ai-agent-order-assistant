@@ -12,13 +12,20 @@ from pydantic import BaseModel, Field
 
 from restaurant_bot.config import Settings
 from restaurant_bot.domain.models import ExtractedItem, Intent, ParsedCommand
-from restaurant_bot.services.parser import infer_intent, parse_product_lines, parse_quantity_unit
+from restaurant_bot.observability import Tracer
+from restaurant_bot.services.parser import (
+    has_explicit_global_comment_scope,
+    infer_intent,
+    parse_product_lines,
+    parse_quantity_unit,
+)
 from restaurant_bot.services.text import (
     UNIT_ALIASES,
     clean_text,
     normalize_text,
     normalize_unit,
     parse_number_words,
+    remove_global_comment_overlap,
     to_float,
 )
 
@@ -317,7 +324,7 @@ def _strip_global_comment_scope(value: str) -> str:
         return ""
     comment = re.sub(
         r"^(?:(?:и|а)\s+)?(?:все|всё|всем|для всех)"
-        r"(?:\s+(?:товаров|товары|позиций|позиции))?"
+        r"(?:\s+(?:товар\w*|позици\w*|это(?:\s+дело)?))?"
         r"(?:\s*[,;:—–-]\s*|\s+)",
         "",
         comment,
@@ -413,6 +420,38 @@ def _recover_missing_item_comments(
             item["user_comment_to_supplier"] = recovered
 
 
+def _append_local_item_comment(item: dict[str, Any], comment: str) -> None:
+    """Добавляет локальный комментарий к позиции без повторения текста."""
+    addition = clean_text(comment).strip(" .,;:-—–")
+    if not addition:
+        return
+    existing = clean_text(item.get("comment") or item.get("user_comment_to_supplier")).strip(
+        " .,;:-—–"
+    )
+    if normalize_text(addition) == normalize_text(existing):
+        merged = existing
+    elif existing:
+        merged = f"{existing}; {addition}"
+    else:
+        merged = addition
+    item["comment"] = merged
+    item["user_comment_to_supplier"] = merged
+
+
+def _remove_item_global_comment_overlaps(
+    items: list[dict[str, Any]],
+    global_comment: str,
+) -> None:
+    """Удаляет продублированный общий комментарий и слова его общего охвата."""
+    if not clean_text(global_comment):
+        return
+    for item in items:
+        local_comment = clean_text(item.get("comment") or item.get("user_comment_to_supplier"))
+        cleaned = remove_global_comment_overlap(local_comment, global_comment)
+        item["comment"] = cleaned
+        item["user_comment_to_supplier"] = cleaned
+
+
 def recover_omitted_explicit_items(payload: dict[str, Any], source_text: str) -> dict[str, Any]:
     """Восстанавливает пропущенные явно названные товары."""
     items = list(payload.get("items") or [])
@@ -449,7 +488,11 @@ def recover_omitted_explicit_items(payload: dict[str, Any], source_text: str) ->
 
     restored = restore_explicit_order_terms(items, source_text)
     global_comment = _strip_global_comment_scope(clean_text(payload.get("global_comment")))
+    if global_comment and restored and not has_explicit_global_comment_scope(source_text):
+        _append_local_item_comment(restored[-1], global_comment)
+        global_comment = ""
     payload["global_comment"] = global_comment
+    _remove_item_global_comment_overlaps(restored, global_comment)
     _recover_missing_item_comments(restored, global_comment)
     payload["items"] = collapse_comment_shadow_items(restored, global_comment)
     return payload
@@ -472,13 +515,18 @@ _TEXT_SYSTEM = """
   добавление, отправку, очистку, выбор или подтверждение, если пользователь их отрицает.
 - Примеры навигации: «давай пойдём и добавим товары» → add_more;
   «давай посмотрим наши статусы» → order_status;
+  «покажи вторую заявку», «открой второй заказ» → order_status с selected_index=2;
+  «покажи следующие заявки», «вернись к списку заявок» → order_status;
   «можно вернуться и открыть черновик» → show_cart;
   «новый заказ», «хочу оформить ещё одну заявку» → start_new_order;
   «запросы снабженцу», «посмотреть запросы» → product_add_list.
 - Поддерживай свободный порядок товара, количества, единицы и комментария, разную пунктуацию, запятые, тире, слеши и голосовые оговорки.
 - Сохраняй исходную строку в source_line. Комментарий сохраняй в comment и не включай его в product_query.
 - Комментарий может быть любым текстом пользователя. Порядок слов свободный; не используй закрытый словарь комментариев.
-- Если комментарий относится ко всем позициям, верни его в global_comment; индивидуальные комментарии оставь в item.comment.
+- Возвращай global_comment только при явном указании общего охвата: «всё», «всем товарам»,
+  «для всех позиций», «для всей заявки», «ко всему заказу» или «общий комментарий».
+- Пожелание после последнего товара без такого указания относится только к последнему товару,
+  даже если это время доставки, дата, качество или способ упаковки. Сохрани его в item.comment.
 - Никогда не создавай отдельный item из комментария или из фрагмента между двумя товарами.
 - Слова о качестве, обработке, доставке, замене и пожеланиях пользователя сохраняй дословно в comment, а не в product_query.
 - Незнакомое или написанное с опечаткой слово рядом с категорией товара может быть частью названия.
@@ -488,8 +536,13 @@ _TEXT_SYSTEM = """
 - Пример: «говядина 10 кг мраморная без кожи» → product_query="говядина", quantity=10, unit="кг", comment="мраморная без кожи".
 - Пример с опечаткой: «сироп рза холодным» → product_query="сироп рза", comment="холодным".
 - Пример общего комментария: «всё привезти до 9 утра» → global_comment="привезти до 9 утра" и не создавай из него товар.
+- Пример локального комментария последней позиции: «куриные лапы 15 кг. Желательно завтра с 9 до 14»
+  → у куриных лап comment="Желательно завтра с 9 до 14", global_comment пустой.
 - Пример локальных и общего комментариев: «сироп тархун в бутылках 10 шт, сироп роза 1 шт в банках, и всё желательно на завтра»
   → у тархуна comment="в бутылках", у розы comment="в банках", global_comment="желательно на завтра".
+- Разговорная связка общего охвата не является локальным комментарием:
+  «сироп роза 5 шт, главное быстро, и сироп тархун — всё это дело на завтра»
+  → у розы comment="главное быстро", у тархуна comment="", global_comment="на завтра".
 - Не выдумывай товар, количество, бренд, поставщика или характеристики.
 - Если количество без единицы, сохрани число, а unit оставь пустым.
 - Число в фасовке или объёме внутри названия не является количеством заказа, если заказанное количество указано отдельно после тире или в конце.
@@ -588,6 +641,7 @@ class OpenAIService:
     def __init__(self, settings: Settings):
         """Инициализирует компонент."""
         self.settings = settings
+        self.tracer = Tracer(settings)
         self.client = OpenAI(
             api_key=settings.openai_api_key.get_secret_value(),
             timeout=settings.openai_text_timeout_seconds,
@@ -598,6 +652,45 @@ class OpenAIService:
             timeout=settings.openai_vision_timeout_seconds,
             max_retries=0,
         )
+
+    @staticmethod
+    def _usage_details(response: Any) -> dict[str, Any] | None:
+        """Возвращает непересекающиеся usage-бакеты для расчёта цены Langfuse."""
+        usage = getattr(response, "usage", None)
+        if usage is None:
+            return None
+        if isinstance(usage, dict):
+            payload = dict(usage)
+        elif hasattr(usage, "model_dump"):
+            payload = usage.model_dump(exclude_none=True)
+        else:
+            payload = {
+                key: value
+                for key, value in vars(usage).items()
+                if value is not None and not key.startswith("_")
+            }
+        input_total = int(payload.get("input_tokens") or payload.get("prompt_tokens") or 0)
+        output_total = int(payload.get("output_tokens") or payload.get("completion_tokens") or 0)
+        total = int(payload.get("total_tokens") or input_total + output_total)
+        raw_input_details = (
+            payload.get("input_tokens_details")
+            or payload.get("input_token_details")
+            or payload.get("prompt_tokens_details")
+            or {}
+        )
+        if hasattr(raw_input_details, "model_dump"):
+            raw_input_details = raw_input_details.model_dump(exclude_none=True)
+        cached = int((raw_input_details or {}).get("cached_tokens") or 0)
+        cached = min(max(cached, 0), input_total)
+
+        normalized: dict[str, int] = {
+            "input": input_total - cached,
+            "output": output_total,
+            "total": total,
+        }
+        if cached:
+            normalized["input_cached_tokens"] = cached
+        return normalized
 
     def parse_text(self, text: str) -> ParsedCommand:
         """Извлекает структурированную команду из текста."""
@@ -651,12 +744,22 @@ class OpenAIService:
             )
             return deterministic
         try:
-            response = self.client.responses.parse(
+            with self.tracer.generation(
+                "openai.parse_text",
                 model=self.settings.openai_text_model,
-                instructions=_TEXT_SYSTEM,
-                input=text,
-                text_format=ParsedInputSchema,
-            )
+                input={"characters": len(text), "kind": "text"},
+                metadata={"feature": "order_parser"},
+            ) as generation:
+                response = self.client.responses.parse(
+                    model=self.settings.openai_text_model,
+                    instructions=_TEXT_SYSTEM,
+                    input=text,
+                    text_format=ParsedInputSchema,
+                )
+                generation.update(
+                    output={"parsed": response.output_parsed is not None},
+                    usage_details=self._usage_details(response),
+                )
         except (APIConnectionError, APITimeoutError, RateLimitError) as error:
             logger.warning(
                 "text_ai_transport_failed",
@@ -664,9 +767,8 @@ class OpenAIService:
                 error_type=type(error).__name__,
                 deterministic_intent=deterministic.intent.value,
                 deterministic_item_count=len(deterministic.items),
+                deterministic_fallback_used=False,
             )
-            if deterministic.intent == Intent.ADD_ITEMS and deterministic.items:
-                return deterministic
             raise
         parsed = response.output_parsed
         if parsed is None:
@@ -864,8 +966,22 @@ class OpenAIService:
             request["file"] = audio
             if prompt:
                 request["prompt"] = prompt
-            result = self.client.audio.transcriptions.create(**request)
-        text = clean_text(getattr(result, "text", ""))
+            with self.tracer.generation(
+                "openai.transcribe",
+                model=str(request["model"]),
+                input={
+                    "audio_bytes": path.stat().st_size,
+                    "prompt_characters": len(prompt),
+                    "kind": "voice",
+                },
+                metadata={"feature": "voice_transcription", "fallback": False},
+            ) as generation:
+                result = self.client.audio.transcriptions.create(**request)
+                text = clean_text(getattr(result, "text", ""))
+                generation.update(
+                    output={"transcript_characters": len(text)},
+                    usage_details=self._usage_details(result),
+                )
         if text:
             logger.info(
                 "voice_transcription_completed",
@@ -881,8 +997,22 @@ class OpenAIService:
                 else self.settings.openai_transcribe_fallback_model
             )
             request["file"] = audio
-            fallback = self.client.audio.transcriptions.create(**request)
-        fallback_text = clean_text(getattr(fallback, "text", ""))
+            with self.tracer.generation(
+                "openai.transcribe",
+                model=str(request["model"]),
+                input={
+                    "audio_bytes": path.stat().st_size,
+                    "prompt_characters": len(prompt),
+                    "kind": "voice",
+                },
+                metadata={"feature": "voice_transcription", "fallback": True},
+            ) as generation:
+                fallback = self.client.audio.transcriptions.create(**request)
+                fallback_text = clean_text(getattr(fallback, "text", ""))
+                generation.update(
+                    output={"transcript_characters": len(fallback_text)},
+                    usage_details=self._usage_details(fallback),
+                )
         logger.info(
             "voice_transcription_completed",
             model=request["model"],
@@ -896,28 +1026,50 @@ class OpenAIService:
         import base64
 
         encoded = base64.b64encode(path.read_bytes()).decode("ascii")
-        response = self.vision_client.responses.parse(
+        with self.tracer.generation(
+            "openai.parse_photo",
             model=self.settings.openai_vision_model,
-            instructions=_PHOTO_SYSTEM,
-            input=cast(
-                Any,
-                [
-                    {
-                        "role": "user",
-                        "content": [
-                            {"type": "input_text", "text": caption or "Распознай заявку на фото"},
-                            {
-                                "type": "input_image",
-                                "image_url": f"data:{mime_type};base64,{encoded}",
-                                "detail": "high",
-                            },
-                        ],
-                    }
-                ],
-            ),
-            text_format=ParsedInputSchema,
-            max_output_tokens=5000,
-        )
+            input={
+                "image_bytes": path.stat().st_size,
+                "caption_characters": len(caption),
+                "mime_type": mime_type,
+                "kind": "photo",
+            },
+            metadata={"feature": "photo_order_parser"},
+        ) as generation:
+            response = self.vision_client.responses.parse(
+                model=self.settings.openai_vision_model,
+                instructions=_PHOTO_SYSTEM,
+                input=cast(
+                    Any,
+                    [
+                        {
+                            "role": "user",
+                            "content": [
+                                {
+                                    "type": "input_text",
+                                    "text": caption or "Распознай заявку на фото",
+                                },
+                                {
+                                    "type": "input_image",
+                                    "image_url": f"data:{mime_type};base64,{encoded}",
+                                    "detail": "high",
+                                },
+                            ],
+                        }
+                    ],
+                ),
+                text_format=ParsedInputSchema,
+                max_output_tokens=5000,
+            )
+            parsed_output = response.output_parsed
+            generation.update(
+                output={
+                    "parsed": parsed_output is not None,
+                    "item_count": len(parsed_output.items) if parsed_output else 0,
+                },
+                usage_details=self._usage_details(response),
+            )
         parsed = response.output_parsed
         if parsed is None:
             logger.warning("photo_ai_empty_result", mime_type=mime_type)
@@ -1018,12 +1170,26 @@ class OpenAIService:
         self, query: str, candidates: list[dict[str, Any]]
     ) -> ProductMatchDecision:
         """Выбирает кандидата только из заданного списка."""
-        response = self.client.responses.parse(
+        with self.tracer.generation(
+            "openai.choose_catalog_candidate",
             model=self.settings.openai_match_model,
-            instructions=_MATCH_SYSTEM,
-            input=json.dumps({"query": query, "candidates": candidates}, ensure_ascii=False),
-            text_format=ProductMatchDecision,
-        )
+            input={
+                "query_characters": len(query),
+                "candidate_count": len(candidates),
+                "kind": "catalog_match",
+            },
+            metadata={"feature": "catalog_matching"},
+        ) as generation:
+            response = self.client.responses.parse(
+                model=self.settings.openai_match_model,
+                instructions=_MATCH_SYSTEM,
+                input=json.dumps({"query": query, "candidates": candidates}, ensure_ascii=False),
+                text_format=ProductMatchDecision,
+            )
+            generation.update(
+                output={"parsed": response.output_parsed is not None},
+                usage_details=self._usage_details(response),
+            )
         decision = response.output_parsed or ProductMatchDecision(action="ambiguous")
         logger.info(
             "catalog_candidate_ai_decision",
@@ -1052,22 +1218,37 @@ class OpenAIService:
         }
         if not allowed:
             return ""
-        response = self.client.responses.parse(
+        with self.tracer.generation(
+            "openai.choose_visible_action",
             model=self.settings.openai_text_model,
-            instructions=_VISIBLE_ACTION_SYSTEM,
-            input=json.dumps(
-                {
-                    "user_text": text,
-                    "screen_text": screen_text[:2000],
-                    "actions": [
-                        {"action_id": action_id, "label": label}
-                        for action_id, label in allowed.items()
-                    ],
-                },
-                ensure_ascii=False,
-            ),
-            text_format=VisibleActionDecision,
-        )
+            input={
+                "text_characters": len(text),
+                "screen_characters": min(len(screen_text), 2000),
+                "action_count": len(allowed),
+                "kind": "visible_action",
+            },
+            metadata={"feature": "voice_navigation"},
+        ) as generation:
+            response = self.client.responses.parse(
+                model=self.settings.openai_text_model,
+                instructions=_VISIBLE_ACTION_SYSTEM,
+                input=json.dumps(
+                    {
+                        "user_text": text,
+                        "screen_text": screen_text[:2000],
+                        "actions": [
+                            {"action_id": action_id, "label": label}
+                            for action_id, label in allowed.items()
+                        ],
+                    },
+                    ensure_ascii=False,
+                ),
+                text_format=VisibleActionDecision,
+            )
+            generation.update(
+                output={"parsed": response.output_parsed is not None},
+                usage_details=self._usage_details(response),
+            )
         decision = response.output_parsed or VisibleActionDecision()
         selected = decision.action_id if decision.action_id in allowed else ""
         if decision.confidence < 0.9:

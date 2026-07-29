@@ -85,10 +85,21 @@ def submit_product_add(self, chat_id: str) -> None:  # type: ignore[no-untyped-d
     retry_kwargs={"max_retries": 4},
     name="restaurant_bot.send_order_status",
 )
-def send_order_status(self, chat_id: str) -> None:  # type: ignore[no-untyped-def]
-    """Отправляет последние статусы заявок."""
+def send_order_status(  # type: ignore[no-untyped-def]
+    self,
+    chat_id: str,
+    page: int = 0,
+    selected_index: int | None = None,
+    order_number: str = "",
+) -> None:
+    """Отправляет список заявок или подробности выбранной заявки."""
     _, submission = dependencies()
-    submission.send_status(chat_id)
+    submission.send_status(
+        chat_id,
+        page=page,
+        selected_index=selected_index,
+        order_number=order_number,
+    )
 
 
 @celery_app.task(name="restaurant_bot.cleanup_expired_audit_data")

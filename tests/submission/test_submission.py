@@ -586,15 +586,16 @@ def test_dispatch_uncertain_reply_has_no_repeat_button() -> None:
 
 
 def test_local_saved_reply_is_explicit_and_has_only_new_order_button() -> None:
-    """Объясняет запись в тестовую таблицу без утверждения об отправке."""
+    """Объясняет подготовку заявки без утверждения об отправке."""
     reply = submission_local_saved_reply(
         type("State", (), {"ui_revision": 4})(),
         "ORDER-LOCAL",
     )
 
-    assert "Заявка записана в тестовую таблицу" in reply.text
-    assert "Данные внесены в лист «Заявка», расчёты обновлены" in reply.text
-    assert "Поставщикам ничего не отправлено" in reply.text
+    assert "Заявка подготовлена" in reply.text
+    assert "Товары записаны в лист «Заявка», расчёты обновлены" in reply.text
+    assert "Заявку поставщикам отправит ответственный сотрудник" in reply.text
+    assert "тест" not in reply.text.lower()
     assert "ORDER-LOCAL" in reply.text
     assert [(button.text, button.callback_data) for row in reply.rows for button in row] == [
         ("Новая заявка", "v2:clear:r4")
@@ -604,7 +605,7 @@ def test_local_saved_reply_is_explicit_and_has_only_new_order_button() -> None:
 def test_disabled_dispatch_writes_and_recalculates_but_never_calls_submission_script(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Сохраняет тестовую заявку локально и блокирует только центральный POST."""
+    """Готовит заявку для ручной отправки и блокирует центральный POST."""
     service = object.__new__(SubmissionService)
     service.settings = SimpleNamespace(google_order_submission_enabled=False)
     service.redis = MagicMock()
@@ -677,65 +678,60 @@ def _mock_status_session(
     monkeypatch.setattr(submission_module, "chat_lock", lambda *_args, **_kwargs: nullcontext())
 
 
-def test_disabled_local_mode_reads_latest_history_without_sending(
+def _history_status_row(
+    order_number: str,
+    supplier: str = "Поставщик",
+) -> dict[str, str]:
+    """Создаёт сводную строку реальной «Истории»."""
+    return {
+        "Номер заявки": order_number,
+        "Время создания заявки": "29.07.2026 13:16:15",
+        "Условное название поставщика": supplier,
+        "Условное наз-ие заведения": "Тестовое кафе",
+        "Список товаров": "Кухня:\n1. Мука — 4 шт",
+        "Стадия": "Отправлено поставщику",
+    }
+
+
+def test_statuses_show_five_recent_orders_of_current_venue(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Показывает подготовленные CEO статусы без номера в сессии пользователя."""
+    """Показывает пять реальных заявок и кнопку следующей страницы."""
     service = object.__new__(SubmissionService)
-    service.settings = SimpleNamespace(google_order_submission_enabled=False)
     service.redis = MagicMock()
     service.telegram = MagicMock()
     service.sheets = MagicMock()
-    state = ConversationState(spreadsheet_id="venue-sheet")
+    state = ConversationState(
+        spreadsheet_id="venue-sheet",
+        venue_name="Тестовое кафе",
+    )
     _mock_status_session(monkeypatch, state)
-    service.sheets.read_latest_order_statuses.return_value = [
-        {
-            "Номер заявки": "№00V63II4-000025",
-            "Условное название поставщика": "Агробалтик",
-            "Список товаров": "Кухня:\n1. Мука — 4 шт",
-            "Стадия": "Отправлено поставщику",
-        }
+    service.sheets.read_recent_order_statuses.return_value = [
+        _history_status_row(f"ORDER-{index}") for index in range(1, 7)
     ]
 
     service.send_status("chat-status")
 
-    service.sheets.read_latest_order_statuses.assert_called_once_with("venue-sheet")
-    service.sheets.read_order_statuses.assert_not_called()
-    reply = service.telegram.send_reply.call_args.args[1]
-    assert "Тестовые данные из листа «История»" in reply.text
-    assert "Заявка не отправлялась через этого бота" in reply.text
-    assert "№00V63II4-000025" in reply.text
-    assert "Агробалтик" in reply.text
-
-
-def test_enabled_mode_without_user_orders_does_not_show_test_history(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Не показывает чужие тестовые строки после включения реальной отправки."""
-    service = object.__new__(SubmissionService)
-    service.settings = SimpleNamespace(google_order_submission_enabled=True)
-    service.redis = MagicMock()
-    service.telegram = MagicMock()
-    service.sheets = MagicMock()
-    _mock_status_session(
-        monkeypatch,
-        ConversationState(spreadsheet_id="venue-sheet"),
+    service.sheets.read_recent_order_statuses.assert_called_once_with(
+        "venue-sheet",
+        "Тестовое кафе",
+        offset=0,
+        limit=6,
     )
-
-    service.send_status("chat-status")
-
-    service.sheets.read_latest_order_statuses.assert_not_called()
     service.sheets.read_order_statuses.assert_not_called()
     reply = service.telegram.send_reply.call_args.args[1]
-    assert reply.text == "У вас пока нет отправленных заявок."
+    assert "ORDER-1" in reply.text
+    assert "ORDER-5" in reply.text
+    assert "ORDER-6" not in reply.text
+    assert "Покажи вторую" in reply.text
+    assert reply.rows[-1][0].text == "Старее →"
 
 
-def test_disabled_mode_falls_back_when_old_user_order_is_absent_from_history(
+def test_statuses_open_selected_order_from_shown_list(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Показывает подготовленную Историю вместо отсутствующего старого номера."""
+    """Открывает подробности выбранной заявки по стабильному списку сессии."""
     service = object.__new__(SubmissionService)
-    service.settings = SimpleNamespace(google_order_submission_enabled=False)
     service.redis = MagicMock()
     service.telegram = MagicMock()
     service.sheets = MagicMock()
@@ -743,26 +739,85 @@ def test_disabled_mode_falls_back_when_old_user_order_is_absent_from_history(
         monkeypatch,
         ConversationState(
             spreadsheet_id="venue-sheet",
+            venue_name="Тестовое кафе",
+            order_status_view_active=True,
+            order_status_page=0,
+            order_status_order_numbers=["ORDER-1", "ORDER-2"],
+        ),
+    )
+    service.sheets.read_order_statuses.return_value = [_history_status_row("ORDER-2", "Раджабов")]
+
+    service.send_status("chat-status", selected_index=2)
+
+    service.sheets.read_order_statuses.assert_called_once_with(
+        ["ORDER-2"],
+        "venue-sheet",
+        "Тестовое кафе",
+    )
+    reply = service.telegram.send_reply.call_args.args[1]
+    assert "ORDER-2" in reply.text
+    assert "Раджабов" in reply.text
+    assert reply.rows[-1][0].text == "← К списку заявок"
+
+
+def test_statuses_read_older_page_without_using_local_draft_number(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Берёт следующую страницу «Истории», игнорируя номер локального черновика."""
+    service = object.__new__(SubmissionService)
+    service.redis = MagicMock()
+    service.telegram = MagicMock()
+    service.sheets = MagicMock()
+    _mock_status_session(
+        monkeypatch,
+        ConversationState(
+            spreadsheet_id="venue-sheet",
+            venue_name="Тестовое кафе",
             last_order_no="OLD-LOCAL-ORDER",
         ),
     )
-    service.sheets.read_order_statuses.return_value = []
-    service.sheets.read_latest_order_statuses.return_value = [
-        {
-            "Номер заявки": "№00V63II4-000025",
-            "Условное название поставщика": "Агробалтик",
-            "Список товаров": "Кухня:\n1. Мука — 4 шт",
-            "Стадия": "Отправлено поставщику",
-        }
-    ]
+    service.sheets.read_recent_order_statuses.return_value = [_history_status_row("ORDER-6")]
+
+    service.send_status("chat-status", page=1)
+
+    service.sheets.read_recent_order_statuses.assert_called_once_with(
+        "venue-sheet",
+        "Тестовое кафе",
+        offset=5,
+        limit=6,
+    )
+    service.sheets.read_order_statuses.assert_not_called()
+    reply = service.telegram.send_reply.call_args.args[1]
+    assert "Страница 2" in reply.text
+    assert reply.rows[-1][0].text == "← Новее"
+
+
+def test_statuses_explain_when_real_history_is_empty(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Сообщает, что у текущего заведения нет реальных заявок."""
+    service = object.__new__(SubmissionService)
+    service.redis = MagicMock()
+    service.telegram = MagicMock()
+    service.sheets = MagicMock()
+    _mock_status_session(
+        monkeypatch,
+        ConversationState(
+            spreadsheet_id="venue-sheet",
+            venue_name="Тестовое кафе",
+        ),
+    )
+    service.sheets.read_recent_order_statuses.return_value = []
 
     service.send_status("chat-status")
 
-    service.sheets.read_order_statuses.assert_called_once_with(
-        ["OLD-LOCAL-ORDER"],
+    service.sheets.read_recent_order_statuses.assert_called_once_with(
         "venue-sheet",
+        "Тестовое кафе",
+        offset=0,
+        limit=6,
     )
-    service.sheets.read_latest_order_statuses.assert_called_once_with("venue-sheet")
     reply = service.telegram.send_reply.call_args.args[1]
-    assert "Тестовые данные из листа «История»" in reply.text
-    assert "№00V63II4-000025" in reply.text
+    assert reply.text == (
+        "📋 <b>Мои заявки</b>\n\nУ этого заведения пока нет отправленных заявок в листе «История»."
+    )

@@ -100,6 +100,57 @@ def test_global_comment_is_appended_to_every_item_comment_and_order_row(settings
     ]
 
 
+def test_global_comment_filler_is_removed_but_catalog_comments_are_preserved(
+    settings,
+) -> None:  # type: ignore[no-untyped-def]
+    """Сохраняет дневные комментарии и не записывает разговорную связку общего пожелания."""
+    engine = ConversationEngine(settings)
+    catalog = [
+        CatalogProduct(
+            product_id="rose",
+            name="Сироп Роза, 1л",
+            supplier="МБР",
+            unit="шт",
+            comment="в банках; на завтра; на завтра или послезавтра",
+        ),
+        CatalogProduct(
+            product_id="tarhun",
+            name="Сироп Тархун, 1л",
+            supplier="МБР",
+            unit="шт",
+            comment="в ведрах; на завтра; в вагонах",
+        ),
+    ]
+    result = engine.handle(
+        _event(),
+        ParsedCommand(
+            intent=Intent.ADD_ITEMS,
+            global_comment="на завтра",
+            items=[
+                ExtractedItem(
+                    product_query="Сироп Роза",
+                    quantity=5,
+                    unit="шт",
+                    comment="главное быстро",
+                ),
+                ExtractedItem(
+                    product_query="Сироп Тархун",
+                    quantity=10,
+                    unit="шт",
+                    comment="всё это дело на завтра",
+                ),
+            ],
+        ),
+        ConversationState(restaurant="Кафе"),
+        catalog,
+    )
+
+    assert [item.comment for item in result.state.cart] == [
+        "в банках; на завтра; на завтра или послезавтра; главное быстро",
+        "в ведрах; на завтра; в вагонах",
+    ]
+
+
 def test_late_global_comment_applies_to_existing_and_new_items_without_overlap(
     settings,
 ) -> None:  # type: ignore[no-untyped-def]

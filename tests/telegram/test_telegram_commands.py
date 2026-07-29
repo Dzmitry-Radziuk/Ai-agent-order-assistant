@@ -78,3 +78,167 @@ def test_order_status_callback_uses_source_progress_text(settings) -> None:  # t
 
     assert result.enqueue_order_status is True
     assert result.reply.text == "Обновляю статус заявки..."
+
+
+def test_order_status_callback_opens_selected_order(settings) -> None:  # type: ignore[no-untyped-def]
+    """Передаёт номер выбранной кнопкой заявки в фоновую задачу."""
+    state = ConversationState(
+        order_status_view_active=True,
+        order_status_order_numbers=["A-1", "A-2"],
+    )
+
+    result = ConversationEngine(settings).handle(
+        TelegramEvent(
+            update_id=2,
+            chat_id="1",
+            input_type=InputKind.CALLBACK,
+            callback_data="v2:order:2",
+        ),
+        infer_intent("", "v2:order:2"),
+        state,
+        [],
+    )
+
+    assert result.enqueue_order_status is True
+    assert result.order_status_selected_index == 2
+    assert result.order_status_page == 0
+
+
+def test_voice_can_open_order_by_spoken_position(settings) -> None:  # type: ignore[no-untyped-def]
+    """Понимает короткое «вторая» на экране списка заявок."""
+    state = ConversationState(
+        order_status_view_active=True,
+        order_status_order_numbers=["A-1", "A-2", "A-3"],
+    )
+    event = TelegramEvent(
+        update_id=3,
+        chat_id="1",
+        input_type=InputKind.VOICE,
+        text="вторая",
+    )
+
+    result = ConversationEngine(settings).handle(
+        event,
+        infer_intent(event.text),
+        state,
+        [],
+    )
+
+    assert result.enqueue_order_status is True
+    assert result.order_status_selected_index == 2
+
+
+def test_voice_can_open_next_order_status_page(settings) -> None:  # type: ignore[no-untyped-def]
+    """Понимает «следующие» относительно открытого списка заявок."""
+    state = ConversationState(
+        order_status_view_active=True,
+        order_status_page=0,
+        order_status_order_numbers=["A-1", "A-2"],
+    )
+    event = TelegramEvent(
+        update_id=4,
+        chat_id="1",
+        input_type=InputKind.VOICE,
+        text="следующие",
+    )
+
+    result = ConversationEngine(settings).handle(
+        event,
+        infer_intent(event.text),
+        state,
+        [],
+    )
+
+    assert result.enqueue_order_status is True
+    assert result.order_status_page == 1
+
+
+def test_natural_order_status_phrase_contains_selected_position() -> None:
+    """Извлекает позицию из полной человеческой фразы."""
+    command = infer_intent("Давай посмотрим вторую заявку")
+
+    assert command.intent is Intent.ORDER_STATUS
+    assert command.selected_index == 2
+
+
+def test_order_status_page_callback_contains_page_number() -> None:
+    """Извлекает страницу из безопасного callback без номера заявки."""
+    command = infer_intent("", "v2:orderspage:3")
+
+    assert command.intent is Intent.ORDER_STATUS
+    assert command.callback_target == "page:3"
+
+
+@pytest.mark.parametrize(
+    ("phrase", "selected_index"),
+    [
+        ("вторая", 2),
+        ("покажи вторую", 2),
+        ("открой заявку номер три", 3),
+        ("выбери 4", 4),
+        ("давай первую", 1),
+    ],
+)
+def test_order_status_voice_selection_accepts_natural_phrases(
+    settings,
+    phrase: str,
+    selected_index: int,
+) -> None:  # type: ignore[no-untyped-def]
+    """Выбирает заявку разными короткими голосовыми фразами."""
+    state = ConversationState(
+        order_status_view_active=True,
+        order_status_order_numbers=["A-1", "A-2", "A-3", "A-4", "A-5"],
+    )
+    event = TelegramEvent(
+        update_id=5,
+        chat_id="1",
+        input_type=InputKind.VOICE,
+        text=phrase,
+    )
+
+    result = ConversationEngine(settings).handle(
+        event,
+        infer_intent(phrase),
+        state,
+        [],
+    )
+
+    assert result.enqueue_order_status is True
+    assert result.order_status_selected_index == selected_index
+
+
+@pytest.mark.parametrize(
+    "phrase",
+    [
+        "следующие",
+        "покажи следующие заявки",
+        "покажи более старые",
+        "следующая страница",
+    ],
+)
+def test_order_status_voice_navigation_accepts_next_page_phrases(
+    settings,
+    phrase: str,
+) -> None:  # type: ignore[no-untyped-def]
+    """Открывает более старые заявки разными голосовыми фразами."""
+    state = ConversationState(
+        order_status_view_active=True,
+        order_status_page=1,
+        order_status_order_numbers=["A-6", "A-7"],
+    )
+    event = TelegramEvent(
+        update_id=6,
+        chat_id="1",
+        input_type=InputKind.VOICE,
+        text=phrase,
+    )
+
+    result = ConversationEngine(settings).handle(
+        event,
+        infer_intent(phrase),
+        state,
+        [],
+    )
+
+    assert result.enqueue_order_status is True
+    assert result.order_status_page == 2

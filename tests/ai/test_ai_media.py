@@ -12,6 +12,7 @@ from restaurant_bot.integrations.openai_client import (
     ParsedInputSchema,
     VisibleActionDecision,
 )
+from restaurant_bot.observability import Tracer
 
 
 class _Transcriptions:
@@ -69,6 +70,7 @@ def test_photo_uses_dedicated_vision_client(settings, tmp_path: Path) -> None:  
     parsed = ParsedInputSchema(intent=Intent.ADD_ITEMS)
     service = object.__new__(OpenAIService)
     service.settings = settings
+    service.tracer = Tracer(settings)
     service.client = SimpleNamespace(responses=_FailingResponses())
     service.vision_client = SimpleNamespace(responses=_Responses(parsed))
     photo = tmp_path / "order.jpg"
@@ -113,9 +115,48 @@ def _service(settings, client):  # type: ignore[no-untyped-def]
     """Создаёт настроенный тестовый экземпляр сервиса."""
     service = object.__new__(OpenAIService)
     service.settings = settings
+    service.tracer = Tracer(settings)
     service.client = client
     service.vision_client = client
     return service
+
+
+def test_openai_usage_is_normalized_for_langfuse() -> None:
+    """Передаёт Langfuse непересекающиеся бакеты входа, выхода и итога."""
+    response = SimpleNamespace(
+        usage={
+            "type": "tokens",
+            "input_tokens": 14,
+            "input_token_details": {"audio_tokens": 14, "text_tokens": 0},
+            "output_tokens": 45,
+            "total_tokens": 59,
+        }
+    )
+
+    assert OpenAIService._usage_details(response) == {
+        "input": 14,
+        "output": 45,
+        "total": 59,
+    }
+
+
+def test_openai_usage_separates_discounted_cached_tokens() -> None:
+    """Исключает кэшированные токены из обычного входного бакета."""
+    response = SimpleNamespace(
+        usage={
+            "input_tokens": 100,
+            "input_tokens_details": {"cached_tokens": 20},
+            "output_tokens": 10,
+            "total_tokens": 110,
+        }
+    )
+
+    assert OpenAIService._usage_details(response) == {
+        "input": 80,
+        "input_cached_tokens": 20,
+        "output": 10,
+        "total": 110,
+    }
 
 
 def test_voice_transcription_uses_fallback_when_primary_returns_empty(
@@ -274,11 +315,40 @@ def test_ai_item_supplier_comment_is_preserved_as_working_item_comment(settings)
     )
     service = _service(settings, SimpleNamespace(responses=_Responses(parsed)))
 
-    command = service.parse_text("Сироп роза 5 шт")
+    command = service.parse_text("Сироп роза 5 шт. Всё на завтра")
 
     assert command.global_comment == "на завтра"
     assert command.items[0].comment == "охлаждённым"
     assert command.items[0].user_comment_to_supplier == "охлаждённым"
+
+
+def test_ai_global_comment_scope_filler_is_not_saved_as_local_comment(settings) -> None:  # type: ignore[no-untyped-def]
+    """Удаляет разговорную связку общего комментария из комментария последнего товара."""
+    source = "Сироп роза 5 штук, главное быстро, и сироп тархун — всё это дело на завтра."
+    parsed = ParsedInputSchema(
+        intent=Intent.ADD_ITEMS,
+        global_comment="всё это дело на завтра",
+        items=[
+            ExtractedItem(
+                product_query="Сироп роза",
+                quantity=5,
+                unit="шт",
+                comment="главное быстро",
+                source_line=source,
+            ),
+            ExtractedItem(
+                product_query="Сироп тархун",
+                comment="всё это дело на завтра",
+                source_line=source,
+            ),
+        ],
+    )
+    service = _service(settings, SimpleNamespace(responses=_Responses(parsed)))
+
+    command = service.parse_text(source)
+
+    assert command.global_comment == "на завтра"
+    assert [item.comment for item in command.items] == ["главное быстро", ""]
 
 
 def test_ai_cannot_turn_a_product_name_into_add_more_navigation(settings) -> None:  # type: ignore[no-untyped-def]
@@ -381,51 +451,75 @@ def test_spoken_word_quantity_survives_ai_normalization(settings, text: str) -> 
     assert command.items[0].comment == "желательно холодный"
 
 
-def test_text_timeout_returns_deterministic_product_fallback(settings) -> None:  # type: ignore[no-untyped-def]
-    """Не теряет распознанный товар при сетевом таймауте ИИ."""
+def test_text_timeout_does_not_accept_deterministic_product_guess(settings) -> None:  # type: ignore[no-untyped-def]
+    """Не изменяет заявку локальной догадкой после исчерпания повторов AI."""
     service = _service(settings, SimpleNamespace(responses=_TimeoutResponses()))
 
-    command = service.parse_text("Сироп роза 5 штук обязательно охлаждённым")
-
-    assert command.intent is Intent.ADD_ITEMS
-    assert len(command.items) == 1
-    assert command.items[0].product_query == "Сироп роза"
-    assert command.items[0].quantity == 5
-    assert command.items[0].unit == "шт"
-    assert command.items[0].comment == "обязательно охлаждённым"
+    with pytest.raises(APITimeoutError):
+        service.parse_text("Сироп роза 5 штук обязательно охлаждённым")
 
 
-def test_text_timeout_keeps_comments_for_every_spoken_product(settings) -> None:  # type: ignore[no-untyped-def]
-    """Не смешивает товары и комментарии при тайм-ауте смыслового разбора."""
+def test_text_timeout_does_not_guess_comments_for_spoken_products(settings) -> None:  # type: ignore[no-untyped-def]
+    """Не разбирает локально список с комментариями после тайм-аута AI."""
     service = _service(settings, SimpleNamespace(responses=_TimeoutResponses()))
 
-    command = service.parse_text(
-        "Добавь сироп розы 5 штук на завтра и сироп сангрия 10 штук, желательно холодным."
+    with pytest.raises(APITimeoutError):
+        service.parse_text(
+            "Добавь сироп розы 5 штук на завтра и сироп сангрия 10 штук, желательно холодным."
+        )
+
+
+def test_text_timeout_does_not_guess_explicit_global_comment(settings) -> None:  # type: ignore[no-untyped-def]
+    """Не применяет общий комментарий без успешного ответа AI."""
+    service = _service(settings, SimpleNamespace(responses=_TimeoutResponses()))
+
+    with pytest.raises(APITimeoutError):
+        service.parse_text(
+            "Добавь сироп роза 5 штук в банках и сироп сангрия 10 штук. "
+            "Всё желательно привезти завтра."
+        )
+
+
+def test_text_timeout_does_not_guess_complex_spoken_item_boundaries(settings) -> None:  # type: ignore[no-untyped-def]
+    """Не изменяет черновик догадкой для сложной голосовой заявки."""
+    service = _service(settings, SimpleNamespace(responses=_TimeoutResponses()))
+
+    with pytest.raises(APITimeoutError):
+        service.parse_text(
+            "Сироп Роза 5 штук, желательно холодным. "
+            "Сироп Тархун 10 штук в банках. "
+            "Говядина, кости продольный распил 10 килограмм. "
+            "И куриные лапы 15 штук. Желательно завтра с 9 до 14."
+        )
+
+
+def test_ai_global_comment_without_scope_is_moved_to_last_item(settings) -> None:  # type: ignore[no-untyped-def]
+    """Считает неявное пожелание после списка комментарием последнего товара."""
+    text = "Сироп Роза 5 штук. Куриные лапы 15 килограмм. Желательно завтра с 9 до 14."
+    parsed = ParsedInputSchema(
+        intent=Intent.ADD_ITEMS,
+        global_comment="Желательно завтра с 9 до 14",
+        items=[
+            ExtractedItem(
+                product_query="Сироп Роза",
+                quantity=5,
+                unit="шт",
+                source_line="Сироп Роза 5 штук.",
+            ),
+            ExtractedItem(
+                product_query="Куриные лапы",
+                quantity=15,
+                unit="кг",
+                source_line="Куриные лапы 15 килограмм. Желательно завтра с 9 до 14.",
+            ),
+        ],
     )
+    service = _service(settings, SimpleNamespace(responses=_Responses(parsed)))
 
-    assert command.intent is Intent.ADD_ITEMS
-    assert [
-        (item.product_query, item.quantity, item.unit, item.comment) for item in command.items
-    ] == [
-        ("сироп розы", 5, "шт", "на завтра"),
-        ("сироп сангрия", 10, "шт", "желательно холодным"),
-    ]
+    command = service.parse_text(text)
 
-
-def test_text_timeout_preserves_explicit_global_comment(settings) -> None:  # type: ignore[no-untyped-def]
-    """Сохраняет общий комментарий отдельно при недоступности OpenAI."""
-    service = _service(settings, SimpleNamespace(responses=_TimeoutResponses()))
-
-    command = service.parse_text(
-        "Добавь сироп роза 5 штук в банках и сироп сангрия 10 штук. Всё желательно привезти завтра."
-    )
-
-    assert command.intent is Intent.ADD_ITEMS
-    assert command.global_comment == "желательно привезти завтра"
-    assert [(item.product_query, item.quantity, item.comment) for item in command.items] == [
-        ("сироп роза", 5, "в банках"),
-        ("сироп сангрия", 10, ""),
-    ]
+    assert command.global_comment == ""
+    assert command.items[-1].comment == "Желательно завтра с 9 до 14"
 
 
 def test_hyphenated_multiline_product_list_skips_ai_and_keeps_quantities(

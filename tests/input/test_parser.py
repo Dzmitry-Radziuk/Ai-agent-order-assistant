@@ -202,3 +202,24 @@ def test_spoken_product_list_separates_local_and_global_comments() -> None:
         ("сироп роза", 5, "в банках"),
         ("сироп сангрия", 10, ""),
     ]
+
+
+def test_spoken_product_list_keeps_sentence_comments_with_their_products() -> None:
+    """Не переносит начало следующего товара в комментарий предыдущего."""
+    command = infer_intent(
+        "Сироп Роза 5 штук, желательно холодным. "
+        "Сироп Тархун 10 штук в банках. "
+        "Говядина, кости продольный распил 10 килограмм. "
+        "И куриные лапы 15 штук. Желательно завтра с 9 до 14."
+    )
+
+    assert command.intent is Intent.ADD_ITEMS
+    assert command.global_comment == ""
+    assert [
+        (item.product_query, item.quantity, item.unit, item.comment) for item in command.items
+    ] == [
+        ("Сироп Роза", 5, "шт", "желательно холодным"),
+        ("Сироп Тархун", 10, "шт", "в банках"),
+        ("Говядина, кости продольный распил", 10, "кг", ""),
+        ("куриные лапы", 15, "шт", "Желательно завтра с 9 до 14"),
+    ]

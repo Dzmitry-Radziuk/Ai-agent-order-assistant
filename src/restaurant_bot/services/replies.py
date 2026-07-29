@@ -731,7 +731,7 @@ def final_review_reply(state: ConversationState) -> BotReply:
                     )
                 ]
             )
-        rows.append([Button(text="Отправить поставщику", callback_data="v2:submit")])
+        rows.append([Button(text="Отправить в таблицу заказа", callback_data="v2:submit")])
     rows.append([Button(text="К черновику", callback_data="v2:back")])
     return BotReply(text="\n".join(lines), rows=rows)
 

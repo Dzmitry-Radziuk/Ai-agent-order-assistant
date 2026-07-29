@@ -337,13 +337,19 @@ class GoogleSheetsGateway:
         )
 
     def read_order_statuses(
-        self, order_numbers: list[str], spreadsheet_id: str
+        self,
+        order_numbers: list[str],
+        spreadsheet_id: str,
+        venue_name: str = "",
     ) -> list[dict[str, Any]]:
         """Читает статусы заявок из автоматически формируемого листа."""
         if not order_numbers:
             return []
         wanted = {clean_text(order_number) for order_number in order_numbers}
-        rows = self.read_rows(self.settings.google_order_status_sheet, spreadsheet_id)
+        rows = self._filter_history_by_venue(
+            self.read_rows(self.settings.google_order_status_sheet, spreadsheet_id),
+            venue_name,
+        )
         return [
             row
             for row in rows
@@ -351,27 +357,75 @@ class GoogleSheetsGateway:
             in wanted
         ]
 
-    def read_latest_order_statuses(self, spreadsheet_id: str) -> list[dict[str, Any]]:
-        """Читает последнюю заявку из «Истории» для безопасной локальной проверки."""
-        rows = self.read_rows(self.settings.google_order_status_sheet, spreadsheet_id)
-        latest_order_number = next(
-            (
+    def read_recent_order_statuses(
+        self,
+        spreadsheet_id: str,
+        venue_name: str = "",
+        *,
+        offset: int = 0,
+        limit: int = 5,
+    ) -> list[dict[str, Any]]:
+        """Читает строки последних заявок текущего заведения из «Истории»."""
+        if offset < 0 or limit < 1:
+            return []
+        rows = self._filter_history_by_venue(
+            self.read_rows(self.settings.google_order_status_sheet, spreadsheet_id),
+            venue_name,
+        )
+        order_numbers = list(
+            dict.fromkeys(
                 clean_text(row.get("Номер заявки") or row.get("№ Заявки") or row.get("ID заявки"))
                 for row in rows
                 if clean_text(
                     row.get("Номер заявки") or row.get("№ Заявки") or row.get("ID заявки")
                 )
-            ),
-            "",
+            )
         )
-        if not latest_order_number:
+        selected = set(order_numbers[offset : offset + limit])
+        if not selected:
             return []
         return [
             row
             for row in rows
             if clean_text(row.get("Номер заявки") or row.get("№ Заявки") or row.get("ID заявки"))
-            == latest_order_number
+            in selected
         ]
+
+    def read_latest_order_statuses(
+        self,
+        spreadsheet_id: str,
+        venue_name: str = "",
+    ) -> list[dict[str, Any]]:
+        """Читает последнюю заявку текущего заведения из «Истории»."""
+        return self.read_recent_order_statuses(
+            spreadsheet_id,
+            venue_name,
+            limit=1,
+        )
+
+    @staticmethod
+    def _filter_history_by_venue(
+        rows: list[dict[str, Any]],
+        venue_name: str,
+    ) -> list[dict[str, Any]]:
+        """Исключает заявки других заведений при наличии данных о заведении."""
+        expected = normalize_text(venue_name)
+        if not expected:
+            return rows
+
+        def row_venue(row: dict[str, Any]) -> str:
+            """Возвращает название заведения из поддерживаемого столбца."""
+            return clean_text(
+                row.get("Условное наз-ие заведения")
+                or row.get("Условное название заведения")
+                or row.get("Заведение")
+                or row.get("venue_name")
+            )
+
+        rows_with_venue = [row for row in rows if row_venue(row)]
+        if not rows_with_venue:
+            return rows
+        return [row for row in rows_with_venue if normalize_text(row_venue(row)) == expected]
 
     def prepare_order_submission(
         self,

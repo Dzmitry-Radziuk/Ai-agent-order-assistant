@@ -101,6 +101,23 @@ def test_voice_no_returns_to_draft(settings) -> None:  # type: ignore[no-untyped
     assert "Сироп Роза, 1л — 10 шт" in result.reply.text
 
 
+def test_voice_submit_wins_over_wrong_add_more_intent(settings) -> None:  # type: ignore[no-untyped-def]
+    """Открывает проверку заявки, даже если ИИ ошибочно вернул добавление товаров."""
+    added = _add_syrup(settings)
+    phrase = "Да, отправляй"
+
+    result = ConversationEngine(settings).handle(
+        _voice(phrase, update_id=4),
+        ParsedCommand(intent=Intent.ADD_MORE, text=phrase),
+        added.state,
+        [],
+    )
+
+    assert result.state.stage is SessionStage.AWAIT_SUBMIT_CONFIRM
+    assert "Финальная проверка" in result.reply.text
+    assert result.enqueue_submission is False
+
+
 def test_product_sent_from_add_more_prompt_opens_duplicate_in_collecting_stage(
     settings,
 ) -> None:  # type: ignore[no-untyped-def]

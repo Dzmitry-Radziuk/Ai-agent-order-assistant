@@ -84,6 +84,7 @@ from restaurant_bot.services.text import (
     normalize_text,
     normalize_unit,
     parse_number_words,
+    remove_global_comment_overlap,
 )
 
 
@@ -122,7 +123,15 @@ class ConversationEngine:
         # voice alike.
         command = self._contextual_negative_command(command, event, state)
         command = self._contextual_quantity_command(command, event.text, state)
+        command = self._contextual_order_status_command(command, event, state)
         command = self._contextual_voice_command(command, event, state)
+        if command.intent not in {
+            Intent.ORDER_STATUS,
+            Intent.SMALL_TALK,
+            Intent.THANKS,
+            Intent.UNKNOWN,
+        }:
+            state.order_status_view_active = False
         if command.intent in {
             Intent.SUBMIT_REQUEST,
             Intent.SHOW_FINAL_REVIEW,
@@ -297,6 +306,9 @@ class ConversationEngine:
         if command.intent == Intent.SMALL_TALK:
             return EngineResult(state=state, reply=small_talk_reply(state))
         if command.intent == Intent.ORDER_STATUS:
+            page = self._order_status_page(command, state)
+            state.order_status_view_active = True
+            state.order_status_page = page
             return EngineResult(
                 state=state,
                 reply=BotReply(
@@ -307,6 +319,9 @@ class ConversationEngine:
                     )
                 ),
                 enqueue_order_status=True,
+                order_status_page=page,
+                order_status_selected_index=command.selected_index,
+                order_status_order_number=command.selection_query,
             )
         if command.intent == Intent.SHOW_CART:
             if (
@@ -941,6 +956,100 @@ class ConversationEngine:
             )
         return command
 
+    def _contextual_order_status_command(
+        self,
+        command: ParsedCommand,
+        event: TelegramEvent,
+        state: ConversationState,
+    ) -> ParsedCommand:
+        """Связывает короткую фразу с последним показанным списком заявок."""
+        if not state.order_status_view_active:
+            return command
+        raw = event.text or command.text
+        phrase = normalize_text(raw)
+        if not phrase:
+            return command
+        if command.intent == Intent.ORDER_STATUS and (
+            command.selected_index is not None or command.selection_query or command.callback_target
+        ):
+            return command
+        if command.intent == Intent.SELECT_CANDIDATE and command.selected_index is not None:
+            return ParsedCommand(
+                intent=Intent.ORDER_STATUS,
+                text=raw,
+                selected_index=command.selected_index,
+            )
+        selection_phrase = re.sub(
+            r"^(?:(?:покаж\w*|открой\w*|выбер\w*|посмотр\w*|давай)\s+)+",
+            "",
+            phrase,
+        )
+        selection_phrase = re.sub(
+            r"^(?:(?:заявк\w*|заказ\w*)\s+)?(?:номер\s+)?",
+            "",
+            selection_phrase,
+        )
+        spoken_index = self._spoken_choice_index(selection_phrase)
+        if spoken_index is not None and spoken_index <= len(state.order_status_order_numbers):
+            return ParsedCommand(
+                intent=Intent.ORDER_STATUS,
+                text=raw,
+                selected_index=spoken_index,
+            )
+        if re.fullmatch(
+            r"(?:(?:покаж\w*|открой\w*)\s+)?"
+            r"(?:следующ\w*|дальше|ещё|еще|(?:более\s+)?стар\w*)"
+            r"(?:\s+(?:страниц\w*|заявк\w*|заказ\w*))?",
+            phrase,
+        ):
+            return ParsedCommand(
+                intent=Intent.ORDER_STATUS,
+                text=raw,
+                callback_target="next",
+            )
+        if re.fullmatch(
+            r"(?:(?:покаж\w*|открой\w*)\s+)?"
+            r"(?:предыдущ\w*|новее|(?:более\s+)?нов\w*)"
+            r"(?:\s+(?:страниц\w*|заявк\w*|заказ\w*))?",
+            phrase,
+        ):
+            return ParsedCommand(
+                intent=Intent.ORDER_STATUS,
+                text=raw,
+                callback_target="previous",
+            )
+        if re.fullmatch(
+            r"(?:назад(?:\s+к списку)?|к списку|вернись назад|вернись к списку)"
+            r"(?:\s+(?:заявок|заказов))?",
+            phrase,
+        ):
+            return ParsedCommand(
+                intent=Intent.ORDER_STATUS,
+                text=raw,
+                callback_target="current",
+            )
+        return command
+
+    @staticmethod
+    def _order_status_page(command: ParsedCommand, state: ConversationState) -> int:
+        """Вычисляет страницу истории для списка или выбранной заявки."""
+        target = command.callback_target
+        if target.startswith("page:"):
+            try:
+                return max(0, int(target.partition(":")[2]))
+            except ValueError:
+                return 0
+        if target == "next":
+            return state.order_status_page + 1
+        if target == "previous":
+            return max(0, state.order_status_page - 1)
+        if target == "current" or command.selected_index is not None or command.selection_query:
+            return max(0, state.order_status_page)
+        phrase = normalize_text(command.text)
+        if state.order_status_view_active and phrase in {"обнови", "обновить", "обновить статусы"}:
+            return max(0, state.order_status_page)
+        return 0
+
     def _contextual_voice_command(
         self,
         command: ParsedCommand,
@@ -968,6 +1077,20 @@ class ConversationEngine:
             return command.model_copy(update={"intent": Intent.MERGE_DUPLICATE})
 
         if state.stage == SessionStage.AWAIT_ADD_MORE_CONFIRM:
+            if not has_negated_action(
+                phrase,
+                "отправ",
+                "оформ",
+                "запиш",
+                "переда",
+            ) and self._has_any_prefix(
+                phrase,
+                "отправ",
+                "оформ",
+                "запиш",
+                "переда",
+            ):
+                return command.model_copy(update={"intent": Intent.SUBMIT_REQUEST})
             if command.intent == Intent.ADD_MORE or self._is_explicit_yes(phrase):
                 return command.model_copy(update={"intent": Intent.ADD_MORE})
             if command.intent in {Intent.BACK, Intent.CANCEL, Intent.SHOW_CART}:
@@ -1742,22 +1865,7 @@ class ConversationEngine:
     @staticmethod
     def _remove_global_comment_overlap(item_comment: str, global_comment: str) -> str:
         """Удаляет общую часть, которую ИИ также включил в комментарий позиции."""
-        item_text = " ".join(str(item_comment or "").split()).strip(" .,;")
-        global_text = " ".join(str(global_comment or "").split()).strip(" .,;")
-        if not item_text or not global_text:
-            return item_text
-        match = re.search(re.escape(global_text), item_text, flags=re.I)
-        if match is None:
-            return item_text
-        remaining = f"{item_text[: match.start()]} {item_text[match.end() :]}"
-        remaining = re.sub(
-            r"(?:\b(?:и|а)\s+)?(?:все|всё|всем|для всех)\s*(?=$|[,;])",
-            " ",
-            remaining,
-            flags=re.I,
-        )
-        remaining = re.sub(r"\s+", " ", remaining)
-        return remaining.strip(" .,;:-—–")
+        return remove_global_comment_overlap(item_comment, global_comment)
 
     @staticmethod
     def _apply_global_comment(state: ConversationState, global_comment: str) -> None:
@@ -2285,8 +2393,13 @@ class ConversationEngine:
             venue_code=state.venue_code,
         )
         state.stage = SessionStage.SUBMITTING
+        progress = (
+            "Отправляю заявку"
+            if self.settings.google_order_submission_enabled
+            else "Подготавливаю заявку"
+        )
         return EngineResult(
             state=state,
-            reply=BotReply(text=f"Отправляю заявку <b>{order_no}</b>..."),
+            reply=BotReply(text=f"{progress} <b>{order_no}</b>..."),
             enqueue_submission=True,
         )

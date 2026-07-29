@@ -336,6 +336,9 @@ class ConversationState(BaseModel):
     edit_multiple_index: int | None = None
     pending_added_items_count: int = 0
     pending_new_order_confirmation: bool = False
+    order_status_view_active: bool = False
+    order_status_page: int = 0
+    order_status_order_numbers: list[str] = Field(default_factory=list)
 
     def current_item(self) -> CartItem | None:
         """Возвращает позицию, ожидающую действия пользователя."""
@@ -368,5 +371,8 @@ class EngineResult(BaseModel):
     reply: BotReply
     enqueue_submission: bool = False
     enqueue_order_status: bool = False
+    order_status_page: int = 0
+    order_status_selected_index: int | None = None
+    order_status_order_number: str = ""
     enqueue_product_add: bool = False
     invalidate_catalog: bool = False

@@ -68,7 +68,12 @@ def test_product_add_and_status_tasks_delegate_to_submission(mocker) -> None:  #
     tasks.send_order_status.run("chat-3")
 
     submission.submit_product_add.assert_called_once_with("chat-2")
-    submission.send_status.assert_called_once_with("chat-3")
+    submission.send_status.assert_called_once_with(
+        "chat-3",
+        page=0,
+        selected_index=None,
+        order_number="",
+    )
 
 
 def test_celery_configuration_preserves_delivery_guarantees() -> None:

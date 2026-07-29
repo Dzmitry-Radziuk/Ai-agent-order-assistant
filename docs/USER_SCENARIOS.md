@@ -653,51 +653,54 @@ flowchart LR
 - [`tests/submission/test_submission.py`](../tests/submission/test_submission.py) → `test_redelivery_after_started_dispatch_does_not_send_second_post`
 - [`tests/submission/test_submission_guards.py`](../tests/submission/test_submission_guards.py) → `test_submission_retry_is_blocked_after_uncertain_dispatch`
 
-#### SUB-06 · Локальная запись без отправки поставщикам
+#### SUB-06 · Подготовка заявки для ручной отправки
 
 **Приоритет:** Критический<br>
 **Канал:** Кнопка, Системный<br>
 **Предусловие:** Бот работает с GOOGLE_ORDER_SUBMISSION_ENABLED=false.
 
-**Действие пользователя:** Подтверждает финальную отправку во время локальной проверки.
+**Действие пользователя:** Подтверждает подготовленную заявку.
 
-**Ответ бота:** Записывает количества и комментарии в лист «Заявка», запускает перерасчёт и сообщает, что поставщикам ничего не отправлено.
+**Ответ бота:** Записывает количества и комментарии в лист «Заявка», запускает перерасчёт и сообщает, что заявку поставщикам отправит ответственный сотрудник.
 
-**Результат:** Тестовая таблица обновлена и пересчитана, но центральный Apps Script отправки не вызван.
+**Результат:** Рабочая таблица заведения обновлена и пересчитана, а центральный Apps Script отправки не вызван.
 
 **Примеры фраз:**
 
-- «Заявка записана в тестовую таблицу»
-- «Поставщикам ничего не отправлено»
+- «Заявка подготовлена»
+- «Заявку поставщикам отправит ответственный сотрудник»
 
 **Автоматическая проверка:**
 
 - [`tests/submission/test_submission.py`](../tests/submission/test_submission.py) → `test_disabled_dispatch_writes_and_recalculates_but_never_calls_submission_script`
 - [`tests/submission/test_submission_guards.py`](../tests/submission/test_submission_guards.py) → `test_disabled_external_dispatch_still_enqueues_local_table_write`
 
-#### SUB-07 · Проверка готовой Истории без отправки
+#### SUB-07 · Последние реальные заявки и голосовой выбор
 
 **Приоритет:** Критический<br>
 **Канал:** Текст, Голос, Кнопка<br>
-**Предусловие:** Локальная отправка выключена, у пользователя нет собственных номеров, а в листе «История» есть тестовая заявка.
+**Предусловие:** Ответственный сотрудник отправил заявку, и её данные появились в листе «История».
 
 **Действие пользователя:** Просит показать статусы заявок.
 
-**Ответ бота:** Читает последнюю заявку из «Истории» и явно помечает её как тестовые данные, не отправленные через этого бота.
+**Ответ бота:** Фильтрует «Историю» по текущему заведению, показывает пять последних заявок и открывает выбранную кнопку или голосом. Более старые заявки доступны на следующих страницах.
 
-**Результат:** Статусы проверяются только чтением; Google Sheets, центральный скрипт и поставщики не затрагиваются.
+**Результат:** Пользователь видит только реальные заявки своего заведения; просмотр ничего не записывает и не отправляет повторно.
 
 **Примеры фраз:**
 
 - «Мои заявки»
-- «Проверить статус»
-- «Покажи последнюю заявку»
+- «Покажи вторую заявку»
+- «Следующие»
+- «Вернись к списку заявок»
 
 **Автоматическая проверка:**
 
-- [`tests/submission/test_submission.py`](../tests/submission/test_submission.py) → `test_disabled_local_mode_reads_latest_history_without_sending`
-- [`tests/submission/test_submission.py`](../tests/submission/test_submission.py) → `test_enabled_mode_without_user_orders_does_not_show_test_history`
-- [`tests/submission/test_google_sheets_mapping.py`](../tests/submission/test_google_sheets_mapping.py) → `test_latest_order_statuses_use_first_complete_order_from_history`
+- [`tests/submission/test_submission.py`](../tests/submission/test_submission.py) → `test_statuses_show_five_recent_orders_of_current_venue`
+- [`tests/submission/test_submission.py`](../tests/submission/test_submission.py) → `test_statuses_open_selected_order_from_shown_list`
+- [`tests/submission/test_google_sheets_mapping.py`](../tests/submission/test_google_sheets_mapping.py) → `test_latest_order_statuses_filter_foreign_venue_before_selecting_order`
+- [`tests/telegram/test_telegram_commands.py`](../tests/telegram/test_telegram_commands.py) → `test_voice_can_open_order_by_spoken_position`
+- [`tests/telegram/test_telegram_commands.py`](../tests/telegram/test_telegram_commands.py) → `test_voice_can_open_next_order_status_page`
 
 ### Защита от неверного действия
 

@@ -184,6 +184,87 @@ def test_latest_order_statuses_return_empty_for_history_without_order_numbers(se
     assert gateway.read_latest_order_statuses(VENUE_SPREADSHEET_ID) == []
 
 
+def test_latest_order_statuses_filter_foreign_venue_before_selecting_order(settings) -> None:  # type: ignore[no-untyped-def]
+    """Не принимает более свежую заявку другого заведения за свою."""
+    gateway = GoogleSheetsGateway(settings)
+    gateway.read_rows = MagicMock(  # type: ignore[method-assign]
+        return_value=[
+            {
+                "Номер заявки": "FOREIGN-1",
+                "Условное наз-ие заведения": "Качели",
+            },
+            {
+                "Номер заявки": "OWN-2",
+                "Условное наз-ие заведения": "Тестовое кафе",
+            },
+            {
+                "Номер заявки": "OWN-1",
+                "Условное наз-ие заведения": "Тестовое кафе",
+            },
+        ]
+    )
+
+    rows = gateway.read_latest_order_statuses(
+        VENUE_SPREADSHEET_ID,
+        "Тестовое кафе",
+    )
+
+    assert [row["Номер заявки"] for row in rows] == ["OWN-2"]
+
+
+def test_recent_order_statuses_support_venue_pagination(settings) -> None:  # type: ignore[no-untyped-def]
+    """Возвращает выбранные номера страницы со всеми их поставщиками."""
+    gateway = GoogleSheetsGateway(settings)
+    gateway.read_rows = MagicMock(  # type: ignore[method-assign]
+        return_value=[
+            {
+                "Номер заявки": "A-3",
+                "Поставщик": "Первый",
+                "Условное наз-ие заведения": "Кафе",
+            },
+            {
+                "Номер заявки": "A-3",
+                "Поставщик": "Второй",
+                "Условное наз-ие заведения": "Кафе",
+            },
+            {
+                "Номер заявки": "A-2",
+                "Поставщик": "Старый",
+                "Условное наз-ие заведения": "Кафе",
+            },
+            {
+                "Номер заявки": "A-1",
+                "Поставщик": "Очень старый",
+                "Условное наз-ие заведения": "Кафе",
+            },
+        ]
+    )
+
+    rows = gateway.read_recent_order_statuses(
+        VENUE_SPREADSHEET_ID,
+        "Кафе",
+        offset=1,
+        limit=1,
+    )
+
+    assert [row["Номер заявки"] for row in rows] == ["A-2"]
+
+
+def test_venue_filter_keeps_legacy_history_without_venue_values(settings) -> None:  # type: ignore[no-untyped-def]
+    """Сохраняет чтение старой Истории, если в ней нет названия заведения."""
+    gateway = GoogleSheetsGateway(settings)
+    gateway.read_rows = MagicMock(  # type: ignore[method-assign]
+        return_value=[{"Номер заявки": "LEGACY-1", "Стадия": "Отправлена"}]
+    )
+
+    rows = gateway.read_latest_order_statuses(
+        VENUE_SPREADSHEET_ID,
+        "Кафе",
+    )
+
+    assert [row["Номер заявки"] for row in rows] == ["LEGACY-1"]
+
+
 def test_live_catalog_headers_fill_submission_metadata(settings) -> None:  # type: ignore[no-untyped-def]
     """Проверяет, что реальная каталог заголовки fill отправка заявки metadata."""
     gateway = GoogleSheetsGateway(settings)

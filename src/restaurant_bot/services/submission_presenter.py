@@ -35,13 +35,13 @@ def submission_success_reply(state: Any, order_no: str) -> BotReply:
 
 
 def submission_local_saved_reply(state: Any, order_no: str) -> BotReply:
-    """Подтверждает запись тестовой заявки без отправки поставщикам."""
+    """Подтверждает подготовку заявки для ручной отправки."""
     return BotReply(
         text=(
-            "✅ <b>Заявка записана в тестовую таблицу</b>\n\n"
-            "Данные внесены в лист «Заявка», расчёты обновлены.\n"
-            "<b>Поставщикам ничего не отправлено.</b>\n\n"
-            f"Номер тестовой заявки: {escape(order_no)}"
+            "✅ <b>Заявка подготовлена</b>\n\n"
+            "Товары записаны в лист «Заявка», расчёты обновлены.\n"
+            "Заявку поставщикам отправит ответственный сотрудник.\n\n"
+            f"Номер черновика: {escape(order_no)}"
         ),
         rows=[
             [
@@ -125,6 +125,25 @@ def _format_delivery_date(value: Any) -> str:
     return raw
 
 
+def _format_history_timestamp(value: Any) -> str:
+    """Форматирует дату создания заявки для компактного списка."""
+    raw = str(value or "").strip()
+    if not raw:
+        return "Дата не указана"
+    for pattern in (
+        "%d.%m.%Y %H:%M:%S",
+        "%d.%m.%Y %H:%M",
+        "%Y-%m-%dT%H:%M:%S",
+        "%Y-%m-%d %H:%M:%S",
+    ):
+        try:
+            parsed = datetime.strptime(raw[:19], pattern)
+            return parsed.strftime("%d.%m.%Y, %H:%M")
+        except ValueError:
+            continue
+    return raw
+
+
 def _escape_multiline(value: Any) -> str:
     """Экранирует многострочный текст, сохраняя переносы строк."""
     return "\n".join(escape(line) for line in str(value or "").splitlines() if line.strip())
@@ -139,6 +158,145 @@ def _is_aggregated_status_row(row: dict[str, Any]) -> bool:
             "Условное название поставщика",
             "Условное наз-ие заведения",
         )
+    )
+
+
+def group_order_status_rows(
+    rows: list[dict[str, Any]],
+) -> list[tuple[str, list[dict[str, Any]]]]:
+    """Группирует строки «Истории» по номеру заявки, сохраняя порядок."""
+    groups: dict[str, list[dict[str, Any]]] = {}
+    for row in rows:
+        order_number = _status_value(row, "Номер заявки", "№ Заявки", "ID заявки", "order_no")
+        if order_number:
+            groups.setdefault(order_number, []).append(row)
+    return list(groups.items())
+
+
+def _supplier_count(order_rows: list[dict[str, Any]]) -> int:
+    """Считает поставщиков одной заявки без повторов."""
+    suppliers = {
+        _status_value(
+            row,
+            "Условное название поставщика",
+            "Основной поставщик (Условное наз-ие)",
+            "Поставщик",
+            "supplier",
+        )
+        for row in order_rows
+    }
+    suppliers.discard("")
+    return len(suppliers) or len(order_rows)
+
+
+def _supplier_word(count: int) -> str:
+    """Согласует слово «поставщик» с количеством."""
+    if count % 10 == 1 and count % 100 != 11:
+        return "поставщик"
+    if count % 10 in {2, 3, 4} and count % 100 not in {12, 13, 14}:
+        return "поставщика"
+    return "поставщиков"
+
+
+def build_order_status_list_reply(
+    rows: list[dict[str, Any]],
+    *,
+    page: int,
+    has_more: bool,
+) -> BotReply:
+    """Формирует компактный список реальных заявок с навигацией."""
+    groups = group_order_status_rows(rows)
+    if not groups:
+        return BotReply(
+            text=(
+                "📋 <b>Мои заявки</b>\n\n"
+                "У этого заведения пока нет отправленных заявок в листе «История»."
+            )
+        )
+
+    lines = ["📋 <b>Мои заявки</b>", "", f"Страница {page + 1}:"]
+    buttons: list[list[Button]] = []
+    for index, (order_number, order_rows) in enumerate(groups, start=1):
+        created_at = _status_value(
+            order_rows[0],
+            "Время создания заявки",
+            "Дата создания",
+            "created_at",
+        )
+        supplier_count = _supplier_count(order_rows)
+        stages = {
+            _status_value(row, "Стадия", "Статус", "status")
+            for row in order_rows
+            if _status_value(row, "Стадия", "Статус", "status")
+        }
+        lines.extend(
+            [
+                "",
+                f"{index}. <b>{escape(order_number)}</b>",
+                (
+                    f"{escape(_format_history_timestamp(created_at))} · "
+                    f"{supplier_count} {_supplier_word(supplier_count)}"
+                ),
+                (
+                    f"Статус: {escape(next(iter(stages)))}"
+                    if len(stages) == 1
+                    else "Статусы различаются по поставщикам"
+                ),
+            ]
+        )
+        buttons.append(
+            [
+                Button(
+                    text=f"{index}. {order_number}"[:60],
+                    callback_data=f"v2:order:{index}",
+                )
+            ]
+        )
+
+    navigation: list[Button] = []
+    if page > 0:
+        navigation.append(
+            Button(
+                text="← Новее",
+                callback_data=f"v2:orderspage:{page - 1}",
+            )
+        )
+    if has_more:
+        navigation.append(
+            Button(
+                text="Старее →",
+                callback_data=f"v2:orderspage:{page + 1}",
+            )
+        )
+    if navigation:
+        buttons.append(navigation)
+    lines.extend(["", "Выберите заявку или скажите, например: «Покажи вторую»."])
+    return BotReply(text="\n".join(lines), rows=buttons)
+
+
+def build_order_status_detail_reply(
+    text: str,
+    *,
+    page: int,
+    selected_index: int,
+) -> BotReply:
+    """Добавляет к подробной заявке возврат к списку и обновление."""
+    return BotReply(
+        text=text,
+        rows=[
+            [
+                Button(
+                    text="Обновить",
+                    callback_data=f"v2:order:{selected_index}",
+                )
+            ],
+            [
+                Button(
+                    text="← К списку заявок",
+                    callback_data=f"v2:orderspage:{page}",
+                )
+            ],
+        ],
     )
 
 

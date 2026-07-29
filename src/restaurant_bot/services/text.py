@@ -141,6 +141,32 @@ def normalize_text(value: Any) -> str:
     return re.sub(r"\s+", " ", text).strip()
 
 
+def remove_global_comment_overlap(item_comment: str, global_comment: str) -> str:
+    """Удаляет общую часть и разговорные слова охвата из локального комментария."""
+    item_text = clean_text(item_comment).strip(" .,;")
+    global_text = clean_text(global_comment).strip(" .,;")
+    if not item_text or not global_text:
+        return item_text
+    match = re.search(re.escape(global_text), item_text, flags=re.I)
+    if match is None:
+        return item_text
+    remaining = f"{item_text[: match.start()]} {item_text[match.end() :]}"
+    scope_residue = (
+        r"(?:(?:все|всё|всем)"
+        r"(?:\s+(?:это(?:\s+дело)?|эти\w*"
+        r"(?:\s+(?:товар\w*|позици\w*))?|товар\w*|позици\w*))?"
+        r"|для\s+всех(?:\s+(?:товар\w*|позици\w*))?)"
+    )
+    remaining = re.sub(
+        rf"(?:\b(?:и|а)\s+)?{scope_residue}\s*(?=$|[,;:—–-])",
+        " ",
+        remaining,
+        flags=re.I,
+    )
+    remaining = re.sub(r"\s+", " ", remaining)
+    return remaining.strip(" .,;:-—–")
+
+
 def normalize_unit(value: Any) -> str:
     """Нормализует единицу измерения."""
     text = normalize_text(value)

@@ -37,6 +37,10 @@ def test_submit_request_opens_final_review_without_enqueuing(settings) -> None: 
     assert review.state.stage is SessionStage.AWAIT_SUBMIT_CONFIRM
     assert review.enqueue_submission is False
     assert "Финальная проверка" in review.reply.text
+    assert [(button.text, button.callback_data) for row in review.reply.rows for button in row] == [
+        ("Отправить в таблицу заказа", "v2:submit"),
+        ("К черновику", "v2:back"),
+    ]
 
 
 def test_clear_cart_removes_draft_and_returns_to_collecting(settings) -> None:  # type: ignore[no-untyped-def]

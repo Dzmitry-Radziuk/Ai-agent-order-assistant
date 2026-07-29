@@ -64,6 +64,28 @@ class Tracer:
         ) as observation:
             yield observation
 
+    @contextmanager
+    def generation(
+        self,
+        name: str,
+        *,
+        model: str,
+        input: Any = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> Iterator[Observation]:
+        """Создаёт обезличенное наблюдение вызова языковой модели."""
+        if self.client is None:
+            yield NoopObservation()
+            return
+        with self.client.start_as_current_observation(
+            name=name,
+            as_type="generation",
+            model=model,
+            input=input,
+            metadata=metadata,
+        ) as observation:
+            yield observation
+
     @staticmethod
     def anonymized_chat_id(chat_id: str) -> str:
         """Возвращает обезличенный идентификатор чата."""

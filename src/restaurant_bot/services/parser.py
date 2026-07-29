@@ -197,8 +197,10 @@ _NATURAL_COMMANDS: list[tuple[Intent, re.Pattern[str]]] = [
     (
         Intent.SUBMIT_REQUEST,
         re.compile(
-            r"^(?:(?:отправь|отправить|отправляй|добавь|добавить|положи|положить|перенеси|перенести)"
+            r"^(?:(?:(?:да|ага|ладно|хорошо|ок|окей)\s*,?\s*|давай\s+)?"
+            r"(?:отправь|отправить|отправляй|добавь|добавить|положи|положить|перенеси|перенести)"
             r"(?: (?:товары|товар|позиции|позицию|заявку|заказ))? в корзину|"
+            r"(?:(?:да|ага|ладно|хорошо|ок|окей)\s*,?\s*|давай\s+)?"
             r"(?:отправь|отправить|отправляй|оформи|оформить|запиши|записать)(?: заявку| в таблицу заказа| в таблицу)?|"
             r"перейти к проверке заявки|проверь заявку перед отправкой|готово отправляй)$",
             re.I,
@@ -946,6 +948,8 @@ def infer_intent(text: str, callback_data: str = "") -> ParsedCommand:
     # complete phrases, so terminal punctuation must not turn "Добавить еще
     # товары." into a product named "товары".
     normalized = normalize_command_text(text)
+    if status_command := _parse_order_status_navigation(normalized, text):
+        return status_command
     for intent, pattern in (*_COMMANDS, *_NATURAL_COMMANDS):
         if pattern.fullmatch(normalized):
             return ParsedCommand(intent=intent, text=text)
@@ -1035,6 +1039,86 @@ def infer_intent(text: str, callback_data: str = "") -> ParsedCommand:
     return ParsedCommand(intent=Intent.UNKNOWN, text=text)
 
 
+def _parse_order_status_navigation(normalized: str, source_text: str) -> ParsedCommand | None:
+    """Разбирает выбор заявки и навигацию по истории естественной фразой."""
+    if has_negation(normalized) or not re.search(
+        r"\b(?:заявк\w*|заказ\w*)\b",
+        normalized,
+    ):
+        return None
+    has_navigation_action = bool(
+        re.search(r"\b(?:покаж\w*|откро\w*|открой\w*|посмотр\w*|перейд\w*)\b", normalized)
+    )
+    has_next_page_wording = bool(
+        re.search(r"\b(?:следующ(?:ие|их|ими)|дальше|стар\w*)\b", normalized)
+    )
+    creates_order = bool(re.search(r"\b(?:созда\w*|оформ\w*|нача\w*|сдела\w*)\b", normalized))
+    if (
+        has_next_page_wording or (has_navigation_action and "следующ" in normalized)
+    ) and not creates_order:
+        return ParsedCommand(
+            intent=Intent.ORDER_STATUS,
+            text=source_text,
+            callback_target="next",
+        )
+    if re.search(
+        r"\b(?:предыдущ\w*|новее)\b.*\b(?:заявк\w*|заказ\w*)\b",
+        normalized,
+    ):
+        return ParsedCommand(
+            intent=Intent.ORDER_STATUS,
+            text=source_text,
+            callback_target="previous",
+        )
+    if match := re.search(
+        r"\b(?:заявк\w*|заказ\w*)\s*(?:номер|№)\s*([a-zа-яё0-9#№._/-]+)",
+        normalized,
+        re.I,
+    ):
+        selected_index = {
+            "1": 1,
+            "один": 1,
+            "первый": 1,
+            "2": 2,
+            "два": 2,
+            "второй": 2,
+            "3": 3,
+            "три": 3,
+            "третий": 3,
+            "4": 4,
+            "четыре": 4,
+            "четвертый": 4,
+            "5": 5,
+            "пять": 5,
+            "пятый": 5,
+        }.get(match.group(1))
+        return ParsedCommand(
+            intent=Intent.ORDER_STATUS,
+            text=source_text,
+            selected_index=selected_index,
+            selection_query="" if selected_index is not None else match.group(1),
+        )
+
+    ordinals = {
+        1: r"(?:1|один|перв\w*|последн\w*|свеж\w*)",
+        2: r"(?:2|два|втор\w*)",
+        3: r"(?:3|три|трет\w*)",
+        4: r"(?:4|четыр\w*)",
+        5: r"(?:5|пять|пят\w*)",
+    }
+    for index, ordinal in ordinals.items():
+        if re.search(
+            rf"(?:^|\s){ordinal}(?:\s+(?:заявк\w*|заказ\w*)|$)",
+            normalized,
+        ):
+            return ParsedCommand(
+                intent=Intent.ORDER_STATUS,
+                text=source_text,
+                selected_index=index,
+            )
+    return None
+
+
 def parse_callback(data: str) -> ParsedCommand:
     """Разбирает данные нажатой кнопки."""
     parts = data.split(":")
@@ -1122,6 +1206,29 @@ def parse_callback(data: str) -> ParsedCommand:
             edit_quantity=quantity,
             callback_revision=revision,
         )
+    if action == "order" and rest:
+        try:
+            selected_index = int(rest[-1])
+        except ValueError:
+            selected_index = None
+        return ParsedCommand(
+            intent=Intent.ORDER_STATUS,
+            text=data,
+            selected_index=selected_index,
+            selection_query="" if selected_index is not None else rest[-1],
+            callback_revision=revision,
+        )
+    if action == "orderspage" and rest:
+        try:
+            page = max(0, int(rest[-1]))
+        except ValueError:
+            page = 0
+        return ParsedCommand(
+            intent=Intent.ORDER_STATUS,
+            text=data,
+            callback_target=f"page:{page}",
+            callback_revision=revision,
+        )
     return ParsedCommand(
         intent=mapping.get(action, Intent.UNKNOWN),
         text=data,
@@ -1154,7 +1261,7 @@ def _extract_global_comment(text: str) -> tuple[str, str]:
         r"(?P<products>.+?)"
         r"(?:[.!?;]\s*|\s*,?\s+(?:и|а)\s+)"
         r"(?:(?:все|всё|всем|для всех)"
-        r"(?:\s+(?:товаров|товары|позиций|позиции))?|"
+        r"(?:\s+(?:товар\w*|позици\w*|это(?:\s+дело)?))?|"
         r"общ(?:ий|его)\s+комментар(?:ий|ия))"
         r"(?:\s*[,;:—–-]\s*|\s+)"
         r"(?P<comment>.+?)\s*[.!?]*",
@@ -1170,13 +1277,34 @@ def _extract_global_comment(text: str) -> tuple[str, str]:
     return products, comment
 
 
+def has_explicit_global_comment_scope(text: str) -> bool:
+    """Проверяет, что пользователь явно распространил комментарий на всю заявку."""
+    normalized = normalize_text(text)
+    if not normalized:
+        return False
+    if re.search(
+        r"(?:^|\s)(?:все|всё|всем|для всех)"
+        r"(?:\s+(?:товаров|товары|позиций|позиции))?(?:\s|$)",
+        normalized,
+        flags=re.I,
+    ):
+        return True
+    if re.search(
+        r"(?:для|ко|к|на)\s+(?:всей|всю|всего|весь)\s+(?:заявк\w*|заказ\w*)",
+        normalized,
+        flags=re.I,
+    ):
+        return True
+    return "общ" in normalized and "комментар" in normalized
+
+
 def parse_product_lines(text: str) -> list[ExtractedItem]:
     """Разбирает список товаров из текста."""
     source = str(text or "").replace(";", "\n").strip()
     if not source:
         return []
     lines = [clean_text(line) for line in re.split(r"\n+", source) if clean_text(line)]
-    if len(lines) == 1 and source.count(",") >= 2:
+    if len(lines) == 1 and source.count(",") >= 2 and not re.search(r"[.!?]", source):
         comma_parts = [clean_text(line) for line in source.split(",") if clean_text(line)]
         if not any(_is_standalone_quantity(part) for part in comma_parts):
             lines = comma_parts
@@ -1242,7 +1370,12 @@ def parse_product_lines(text: str) -> list[ExtractedItem]:
                         )
                     )
                     if separators:
-                        separator = separators[-1]
+                        strong_separators = [
+                            separator
+                            for separator in separators
+                            if re.match(r"\s*[.;!?]", separator.group())
+                        ]
+                        separator = strong_separators[-1] if strong_separators else separators[-1]
                         comment = clean_text(between[: separator.start()]).strip(" .,;:!?-—–")
                         start = mark.end() + separator.end()
                     else:

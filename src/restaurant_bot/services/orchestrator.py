@@ -32,7 +32,6 @@ from restaurant_bot.integrations.cache import CatalogCache, chat_lock
 from restaurant_bot.integrations.google_sheets import GoogleSheetsGateway
 from restaurant_bot.integrations.openai_client import OpenAIService
 from restaurant_bot.integrations.telegram import TELEGRAM_TRANSIENT_ERRORS, TelegramClient
-from restaurant_bot.observability import Tracer
 from restaurant_bot.repositories.order_events import OrderEventRepository
 from restaurant_bot.repositories.sessions import SessionRepository
 from restaurant_bot.repositories.updates import UpdateRepository
@@ -81,7 +80,7 @@ class UpdateOrchestrator:
         self.sheets = sheets
         self.catalog = CatalogCache(settings, redis, sheets)
         self.engine = ConversationEngine(settings)
-        self.tracer = Tracer(settings)
+        self.tracer = openai_service.tracer
         self.registration = VenueRegistrationService(settings, redis, sheets)
 
     def process(self, update_id: int) -> None:
@@ -1169,7 +1168,12 @@ class UpdateOrchestrator:
         if result.enqueue_order_status:
             from restaurant_bot.workers.tasks import send_order_status
 
-            send_order_status.delay(chat_id)
+            send_order_status.delay(
+                chat_id,
+                page=result.order_status_page,
+                selected_index=result.order_status_selected_index,
+                order_number=result.order_status_order_number,
+            )
         if result.enqueue_product_add:
             from restaurant_bot.workers.tasks import submit_product_add
 

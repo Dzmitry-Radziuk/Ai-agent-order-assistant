@@ -207,6 +207,7 @@ def test_live_voice_candidate_selection_variants(phrase: str, selected_index: in
         ("Я всё добавил", Intent.SUBMIT_REQUEST),
         ("Заявка готова", Intent.SUBMIT_REQUEST),
         ("Можно оформлять", Intent.SUBMIT_REQUEST),
+        ("Да, отправляй", Intent.SUBMIT_REQUEST),
         ("Предыдущий экран", Intent.BACK),
         ("Продолжим работу", Intent.CONTINUE_CURRENT),
         ("Покажи итог", Intent.SHOW_FINAL_REVIEW),

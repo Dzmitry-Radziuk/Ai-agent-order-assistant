@@ -127,4 +127,5 @@ def test_disabled_external_dispatch_still_enqueues_local_table_write(settings) -
     assert guarded.state.pending_submission is not None
     assert guarded.state.pending_submission.rows[0]["Кол-во"] == 5
     assert guarded.state.cart == [cart_item]
-    assert "Отправляю заявку" in guarded.reply.text
+    assert "Подготавливаю заявку" in guarded.reply.text
+    assert "Отправляю заявку" not in guarded.reply.text

@@ -30,7 +30,10 @@ from restaurant_bot.repositories.submissions import SubmissionRepository
 from restaurant_bot.services.replies import cart_reply
 from restaurant_bot.services.submission_presenter import (
     _callback_with_revision,
+    build_order_status_detail_reply,
+    build_order_status_list_reply,
     build_order_status_text,
+    group_order_status_rows,
     submission_dispatch_uncertain_reply,
     submission_failure_reply,
     submission_local_saved_reply,
@@ -43,6 +46,8 @@ logger = structlog.get_logger(__name__)
 
 class SubmissionService:
     """Управляет надёжной отправкой заявок."""
+
+    ORDER_STATUS_PAGE_SIZE = 5
 
     def __init__(
         self,
@@ -297,72 +302,140 @@ class SubmissionService:
                 record.dispatch_completed,
             )
 
-    def send_status(self, chat_id: str) -> None:
-        """Отправляет пользователю статусы его заявок."""
+    def send_status(
+        self,
+        chat_id: str,
+        *,
+        page: int = 0,
+        selected_index: int | None = None,
+        order_number: str = "",
+    ) -> None:
+        """Показывает список заявок или подробности выбранной заявки."""
         with chat_lock(self.redis, chat_id):
             with SessionLocal() as db:
                 _, state = SessionRepository(db).get_for_update(chat_id)
-            order_numbers = [
-                order_number
-                for order_number in dict.fromkeys(
-                    [state.last_order_no, *state.submitted_order_numbers]
-                )
-                if order_number
-            ][:10]
-            if not order_numbers:
-                if not self.settings.google_order_submission_enabled:
-                    self._send_latest_test_status(chat_id, state)
-                    return
-                self.telegram.send_reply(
-                    chat_id, BotReply(text="У вас пока нет отправленных заявок.")
+            if selected_index is not None or order_number:
+                self._send_order_status_detail(
+                    chat_id,
+                    state,
+                    selected_index=selected_index,
+                    order_number=order_number,
                 )
                 return
-            rows = self.sheets.read_order_statuses(
-                order_numbers,
-                self._require_venue_spreadsheet_id(state.spreadsheet_id),
-            )
-            if not rows and not self.settings.google_order_submission_enabled:
-                self._send_latest_test_status(chat_id, state)
-                return
-            self.telegram.send_reply(chat_id, BotReply(text=build_order_status_text(rows, state)))
+            self._send_order_status_page(chat_id, state, page=max(0, page))
 
-    def _send_latest_test_status(
+    def _send_order_status_page(
         self,
         chat_id: str,
         state: ConversationState,
+        *,
+        page: int,
     ) -> None:
-        """Показывает последнюю готовую заявку из «Истории» без отправки."""
-        rows = self.sheets.read_latest_order_statuses(
-            self._require_venue_spreadsheet_id(state.spreadsheet_id)
+        """Показывает одну страницу реальных заявок текущего заведения."""
+        spreadsheet_id = self._require_venue_spreadsheet_id(state.spreadsheet_id)
+        venue_name = state.venue_name or state.restaurant
+        rows = self.sheets.read_recent_order_statuses(
+            spreadsheet_id,
+            venue_name,
+            offset=page * self.ORDER_STATUS_PAGE_SIZE,
+            limit=self.ORDER_STATUS_PAGE_SIZE + 1,
+        )
+        groups = group_order_status_rows(rows)
+        if page > 0 and not groups:
+            self._send_order_status_page(chat_id, state, page=0)
+            return
+        shown_groups = groups[: self.ORDER_STATUS_PAGE_SIZE]
+        shown_rows = [row for _, order_rows in shown_groups for row in order_rows]
+        order_numbers = [number for number, _ in shown_groups]
+        self._persist_order_status_view(
+            chat_id,
+            page=page,
+            order_numbers=order_numbers,
+        )
+        self.telegram.send_reply(
+            chat_id,
+            build_order_status_list_reply(
+                shown_rows,
+                page=page,
+                has_more=len(groups) > self.ORDER_STATUS_PAGE_SIZE,
+            ),
+        )
+
+    def _send_order_status_detail(
+        self,
+        chat_id: str,
+        state: ConversationState,
+        *,
+        selected_index: int | None,
+        order_number: str,
+    ) -> None:
+        """Показывает поставщиков и товары выбранной реальной заявки."""
+        stored_numbers = state.order_status_order_numbers
+        selected = selected_index or 1
+        target = order_number.strip()
+        if not target and 1 <= selected <= len(stored_numbers):
+            target = stored_numbers[selected - 1]
+        if not target:
+            self._send_order_status_page(
+                chat_id,
+                state,
+                page=max(0, state.order_status_page),
+            )
+            return
+
+        rows = self.sheets.read_order_statuses(
+            [target],
+            self._require_venue_spreadsheet_id(state.spreadsheet_id),
+            state.venue_name or state.restaurant,
         )
         if not rows:
             self.telegram.send_reply(
                 chat_id,
                 BotReply(
                     text=(
-                        "🧪 <b>Тестовые статусы</b>\n\n"
-                        "В листе «История» пока нет готовых заявок для проверки."
-                    )
+                        "⚠️ <b>Заявка не найдена</b>\n\n"
+                        f"Заявки {escape(target)} нет в «Истории» этого заведения."
+                    ),
+                    rows=[
+                        [
+                            Button(
+                                text="← К списку заявок",
+                                callback_data=f"v2:orderspage:{state.order_status_page}",
+                            )
+                        ]
+                    ],
                 ),
             )
             return
-        order_number = str(
-            rows[0].get("Номер заявки") or rows[0].get("№ Заявки") or rows[0].get("ID заявки") or ""
-        ).strip()
+
         preview_state = state.model_copy(deep=True)
-        preview_state.last_order_no = order_number
+        preview_state.last_order_no = target
         preview_state.submitted_order_numbers = []
         status_text = build_order_status_text(rows, preview_state)
         self.telegram.send_reply(
             chat_id,
-            BotReply(
-                text=(
-                    "🧪 <b>Тестовые данные из листа «История»</b>\n"
-                    "Заявка не отправлялась через этого бота.\n\n"
-                    f"{status_text}"
-                )
+            build_order_status_detail_reply(
+                status_text,
+                page=max(0, state.order_status_page),
+                selected_index=selected,
             ),
         )
+
+    @staticmethod
+    def _persist_order_status_view(
+        chat_id: str,
+        *,
+        page: int,
+        order_numbers: list[str],
+    ) -> None:
+        """Запоминает показанный список для голосового и кнопочного выбора."""
+        with SessionLocal.begin() as db:
+            sessions = SessionRepository(db)
+            row, state = sessions.get_for_update(chat_id)
+            state.order_status_view_active = True
+            state.order_status_page = page
+            state.order_status_order_numbers = order_numbers
+            sessions.save(chat_id, state, row)
 
     def submit_product_add(self, chat_id: str) -> None:
         """Отправляет запрос на добавление нового товара."""
