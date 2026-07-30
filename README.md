@@ -234,6 +234,19 @@ docker compose exec worker python -m restaurant_bot.cli sync-venue-bindings
 
 Повторный запуск безопасен: сервис импортирует актуальные привязки.
 
+После импорта лист `Чаты` остаётся источником управления доступом:
+
+- учитываются только строки, где `Тип компании = Заведение`;
+- `Активен = TRUE` разрешает пользователю работать с указанным заведением;
+- `Активен = FALSE` или удаление строки отключает доступ;
+- повторное включение `TRUE` восстанавливает доступ без новой ссылки;
+- изменения применяются при следующем обращении пользователя, обычно не позднее чем через `VENUE_ACCESS_CACHE_TTL_SECONDS`;
+- временная ошибка Google не блокирует пользователей, чей доступ уже был подтверждён ранее.
+
+Перед записью заявки, чтением статусов и добавлением ненайденного товара worker
+повторно проверяет реестр без кэша. Поэтому уже поставленная в очередь операция
+не выполнится после отключения пользователя.
+
 ### 7. Проверить приложение
 
 ```bash
@@ -325,7 +338,7 @@ uvicorn restaurant_bot.api.app:app --host 0.0.0.0 --port 8000
 | PostgreSQL | `POSTGRES_*`, `DATABASE_URL`, настройки пула и сроки хранения аудита |
 | Redis/Celery | `REDIS_URL`, `CELERY_BROKER_URL`, `CELERY_RESULT_BACKEND`, `REDIS_MAXMEMORY` |
 | Google | Spreadsheet IDs, названия листов, service account, Apps Script |
-| Кэш | `CATALOG_CACHE_TTL_SECONDS`, `VENUE_DIRECTORY_CACHE_TTL_SECONDS` |
+| Кэш | `CATALOG_CACHE_TTL_SECONDS`, `VENUE_DIRECTORY_CACHE_TTL_SECONDS`, `VENUE_ACCESS_CACHE_TTL_SECONDS` |
 | Наблюдаемость | `LANGFUSE_*`, `LOG_USER_CONTENT` |
 | Compose | `API_BIND_HOST`, `API_PORT`, `UVICORN_WORKERS`, `CELERY_CONCURRENCY` |
 

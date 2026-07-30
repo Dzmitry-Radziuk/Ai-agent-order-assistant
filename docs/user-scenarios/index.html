@@ -117,9 +117,9 @@
   </header>
   <main>
     <section class="summary" aria-label="Сводка">
-      <div class="metric"><b>33</b><span>сценариев</span></div>
-      <div class="metric"><b>33</b><span>связаны с pytest</span></div>
-      <div class="metric"><b>22</b><span>критических</span></div>
+      <div class="metric"><b>34</b><span>сценариев</span></div>
+      <div class="metric"><b>34</b><span>связаны с pytest</span></div>
+      <div class="metric"><b>23</b><span>критических</span></div>
       <div class="metric"><b>7</b><span>разделов</span></div>
     </section>
 
@@ -197,6 +197,32 @@
         <details>
           <summary>Связанные pytest-тесты · 2</summary>
           <ul class="tests"><li><a href="../../tests/venue/test_venue_registration.py">tests/venue/test_venue_registration.py</a><span>test_declining_confirmation_never_writes</span></li><li><a href="../../tests/venue/test_venue_registration.py">tests/venue/test_venue_registration.py</a><span>test_switch_requires_an_extra_confirmation</span></li></ul>
+        </details>
+      </article>
+
+      <article id="scenario-REG-03" class="scenario-card"
+        data-category="registration"
+        data-priority="critical" data-search="reg-03 управление доступом через таблицу подключение заведения отправляет боту сообщение после того, как ответственный сотрудник изменил поле «активен» или удалил строку. при true продолжает работу. при false или отсутствии строки сообщает, что доступ отключён, и не читает и не изменяет таблицу заведения. тип компании = заведение активен = true активен = false строка пользователя удалена">
+        <div class="card-top">
+          <span class="scenario-id">REG-03</span>
+          <span class="priority priority-critical">Критический</span>
+        </div>
+        <h3>Управление доступом через таблицу</h3>
+        <p class="category-label">Подключение заведения</p>
+        <div class="channels"><span>Текст</span><span>Голос</span><span>Фото</span><span>Кнопка</span></div>
+        <dl>
+          <div><dt>Перед началом</dt><dd>Пользователь ранее подключён к заведению, а его строка с типом компании «Заведение» находится в центральном листе «Чаты».</dd></div>
+          <div><dt>Пользователь</dt><dd>Отправляет боту сообщение после того, как ответственный сотрудник изменил поле «Активен» или удалил строку.</dd></div>
+          <div><dt>Бот</dt><dd>При TRUE продолжает работу. При FALSE или отсутствии строки сообщает, что доступ отключён, и не читает и не изменяет таблицу заведения.</dd></div>
+          <div class="result"><dt>Итог</dt><dd>Доступ каждого пользователя управляется строкой типа «Заведение»; строки поставщиков не дают доступ к ресторану. Повторное TRUE восстанавливает доступ. Временный сбой Google не блокирует ранее подтверждённых пользователей.</dd></div>
+        </dl>
+        <details>
+          <summary>Примеры фраз</summary>
+          <ul><li>«Тип компании = Заведение»</li><li>«Активен = TRUE»</li><li>«Активен = FALSE»</li><li>«Строка пользователя удалена»</li></ul>
+        </details>
+        <details>
+          <summary>Связанные pytest-тесты · 4</summary>
+          <ul class="tests"><li><a href="../../tests/venue/test_venue_registration.py">tests/venue/test_venue_registration.py</a><span>test_access_registry_denies_missing_inactive_or_conflicting_rows</span></li><li><a href="../../tests/venue/test_venue_registration.py">tests/venue/test_venue_registration.py</a><span>test_context_revokes_access_removed_from_central_table</span></li><li><a href="../../tests/venue/test_venue_registration.py">tests/venue/test_venue_registration.py</a><span>test_context_restores_access_reenabled_in_central_table</span></li><li><a href="../../tests/submission/test_submission.py">tests/submission/test_submission.py</a><span>test_revoked_access_stops_submission_before_google_write</span></li></ul>
         </details>
       </article>
 
@@ -1010,7 +1036,7 @@
     </section>
   </main>
   <footer>Локальный каталог · версия 1.1 · работает без интернета</footer>
-  <script id="catalog-meta" type="application/json">{"version": "1.1", "total": 33, "linked": 33}</script>
+  <script id="catalog-meta" type="application/json">{"version": "1.1", "total": 34, "linked": 34}</script>
   <script>
     (() => {
       const cards = [...document.querySelectorAll(".scenario-card")];

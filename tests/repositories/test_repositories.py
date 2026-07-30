@@ -157,6 +157,25 @@ def test_venue_repository_reads_active_bindings() -> None:
     assert db.scalar.call_count == 2
 
 
+def test_venue_repository_revokes_and_restores_access() -> None:
+    """Сохраняет отзыв и последующее восстановление доступа."""
+    db = MagicMock()
+    binding = _binding("12345")
+    db.get.return_value = binding
+    repository = VenueBindingRepository(db)
+
+    repository.set_access(1, active=False)
+
+    assert binding.is_active is False
+    assert binding.sync_status == "revoked"
+
+    repository.set_access(1, active=True)
+
+    assert binding.is_active is True
+    assert binding.sync_status == "synced"
+    assert db.flush.call_count == 2
+
+
 def test_venue_repository_creates_first_binding() -> None:
     """Создаёт новую привязку со статусом ожидающей синхронизации."""
     db = MagicMock()

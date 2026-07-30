@@ -520,7 +520,7 @@ class UpdateOrchestrator:
             claim,
             RegistrationResult(
                 handled=True,
-                reply=VenueRegistrationService.not_bound_reply(),
+                reply=self.registration.denied_reply(event),
             ),
         )
 

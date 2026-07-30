@@ -157,6 +157,24 @@
       ]
     },
     {
+      "id": "REG-03",
+      "category": "registration",
+      "title": "Управление доступом через таблицу",
+      "priority": "critical",
+      "channels": ["Текст", "Голос", "Фото", "Кнопка"],
+      "precondition": "Пользователь ранее подключён к заведению, а его строка с типом компании «Заведение» находится в центральном листе «Чаты».",
+      "user_action": "Отправляет боту сообщение после того, как ответственный сотрудник изменил поле «Активен» или удалил строку.",
+      "bot_response": "При TRUE продолжает работу. При FALSE или отсутствии строки сообщает, что доступ отключён, и не читает и не изменяет таблицу заведения.",
+      "result": "Доступ каждого пользователя управляется строкой типа «Заведение»; строки поставщиков не дают доступ к ресторану. Повторное TRUE восстанавливает доступ. Временный сбой Google не блокирует ранее подтверждённых пользователей.",
+      "examples": ["Тип компании = Заведение", "Активен = TRUE", "Активен = FALSE", "Строка пользователя удалена"],
+      "test_refs": [
+        "tests/venue/test_venue_registration.py::test_access_registry_denies_missing_inactive_or_conflicting_rows",
+        "tests/venue/test_venue_registration.py::test_context_revokes_access_removed_from_central_table",
+        "tests/venue/test_venue_registration.py::test_context_restores_access_reenabled_in_central_table",
+        "tests/submission/test_submission.py::test_revoked_access_stops_submission_before_google_write"
+      ]
+    },
+    {
       "id": "INP-01",
       "category": "input",
       "title": "Добавление товаров текстом",

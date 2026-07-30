@@ -16,9 +16,9 @@
 
 | Показатель | Значение |
 |---|---:|
-| Всего сценариев | 33 |
-| Связаны с pytest | 33 |
-| Критические | 22 |
+| Всего сценариев | 34 |
+| Связаны с pytest | 34 |
+| Критические | 23 |
 | Важные | 8 |
 | Защитные | 3 |
 
@@ -149,6 +149,32 @@ flowchart LR
 
 - [`tests/venue/test_venue_registration.py`](../tests/venue/test_venue_registration.py) → `test_declining_confirmation_never_writes`
 - [`tests/venue/test_venue_registration.py`](../tests/venue/test_venue_registration.py) → `test_switch_requires_an_extra_confirmation`
+
+#### REG-03 · Управление доступом через таблицу
+
+**Приоритет:** Критический<br>
+**Канал:** Текст, Голос, Фото, Кнопка<br>
+**Предусловие:** Пользователь ранее подключён к заведению, а его строка с типом компании «Заведение» находится в центральном листе «Чаты».
+
+**Действие пользователя:** Отправляет боту сообщение после того, как ответственный сотрудник изменил поле «Активен» или удалил строку.
+
+**Ответ бота:** При TRUE продолжает работу. При FALSE или отсутствии строки сообщает, что доступ отключён, и не читает и не изменяет таблицу заведения.
+
+**Результат:** Доступ каждого пользователя управляется строкой типа «Заведение»; строки поставщиков не дают доступ к ресторану. Повторное TRUE восстанавливает доступ. Временный сбой Google не блокирует ранее подтверждённых пользователей.
+
+**Примеры фраз:**
+
+- «Тип компании = Заведение»
+- «Активен = TRUE»
+- «Активен = FALSE»
+- «Строка пользователя удалена»
+
+**Автоматическая проверка:**
+
+- [`tests/venue/test_venue_registration.py`](../tests/venue/test_venue_registration.py) → `test_access_registry_denies_missing_inactive_or_conflicting_rows`
+- [`tests/venue/test_venue_registration.py`](../tests/venue/test_venue_registration.py) → `test_context_revokes_access_removed_from_central_table`
+- [`tests/venue/test_venue_registration.py`](../tests/venue/test_venue_registration.py) → `test_context_restores_access_reenabled_in_central_table`
+- [`tests/submission/test_submission.py`](../tests/submission/test_submission.py) → `test_revoked_access_stops_submission_before_google_write`
 
 ### Добавление товаров
 

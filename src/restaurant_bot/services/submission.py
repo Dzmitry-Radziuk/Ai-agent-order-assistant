@@ -40,6 +40,7 @@ from restaurant_bot.services.submission_presenter import (
     submission_success_reply,
 )
 from restaurant_bot.services.text import escape
+from restaurant_bot.services.venue_registration import VenueRegistrationService
 
 logger = structlog.get_logger(__name__)
 
@@ -62,6 +63,7 @@ class SubmissionService:
         self.telegram = telegram
         self.sheets = sheets
         self.catalog_cache = CatalogCache(settings, redis, sheets)
+        self.registration = VenueRegistrationService(settings, redis, sheets)
 
     def submit(self, chat_id: str, *, report_failure: bool = True) -> None:
         """Выполняет надёжную отправку текущей заявки."""
@@ -87,6 +89,15 @@ class SubmissionService:
                             state,
                             checkpoint_order_no,
                         )
+                return
+            if not self._has_current_access(
+                chat_id,
+                user_id=pending.telegram_user_id or chat_id,
+                bound_chat_id=pending.telegram_chat_id or chat_id,
+                venue_code=pending.venue_code,
+                spreadsheet_id=pending.spreadsheet_id,
+            ):
+                self._send_access_disabled(chat_id)
                 return
             dispatch_enabled = getattr(
                 getattr(self, "settings", None),
@@ -312,8 +323,17 @@ class SubmissionService:
     ) -> None:
         """Показывает список заявок или подробности выбранной заявки."""
         with chat_lock(self.redis, chat_id):
-            with SessionLocal() as db:
+            with SessionLocal.begin() as db:
                 _, state = SessionRepository(db).get_for_update(chat_id)
+            if not self._has_current_access(
+                chat_id,
+                user_id=state.telegram_user_id or chat_id,
+                bound_chat_id=state.telegram_chat_id or chat_id,
+                venue_code=state.venue_code,
+                spreadsheet_id=state.spreadsheet_id,
+            ):
+                self._send_access_disabled(chat_id)
+                return
             if selected_index is not None or order_number:
                 self._send_order_status_detail(
                     chat_id,
@@ -440,6 +460,17 @@ class SubmissionService:
     def submit_product_add(self, chat_id: str) -> None:
         """Отправляет запрос на добавление нового товара."""
         with chat_lock(self.redis, chat_id, timeout=300):
+            with SessionLocal.begin() as db:
+                _, access_state = SessionRepository(db).get_for_update(chat_id)
+            if not self._has_current_access(
+                chat_id,
+                user_id=access_state.telegram_user_id or chat_id,
+                bound_chat_id=access_state.telegram_chat_id or chat_id,
+                venue_code=access_state.venue_code,
+                spreadsheet_id=access_state.spreadsheet_id,
+            ):
+                self._send_access_disabled(chat_id)
+                return
             with SessionLocal.begin() as db:
                 sessions = SessionRepository(db)
                 row, state = sessions.get_for_update(chat_id)
@@ -584,6 +615,45 @@ class SubmissionService:
         state.stage = SessionStage.REVIEW
         state.status = "review"
         return request
+
+    def _has_current_access(
+        self,
+        chat_id: str,
+        *,
+        user_id: str,
+        bound_chat_id: str,
+        venue_code: str,
+        spreadsheet_id: str,
+    ) -> bool:
+        """Повторно проверяет доступ перед чтением или записью Google Sheets."""
+        registration = getattr(self, "registration", None)
+        if registration is None:
+            return True
+        context = registration.context_for_identity(
+            user_id,
+            bound_chat_id,
+            force_refresh=True,
+        )
+        allowed = bool(
+            context
+            and (not venue_code or context.venue_code == venue_code)
+            and (not spreadsheet_id or context.spreadsheet_id == spreadsheet_id)
+        )
+        if not allowed:
+            logger.info(
+                "venue_access_blocked_before_sheet_operation",
+                chat_id=chat_id,
+                telegram_user_id=user_id,
+                venue_code=venue_code,
+            )
+        return allowed
+
+    def _send_access_disabled(self, chat_id: str) -> None:
+        """Отправляет единый ответ об отзыве доступа."""
+        self.telegram.send_reply(
+            chat_id,
+            VenueRegistrationService.access_disabled_reply(),
+        )
 
     def _load_pending(self, chat_id: str) -> PendingSubmission | None:
         """Загружает снимок ожидающей отправки заявки."""

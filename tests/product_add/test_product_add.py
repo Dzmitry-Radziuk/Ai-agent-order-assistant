@@ -364,7 +364,11 @@ def _product_add_service(
         ],
     )
     repository = MagicMock()
-    repository.get_for_update.side_effect = [(None, state), (None, state)]
+    repository.get_for_update.side_effect = [
+        (None, state),
+        (None, state),
+        (None, state),
+    ]
     repository_cls = MagicMock(return_value=repository)
     monkeypatch.setattr(submission_module, "SessionRepository", repository_cls)
     monkeypatch.setattr(

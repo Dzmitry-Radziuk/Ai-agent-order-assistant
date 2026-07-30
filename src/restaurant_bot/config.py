@@ -62,6 +62,7 @@ class Settings(BaseSettings):
     google_registration_spreadsheet_id: str = ""
     google_registration_sheet: str = "Чаты"
     venue_directory_cache_ttl_seconds: int = Field(default=120, ge=30, le=3600)
+    venue_access_cache_ttl_seconds: int = Field(default=60, ge=15, le=3600)
     google_catalog_sheet: str = "Заявка"
     google_order_status_sheet: str = "История"
     google_product_add_sheet: str = "Добавить"

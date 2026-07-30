@@ -36,6 +36,32 @@ class VenueBindingRepository:
             )
         )
 
+    def get_revoked(self, user_id: str, chat_id: str) -> VenueBinding | None:
+        """Возвращает последнюю привязку, отключённую через центральный реестр."""
+        return self.db.scalar(
+            select(VenueBinding)
+            .where(
+                VenueBinding.channel == "telegram",
+                VenueBinding.telegram_user_id == user_id,
+                VenueBinding.telegram_chat_id == chat_id,
+                VenueBinding.is_active.is_(False),
+                VenueBinding.sync_status == "revoked",
+            )
+            .order_by(VenueBinding.updated_at.desc(), VenueBinding.id.desc())
+            .limit(1)
+        )
+
+    def set_access(self, binding_id: int, *, active: bool) -> VenueBinding | None:
+        """Включает или отзывает доступ для сохранённой привязки."""
+        row = self.db.get(VenueBinding, binding_id)
+        if row is None:
+            return None
+        row.is_active = active
+        row.sync_status = "synced" if active else "revoked"
+        row.sync_error = None
+        self.db.flush()
+        return row
+
     def bind(
         self,
         *,

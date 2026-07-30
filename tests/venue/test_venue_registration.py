@@ -13,6 +13,7 @@ from restaurant_bot.domain.models import InputKind, TelegramEvent
 from restaurant_bot.services import venue_registration as registration_module
 from restaurant_bot.services.venue_registration import (
     Venue,
+    VenueAccessRegistry,
     VenueContext,
     VenueDirectory,
     VenueDirectoryError,
@@ -61,6 +62,11 @@ class _Service(VenueRegistrationService):
         del event
         return self.current
 
+    def denied_reply(self, event: TelegramEvent):  # type: ignore[no-untyped-def]
+        """Возвращает ответ для пользователя без тестового обращения к БД."""
+        del event
+        return self.not_bound_reply()
+
 
 def _service(settings, matches: list[Venue]) -> _Service:  # type: ignore[no-untyped-def]
     """Создаёт настроенный тестовый экземпляр сервиса."""
@@ -76,6 +82,220 @@ def _venue(code: str = "6461W6", name: str = "Качели") -> Venue:
         spreadsheet_id="sheet-venue-1",
         spreadsheet_url="https://docs.google.com/spreadsheets/d/sheet-venue-1/edit",
     )
+
+
+def _access_row(
+    *,
+    active: str = "TRUE",
+    company_type: str = "Заведение",
+    user_id: str = "77",
+    chat_id: str = "77",
+    code: str = "6461W6",
+) -> dict[str, str]:
+    """Создаёт строку центрального реестра доступа."""
+    return {
+        "Тип компании": company_type,
+        "Канал": "telegram",
+        "Код": code,
+        "Chat ID": chat_id,
+        "User ID": user_id,
+        "Активен": active,
+    }
+
+
+def _binding(*, active: bool = True, status: str = "synced") -> SimpleNamespace:
+    """Создаёт сохранённую привязку пользователя."""
+    return SimpleNamespace(
+        id=5,
+        channel="telegram",
+        telegram_user_id="77",
+        telegram_chat_id="77",
+        venue_code="6461W6",
+        venue_name="Качели",
+        spreadsheet_id="sheet-venue-1",
+        spreadsheet_url="https://docs.google.com/spreadsheets/d/sheet-venue-1/edit",
+        is_active=active,
+        sync_status=status,
+    )
+
+
+@pytest.mark.parametrize("active", ["TRUE", "ИСТИНА"])
+def test_access_registry_allows_only_active_exact_binding(
+    settings,
+    active: str,
+) -> None:  # type: ignore[no-untyped-def]
+    """Разрешает доступ только точному активному пользователю и заведению."""
+    redis = MagicMock()
+    redis.get.return_value = None
+    sheets = MagicMock()
+    sheets.read_venue_registrations.return_value = [_access_row(active=active)]
+    registry = VenueAccessRegistry(settings, redis, sheets)
+
+    assert registry.decision("77", "77", "6461w6") is True
+    assert registry.decision("88", "77", "6461W6") is False
+    redis.setex.assert_called()
+
+
+@pytest.mark.parametrize(
+    "rows",
+    [
+        [],
+        [_access_row(active="FALSE")],
+        [_access_row(company_type="Поставщик")],
+        [_access_row(active="TRUE"), _access_row(active="FALSE")],
+    ],
+)
+def test_access_registry_denies_missing_inactive_or_conflicting_rows(
+    settings,
+    rows: list[dict[str, str]],
+) -> None:  # type: ignore[no-untyped-def]
+    """Запрещает удалённую, неактивную или противоречивую привязку."""
+    redis = MagicMock()
+    redis.get.return_value = None
+    sheets = MagicMock()
+    sheets.read_venue_registrations.return_value = rows
+
+    assert VenueAccessRegistry(settings, redis, sheets).decision("77", "77", "6461W6") is False
+
+
+def test_access_registry_rejects_another_sheet_structure(settings) -> None:  # type: ignore[no-untyped-def]
+    """Не принимает лист поставщика или другой лист за реестр заведений."""
+    redis = MagicMock()
+    redis.get.return_value = None
+    sheets = MagicMock()
+    sheets.read_venue_registrations.return_value = [
+        {"Поставщик": "Раджабов", "Chat ID": "77", "User ID": "77"}
+    ]
+
+    assert VenueAccessRegistry(settings, redis, sheets).decision("77", "77", "6461W6") is None
+
+
+def test_access_registry_failure_keeps_last_database_decision(settings) -> None:  # type: ignore[no-untyped-def]
+    """Возвращает неопределённость вместо массовой блокировки при сбое Google."""
+    redis = MagicMock()
+    redis.get.return_value = None
+    sheets = MagicMock()
+    sheets.read_venue_registrations.side_effect = TimeoutError("offline")
+
+    assert VenueAccessRegistry(settings, redis, sheets).decision("77", "77", "6461W6") is None
+
+
+def test_access_registry_uses_short_redis_cache(settings) -> None:  # type: ignore[no-untyped-def]
+    """Повторно использует снимок прав и не читает Google на каждом сообщении."""
+    redis = MagicMock()
+    redis.get.return_value = json.dumps(
+        [
+            {
+                "channel": "telegram",
+                "user_id": "77",
+                "chat_id": "77",
+                "venue_code": "6461W6",
+                "active": True,
+            }
+        ]
+    )
+    sheets = MagicMock()
+
+    assert VenueAccessRegistry(settings, redis, sheets).decision("77", "77", "6461W6") is True
+    sheets.read_venue_registrations.assert_not_called()
+
+
+def _mock_binding_repository(
+    monkeypatch: pytest.MonkeyPatch,
+    repository: MagicMock,
+) -> None:
+    """Подменяет транзакции и репозиторий привязок."""
+    session_factory = MagicMock()
+    session_factory.return_value = nullcontext(MagicMock())
+    session_factory.begin.return_value = nullcontext(MagicMock())
+    monkeypatch.setattr(registration_module, "SessionLocal", session_factory)
+    monkeypatch.setattr(
+        registration_module,
+        "VenueBindingRepository",
+        lambda _db: repository,
+    )
+
+
+def test_context_revokes_access_removed_from_central_table(
+    settings,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:  # type: ignore[no-untyped-def]
+    """Отключает локальную привязку, отсутствующую в центральном реестре."""
+    binding = _binding()
+    repository = MagicMock()
+    repository.get_active.return_value = binding
+    repository.get_revoked.return_value = None
+    _mock_binding_repository(monkeypatch, repository)
+    service = VenueRegistrationService(settings, MagicMock(), MagicMock(), directory=_Directory([]))
+    service.access_registry = MagicMock()
+    service.access_registry.decision.return_value = False
+
+    assert service.context_for_identity("77", "77") is None
+    repository.set_access.assert_called_once_with(5, active=False)
+
+
+def test_context_restores_access_reenabled_in_central_table(
+    settings,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:  # type: ignore[no-untyped-def]
+    """Возвращает доступ после установки Активен=TRUE."""
+    revoked = _binding(active=False, status="revoked")
+    restored = _binding()
+    repository = MagicMock()
+    repository.get_active.return_value = None
+    repository.get_revoked.return_value = revoked
+    repository.set_access.return_value = restored
+    _mock_binding_repository(monkeypatch, repository)
+    service = VenueRegistrationService(settings, MagicMock(), MagicMock(), directory=_Directory([]))
+    service.access_registry = MagicMock()
+    service.access_registry.decision.return_value = True
+
+    context = service.context_for_identity("77", "77")
+
+    repository.set_access.assert_called_once_with(5, active=True)
+    assert context is not None
+    assert context.venue_code == "6461W6"
+
+
+def test_context_keeps_active_binding_when_registry_is_temporarily_unavailable(
+    settings,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:  # type: ignore[no-untyped-def]
+    """Не блокирует действующего пользователя из-за временного сбоя Google."""
+    binding = _binding()
+    repository = MagicMock()
+    repository.get_active.return_value = binding
+    repository.get_revoked.return_value = None
+    _mock_binding_repository(monkeypatch, repository)
+    service = VenueRegistrationService(settings, MagicMock(), MagicMock(), directory=_Directory([]))
+    service.access_registry = MagicMock()
+    service.access_registry.decision.return_value = None
+
+    context = service.context_for_identity("77", "77")
+
+    repository.set_access.assert_not_called()
+    assert context is not None
+    assert context.venue_code == "6461W6"
+
+
+def test_revoked_user_cannot_reconnect_with_the_old_invite_code(
+    settings,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:  # type: ignore[no-untyped-def]
+    """Не позволяет обойти блокировку повторным вводом кода заведения."""
+    repository = MagicMock()
+    repository.get_revoked.return_value = _binding(active=False, status="revoked")
+    _mock_binding_repository(monkeypatch, repository)
+    service = VenueRegistrationService(settings, MagicMock(), MagicMock(), directory=_Directory([]))
+    service.access_registry = MagicMock()
+    service.access_registry.decision.return_value = False
+
+    result = service._bind(_event(), _venue(), None)
+
+    assert result.reply is not None
+    assert "Доступ к заведению отключён" in result.reply.text
+    repository.bind.assert_not_called()
+    service.sheets.upsert_venue_registration.assert_not_called()
 
 
 @pytest.mark.parametrize(

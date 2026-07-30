@@ -208,6 +208,185 @@ def extract_spreadsheet_id(value: str) -> str:
     return raw if re.fullmatch(r"[A-Za-z0-9_-]{20,}", raw) else ""
 
 
+@dataclass(slots=True, frozen=True)
+class VenueAccessEntry:
+    """Описывает право пользователя на работу с заведением."""
+
+    channel: str
+    user_id: str
+    chat_id: str
+    venue_code: str
+    active: bool
+
+
+class VenueAccessRegistry:
+    """Читает права доступа из центрального листа и кратковременно кэширует их."""
+
+    CACHE_KEY = "restaurant-bot:venue-access:v2"
+    ACTIVE_VALUES = frozenset({"true", "истина", "да", "1", "активен", "yes"})
+    VENUE_TYPES = frozenset({"заведение", "venue"})
+    REQUIRED_HEADERS = (
+        ("Тип компании", "company_type"),
+        ("Канал", "channel"),
+        ("Код", "Код заведения", "venue_code"),
+        ("Chat ID", "chat_id"),
+        ("User ID", "user_id"),
+        ("Активен", "active"),
+    )
+
+    def __init__(
+        self,
+        settings: Settings,
+        redis: Redis[Any],
+        sheets: GoogleSheetsGateway,
+    ):
+        """Инициализирует компонент."""
+        self.settings = settings
+        self.redis = redis
+        self.sheets = sheets
+
+    def decision(
+        self,
+        user_id: str,
+        chat_id: str,
+        venue_code: str,
+        *,
+        force_refresh: bool = False,
+    ) -> bool | None:
+        """Возвращает решение реестра или None при недоступности Google."""
+        try:
+            entries = self._entries(force_refresh=force_refresh)
+        except Exception as exc:
+            logger.warning(
+                "venue_access_registry_unavailable",
+                error_type=type(exc).__name__,
+            )
+            return None
+        identity = (
+            "telegram",
+            clean_text(user_id),
+            clean_text(chat_id),
+            normalize_code(venue_code),
+        )
+        matches = [
+            entry
+            for entry in entries
+            if (
+                entry.channel,
+                entry.user_id,
+                entry.chat_id,
+                entry.venue_code,
+            )
+            == identity
+        ]
+        if not matches:
+            return False
+        if len({entry.active for entry in matches}) > 1:
+            logger.warning(
+                "venue_access_registry_conflict",
+                telegram_user_id=identity[1],
+                venue_code=identity[3],
+            )
+            return False
+        return all(entry.active for entry in matches)
+
+    def invalidate(self) -> None:
+        """Удаляет кэш после изменения регистрационного листа."""
+        try:
+            self.redis.delete(self.CACHE_KEY)
+        except Exception as exc:
+            logger.warning(
+                "venue_access_cache_invalidation_failed",
+                error_type=type(exc).__name__,
+            )
+
+    def _entries(self, *, force_refresh: bool) -> list[VenueAccessEntry]:
+        """Возвращает нормализованный снимок прав из кэша или Google."""
+        cached: str | bytes | bytearray | None = None
+        if not force_refresh:
+            try:
+                cached = self.redis.get(self.CACHE_KEY)
+            except Exception as exc:
+                logger.warning(
+                    "venue_access_cache_read_failed",
+                    error_type=type(exc).__name__,
+                )
+        if cached:
+            try:
+                payload = json.loads(cast(str | bytes | bytearray, cached))
+                if not isinstance(payload, list):
+                    raise ValueError("venue access cache must contain a list")
+                return [VenueAccessEntry(**item) for item in payload if isinstance(item, dict)]
+            except (TypeError, ValueError, KeyError):
+                self.invalidate()
+
+        rows = self.sheets.read_venue_registrations()
+        self._validate_headers(rows)
+        entries = [entry for row in rows if (entry := self._entry(row)) is not None]
+        try:
+            self.redis.setex(
+                self.CACHE_KEY,
+                self.settings.venue_access_cache_ttl_seconds,
+                json.dumps([asdict(entry) for entry in entries], ensure_ascii=False),
+            )
+        except Exception as exc:
+            logger.warning(
+                "venue_access_cache_write_failed",
+                error_type=type(exc).__name__,
+            )
+        return entries
+
+    @classmethod
+    def _validate_headers(cls, rows: list[dict[str, Any]]) -> None:
+        """Отклоняет другой лист вместо корректного реестра доступа."""
+        if not rows:
+            return
+        headers = {normalize_text(header) for row in rows for header in row if clean_text(header)}
+        missing = [
+            aliases[0]
+            for aliases in cls.REQUIRED_HEADERS
+            if not any(normalize_text(alias) in headers for alias in aliases)
+        ]
+        if missing:
+            raise VenueDirectoryError(
+                f"venue access registry missing headers: {', '.join(missing)}"
+            )
+
+    @classmethod
+    def _entry(cls, row: dict[str, Any]) -> VenueAccessEntry | None:
+        """Преобразует строку регистрационного листа в право доступа."""
+
+        def first(*keys: str) -> str:
+            """Возвращает первое заполненное значение поддерживаемого столбца."""
+            for key in keys:
+                value = clean_text(row.get(key))
+                if value:
+                    return value
+            return ""
+
+        company_type = normalize_text(first("Тип компании", "company_type"))
+        channel = normalize_text(first("Канал", "channel"))
+        user_id = first("User ID", "user_id")
+        chat_id = first("Chat ID", "chat_id")
+        venue_code = normalize_code(first("Код", "Код заведения", "venue_code"))
+        if (
+            company_type not in cls.VENUE_TYPES
+            or channel != "telegram"
+            or not user_id
+            or not chat_id
+            or not venue_code
+        ):
+            return None
+        active = normalize_text(first("Активен", "active")) in cls.ACTIVE_VALUES
+        return VenueAccessEntry(
+            channel=channel,
+            user_id=user_id,
+            chat_id=chat_id,
+            venue_code=venue_code,
+            active=active,
+        )
+
+
 class VenueRegistrationService:
     """Проверяет и сохраняет привязку к заведению."""
 
@@ -223,14 +402,60 @@ class VenueRegistrationService:
         self.redis = redis
         self.sheets = sheets
         self.directory = directory or VenueDirectory(settings, redis)
+        self.access_registry = VenueAccessRegistry(settings, redis, sheets)
 
     def context_for(self, event: TelegramEvent) -> VenueContext | None:
         """Возвращает активный контекст заведения пользователя."""
         if event.chat_type != "private" or not event.telegram_user_id:
             return None
+        return self.context_for_identity(event.telegram_user_id, event.chat_id)
+
+    def context_for_identity(
+        self,
+        user_id: str,
+        chat_id: str,
+        *,
+        force_refresh: bool = False,
+    ) -> VenueContext | None:
+        """Синхронизирует право пользователя и возвращает доступное заведение."""
         with SessionLocal() as db:
-            row = VenueBindingRepository(db).get_active(event.telegram_user_id, event.chat_id)
+            repository = VenueBindingRepository(db)
+            row = repository.get_active(user_id, chat_id) or repository.get_revoked(
+                user_id,
+                chat_id,
+            )
+        if row is None:
+            return None
+
+        decision = self.access_registry.decision(
+            user_id,
+            chat_id,
+            row.venue_code,
+            force_refresh=force_refresh,
+        )
+        if decision is None:
+            return self._context(row) if row.is_active and row.sync_status == "synced" else None
+        if decision:
+            if not row.is_active or row.sync_status != "synced":
+                with SessionLocal.begin() as db:
+                    restored = VenueBindingRepository(db).set_access(row.id, active=True)
+                row = restored or row
+                logger.info(
+                    "venue_access_restored",
+                    telegram_user_id=user_id,
+                    venue_code=row.venue_code,
+                )
             return self._context(row)
+
+        if row.is_active or row.sync_status != "revoked":
+            with SessionLocal.begin() as db:
+                VenueBindingRepository(db).set_access(row.id, active=False)
+            logger.info(
+                "venue_access_revoked",
+                telegram_user_id=user_id,
+                venue_code=row.venue_code,
+            )
+        return None
 
     def bootstrap_existing_bindings(self) -> int:
         """Импортирует действующие привязки из старого реестра."""
@@ -299,7 +524,7 @@ class VenueRegistrationService:
                     ),
                     context=context,
                 )
-            return RegistrationResult(handled=True, reply=self.not_bound_reply())
+            return RegistrationResult(handled=True, reply=self.denied_reply(event))
         if not code or not valid_code(code):
             return RegistrationResult(handled=True, reply=self.not_bound_reply())
 
@@ -350,6 +575,18 @@ class VenueRegistrationService:
         self, event: TelegramEvent, venue: Venue, previous: VenueContext | None
     ) -> RegistrationResult:
         """Создаёт или обновляет привязку к заведению."""
+        if self._revoked_for_venue(event, venue.code):
+            decision = self.access_registry.decision(
+                event.telegram_user_id,
+                event.chat_id,
+                venue.code,
+                force_refresh=True,
+            )
+            if decision is not True:
+                return RegistrationResult(
+                    handled=True,
+                    reply=self.access_disabled_reply(),
+                )
         with SessionLocal.begin() as db:
             binding, deactivated, created = VenueBindingRepository(db).bind(
                 user_id=event.telegram_user_id,
@@ -369,6 +606,7 @@ class VenueRegistrationService:
                 self.sheets.upsert_venue_registration(payload)
             self.sheets.upsert_venue_registration(binding_values)
         except Exception as exc:
+            self.access_registry.invalidate()
             with SessionLocal.begin() as db:
                 VenueBindingRepository(db).restore_after_sync_failure(
                     binding_id=binding_id,
@@ -391,6 +629,7 @@ class VenueRegistrationService:
                     )
                 ),
             )
+        self.access_registry.invalidate()
         with SessionLocal.begin() as db:
             VenueBindingRepository(db).mark_sync(binding_id, "synced")
         context = VenueContext(
@@ -421,6 +660,38 @@ class VenueRegistrationService:
             context=context,
             reset_session=previous is None or previous.venue_code != venue.code,
         )
+
+    def denied_reply(self, event: TelegramEvent) -> BotReply:
+        """Объясняет отзыв доступа либо предлагает первоначальное подключение."""
+        if event.chat_type == "private" and event.telegram_user_id:
+            with SessionLocal.begin() as db:
+                revoked = VenueBindingRepository(db).get_revoked(
+                    event.telegram_user_id,
+                    event.chat_id,
+                )
+            if revoked is not None:
+                return self.access_disabled_reply()
+        return self.not_bound_reply()
+
+    @staticmethod
+    def access_disabled_reply() -> BotReply:
+        """Сообщает пользователю об отключённом доступе."""
+        return BotReply(
+            text=(
+                "⛔ <b>Доступ к заведению отключён</b>\n\n"
+                "Обратитесь к ответственному сотруднику вашего заведения."
+            )
+        )
+
+    @staticmethod
+    def _revoked_for_venue(event: TelegramEvent, venue_code: str) -> bool:
+        """Проверяет сохранённый отзыв доступа для выбранного заведения."""
+        with SessionLocal.begin() as db:
+            row = VenueBindingRepository(db).get_revoked(
+                event.telegram_user_id,
+                event.chat_id,
+            )
+        return row is not None and row.venue_code == normalize_code(venue_code)
 
     @staticmethod
     def _registry_values(binding: VenueBinding, *, active: bool) -> dict[str, Any]:

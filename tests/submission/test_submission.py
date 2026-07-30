@@ -605,6 +605,41 @@ def test_local_saved_reply_is_explicit_and_has_only_new_order_button() -> None:
     ]
 
 
+def test_revoked_access_stops_submission_before_google_write(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Не записывает подготовленную заявку после отзыва доступа."""
+    service = object.__new__(SubmissionService)
+    service.redis = MagicMock()
+    service.telegram = MagicMock()
+    service.sheets = MagicMock()
+    service.registration = MagicMock()
+    service.registration.context_for_identity.return_value = None
+    pending = PendingSubmission(
+        order_no="ORDER-BLOCKED",
+        telegram_user_id="user-1",
+        telegram_chat_id="chat-1",
+        spreadsheet_id="venue-sheet",
+        venue_code="VENUE-1",
+        rows=[{"ID товара": "rose", "Кол-во": 5}],
+    )
+    service._load_pending = MagicMock(return_value=pending)  # type: ignore[method-assign]
+    monkeypatch.setattr(submission_module, "chat_lock", lambda *_args, **_kwargs: nullcontext())
+
+    service.submit("chat-1")
+
+    service.registration.context_for_identity.assert_called_once_with(
+        "user-1",
+        "chat-1",
+        force_refresh=True,
+    )
+    service.sheets.increment_catalog_quantities.assert_not_called()
+    service.sheets.trigger_recalculation.assert_not_called()
+    service.sheets.send_order_submission.assert_not_called()
+    reply = service.telegram.send_reply.call_args.args[1]
+    assert "Доступ к заведению отключён" in reply.text
+
+
 def test_disabled_dispatch_writes_and_recalculates_but_never_calls_submission_script(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
