@@ -234,9 +234,9 @@ flowchart LR
 
 **Действие пользователя:** Отправляет фотографию распечатанной или заполненной таблицы.
 
-**Ответ бота:** Берёт количество только из заполненных колонок заказа, сохраняет комментарии и игнорирует фасовку, остатки и справочные числа.
+**Ответ бота:** Берёт количество только из заполненных колонок заказа, сохраняет комментарии и игнорирует распознанного с фото поставщика, фасовку, остатки и справочные числа.
 
-**Результат:** Распознанное количество записывается в заявку как количество для «Кухни». Строки без заказа не добавляются.
+**Результат:** Количество записывается для «Кухни», а поставщик определяется по найденной строке актуального каталога. Строки без заказа не добавляются.
 
 **Примеры фраз:**
 
@@ -248,6 +248,7 @@ flowchart LR
 
 - [`tests/ai/test_ai_media.py`](../tests/ai/test_ai_media.py) → `test_client_order_sheet_uses_the_selected_department_quantity`
 - [`tests/ai/test_ai_media.py`](../tests/ai/test_ai_media.py) → `test_client_order_sheet_sums_only_filled_department_order_cells`
+- [`tests/ai/test_ai_media.py`](../tests/ai/test_ai_media.py) → `test_client_order_sheet_ignores_supplier_recognized_from_a_neighbouring_row`
 - [`tests/ai/test_photo_prompt_contract.py`](../tests/ai/test_photo_prompt_contract.py) → `test_photo_prompt_excludes_packaging_and_stock_from_order_quantity`
 
 #### INP-04 · Фото рукописного списка
@@ -345,15 +346,15 @@ flowchart LR
 - [`tests/quantity/test_unit_handling.py`](../tests/quantity/test_unit_handling.py) → `test_incompatible_unit_requires_confirmation_instead_of_silent_change`
 - [`tests/quantity/test_voice_quantity_context.py`](../tests/quantity/test_voice_quantity_context.py) → `test_voice_unit_mismatch_accepts_catalog_unit_and_spoken_quantity`
 
-#### REC-03 · Несколько похожих товаров
+#### REC-03 · Похожие товары требуют выбора
 
 **Приоритет:** Критический<br>
 **Канал:** Текст, Голос, Кнопка<br>
-**Предусловие:** По названию найдено несколько подходящих строк каталога.
+**Предусловие:** По названию найден один или несколько похожих товаров, но точное совпадение не подтверждено.
 
 **Действие пользователя:** Выбирает номер, кнопку или однозначное название варианта.
 
-**Ответ бота:** Показывает кандидатов и не выбирает первый вариант автоматически.
+**Ответ бота:** Показывает похожие товары как подсказки и не добавляет слабое совпадение автоматически.
 
 **Результат:** В черновик попадает только явно выбранный товар.
 
@@ -361,12 +362,13 @@ flowchart LR
 
 - «Первый вариант»
 - «Выбираю второй»
-- «Сироп роза»
+- «Кукуруза спелая — похожий вариант: крупа кукурузная»
 
 **Автоматическая проверка:**
 
 - [`tests/catalog/test_candidate_selection.py`](../tests/catalog/test_candidate_selection.py) → `test_explicit_candidate_selection_uses_selected_catalog_row`
 - [`tests/catalog/test_candidate_selection.py`](../tests/catalog/test_candidate_selection.py) → `test_common_candidate_word_does_not_silently_choose_a_product`
+- [`tests/ai/test_ai_pending.py`](../tests/ai/test_ai_pending.py) → `test_ai_does_not_auto_select_weak_single_corn_candidate`
 
 #### REC-04 · Товар не найден в каталоге
 
@@ -378,18 +380,19 @@ flowchart LR
 
 **Ответ бота:** Показывает понятные варианты и не подставляет случайный товар.
 
-**Результат:** Неизвестная позиция не загрязняет заявку; запрос снабженцу хранится отдельно от черновика.
+**Результат:** Неизвестная или противоречащая запросу позиция не загрязняет заявку; запрос снабженцу хранится отдельно от черновика.
 
 **Примеры фраз:**
 
+- «Свинина без костей — сало не подходит»
 - «Изменить название»
-- «Искать у всех поставщиков»
 - «Отправить запрос снабженцу»
 
 **Автоматическая проверка:**
 
 - [`tests/catalog/test_candidate_selection.py`](../tests/catalog/test_candidate_selection.py) → `test_not_found_product_uses_human_copy_for_text_and_voice`
 - [`tests/product_add/test_product_add.py`](../tests/product_add/test_product_add.py) → `test_product_add_request_list_keeps_request_separate_from_cart`
+- [`tests/ai/test_ai_pending.py`](../tests/ai/test_ai_pending.py) → `test_ai_rejects_semantically_conflicting_pork_candidate`
 
 #### REC-05 · Повтор уже добавленного товара
 

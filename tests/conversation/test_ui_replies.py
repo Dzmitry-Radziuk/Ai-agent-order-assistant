@@ -64,6 +64,31 @@ def test_ambiguous_card_shows_only_catalog_choices_and_safe_recovery() -> None:
     assert "Ввести иначе" not in labels
 
 
+def test_single_ambiguous_candidate_is_presented_only_as_a_similar_product() -> None:
+    """Объясняет, что единственная слабая находка является лишь подсказкой."""
+    item = CartItem(
+        id="corn",
+        source_query="кукуруза спелая",
+        status=ItemStatus.AMBIGUOUS,
+        candidates=[
+            Candidate(
+                product_id="cornmeal",
+                name="Крупа кукурузная Алина 700г 1/7, шт",
+            )
+        ],
+    )
+
+    reply = issue_reply(item, 0)
+
+    assert reply.text == (
+        "🔎 <b>Точного совпадения не найдено</b>\n\n"
+        "По запросу «<b>кукуруза спелая</b>» найден похожий товар.\n\n"
+        "Возможно, вы имели в виду:\n\n"
+        "1. Крупа кукурузная Алина 700г 1/7, шт\n\n"
+        "Не нашли нужный вариант? Отправьте запрос менеджеру по снабжению."
+    )
+
+
 def test_product_issue_cards_escape_user_and_catalog_text() -> None:
     """Экранирует пользовательский запрос и названия вариантов для Telegram HTML."""
     not_found = issue_reply(

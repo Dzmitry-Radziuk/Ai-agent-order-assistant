@@ -574,12 +574,22 @@ def issue_reply(item: CartItem, item_index: int | None = None) -> BotReply:
             ],
         )
     if item.status == ItemStatus.AMBIGUOUS:
-        lines = [
-            f"По запросу «<b>{escape(item.source_query)}</b>» найдено несколько вариантов.",
-            "",
-            "Уточните, какой товар вы имели в виду:",
-            "",
-        ]
+        if len(item.candidates) == 1:
+            lines = [
+                "🔎 <b>Точного совпадения не найдено</b>",
+                "",
+                f"По запросу «<b>{escape(item.source_query)}</b>» найден похожий товар.",
+                "",
+                "Возможно, вы имели в виду:",
+                "",
+            ]
+        else:
+            lines = [
+                f"По запросу «<b>{escape(item.source_query)}</b>» найдено несколько вариантов.",
+                "",
+                "Уточните, какой товар вы имели в виду:",
+                "",
+            ]
         rows: list[list[Button]] = []
         for candidate_index, candidate in enumerate(item.candidates[:5]):
             lines.append(f"{candidate_index + 1}. {escape(candidate.name)}")

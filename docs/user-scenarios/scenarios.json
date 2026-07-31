@@ -214,12 +214,13 @@
       "channels": ["Фото", "Файл-изображение"],
       "precondition": "На фотографии есть таблица заказа с колонками «Зал», «Бар» или «Кухня».",
       "user_action": "Отправляет фотографию распечатанной или заполненной таблицы.",
-      "bot_response": "Берёт количество только из заполненных колонок заказа, сохраняет комментарии и игнорирует фасовку, остатки и справочные числа.",
-      "result": "Распознанное количество записывается в заявку как количество для «Кухни». Строки без заказа не добавляются.",
+      "bot_response": "Берёт количество только из заполненных колонок заказа, сохраняет комментарии и игнорирует распознанного с фото поставщика, фасовку, остатки и справочные числа.",
+      "result": "Количество записывается для «Кухни», а поставщик определяется по найденной строке актуального каталога. Строки без заказа не добавляются.",
       "examples": ["Распечатанная таблица с количеством в колонке «Бар»", "Таблица с заполненными «Зал» и «Кухня»", "Фото, где у товара указан комментарий поставщику"],
       "test_refs": [
         "tests/ai/test_ai_media.py::test_client_order_sheet_uses_the_selected_department_quantity",
         "tests/ai/test_ai_media.py::test_client_order_sheet_sums_only_filled_department_order_cells",
+        "tests/ai/test_ai_media.py::test_client_order_sheet_ignores_supplier_recognized_from_a_neighbouring_row",
         "tests/ai/test_photo_prompt_contract.py::test_photo_prompt_excludes_packaging_and_stock_from_order_quantity"
       ]
     },
@@ -290,17 +291,18 @@
     {
       "id": "REC-03",
       "category": "recognition",
-      "title": "Несколько похожих товаров",
+      "title": "Похожие товары требуют выбора",
       "priority": "critical",
       "channels": ["Текст", "Голос", "Кнопка"],
-      "precondition": "По названию найдено несколько подходящих строк каталога.",
+      "precondition": "По названию найден один или несколько похожих товаров, но точное совпадение не подтверждено.",
       "user_action": "Выбирает номер, кнопку или однозначное название варианта.",
-      "bot_response": "Показывает кандидатов и не выбирает первый вариант автоматически.",
+      "bot_response": "Показывает похожие товары как подсказки и не добавляет слабое совпадение автоматически.",
       "result": "В черновик попадает только явно выбранный товар.",
-      "examples": ["Первый вариант", "Выбираю второй", "Сироп роза"],
+      "examples": ["Первый вариант", "Выбираю второй", "Кукуруза спелая — похожий вариант: крупа кукурузная"],
       "test_refs": [
         "tests/catalog/test_candidate_selection.py::test_explicit_candidate_selection_uses_selected_catalog_row",
-        "tests/catalog/test_candidate_selection.py::test_common_candidate_word_does_not_silently_choose_a_product"
+        "tests/catalog/test_candidate_selection.py::test_common_candidate_word_does_not_silently_choose_a_product",
+        "tests/ai/test_ai_pending.py::test_ai_does_not_auto_select_weak_single_corn_candidate"
       ]
     },
     {
@@ -312,11 +314,12 @@
       "precondition": "Ни один товар каталога не подходит достаточно уверенно.",
       "user_action": "Меняет название, ищет у всех поставщиков, не добавляет позицию или отправляет запрос снабженцу.",
       "bot_response": "Показывает понятные варианты и не подставляет случайный товар.",
-      "result": "Неизвестная позиция не загрязняет заявку; запрос снабженцу хранится отдельно от черновика.",
-      "examples": ["Изменить название", "Искать у всех поставщиков", "Отправить запрос снабженцу"],
+      "result": "Неизвестная или противоречащая запросу позиция не загрязняет заявку; запрос снабженцу хранится отдельно от черновика.",
+      "examples": ["Свинина без костей — сало не подходит", "Изменить название", "Отправить запрос снабженцу"],
       "test_refs": [
         "tests/catalog/test_candidate_selection.py::test_not_found_product_uses_human_copy_for_text_and_voice",
-        "tests/product_add/test_product_add.py::test_product_add_request_list_keeps_request_separate_from_cart"
+        "tests/product_add/test_product_add.py::test_product_add_request_list_keeps_request_separate_from_cart",
+        "tests/ai/test_ai_pending.py::test_ai_rejects_semantically_conflicting_pork_candidate"
       ]
     },
     {

@@ -231,7 +231,12 @@ def test_photo_parser_passes_caption_and_high_detail_image_as_structured_input(
 def test_catalog_matcher_uses_only_structured_candidate_decision(settings) -> None:  # type: ignore[no-untyped-def]
     """Проверяет, что каталог сопоставление использует только структурированный кандидат decision."""
     parsed = SimpleNamespace(
-        action="select", selected_product_id="rose", candidate_product_ids=["rose"], reason="exact"
+        action="select",
+        selected_product_id="rose",
+        candidate_product_ids=["rose"],
+        confidence=0.98,
+        contradictions=[],
+        reason="exact",
     )
     responses = _Responses(parsed)
     service = _service(settings, SimpleNamespace(responses=responses))
@@ -724,6 +729,63 @@ def test_client_order_sheet_uses_the_selected_department_quantity(settings) -> N
 
     assert command.items[0].department == "Кухня"
     assert command.items[0].quantity == 5
+
+
+def test_client_order_sheet_ignores_supplier_recognized_from_a_neighbouring_row(
+    settings,
+) -> None:  # type: ignore[no-untyped-def]
+    """Не ограничивает поиск поставщиком, ошибочно перенесённым OCR из соседней строки."""
+    service = _service(settings, SimpleNamespace())
+    command = service._normalise_photo_command(
+        ParsedCommand(
+            intent=Intent.ADD_ITEMS,
+            items=[
+                ExtractedItem(
+                    product_query="Сироп Роза, 1л",
+                    quantity=10,
+                    unit="шт",
+                    supplier_hint="Тестовый поставщик",
+                    department_quantities={"hall": None, "bar": None, "kitchen": 10},
+                    quantity_source="printed_order_column",
+                ),
+                ExtractedItem(
+                    product_query="Сироп Фундук, 1л",
+                    quantity=20,
+                    unit="шт",
+                    supplier_hint="Тестовый поставщик",
+                    department_quantities={"hall": None, "bar": None, "kitchen": 20},
+                    quantity_source="printed_order_column",
+                ),
+            ],
+        ),
+        "client_order_sheet",
+    )
+
+    assert [item.supplier_hint for item in command.items] == ["", ""]
+    assert [item.quantity for item in command.items] == [10, 20]
+
+
+def test_regular_order_table_keeps_explicit_supplier_hint(settings) -> None:  # type: ignore[no-untyped-def]
+    """Сохраняет поставщика в других форматах, где он относится к товарной строке."""
+    service = _service(settings, SimpleNamespace())
+    command = service._normalise_photo_command(
+        ParsedCommand(
+            intent=Intent.ADD_ITEMS,
+            items=[
+                ExtractedItem(
+                    product_query="Сыр Пармезан",
+                    quantity=5,
+                    unit="кг",
+                    supplier_hint="Поставщик сыра",
+                    order_entry_text="5",
+                    order_entry_type="typed_order_entry",
+                )
+            ],
+        ),
+        "order_table",
+    )
+
+    assert command.items[0].supplier_hint == "Поставщик сыра"
 
 
 def test_client_order_sheet_sums_only_filled_department_order_cells(settings) -> None:  # type: ignore[no-untyped-def]

@@ -65,6 +65,8 @@ class ProductMatchDecision(BaseModel):
     action: str = Field(pattern="^(select|ambiguous|not_found)$")
     selected_product_id: str = ""
     candidate_product_ids: list[str] = Field(default_factory=list)
+    confidence: float = Field(default=0, ge=0, le=1)
+    contradictions: list[str] = Field(default_factory=list)
     reason: str = ""
 
 
@@ -586,6 +588,8 @@ _PHOTO_SYSTEM = """
 source_department, department_quantities, quantity_source, printed_reference_text, order_entry_text, order_entry_type.
 Если это наша таблица заявки с колонками «Зал», «Бар», «Кухня», верни все три значения в department_quantities
 в полях hall, bar, kitchen соответственно. Количество может быть напечатано или вписано ручкой.
+Для client_order_sheet всегда оставляй supplier_hint пустым. Поставщик будет определён по найденной строке
+живого каталога. Не переноси поставщика из соседней строки таблицы на текущий товар.
 Если печатное значение зачёркнуто и рядом указано новое, верни только новое рукописное значение.
 Строку без положительного количества во всех трёх колонках полностью пропускай.
 Не переноси значение из соседней строки: количество, подразделение и комментарий относятся только к товару
@@ -619,8 +623,25 @@ handwritten_correction. Если старое значение зачёркну�
 
 _MATCH_SYSTEM = """
 Ты проверяешь сопоставление пользовательского товара с кандидатами каталога.
-Разрешено выбрать только product_id из переданного списка. Выбирай select только при высокой уверенности.
-Если подходят несколько - ambiguous. Если ни один - not_found. Не используй внешние знания для выдумывания позиции.
+Разрешено выбрать только product_id из переданного списка. Единственный кандидат не означает, что он подходит.
+
+Верни select только когда кандидат обозначает тот же самый товар и confidence не ниже 0.90.
+Все явно названные пользователем свойства должны быть совместимы: вид продукта, часть туши, наличие или
+отсутствие костей, кожи и хрящей, обработка, форма, сорт, вкус и фасовка. Отрицания пользователя обязательны.
+В product_context может быть комментарий к этой позиции. Учитывай из него только признаки самого товара
+(например, «без костей» или «спелая»), но не считай свойствами товара пожелания о доставке или сроке
+вроде «на завтра» и «привезти отдельно».
+Если кандидат лишь относится к похожей категории, но не является тем же товаром, верни ambiguous — бот
+покажет его только как возможную подсказку. Если кандидат является другим продуктом или противоречит
+явным требованиям, верни not_found и перечисли противоречия в contradictions.
+
+Примеры:
+- «кукуруза спелая» и «крупа кукурузная» — ambiguous: продукты связаны, но это не один товар;
+- «свинина без костей, без шкуры, без хрящей» и «сало свиное» — not_found: другой продукт;
+- небольшая ошибка распознавания в названии при совпадении самого товара — select.
+
+Если подходят несколько — ambiguous. Если ни один — not_found. Не используй внешние знания для
+выдумывания позиций. confidence показывает уверенность именно в выбранном action.
 """.strip()
 
 _VISIBLE_ACTION_SYSTEM = """
@@ -1100,6 +1121,10 @@ class OpenAIService:
         for item in command.items:
             copy = item.model_copy(deep=True)
             if document_type == "client_order_sheet":
+                # Исходная таблица уже содержит справочное поле поставщика из каталога.
+                # Распознавание может перенести значение из соседней строки, поэтому оно не
+                # должно ограничивать поиск товара по актуальному каталогу.
+                copy.supplier_hint = ""
                 department_values = (
                     copy.department_quantities.hall,
                     copy.department_quantities.bar,
@@ -1167,7 +1192,10 @@ class OpenAIService:
         }
 
     def choose_catalog_candidate(
-        self, query: str, candidates: list[dict[str, Any]]
+        self,
+        query: str,
+        candidates: list[dict[str, Any]],
+        product_context: str = "",
     ) -> ProductMatchDecision:
         """Выбирает кандидата только из заданного списка."""
         with self.tracer.generation(
@@ -1175,6 +1203,7 @@ class OpenAIService:
             model=self.settings.openai_match_model,
             input={
                 "query_characters": len(query),
+                "context_characters": len(product_context),
                 "candidate_count": len(candidates),
                 "kind": "catalog_match",
             },
@@ -1183,7 +1212,14 @@ class OpenAIService:
             response = self.client.responses.parse(
                 model=self.settings.openai_match_model,
                 instructions=_MATCH_SYSTEM,
-                input=json.dumps({"query": query, "candidates": candidates}, ensure_ascii=False),
+                input=json.dumps(
+                    {
+                        "query": query,
+                        "product_context": product_context,
+                        "candidates": candidates,
+                    },
+                    ensure_ascii=False,
+                ),
                 text_format=ProductMatchDecision,
             )
             generation.update(
@@ -1200,6 +1236,8 @@ class OpenAIService:
             ],
             action=decision.action,
             selected_product_id=decision.selected_product_id,
+            confidence=decision.confidence,
+            contradictions=decision.contradictions,
             reason=decision.reason,
         )
         return decision

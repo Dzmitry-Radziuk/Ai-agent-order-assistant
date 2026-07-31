@@ -18,6 +18,7 @@ from restaurant_bot.config import Settings
 from restaurant_bot.db import SessionLocal
 from restaurant_bot.domain.models import (
     BotReply,
+    CartItem,
     CatalogProduct,
     ConversationState,
     EngineResult,
@@ -48,6 +49,14 @@ from restaurant_bot.services.venue_registration import (
 
 logger = structlog.get_logger(__name__)
 _OPENAI_TRANSIENT_ERRORS = (APIConnectionError, APITimeoutError, RateLimitError)
+_AI_MATCH_SELECT_MIN_CONFIDENCE = 0.90
+_AI_MATCH_NOT_FOUND_MIN_CONFIDENCE = 0.80
+_AI_MATCH_MIN_SCORE = 40.0
+
+
+def _catalog_match_evidence(item: CartItem) -> str:
+    """Объединяет название и локальный комментарий для проверки широты запроса."""
+    return " ".join(part for part in (item.source_query, item.comment) if part).strip()
 
 
 @dataclass(slots=True)
@@ -974,7 +983,7 @@ class UpdateOrchestrator:
             for item in result.state.cart
             if item.status == ItemStatus.AMBIGUOUS
             and item.candidates
-            and not is_broad_category_query(item.source_query, item.candidates)
+            and not is_broad_category_query(_catalog_match_evidence(item), item.candidates)
         ]
         if not pending:
             return result
@@ -986,6 +995,7 @@ class UpdateOrchestrator:
             decision = self.openai.choose_catalog_candidate(
                 item.source_query,
                 [candidate.model_dump() for candidate in item.candidates],
+                item.comment,
             )
             selected = next(
                 (
@@ -995,15 +1005,32 @@ class UpdateOrchestrator:
                 ),
                 None,
             )
-            # n8n permits an AI reranker to select a shortlisted candidate at
-            # high confidence. Requiring literal equality breaks voice
-            # corrections such as "Сыропроза" -> "Сироп Роза".
-            if decision.action == "select" and selected is not None:
+            can_select = (
+                decision.action == "select"
+                and selected is not None
+                and selected.score >= _AI_MATCH_MIN_SCORE
+                and decision.confidence >= _AI_MATCH_SELECT_MIN_CONFIDENCE
+                and not decision.contradictions
+            )
+            if can_select:
                 self.engine._apply_catalog(item, selected, catalog)
+            elif (
+                decision.action == "not_found"
+                and decision.confidence >= _AI_MATCH_NOT_FOUND_MIN_CONFIDENCE
+            ):
+                item.status = ItemStatus.NOT_FOUND
+                item.candidates = []
             else:
-                # `not_found` from AI is never allowed to erase a valid shortlist.
-                # The user must still receive the candidate-choice UI.
                 item.status = ItemStatus.AMBIGUOUS
+                if decision.action == "select":
+                    logger.info(
+                        "catalog_candidate_ai_selection_blocked",
+                        target_query=item.source_query,
+                        selected_product_id=decision.selected_product_id,
+                        candidate_score=selected.score if selected is not None else None,
+                        confidence=decision.confidence,
+                        contradictions=decision.contradictions,
+                    )
 
         result.state.current_issue_item_id = ""
         return self.engine.handle(

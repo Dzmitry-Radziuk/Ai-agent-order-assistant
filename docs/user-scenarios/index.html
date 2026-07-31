@@ -282,7 +282,7 @@
 
       <article id="scenario-INP-03" class="scenario-card"
         data-category="input"
-        data-priority="critical" data-search="inp-03 фото оригинальной таблицы заказа добавление товаров отправляет фотографию распечатанной или заполненной таблицы. берёт количество только из заполненных колонок заказа, сохраняет комментарии и игнорирует фасовку, остатки и справочные числа. распечатанная таблица с количеством в колонке «бар» таблица с заполненными «зал» и «кухня» фото, где у товара указан комментарий поставщику">
+        data-priority="critical" data-search="inp-03 фото оригинальной таблицы заказа добавление товаров отправляет фотографию распечатанной или заполненной таблицы. берёт количество только из заполненных колонок заказа, сохраняет комментарии и игнорирует распознанного с фото поставщика, фасовку, остатки и справочные числа. распечатанная таблица с количеством в колонке «бар» таблица с заполненными «зал» и «кухня» фото, где у товара указан комментарий поставщику">
         <div class="card-top">
           <span class="scenario-id">INP-03</span>
           <span class="priority priority-critical">Критический</span>
@@ -293,16 +293,16 @@
         <dl>
           <div><dt>Перед началом</dt><dd>На фотографии есть таблица заказа с колонками «Зал», «Бар» или «Кухня».</dd></div>
           <div><dt>Пользователь</dt><dd>Отправляет фотографию распечатанной или заполненной таблицы.</dd></div>
-          <div><dt>Бот</dt><dd>Берёт количество только из заполненных колонок заказа, сохраняет комментарии и игнорирует фасовку, остатки и справочные числа.</dd></div>
-          <div class="result"><dt>Итог</dt><dd>Распознанное количество записывается в заявку как количество для «Кухни». Строки без заказа не добавляются.</dd></div>
+          <div><dt>Бот</dt><dd>Берёт количество только из заполненных колонок заказа, сохраняет комментарии и игнорирует распознанного с фото поставщика, фасовку, остатки и справочные числа.</dd></div>
+          <div class="result"><dt>Итог</dt><dd>Количество записывается для «Кухни», а поставщик определяется по найденной строке актуального каталога. Строки без заказа не добавляются.</dd></div>
         </dl>
         <details>
           <summary>Примеры фраз</summary>
           <ul><li>«Распечатанная таблица с количеством в колонке «Бар»»</li><li>«Таблица с заполненными «Зал» и «Кухня»»</li><li>«Фото, где у товара указан комментарий поставщику»</li></ul>
         </details>
         <details>
-          <summary>Связанные pytest-тесты · 3</summary>
-          <ul class="tests"><li><a href="../../tests/ai/test_ai_media.py">tests/ai/test_ai_media.py</a><span>test_client_order_sheet_uses_the_selected_department_quantity</span></li><li><a href="../../tests/ai/test_ai_media.py">tests/ai/test_ai_media.py</a><span>test_client_order_sheet_sums_only_filled_department_order_cells</span></li><li><a href="../../tests/ai/test_photo_prompt_contract.py">tests/ai/test_photo_prompt_contract.py</a><span>test_photo_prompt_excludes_packaging_and_stock_from_order_quantity</span></li></ul>
+          <summary>Связанные pytest-тесты · 4</summary>
+          <ul class="tests"><li><a href="../../tests/ai/test_ai_media.py">tests/ai/test_ai_media.py</a><span>test_client_order_sheet_uses_the_selected_department_quantity</span></li><li><a href="../../tests/ai/test_ai_media.py">tests/ai/test_ai_media.py</a><span>test_client_order_sheet_sums_only_filled_department_order_cells</span></li><li><a href="../../tests/ai/test_ai_media.py">tests/ai/test_ai_media.py</a><span>test_client_order_sheet_ignores_supplier_recognized_from_a_neighbouring_row</span></li><li><a href="../../tests/ai/test_photo_prompt_contract.py">tests/ai/test_photo_prompt_contract.py</a><span>test_photo_prompt_excludes_packaging_and_stock_from_order_quantity</span></li></ul>
         </details>
       </article>
 
@@ -412,33 +412,33 @@
 
       <article id="scenario-REC-03" class="scenario-card"
         data-category="recognition"
-        data-priority="critical" data-search="rec-03 несколько похожих товаров уточнение товаров выбирает номер, кнопку или однозначное название варианта. показывает кандидатов и не выбирает первый вариант автоматически. первый вариант выбираю второй сироп роза">
+        data-priority="critical" data-search="rec-03 похожие товары требуют выбора уточнение товаров выбирает номер, кнопку или однозначное название варианта. показывает похожие товары как подсказки и не добавляет слабое совпадение автоматически. первый вариант выбираю второй кукуруза спелая — похожий вариант: крупа кукурузная">
         <div class="card-top">
           <span class="scenario-id">REC-03</span>
           <span class="priority priority-critical">Критический</span>
         </div>
-        <h3>Несколько похожих товаров</h3>
+        <h3>Похожие товары требуют выбора</h3>
         <p class="category-label">Уточнение товаров</p>
         <div class="channels"><span>Текст</span><span>Голос</span><span>Кнопка</span></div>
         <dl>
-          <div><dt>Перед началом</dt><dd>По названию найдено несколько подходящих строк каталога.</dd></div>
+          <div><dt>Перед началом</dt><dd>По названию найден один или несколько похожих товаров, но точное совпадение не подтверждено.</dd></div>
           <div><dt>Пользователь</dt><dd>Выбирает номер, кнопку или однозначное название варианта.</dd></div>
-          <div><dt>Бот</dt><dd>Показывает кандидатов и не выбирает первый вариант автоматически.</dd></div>
+          <div><dt>Бот</dt><dd>Показывает похожие товары как подсказки и не добавляет слабое совпадение автоматически.</dd></div>
           <div class="result"><dt>Итог</dt><dd>В черновик попадает только явно выбранный товар.</dd></div>
         </dl>
         <details>
           <summary>Примеры фраз</summary>
-          <ul><li>«Первый вариант»</li><li>«Выбираю второй»</li><li>«Сироп роза»</li></ul>
+          <ul><li>«Первый вариант»</li><li>«Выбираю второй»</li><li>«Кукуруза спелая — похожий вариант: крупа кукурузная»</li></ul>
         </details>
         <details>
-          <summary>Связанные pytest-тесты · 2</summary>
-          <ul class="tests"><li><a href="../../tests/catalog/test_candidate_selection.py">tests/catalog/test_candidate_selection.py</a><span>test_explicit_candidate_selection_uses_selected_catalog_row</span></li><li><a href="../../tests/catalog/test_candidate_selection.py">tests/catalog/test_candidate_selection.py</a><span>test_common_candidate_word_does_not_silently_choose_a_product</span></li></ul>
+          <summary>Связанные pytest-тесты · 3</summary>
+          <ul class="tests"><li><a href="../../tests/catalog/test_candidate_selection.py">tests/catalog/test_candidate_selection.py</a><span>test_explicit_candidate_selection_uses_selected_catalog_row</span></li><li><a href="../../tests/catalog/test_candidate_selection.py">tests/catalog/test_candidate_selection.py</a><span>test_common_candidate_word_does_not_silently_choose_a_product</span></li><li><a href="../../tests/ai/test_ai_pending.py">tests/ai/test_ai_pending.py</a><span>test_ai_does_not_auto_select_weak_single_corn_candidate</span></li></ul>
         </details>
       </article>
 
       <article id="scenario-REC-04" class="scenario-card"
         data-category="recognition"
-        data-priority="important" data-search="rec-04 товар не найден в каталоге уточнение товаров меняет название, ищет у всех поставщиков, не добавляет позицию или отправляет запрос снабженцу. показывает понятные варианты и не подставляет случайный товар. изменить название искать у всех поставщиков отправить запрос снабженцу">
+        data-priority="important" data-search="rec-04 товар не найден в каталоге уточнение товаров меняет название, ищет у всех поставщиков, не добавляет позицию или отправляет запрос снабженцу. показывает понятные варианты и не подставляет случайный товар. свинина без костей — сало не подходит изменить название отправить запрос снабженцу">
         <div class="card-top">
           <span class="scenario-id">REC-04</span>
           <span class="priority priority-important">Важный</span>
@@ -450,15 +450,15 @@
           <div><dt>Перед началом</dt><dd>Ни один товар каталога не подходит достаточно уверенно.</dd></div>
           <div><dt>Пользователь</dt><dd>Меняет название, ищет у всех поставщиков, не добавляет позицию или отправляет запрос снабженцу.</dd></div>
           <div><dt>Бот</dt><dd>Показывает понятные варианты и не подставляет случайный товар.</dd></div>
-          <div class="result"><dt>Итог</dt><dd>Неизвестная позиция не загрязняет заявку; запрос снабженцу хранится отдельно от черновика.</dd></div>
+          <div class="result"><dt>Итог</dt><dd>Неизвестная или противоречащая запросу позиция не загрязняет заявку; запрос снабженцу хранится отдельно от черновика.</dd></div>
         </dl>
         <details>
           <summary>Примеры фраз</summary>
-          <ul><li>«Изменить название»</li><li>«Искать у всех поставщиков»</li><li>«Отправить запрос снабженцу»</li></ul>
+          <ul><li>«Свинина без костей — сало не подходит»</li><li>«Изменить название»</li><li>«Отправить запрос снабженцу»</li></ul>
         </details>
         <details>
-          <summary>Связанные pytest-тесты · 2</summary>
-          <ul class="tests"><li><a href="../../tests/catalog/test_candidate_selection.py">tests/catalog/test_candidate_selection.py</a><span>test_not_found_product_uses_human_copy_for_text_and_voice</span></li><li><a href="../../tests/product_add/test_product_add.py">tests/product_add/test_product_add.py</a><span>test_product_add_request_list_keeps_request_separate_from_cart</span></li></ul>
+          <summary>Связанные pytest-тесты · 3</summary>
+          <ul class="tests"><li><a href="../../tests/catalog/test_candidate_selection.py">tests/catalog/test_candidate_selection.py</a><span>test_not_found_product_uses_human_copy_for_text_and_voice</span></li><li><a href="../../tests/product_add/test_product_add.py">tests/product_add/test_product_add.py</a><span>test_product_add_request_list_keeps_request_separate_from_cart</span></li><li><a href="../../tests/ai/test_ai_pending.py">tests/ai/test_ai_pending.py</a><span>test_ai_rejects_semantically_conflicting_pork_candidate</span></li></ul>
         </details>
       </article>
 
