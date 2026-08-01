@@ -5,6 +5,7 @@ from restaurant_bot.services.matching import (
     can_auto_select,
     has_complete_query_evidence,
     is_broad_category_query,
+    is_safe_catalog_name_equivalent,
     rank_candidates,
 )
 
@@ -13,6 +14,22 @@ def test_complete_query_evidence_rejects_category_only_match() -> None:
     """Проверяет, что полный query evidence отклоняет категория только сопоставление."""
     assert has_complete_query_evidence("сироп роза", "Сироп Роза, 1л")
     assert not has_complete_query_evidence("сироп роза", "Сироп Тархун, 1л")
+
+
+def test_safe_catalog_name_equivalence_accepts_inflection_and_word_order() -> None:
+    """Принимает только другое написание того же самого товара."""
+    assert is_safe_catalog_name_equivalent("сироп роз", "Сироп Роза, 1л")
+    assert is_safe_catalog_name_equivalent("филе форели", "Форель филе, кг")
+
+
+def test_safe_catalog_name_equivalence_rejects_related_different_products() -> None:
+    """Не подменяет товар похожей категорией или другим видом продукта."""
+    assert not is_safe_catalog_name_equivalent(
+        "кукуруза",
+        "Крупа кукурузная Алина 700г 1/7, шт",
+    )
+    assert not is_safe_catalog_name_equivalent("свинина", "Сало свиное")
+    assert not is_safe_catalog_name_equivalent("сливки", "Сливки 33%, 1л")
 
 
 def test_exact_product_is_auto_selected_but_category_query_is_not() -> None:

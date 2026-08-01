@@ -38,7 +38,10 @@ from restaurant_bot.repositories.sessions import SessionRepository
 from restaurant_bot.repositories.updates import UpdateRepository
 from restaurant_bot.services.engine import ConversationEngine
 from restaurant_bot.services.input_normalizer import normalize_telegram_update
-from restaurant_bot.services.matching import is_broad_category_query
+from restaurant_bot.services.matching import (
+    is_broad_category_query,
+    is_safe_catalog_name_equivalent,
+)
 from restaurant_bot.services.parser import infer_intent, parse_quantity_unit
 from restaurant_bot.services.text import normalize_text, normalize_unit
 from restaurant_bot.services.venue_registration import (
@@ -978,6 +981,36 @@ class UpdateOrchestrator:
         catalog: list[CatalogProduct],
     ) -> EngineResult:
         """Разрешает спорные позиции по безопасному списку кандидатов."""
+        safely_resolved = False
+        for item in result.state.cart:
+            if item.status != ItemStatus.AMBIGUOUS or not item.candidates:
+                continue
+            equivalent_products = [
+                product
+                for product in catalog
+                if is_safe_catalog_name_equivalent(item.source_query, product.name)
+            ]
+            if len(equivalent_products) != 1:
+                continue
+            equivalent_product = equivalent_products[0]
+            selected = next(
+                (
+                    candidate
+                    for candidate in item.candidates
+                    if candidate.product_id == equivalent_product.product_id
+                ),
+                None,
+            )
+            if selected is None:
+                continue
+            self.engine._apply_catalog(item, selected, catalog)
+            safely_resolved = True
+            logger.info(
+                "catalog_candidate_safe_equivalence_selected",
+                target_query=item.source_query,
+                selected_product_id=selected.product_id,
+            )
+
         pending = [
             item
             for item in result.state.cart
@@ -986,6 +1019,14 @@ class UpdateOrchestrator:
             and not is_broad_category_query(_catalog_match_evidence(item), item.candidates)
         ]
         if not pending:
+            if safely_resolved:
+                result.state.current_issue_item_id = ""
+                return self.engine.handle(
+                    event,
+                    ParsedCommand(intent=Intent.CONTINUE_CURRENT),
+                    result.state,
+                    catalog,
+                )
             return result
 
         for item in pending:

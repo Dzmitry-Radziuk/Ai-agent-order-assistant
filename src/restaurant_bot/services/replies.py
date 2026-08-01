@@ -328,24 +328,14 @@ def empty_draft_reply() -> BotReply:
     )
 
 
-def added_items_question_reply(state: ConversationState, added_count: int) -> BotReply:
-    """Спрашивает, хочет ли пользователь добавить ещё товары."""
-    ready = _active_items(state)
-    added = ready[-added_count:] if added_count > 0 else []
+def added_items_question_reply(_state: ConversationState, added_count: int) -> BotReply:
+    """Подтверждает добавление без привязки к асинхронно обработанной позиции."""
     title = (
         "Товар добавлен в черновик заказа"
-        if len(added) == 1
+        if added_count == 1
         else "Товары добавлены в черновик заказа"
     )
-    lines = [f"✅ <b>{title}</b>"]
-    for item in added[:5]:
-        lines.append(
-            f"• {escape(_item_name(item))} — "
-            f"{format_number(item.quantity)} {escape(_item_unit(item) or 'шт')}"
-        )
-    if len(added) > 5:
-        lines.append(f"…и ещё {len(added) - 5}")
-    lines += ["", "Добавить ещё товары?"]
+    lines = [f"✅ <b>{title}</b>", "", "Добавить ещё товары?"]
     return BotReply(
         text="\n".join(lines),
         rows=[
@@ -430,7 +420,7 @@ def cart_reply(state: ConversationState, title: str = "Черновик заяв
     items = _active_items(state)
     issues = [item for item in items if item.status in ISSUE_STATUSES]
     ready = [item for item in items if item.status not in ISSUE_STATUSES]
-    lines = ["🧾 <b>Черновик заявки</b>", ""]
+    lines = [f"🧾 <b>{escape(title)}</b>", ""]
     if not ready and not issues:
         lines.append("Товаров пока нет.")
     for item in ready[:25]:

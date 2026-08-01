@@ -118,6 +118,44 @@ def query_evidence_tokens(query: str, product_name: str) -> set[str]:
     }
 
 
+def _identity_token_matches(query_token: str, product_token: str) -> bool:
+    """Сопоставляет только безопасные грамматические формы одного слова."""
+    if query_token == product_token:
+        return True
+
+    short, long = sorted((query_token, product_token), key=len)
+    if len(short) >= 3 and long.startswith(short) and len(long) - len(short) <= 3:
+        return True
+
+    common_prefix = 0
+    for left_char, right_char in zip(query_token, product_token, strict=False):
+        if left_char != right_char:
+            break
+        common_prefix += 1
+    return (
+        min(len(query_token), len(product_token)) >= 4
+        and abs(len(query_token) - len(product_token)) <= 1
+        and common_prefix >= min(len(query_token), len(product_token)) - 1
+    )
+
+
+def is_safe_catalog_name_equivalent(query: str, product_name: str) -> bool:
+    """Проверяет, что запрос и каталог называют один товар, а не похожую категорию."""
+    query_tokens = {token for token in tokens(query) if not any(char.isdigit() for char in token)}
+    product_tokens = {
+        token for token in tokens(product_name) if not any(char.isdigit() for char in token)
+    }
+    if len(query_tokens) < 2 or len(query_tokens) != len(product_tokens):
+        return False
+    return all(
+        any(_identity_token_matches(query_token, product_token) for product_token in product_tokens)
+        for query_token in query_tokens
+    ) and all(
+        any(_identity_token_matches(query_token, product_token) for query_token in query_tokens)
+        for product_token in product_tokens
+    )
+
+
 def match_score(query: str, product: CatalogProduct, supplier_hint: str = "") -> float:
     """Рассчитывает оценку совпадения товара."""
     q = normalize_text(query)

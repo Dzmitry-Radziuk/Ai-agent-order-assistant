@@ -804,10 +804,20 @@ def _infer_free_form_navigation(normalized: str) -> Intent | None:
     return None
 
 
+_DRAFT_CONTAINER_RE = r"(?:заявк\w*|заказ\w*|корзин\w*|черновик\w*|списк\w*)"
+_DRAFT_MODIFIER_RE = r"(?:мо\w+|наш\w+|текущ\w+|эт\w+|данн\w+)"
+_DRAFT_LOCATION_RE = rf"{_DRAFT_CONTAINER_RE}(?:\s+товар\w*)?"
+_REMOVE_ACTION_RE = (
+    r"(?:убери|убрать|уберем|уберём|убираем|удали|удалить|удаляем|"
+    r"исключи|исключить|вычеркни|вычеркнуть|сними|снять|выкинь|выкинуть|"
+    r"не\s+добавляй|не\s+добавлять|не\s+заказывай|не\s+заказывать)"
+)
 _REMOVE_RE = re.compile(
-    r"^(?:(?:убери|удали|удалить|исключи|исключить|вычеркни|вычеркнуть|сними|"
-    r"снять|выкинь|выкинуть|не добавляй)\s+(?:из (?:заявки|корзины|черновика)\s+)?|"
-    r"(?:мне\s+)?не\s+(?:нужен|нужна|нужно|нужны)\s+)(.+?)\s*$",
+    rf"^(?:(?:пожалуйста\s+)?(?:(?:давай|можешь|можно|нужно|надо)\s+)?"
+    rf"{_REMOVE_ACTION_RE}\s+(?:пожалуйста\s+)?(?:(?:мне|у\s+меня)\s+)?"
+    rf"(?:(?:из|с)\s+(?:{_DRAFT_MODIFIER_RE}\s+)?{_DRAFT_LOCATION_RE}\s+)?|"
+    r"(?:мне\s+)?не\s+(?:нужен|нужна|нужно|нужны)\s+)(.+?)"
+    r"(?:\s*,?\s*пожалуйста)?\s*$",
     re.I,
 )
 _EDIT_ACTION = (
@@ -862,9 +872,12 @@ _EDIT_PATTERNS = [
 _SELECT_RE = re.compile(r"^(?:вариант|номер|выбери)?\s*([1-5])$", re.I)
 
 
-def _clean_command_target(value: str) -> str:
-    """Убирает служебные слова перед названием товара."""
+def clean_command_target(value: str) -> str:
+    """Убирает служебные слова вокруг названия товара в команде."""
     target = clean_text(value)
+    target = re.sub(r"^(?:пожалуйста\s+)", "", target, flags=re.I)
+    target = re.sub(r"(?:\s*,?\s*пожалуйста)$", "", target, flags=re.I)
+    target = target.strip(" ,;:-—–.!?")
     target = re.sub(r"^для\s+", "", target, flags=re.I)
     target = re.sub(
         r"^(?:(?:этот|эту|это|данный|данную|текущий|текущую)\s+)?"
@@ -873,7 +886,24 @@ def _clean_command_target(value: str) -> str:
         target,
         flags=re.I,
     )
-    return target.strip(" ,;:-—–")
+    target = re.sub(
+        rf"\s+(?:из|с|в|на)\s+(?:{_DRAFT_MODIFIER_RE}\s+)?{_DRAFT_LOCATION_RE}\s*$",
+        "",
+        target,
+        flags=re.I,
+    )
+    return target.strip(" ,;:-—–.!?")
+
+
+def _is_whole_draft_target(value: str) -> bool:
+    """Отличает название всего черновика от названия отдельного товара."""
+    return bool(
+        re.fullmatch(
+            rf"(?:{_DRAFT_MODIFIER_RE}\s+)?{_DRAFT_LOCATION_RE}",
+            clean_text(value),
+            flags=re.I,
+        )
+    )
 
 
 def _parse_edit_quantity(text: str) -> ParsedCommand | None:
@@ -885,7 +915,7 @@ def _parse_edit_quantity(text: str) -> ParsedCommand | None:
         quantity, unit = parse_quantity_unit(match.group("amount"))
         if quantity is None:
             continue
-        target = _clean_command_target(match.groupdict().get("target") or "")
+        target = clean_command_target(match.groupdict().get("target") or "")
         return ParsedCommand(
             intent=Intent.EDIT_QUANTITY,
             text=text,
@@ -963,15 +993,17 @@ def infer_intent(text: str, callback_data: str = "") -> ParsedCommand:
     if edit_command := _parse_edit_quantity(normalized):
         return edit_command.model_copy(update={"text": text})
 
-    if free_form_intent := _infer_free_form_navigation(normalized):
-        return ParsedCommand(intent=free_form_intent, text=text)
-
     if match := _REMOVE_RE.match(normalized):
-        target = _clean_command_target(match.group(1))
+        target = clean_command_target(match.group(1))
+        if target and _is_whole_draft_target(target):
+            return ParsedCommand(intent=Intent.CLEAR_CART, text=text)
         if target:
             return ParsedCommand(
                 intent=Intent.REMOVE_ITEM, text=text, target_query=target, target_queries=[target]
             )
+
+    if free_form_intent := _infer_free_form_navigation(normalized):
+        return ParsedCommand(intent=free_form_intent, text=text)
 
     if match := _SELECT_RE.match(normalized):
         return ParsedCommand(

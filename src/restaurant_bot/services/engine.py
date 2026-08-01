@@ -37,6 +37,7 @@ from restaurant_bot.services.matching import (
     tokens,
 )
 from restaurant_bot.services.parser import (
+    clean_command_target,
     has_negated_action,
     has_negation,
     infer_intent,
@@ -195,18 +196,18 @@ class ConversationEngine:
             selection_query = normalize_text(event.text or command.text)
             if selection_query:
                 scores = [
-                    self._contains_score(selection_query, normalize_text(candidate.name))
+                    len(query_evidence_tokens(selection_query, candidate.name))
                     for candidate in current.candidates
                 ]
                 best_score = max(scores, default=0)
-                if best_score >= 2 and scores.count(best_score) == 1:
+                if best_score >= 1 and scores.count(best_score) == 1:
                     command = ParsedCommand(
                         intent=Intent.SELECT_CANDIDATE,
                         text=event.text or command.text,
                         selection_query=event.text or command.text,
                         callback_target=str(self._item_index(state, current)),
                     )
-                elif event.input_type == InputKind.VOICE:
+                elif event.input_type == InputKind.VOICE and not command.items:
                     # On an open candidate card every vague voice utterance
                     # is a possible choice, never a new product.  Keeping the
                     # same card is safer than polluting the draft with a bad
@@ -273,6 +274,7 @@ class ConversationEngine:
                 SessionStage.AWAIT_UNIT_QUANTITY,
             }
             and (event.text.strip() or command.text.strip())
+            and not self._has_named_product_items(command, event.text or command.text)
         ):
             quantity, unit = self._spoken_quantity(event.text or command.text)
             if quantity is not None:
@@ -689,8 +691,10 @@ class ConversationEngine:
                     return self._advance(state)
             selected_supplier = state.supplier_hint_context
             for extracted in command.items:
-                if selected_supplier and not extracted.supplier_hint:
+                if selected_supplier:
                     extracted = extracted.model_copy(update={"supplier_hint": selected_supplier})
+                else:
+                    extracted = self._validate_supplier_hint(extracted, catalog)
                 item = self._build_item(extracted, command.global_comment)
                 item.supplier_search_locked = bool(selected_supplier)
                 self._match_item(item, catalog)
@@ -800,6 +804,26 @@ class ConversationEngine:
         )
 
     @staticmethod
+    def _validate_supplier_hint(
+        extracted: ExtractedItem,
+        catalog: list[CatalogProduct],
+    ) -> ExtractedItem:
+        """Оставляет поставщика только при подтверждении живым каталогом."""
+        hint = extracted.supplier_hint.strip()
+        if not hint:
+            return extracted
+        matches = {
+            product.supplier.strip()
+            for product in catalog
+            if product.supplier.strip() and supplier_matches_hint(product.supplier, hint)
+        }
+        if not matches:
+            return extracted.model_copy(update={"supplier_hint": ""})
+        if len(matches) == 1:
+            return extracted.model_copy(update={"supplier_hint": matches.pop()})
+        return extracted
+
+    @staticmethod
     def _spoken_quantity(text: str) -> tuple[float | None, str]:
         """Извлекает явно произнесённое количество."""
         quantity, unit = parse_quantity_unit(text)
@@ -836,6 +860,40 @@ class ConversationEngine:
         return any(
             word in UNIT_ALIASES and normalize_unit(word) == normalized_expected for word in words
         )
+
+    @staticmethod
+    def _has_named_product_items(command: ParsedCommand, text: str) -> bool:
+        """Отличает полноценный товарный запрос от короткого ответа количеством."""
+        if command.intent != Intent.ADD_ITEMS or not command.items:
+            return False
+        normalized_text = normalize_text(text or command.text)
+        response_word_stems = (
+            "давай",
+            "добав",
+            "закаж",
+            "измен",
+            "исправ",
+            "колич",
+            "мне",
+            "надо",
+            "нуж",
+            "постав",
+            "пусть",
+            "сдел",
+            "укаж",
+            "вес",
+            "возьм",
+        )
+        for item in command.items:
+            query = normalize_text(item.product_query)
+            if not query or query == normalized_text:
+                continue
+            query_words = re.findall(r"[a-zа-яё]+", query, flags=re.I)
+            if query_words and any(
+                not word.startswith(response_word_stems) for word in query_words
+            ):
+                return True
+        return False
 
     def _contextual_quantity_command(
         self,
@@ -945,7 +1003,11 @@ class ConversationEngine:
             if correction or self._mentions_expected_unit(phrase, current.catalog_unit):
                 return command.model_copy(update={"intent": Intent.ENTER_OTHER_QUANTITY})
 
-        if current.status == ItemStatus.MISSING_QTY and quantity is not None:
+        if (
+            current.status == ItemStatus.MISSING_QTY
+            and quantity is not None
+            and not self._has_named_product_items(command, phrase)
+        ):
             return command.model_copy(
                 update={
                     "intent": Intent.EDIT_QUANTITY,
@@ -2203,11 +2265,12 @@ class ConversationEngine:
 
     def _remove_item(self, command: ParsedCommand, state: ConversationState) -> EngineResult:
         """Удаляет выбранную позицию из черновика."""
-        target = normalize_text(command.target_query)
+        target_query = clean_command_target(command.target_query)
+        target = normalize_text(target_query)
         if not target and state.current_item():
             state.current_item().status = ItemStatus.SKIPPED  # type: ignore[union-attr]
             return self._advance(state)
-        item = self._find_cart_item(state, command.target_query)
+        item = self._find_cart_item(state, target_query)
         if item is not None:
             item.status = ItemStatus.SKIPPED
             return EngineResult(state=state, reply=cart_reply(state, title="Позиция удалена"))

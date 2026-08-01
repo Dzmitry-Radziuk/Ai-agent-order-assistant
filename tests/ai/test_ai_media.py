@@ -555,6 +555,17 @@ def test_short_product_name_without_quantity_skips_ai(settings, text: str) -> No
     assert command.items[0].quantity is None
 
 
+def test_support_failure_phrase_uses_semantic_ai_instead_of_becoming_product(settings) -> None:  # type: ignore[no-untyped-def]
+    """Передаёт жалобу на работу бота в ИИ и не создаёт из неё товар."""
+    parsed = ParsedInputSchema(intent=Intent.SMALL_TALK)
+    service = _service(settings, SimpleNamespace(responses=_Responses(parsed)))
+
+    command = service.parse_text("Доброе, не работает")
+
+    assert command.intent is Intent.SMALL_TALK
+    assert command.items == []
+
+
 def test_short_product_with_possible_comment_skips_slow_initial_ai(settings) -> None:  # type: ignore[no-untyped-def]
     """Оставляет короткую фразу каталогу для разделения названия и комментария."""
     service = _service(settings, SimpleNamespace(responses=_FailingResponses()))

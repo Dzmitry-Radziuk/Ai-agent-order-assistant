@@ -129,6 +129,66 @@ def test_unrecognized_voice_on_candidate_card_cannot_create_a_new_product(settin
     assert result.state.cart[0].status is ItemStatus.AMBIGUOUS
 
 
+def test_new_voice_product_with_decimal_quantity_does_not_select_old_candidate(
+    settings,
+) -> None:  # type: ignore[no-untyped-def]
+    """Не выбирает старый товар по совпавшему нулю из фасовки и количества."""
+    engine = ConversationEngine(settings)
+    badian = CartItem(
+        id="badian",
+        source_query="бадьян",
+        status=ItemStatus.AMBIGUOUS,
+        candidates=[
+            Candidate(
+                product_id="badian-product",
+                name="Бадьян (анис звёздчатый) 0,25кг",
+                supplier="Специи",
+                unit="шт",
+            )
+        ],
+    )
+    state = ConversationState(cart=[badian], current_issue_item_id=badian.id)
+    text = "Филе форели 0,9-1,3 килограмма зачищенное, Тринца."
+    result = engine.handle(
+        TelegramEvent(update_id=2, chat_id="1", input_type=InputKind.VOICE, text=text),
+        ParsedCommand(
+            intent=Intent.ADD_ITEMS,
+            text=text,
+            items=[
+                ExtractedItem(
+                    product_query="Филе форели",
+                    quantity=1.3,
+                    unit="кг",
+                    supplier_hint="Тринца",
+                    comment="зачищенное",
+                )
+            ],
+        ),
+        state,
+        [
+            CatalogProduct(
+                product_id="badian-product",
+                name="Бадьян (анис звёздчатый) 0,25кг",
+                supplier="Специи",
+                unit="шт",
+            ),
+            CatalogProduct(
+                product_id="trout",
+                name="Филе форели",
+                supplier="Рыба",
+                unit="кг",
+            ),
+        ],
+    )
+
+    assert len(result.state.cart) == 2
+    assert result.state.cart[0].status is ItemStatus.AMBIGUOUS
+    assert result.state.cart[0].catalog_product_id == ""
+    assert result.state.cart[1].catalog_product_id == "trout"
+    assert result.state.cart[1].quantity == 1.3
+    assert result.state.cart[1].supplier_hint == ""
+
+
 def test_selecting_typo_candidate_finishes_two_item_list_and_drops_numeric_garbage(
     settings,
 ) -> None:  # type: ignore[no-untyped-def]
@@ -184,6 +244,9 @@ def test_selecting_typo_candidate_finishes_two_item_list_and_drops_numeric_garba
         ("sangria", 2, ItemStatus.MATCHED),
         ("cordial", 3, ItemStatus.MATCHED),
     ]
+    assert "Товары добавлены в черновик заказа" in selected.reply.text
+    assert "Сироп Сангрия" not in selected.reply.text
+    assert "Кордиал Апельсин" not in selected.reply.text
     assert "Добавить ещё товары?" in selected.reply.text
 
 

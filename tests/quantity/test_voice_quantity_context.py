@@ -1,6 +1,7 @@
 import pytest
 
 from restaurant_bot.domain.models import (
+    CatalogProduct,
     ConversationState,
     ExtractedItem,
     InputKind,
@@ -329,3 +330,41 @@ def test_voice_unit_entry_removes_previous_false_command_items(settings) -> None
 
     assert [item.id for item in result.state.cart] == ["unit"]
     assert result.state.stage is SessionStage.AWAIT_UNIT_QUANTITY
+
+
+def test_voice_product_list_is_not_consumed_by_open_quantity_card(settings) -> None:  # type: ignore[no-untyped-def]
+    """Сохраняет весь новый список, даже если старому товару не хватало количества."""
+    engine = ConversationEngine(settings)
+    dill = engine._build_item(ExtractedItem(product_query="Укроп"))
+    dill.id = "dill"
+    dill.status = ItemStatus.MISSING_QTY
+    dill.catalog_product_id = "dill-product"
+    dill.catalog_name = "Укроп"
+    dill.catalog_unit = "кг"
+    state = ConversationState(cart=[dill], current_issue_item_id=dill.id)
+    text = "Укроп 2 килограмма, петрушка 3 килограмма, сельдерей 5 килограммов."
+
+    result = engine.handle(
+        _voice(text),
+        ParsedCommand(
+            intent=Intent.ADD_ITEMS,
+            text=text,
+            items=[
+                ExtractedItem(product_query="Укроп", quantity=2, unit="кг"),
+                ExtractedItem(product_query="Петрушка", quantity=3, unit="кг"),
+                ExtractedItem(product_query="Сельдерей", quantity=5, unit="кг"),
+            ],
+        ),
+        state,
+        [
+            CatalogProduct(product_id="dill-product", name="Укроп", unit="кг"),
+            CatalogProduct(product_id="parsley", name="Петрушка", unit="кг"),
+            CatalogProduct(product_id="celery", name="Сельдерей", unit="кг"),
+        ],
+    )
+
+    assert [(item.catalog_product_id, item.quantity) for item in result.state.cart] == [
+        ("dill-product", 2),
+        ("parsley", 3),
+        ("celery", 5),
+    ]

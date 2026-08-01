@@ -93,7 +93,8 @@ def test_duplicate_merge_adds_only_the_confirmed_increment(settings) -> None:  #
 
     assert merged.state.cart[0].quantity == 8
     assert merged.state.cart[1].status is ItemStatus.SKIPPED
-    assert "Сироп Роза" in merged.reply.text
+    assert "Товар добавлен в черновик заказа" in merged.reply.text
+    assert "Сироп Роза" not in merged.reply.text
 
 
 @pytest.mark.parametrize(

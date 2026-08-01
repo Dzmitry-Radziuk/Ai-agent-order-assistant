@@ -108,6 +108,32 @@ def test_spoken_quantity_edit_selects_named_product_instead_of_first_cart_row(
     assert [item.quantity for item in result.state.cart] == [5, 10, 7]
 
 
+def test_voice_removal_ignores_draft_location_in_product_name(settings) -> None:  # type: ignore[no-untyped-def]
+    """Удаляет названный товар, даже если AI сохранил хвост «из заявки»."""
+    engine = ConversationEngine(settings)
+    state = ConversationState(
+        cart=[
+            _matched_syrup("cornmeal", "Крупа кукурузная Алина, 700 г", 5),
+            _matched_syrup("rose", "Сироп Роза, 1л", 2),
+        ]
+    )
+
+    result = engine.handle(
+        _event(),
+        ParsedCommand(
+            intent=Intent.REMOVE_ITEM,
+            target_query="крупу кукурузную из заявки, пожалуйста",
+            target_queries=["крупу кукурузную из заявки, пожалуйста"],
+        ),
+        state,
+        [],
+    )
+
+    assert result.state.cart[0].status is ItemStatus.SKIPPED
+    assert result.state.cart[1].status is ItemStatus.MATCHED
+    assert "Позиция удалена" in result.reply.text
+
+
 def test_ambiguous_or_unknown_quantity_target_never_changes_first_cart_row(
     settings,
 ) -> None:  # type: ignore[no-untyped-def]

@@ -103,6 +103,60 @@ def test_low_confidence_ai_not_found_keeps_candidate_choice_for_user(settings) -
     assert resolved.state.cart[0].candidates[0].product_id == "rose"
 
 
+def test_safe_inflected_catalog_name_is_selected_without_ai_guess(settings) -> None:  # type: ignore[no-untyped-def]
+    """Выбирает уникальное эквивалентное название, не доверяя ошибочному отказу ИИ."""
+    catalog = [
+        CatalogProduct(product_id="rose", name="Сироп Роза, 1л", unit="шт"),
+        CatalogProduct(product_id="tarhun", name="Сироп Тархун, 1л", unit="шт"),
+    ]
+    item = CartItem(
+        id="rose",
+        source_query="сироп роз",
+        quantity=5,
+        unit="шт",
+        status=ItemStatus.AMBIGUOUS,
+        candidates=rank_candidates("сироп роз", catalog),
+    )
+    matcher = _Matcher(ProductMatchDecision(action="not_found", confidence=0.99))
+
+    resolved = _orchestrator(settings, matcher)._resolve_ai_pending(
+        TelegramEvent(update_id=6, chat_id="123456", input_type=InputKind.VOICE),
+        EngineResult(state=ConversationState(cart=[item]), reply=issue_reply(item, 0)),
+        catalog,
+    )
+
+    assert matcher.calls == []
+    assert resolved.state.cart[0].status is ItemStatus.MATCHED
+    assert resolved.state.cart[0].catalog_product_id == "rose"
+
+
+def test_equivalent_names_from_different_suppliers_still_require_user_choice(settings) -> None:  # type: ignore[no-untyped-def]
+    """Не выбирает строку сам, если одинаковый товар есть у нескольких поставщиков."""
+    catalog = [
+        CatalogProduct(product_id="rose-a", name="Сироп Роза, 1л", supplier="А", unit="шт"),
+        CatalogProduct(product_id="rose-b", name="Сироп Роза, 1л", supplier="Б", unit="шт"),
+    ]
+    item = CartItem(
+        id="rose",
+        source_query="сироп роз",
+        quantity=5,
+        unit="шт",
+        status=ItemStatus.AMBIGUOUS,
+        candidates=rank_candidates("сироп роз", catalog),
+    )
+    matcher = _Matcher(ProductMatchDecision(action="ambiguous", confidence=0.99))
+
+    resolved = _orchestrator(settings, matcher)._resolve_ai_pending(
+        TelegramEvent(update_id=7, chat_id="123456", input_type=InputKind.VOICE),
+        EngineResult(state=ConversationState(cart=[item]), reply=issue_reply(item, 0)),
+        catalog,
+    )
+
+    assert matcher.calls == []
+    assert resolved.state.cart[0].status is ItemStatus.AMBIGUOUS
+    assert resolved.state.cart[0].catalog_product_id == ""
+
+
 def test_ai_does_not_auto_select_weak_single_corn_candidate(settings) -> None:  # type: ignore[no-untyped-def]
     """Не заменяет свежую кукурузу единственной найденной кукурузной крупой."""
     catalog = [
