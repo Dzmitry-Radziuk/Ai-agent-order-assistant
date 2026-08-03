@@ -22,6 +22,11 @@ PRIORITY_LABELS = {
     "edge": "Защитный",
 }
 
+STATUS_LABELS = {
+    "live": "Работает сейчас",
+    "prepared": "Подготовлено, но выключено",
+}
+
 
 def _strip_trailing_whitespace(text: str) -> str:
     """Удаляет пробелы в концах строк, сохраняя финальный перевод строки."""
@@ -49,7 +54,15 @@ def _test_functions(path: Path) -> set[str]:
 
 def validate_catalog(catalog: dict[str, Any], source_directory: Path) -> None:
     """Проверяет структуру каталога и существование связанных pytest-тестов."""
-    required_root = {"title", "version", "categories", "journeys", "scenarios"}
+    required_root = {
+        "title",
+        "version",
+        "rules",
+        "categories",
+        "journeys",
+        "system_flows",
+        "scenarios",
+    }
     missing_root = required_root - catalog.keys()
     if missing_root:
         raise ValueError(f"В каталоге отсутствуют поля: {sorted(missing_root)}")
@@ -63,6 +76,16 @@ def validate_catalog(catalog: dict[str, Any], source_directory: Path) -> None:
     known_priorities = set(PRIORITY_LABELS)
     scenario_ids: set[str] = set()
     test_cache: dict[Path, set[str]] = {}
+
+    required_contract = {"permissions", "entities", "confirmation", "recovery"}
+    for category in categories:
+        missing_contract = required_contract - category.get("contract", {}).keys()
+        if missing_contract:
+            raise ValueError(
+                f"Категория {category['id']}: в contract отсутствуют {sorted(missing_contract)}"
+            )
+        if not category["contract"]["entities"]:
+            raise ValueError(f"Категория {category['id']}: нужен список сущностей")
 
     for scenario in catalog["scenarios"]:
         required = {
@@ -88,6 +111,8 @@ def validate_catalog(catalog: dict[str, Any], source_directory: Path) -> None:
             raise ValueError(f"{scenario['id']}: неизвестная категория")
         if scenario["priority"] not in known_priorities:
             raise ValueError(f"{scenario['id']}: неизвестный приоритет")
+        if scenario.get("status", "live") not in STATUS_LABELS:
+            raise ValueError(f"{scenario['id']}: неизвестный статус доступности")
         if scenario["priority"] == "critical" and not scenario["test_refs"]:
             raise ValueError(f"{scenario['id']}: критический сценарий должен иметь тест")
         if not scenario["channels"]:
@@ -105,7 +130,7 @@ def validate_catalog(catalog: dict[str, Any], source_directory: Path) -> None:
                 raise ValueError(f"{scenario['id']}: тест не найден {reference}")
 
     journey_titles: set[str] = set()
-    for journey in catalog["journeys"]:
+    for journey in [*catalog["journeys"], *catalog["system_flows"]]:
         required = {"title", "description", "steps", "diagram", "scenario_ids"}
         missing = required - journey.keys()
         if missing:
@@ -125,6 +150,10 @@ def validate_catalog(catalog: dict[str, Any], source_directory: Path) -> None:
                 f"Маршрут {journey['title']}: неизвестные сценарии {sorted(unknown_scenarios)}"
             )
 
+    for rule in catalog["rules"]:
+        if not rule.get("title") or not rule.get("description"):
+            raise ValueError("Каждому правилу нужны title и description")
+
     if source_directory.resolve() != SOURCE_PATH.parent.resolve():
         return
 
@@ -141,6 +170,14 @@ def _test_markdown(reference: str) -> str:
     """Формирует Markdown-ссылку на тестовый файл и имя функции."""
     path, function_name = reference.split("::", maxsplit=1)
     return f"[`{path}`](../{path}) → `{function_name}`"
+
+
+def _scenario_contract(scenario: dict[str, Any], category: dict[str, Any]) -> dict[str, Any]:
+    """Объединяет правила раздела с уточнениями конкретного сценария."""
+    contract = dict(category["contract"])
+    contract.update(scenario.get("contract", {}))
+    contract.setdefault("state_change", scenario["result"])
+    return contract
 
 
 def render_markdown(catalog: dict[str, Any]) -> str:
@@ -162,19 +199,36 @@ def render_markdown(catalog: dict[str, Any]) -> str:
         "3. Сравните ответ бота и итог с ожидаемым поведением.",
         "4. Для удобного просмотра откройте [`user-scenarios/index.html`](user-scenarios/index.html).",
         "",
-        "## Покрытие",
-        "",
-        "| Показатель | Значение |",
-        "|---|---:|",
-        f"| Всего сценариев | {total} |",
-        f"| Связаны с pytest | {linked} |",
-        f"| Критические | {priorities['critical']} |",
-        f"| Важные | {priorities['important']} |",
-        f"| Защитные | {priorities['edge']} |",
-        "",
-        "## Основные маршруты",
+        "## Главные правила",
         "",
     ]
+
+    for rule in catalog["rules"]:
+        lines.extend(
+            [
+                f"### {rule['title']}",
+                "",
+                rule["description"],
+                "",
+            ]
+        )
+
+    lines.extend(
+        [
+            "## Покрытие",
+            "",
+            "| Показатель | Значение |",
+            "|---|---:|",
+            f"| Всего сценариев | {total} |",
+            f"| Связаны с pytest | {linked} |",
+            f"| Критические | {priorities['critical']} |",
+            f"| Важные | {priorities['important']} |",
+            f"| Защитные | {priorities['edge']} |",
+            "",
+            "## Основные маршруты",
+            "",
+        ]
+    )
 
     for journey in catalog["journeys"]:
         lines.extend(
@@ -193,13 +247,37 @@ def render_markdown(catalog: dict[str, Any]) -> str:
             ]
         )
 
+    lines.extend(["## Как бот принимает решения", ""])
+    for flow in catalog["system_flows"]:
+        lines.extend(
+            [
+                f"### {flow['title']}",
+                "",
+                flow["description"],
+                "",
+                "```mermaid",
+                flow["diagram"].strip(),
+                "```",
+                "",
+                "**Связанные сценарии:** "
+                + ", ".join(f"`{scenario_id}`" for scenario_id in flow["scenario_ids"]),
+                "",
+            ]
+        )
+
     lines.extend(["## Каталог сценариев", ""])
     for category in catalog["categories"]:
+        category_contract = category["contract"]
         lines.extend(
             [
                 f"### {category['title']}",
                 "",
                 category["description"],
+                "",
+                f"**Доступ:** {category_contract['permissions']}  ",
+                "**Что распознаём:** " + ", ".join(category_contract["entities"]) + "  ",
+                f"**Подтверждение:** {category_contract['confirmation']}  ",
+                f"**Если произошла ошибка:** {category_contract['recovery']}",
                 "",
             ]
         )
@@ -208,11 +286,14 @@ def render_markdown(catalog: dict[str, Any]) -> str:
         ):
             channels = ", ".join(scenario["channels"])
             priority = PRIORITY_LABELS[scenario["priority"]]
+            status = STATUS_LABELS[scenario.get("status", "live")]
+            contract = _scenario_contract(scenario, category)
             lines.extend(
                 [
                     f"#### {scenario['id']} · {scenario['title']}",
                     "",
                     f"**Приоритет:** {priority}<br>",
+                    f"**Статус:** {status}<br>",
                     f"**Канал:** {channels}<br>",
                     f"**Предусловие:** {scenario['precondition']}",
                     "",
@@ -221,6 +302,17 @@ def render_markdown(catalog: dict[str, Any]) -> str:
                     f"**Ответ бота:** {scenario['bot_response']}",
                     "",
                     f"**Результат:** {scenario['result']}",
+                    "",
+                    "<details>",
+                    "<summary><strong>Что важно для системы</strong></summary>",
+                    "",
+                    f"- **Доступ:** {contract['permissions']}",
+                    "- **Распознаваем:** " + ", ".join(contract["entities"]),
+                    f"- **Подтверждение:** {contract['confirmation']}",
+                    f"- **Изменение состояния:** {contract['state_change']}",
+                    f"- **Восстановление:** {contract['recovery']}",
+                    "",
+                    "</details>",
                     "",
                     "**Примеры фраз:**",
                     "",
@@ -251,9 +343,12 @@ def render_markdown(catalog: dict[str, Any]) -> str:
     return _strip_trailing_whitespace("\n".join(lines))
 
 
-def _scenario_card(scenario: dict[str, Any], category_title: str) -> str:
+def _scenario_card(scenario: dict[str, Any], category: dict[str, Any]) -> str:
     """Создаёт одну HTML-карточку сценария."""
     priority = scenario["priority"]
+    status = scenario.get("status", "live")
+    category_title = category["title"]
+    contract = _scenario_contract(scenario, category)
     search_text = " ".join(
         [
             scenario["id"],
@@ -261,6 +356,8 @@ def _scenario_card(scenario: dict[str, Any], category_title: str) -> str:
             category_title,
             scenario["user_action"],
             scenario["bot_response"],
+            contract["permissions"],
+            *contract["entities"],
             *scenario["examples"],
         ]
     ).lower()
@@ -282,7 +379,10 @@ def _scenario_card(scenario: dict[str, Any], category_title: str) -> str:
         data-priority="{html.escape(priority)}" data-search="{html.escape(search_text)}">
         <div class="card-top">
           <span class="scenario-id">{html.escape(scenario["id"])}</span>
-          <span class="priority priority-{html.escape(priority)}">{PRIORITY_LABELS[priority]}</span>
+          <span class="badges">
+            <span class="status status-{html.escape(status)}">{STATUS_LABELS[status]}</span>
+            <span class="priority priority-{html.escape(priority)}">{PRIORITY_LABELS[priority]}</span>
+          </span>
         </div>
         <h3>{html.escape(scenario["title"])}</h3>
         <p class="category-label">{html.escape(category_title)}</p>
@@ -293,6 +393,16 @@ def _scenario_card(scenario: dict[str, Any], category_title: str) -> str:
           <div><dt>Бот</dt><dd>{html.escape(scenario["bot_response"])}</dd></div>
           <div class="result"><dt>Итог</dt><dd>{html.escape(scenario["result"])}</dd></div>
         </dl>
+        <details>
+          <summary>Что важно</summary>
+          <dl class="contract">
+            <div><dt>Доступ</dt><dd>{html.escape(contract["permissions"])}</dd></div>
+            <div><dt>Распознаём</dt><dd>{html.escape(", ".join(contract["entities"]))}</dd></div>
+            <div><dt>Подтверждение</dt><dd>{html.escape(contract["confirmation"])}</dd></div>
+            <div><dt>Что изменится</dt><dd>{html.escape(contract["state_change"])}</dd></div>
+            <div><dt>Если произошла ошибка</dt><dd>{html.escape(contract["recovery"])}</dd></div>
+          </dl>
+        </details>
         <details>
           <summary>Примеры фраз</summary>
           <ul>{examples}</ul>
@@ -332,8 +442,31 @@ def render_html(catalog: dict[str, Any]) -> str:
         )
         for journey in catalog["journeys"]
     )
+    rule_cards = "".join(
+        '<article class="rule"><h3>'
+        f"{html.escape(rule['title'])}</h3><p>{html.escape(rule['description'])}</p></article>"
+        for rule in catalog["rules"]
+    )
+    flow_cards = "".join(
+        (
+            '<details class="system-flow"><summary>'
+            f"{html.escape(flow['title'])}</summary><p>{html.escape(flow['description'])}</p>"
+            '<div class="journey-steps">'
+            + "".join(
+                f"<span><b>{index}</b>{html.escape(step)}</span>"
+                for index, step in enumerate(flow["steps"], start=1)
+            )
+            + '</div><div class="journey-tests"><b>Связанные сценарии:</b> '
+            + " ".join(
+                f'<a href="#scenario-{html.escape(scenario_id)}">{html.escape(scenario_id)}</a>'
+                for scenario_id in flow["scenario_ids"]
+            )
+            + "</div></details>"
+        )
+        for flow in catalog["system_flows"]
+    )
     cards = "".join(
-        _scenario_card(scenario, category_by_id[scenario["category"]]["title"])
+        _scenario_card(scenario, category_by_id[scenario["category"]])
         for scenario in catalog["scenarios"]
     )
     source_json = json.dumps(
@@ -386,6 +519,10 @@ def render_html(catalog: dict[str, Any]) -> str:
     .section-heading {{ margin: 34px 0 16px; }}
     .section-heading h2 {{ margin: 0 0 6px; font-size: 28px; }}
     .section-heading p {{ margin: 0; color: var(--muted); }}
+    .rules {{ display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }}
+    .rule {{ padding: 18px; border-radius: 16px; background: var(--green-soft); }}
+    .rule h3 {{ margin: 0 0 6px; font-size: 17px; }}
+    .rule p {{ margin: 0; color: #315c48; line-height: 1.5; }}
     .journeys {{ display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }}
     .journey {{ background: var(--card); border: 1px solid var(--line); border-radius: 18px; padding: 22px; }}
     .journey h3 {{ margin: 0 0 6px; }}
@@ -404,6 +541,10 @@ def render_html(catalog: dict[str, Any]) -> str:
       display: inline-block; margin-left: 5px; padding: 1px 7px; border-radius: 7px;
       background: var(--green-soft); text-decoration: none;
     }}
+    .system-flows {{ display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }}
+    .system-flow {{ margin: 0; padding: 18px; border: 1px solid var(--line); border-radius: 16px; background: var(--card); }}
+    .system-flow summary {{ font-size: 17px; }}
+    .system-flow p {{ color: var(--muted); line-height: 1.5; }}
     .toolbar {{
       position: sticky; top: 0; z-index: 5; margin: 24px 0 18px; padding: 14px;
       background: #f4f7f4ed; backdrop-filter: blur(12px); border: 1px solid var(--line); border-radius: 16px;
@@ -424,11 +565,15 @@ def render_html(catalog: dict[str, Any]) -> str:
     .scenario-card {{ background: var(--card); border: 1px solid var(--line); border-radius: 18px; padding: 22px; }}
     .scenario-card[hidden] {{ display: none; }}
     .card-top {{ display: flex; align-items: center; justify-content: space-between; gap: 12px; }}
+    .badges {{ display: flex; align-items: center; justify-content: flex-end; gap: 6px; flex-wrap: wrap; }}
     .scenario-id {{ color: var(--green); font-weight: 750; letter-spacing: .04em; }}
     .priority {{ font-size: 12px; border-radius: 999px; padding: 5px 9px; font-weight: 700; }}
     .priority-critical {{ color: var(--critical); background: #fee4e2; }}
     .priority-important {{ color: var(--important); background: #fef0c7; }}
     .priority-edge {{ color: var(--edge); background: #eaecf0; }}
+    .status {{ font-size: 11px; border-radius: 999px; padding: 5px 8px; font-weight: 700; }}
+    .status-live {{ color: #146c43; background: #d1fadf; }}
+    .status-prepared {{ color: #93370d; background: #ffead5; }}
     .scenario-card h3 {{ margin: 13px 0 4px; font-size: 21px; }}
     .category-label {{ margin: 0 0 12px; color: var(--muted); font-size: 13px; }}
     .channels {{ display: flex; gap: 6px; margin-bottom: 16px; }}
@@ -438,6 +583,7 @@ def render_html(catalog: dict[str, Any]) -> str:
     dt {{ color: var(--muted); font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; }}
     dd {{ margin: 5px 0 0; line-height: 1.48; }}
     dl .result {{ border-radius: 12px; border: 0; background: var(--green-soft); padding: 12px; margin: 4px 0 12px; }}
+    .contract div {{ padding: 9px 0; }}
     details {{ border-top: 1px solid var(--line); padding: 11px 0 0; margin-top: 10px; }}
     summary {{ cursor: pointer; color: var(--green); font-weight: 650; }}
     li {{ margin: 7px 0; line-height: 1.4; }}
@@ -445,7 +591,7 @@ def render_html(catalog: dict[str, Any]) -> str:
     a {{ color: var(--green); }}
     footer {{ color: var(--muted); text-align: center; padding: 24px; }}
     @media (max-width: 820px) {{
-      .summary, .journeys, .scenario-grid {{ grid-template-columns: 1fr; }}
+      .summary, .rules, .journeys, .system-flows, .scenario-grid {{ grid-template-columns: 1fr; }}
       header {{ padding-top: 36px; padding-bottom: 50px; }}
       .toolbar {{ position: static; }}
     }}
@@ -471,10 +617,22 @@ def render_html(catalog: dict[str, Any]) -> str:
     </section>
 
     <div class="section-heading">
+      <h2>Главные правила</h2>
+      <p>Пять принципов, которые защищают пользователя от неверного действия.</p>
+    </div>
+    <section class="rules">{rule_cards}</section>
+
+    <div class="section-heading">
       <h2>Как проходит заявка</h2>
       <p>Основные маршруты без технических деталей.</p>
     </div>
     <div class="journeys">{journey_cards}</div>
+
+    <div class="section-heading">
+      <h2>Как бот принимает решения</h2>
+      <p>Откройте нужную схему — внутри только основные шаги.</p>
+    </div>
+    <section class="system-flows">{flow_cards}</section>
 
     <div class="section-heading">
       <h2>Все пользовательские сценарии</h2>

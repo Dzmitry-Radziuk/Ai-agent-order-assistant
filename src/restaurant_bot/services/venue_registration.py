@@ -313,7 +313,7 @@ class VenueAccessRegistry:
                 )
         if cached:
             try:
-                payload = json.loads(cast(str | bytes | bytearray, cached))
+                payload = json.loads(cached)
                 if not isinstance(payload, list):
                     raise ValueError("venue access cache must contain a list")
                 return [VenueAccessEntry(**item) for item in payload if isinstance(item, dict)]

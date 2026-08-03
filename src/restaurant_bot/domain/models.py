@@ -111,6 +111,7 @@ class SessionStage(StrEnum):
     AWAIT_MANUAL_DETAILS = "await_manual_details"
     AWAIT_PRODUCT_ADD_DETAILS = "await_product_add_details"
     AWAIT_ADD_MORE_CONFIRM = "await_add_more_confirm"
+    AWAIT_COMMENT_SCOPE = "await_comment_scope"
 
 
 class TelegramEvent(BaseModel):
@@ -198,6 +199,9 @@ class ParsedCommand(BaseModel):
     edit_quantity: float | None = None
     edit_unit: str = ""
     global_comment: str = ""
+    comment_clarification: str = ""
+    comment_scope_action: str = ""
+    comment_target_indexes: list[int] = Field(default_factory=list)
     confidence: float | None = None
     callback_revision: int | None = None
     callback_target: str = ""
@@ -335,6 +339,9 @@ class ConversationState(BaseModel):
     unit_item_index: int | None = None
     edit_multiple_index: int | None = None
     pending_added_items_count: int = 0
+    pending_comment_items: list[ExtractedItem] = Field(default_factory=list)
+    pending_comment_text: str = ""
+    pending_comment_global_comment: str = ""
     pending_new_order_confirmation: bool = False
     order_status_view_active: bool = False
     order_status_page: int = 0

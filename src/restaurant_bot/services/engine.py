@@ -54,6 +54,7 @@ from restaurant_bot.services.product_add_flow import (
 from restaurant_bot.services.replies import (
     added_items_question_reply,
     cart_reply,
+    comment_scope_clarification_reply,
     empty_draft_reply,
     final_review_reply,
     help_reply,
@@ -88,6 +89,36 @@ from restaurant_bot.services.text import (
     remove_global_comment_overlap,
 )
 
+_SUPPLIER_COMMENT_PREFIXES = {
+    "без",
+    "в",
+    "до",
+    "если",
+    "к",
+    "на",
+    "не",
+    "обязательно",
+    "отдельно",
+    "по",
+    "пожалуйста",
+    "после",
+    "просьба",
+    "раздельно",
+    "с",
+    "срочно",
+    "сегодня",
+    "только",
+    "утром",
+    "вечером",
+    "желательно",
+    "завтра",
+}
+_SUPPLIER_COMMENT_MODIFIER_RE = re.compile(
+    r"(?:ый|ий|ой|ая|яя|ое|ее|ые|ие|ого|его|ому|ему|ым|им|ую|юю|ых|их|"
+    r"енно|ано|но|мелко|крупно)$",
+    flags=re.I,
+)
+
 
 class ConversationEngine:
     """Применяет бизнес-правила к состоянию диалога."""
@@ -105,6 +136,8 @@ class ConversationEngine:
     ) -> EngineResult:
         """Обрабатывает входные данные текущего компонента."""
         state.last_input_text = event.text or command.text
+        if state.pending_comment_items:
+            return self._resolve_pending_comment_scope(event, command, state, catalog)
         self._remove_navigation_command_items(state)
         self._remove_cart_comment_shadows(state)
         self._remove_exact_cart_duplicates(state)
@@ -435,6 +468,20 @@ class ConversationEngine:
                 return EngineResult(state=state, reply=supplier_warning_choose_reply(state))
             return EngineResult(state=state, reply=start_adding_supplier_reply(state, index))
 
+        if command.comment_clarification:
+            state.pending_comment_items = [item.model_copy(deep=True) for item in command.items]
+            state.pending_comment_text = command.comment_clarification
+            state.pending_comment_global_comment = command.global_comment
+            state.stage = SessionStage.AWAIT_COMMENT_SCOPE
+            state.status = "await_comment_scope"
+            return EngineResult(
+                state=state,
+                reply=comment_scope_clarification_reply(
+                    state.pending_comment_items,
+                    state.pending_comment_text,
+                ),
+            )
+
         # `v2:back` is n8n's return-to-draft button. It must render the
         # existing draft (including unresolved positions), not clear context
         # and ask for another product.
@@ -737,6 +784,100 @@ class ConversationEngine:
         if event.input_type == InputKind.VOICE:
             return EngineResult(state=state, reply=unrecognized_voice_reply(state))
         return EngineResult(state=state, reply=unknown_intent_reply(state))
+
+    def _resolve_pending_comment_scope(
+        self,
+        event: TelegramEvent,
+        command: ParsedCommand,
+        state: ConversationState,
+        catalog: list[CatalogProduct],
+    ) -> EngineResult:
+        """Применяет ожидающий комментарий только после надёжного выбора области."""
+        if command.intent in {Intent.CLEAR_CART, Intent.START_NEW_ORDER}:
+            self._clear_pending_comment(state)
+            return self.handle(event, command, state, catalog)
+        if (
+            command.intent in {Intent.BACK, Intent.CANCEL}
+            or command.comment_scope_action == "cancel"
+        ):
+            self._clear_pending_comment(state)
+            state.stage = (
+                SessionStage.REVIEW
+                if self._has_active_draft_items(state)
+                else SessionStage.COLLECTING
+            )
+            state.status = state.stage.value
+            return EngineResult(
+                state=state,
+                reply=cart_reply(state, title="Комментарий не добавлен"),
+            )
+
+        action = command.comment_scope_action
+        confidence = command.confidence or 0.0
+        valid_indexes = list(
+            dict.fromkeys(
+                index
+                for index in command.comment_target_indexes
+                if isinstance(index, int)
+                and not isinstance(index, bool)
+                and 0 <= index < len(state.pending_comment_items)
+            )
+        )
+        indexes_are_exact = valid_indexes == command.comment_target_indexes
+        valid_resolution = bool(
+            confidence >= 0.9
+            and (
+                (action == "items" and valid_indexes and indexes_are_exact)
+                or (action == "order" and not command.comment_target_indexes)
+            )
+        )
+        if not valid_resolution:
+            state.stage = SessionStage.AWAIT_COMMENT_SCOPE
+            state.status = "await_comment_scope"
+            return EngineResult(
+                state=state,
+                reply=comment_scope_clarification_reply(
+                    state.pending_comment_items,
+                    state.pending_comment_text,
+                ),
+            )
+
+        pending_items = [item.model_copy(deep=True) for item in state.pending_comment_items]
+        comment = state.pending_comment_text
+        global_comment = state.pending_comment_global_comment
+        if action == "order":
+            global_comment = self._merge_comments(global_comment, comment)
+        else:
+            for index in valid_indexes:
+                merged = self._merge_comments(
+                    pending_items[index].comment,
+                    pending_items[index].user_comment_to_supplier,
+                    comment,
+                )
+                pending_items[index] = pending_items[index].model_copy(
+                    update={
+                        "comment": merged,
+                        "user_comment_to_supplier": merged,
+                    }
+                )
+
+        self._clear_pending_comment(state)
+        state.stage = SessionStage.COLLECTING
+        state.status = "collecting"
+        resolved = ParsedCommand(
+            intent=Intent.ADD_ITEMS,
+            items=pending_items,
+            global_comment=global_comment,
+        )
+        safe_event = event.model_copy(update={"text": ""})
+        return self.handle(safe_event, resolved, state, catalog)
+
+    @staticmethod
+    def _clear_pending_comment(state: ConversationState) -> None:
+        """Удаляет временные данные уточнения, не затрагивая черновик."""
+        state.pending_comment_items = []
+        state.pending_comment_text = ""
+        state.pending_comment_global_comment = ""
 
     @staticmethod
     def _remove_navigation_command_items(state: ConversationState) -> None:
@@ -1714,6 +1855,7 @@ class ConversationEngine:
         state.unit_item_index = None
         state.edit_multiple_index = None
         state.pending_added_items_count = 0
+        ConversationEngine._clear_pending_comment(state)
         clear_product_add_pending(state)
 
     @staticmethod
@@ -1783,17 +1925,30 @@ class ConversationEngine:
                 )
             ):
                 comment_words = [word for word in query_words if word not in first_evidence]
-                product_words = [word for word in query_words if word in first_evidence]
-                item.comment = self._merge_comments(item.comment, " ".join(comment_words))
-                item.source_query = " ".join(product_words)
-                candidates = rank_candidates(item.source_query, search_catalog, supplier_hint)
-                item.candidates = candidates
+                if self._looks_like_supplier_comment_fragment(comment_words):
+                    product_words = [word for word in query_words if word in first_evidence]
+                    item.comment = self._merge_comments(item.comment, " ".join(comment_words))
+                    item.source_query = " ".join(product_words)
+                    candidates = rank_candidates(item.source_query, search_catalog, supplier_hint)
+                    item.candidates = candidates
         item.supplier_search_locked = False
         broad_query = is_broad_category_query(item.source_query, candidates)
         if broad_query or not can_auto_select(candidates):
             item.status = ItemStatus.AMBIGUOUS
             return
         self._apply_catalog(item, candidates[0], catalog)
+
+    @staticmethod
+    def _looks_like_supplier_comment_fragment(words: list[str]) -> bool:
+        """Отличает инструкцию поставщику от неизвестной части названия товара."""
+        normalized = [normalize_text(word) for word in words if normalize_text(word)]
+        if not normalized:
+            return False
+        if any(word in _SUPPLIER_COMMENT_PREFIXES for word in normalized):
+            return True
+        if normalized[0].endswith(("ть", "ться", "йте")):
+            return True
+        return all(_SUPPLIER_COMMENT_MODIFIER_RE.search(word) for word in normalized)
 
     def _apply_catalog(
         self,
@@ -2249,6 +2404,8 @@ class ConversationEngine:
         item = state.current_item()
         if item:
             item.status = ItemStatus.SKIPPED
+            if state.pending_added_items_count:
+                state.pending_added_items_count -= 1
         state.current_issue_item_id = ""
         return self._advance(state)
 

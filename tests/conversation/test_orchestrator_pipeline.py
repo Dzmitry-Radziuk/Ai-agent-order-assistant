@@ -8,13 +8,17 @@ import pytest
 from restaurant_bot.domain.models import (
     BotReply,
     Button,
+    CartItem,
     CatalogProduct,
     ConversationState,
     EngineResult,
     ExtractedItem,
     Intent,
+    ItemStatus,
     ParsedCommand,
+    SessionStage,
 )
+from restaurant_bot.integrations.openai_client import CommentScopeDecision
 from restaurant_bot.services import orchestrator as orchestrator_module
 from restaurant_bot.services.orchestrator import ClaimedUpdate, UpdateOrchestrator
 from restaurant_bot.services.venue_registration import RegistrationResult, VenueContext
@@ -134,6 +138,227 @@ def _search_all_claim() -> ClaimedUpdate:
         state_applied=False,
         reply_sent=False,
         tasks_enqueued=False,
+    )
+
+
+def _analytics_orchestrator(*, include_user_content: bool = False) -> UpdateOrchestrator:
+    """Создаёт оркестратор только для проверки продуктовой аналитики."""
+    service = object.__new__(UpdateOrchestrator)
+    service.settings = SimpleNamespace(
+        log_user_content=include_user_content,
+        log_content_max_length=500,
+    )
+    service.tracer = MagicMock()
+    service.tracer.anonymized_chat_id.return_value = "venue-hash"
+    return service
+
+
+@pytest.mark.parametrize(
+    ("status", "expected_outcome", "expected_reason"),
+    [
+        (ItemStatus.NOT_FOUND, "failed", "product_not_found"),
+        (ItemStatus.AMBIGUOUS, "needs_clarification", "ambiguous_product"),
+        (ItemStatus.MISSING_QTY, "needs_clarification", "missing_quantity"),
+    ],
+)
+def test_request_analytics_classifies_unsuccessful_product_searches(
+    status: ItemStatus,
+    expected_outcome: str,
+    expected_reason: str,
+) -> None:
+    """Классифицирует неудачный поиск без раскрытия пользовательского текста."""
+    service = _analytics_orchestrator()
+    event = orchestrator_module.normalize_telegram_update(_claim("кукуруза 2 кг").payload)
+    command = ParsedCommand(
+        intent=Intent.ADD_ITEMS,
+        items=[ExtractedItem(product_query="кукуруза", quantity=2, unit="кг")],
+    )
+    item = CartItem(id="corn", source_query="кукуруза", status=status)
+    state = ConversationState(
+        cart=[item],
+        current_issue_item_id=item.id,
+        stage=SessionStage.COLLECTING,
+    )
+
+    analytics = service._request_analytics(
+        event,
+        command,
+        state,
+        previous_stage=SessionStage.COLLECTING.value,
+        previous_cart_count=0,
+        previous_issue_item_id="",
+    )
+
+    assert analytics["scenario"] == "draft_management"
+    assert analytics["outcome"] == expected_outcome
+    assert analytics["failure_reason"] == expected_reason
+    assert analytics["issue_types"] == [status.value]
+    assert analytics["request_fingerprint"].startswith("<content sha256:")
+    assert "кукуруза" not in analytics["request_fingerprint"]
+
+
+def test_request_analytics_marks_mixed_result_as_partial() -> None:
+    """Отмечает частичный результат, когда найден не каждый новый товар."""
+    service = _analytics_orchestrator()
+    event = orchestrator_module.normalize_telegram_update(_claim("сироп роза и кукуруза").payload)
+    command = ParsedCommand(
+        intent=Intent.ADD_ITEMS,
+        items=[
+            ExtractedItem(product_query="сироп роза"),
+            ExtractedItem(product_query="кукуруза"),
+        ],
+    )
+    state = ConversationState(
+        cart=[
+            CartItem(id="rose", source_query="сироп роза", status=ItemStatus.MATCHED),
+            CartItem(id="corn", source_query="кукуруза", status=ItemStatus.NOT_FOUND),
+        ]
+    )
+
+    analytics = service._request_analytics(
+        event,
+        command,
+        state,
+        previous_stage=SessionStage.COLLECTING.value,
+        previous_cart_count=0,
+        previous_issue_item_id="",
+    )
+
+    assert analytics["outcome"] == "partial"
+    assert analytics["failure_reason"] == "product_not_found"
+    assert analytics["item_count"] == 2
+    assert analytics["issue_count"] == 1
+
+
+def test_request_analytics_marks_ambiguous_comment_scope_for_insights() -> None:
+    """Отмечает неясную область комментария как требующее уточнения обращение."""
+    service = _analytics_orchestrator(include_user_content=True)
+    event = orchestrator_module.normalize_telegram_update(
+        _claim("томаты 5 кг, огурцы 4 кг, положить отдельно").payload
+    )
+    command = ParsedCommand(
+        intent=Intent.ADD_ITEMS,
+        items=[
+            ExtractedItem(product_query="томаты", quantity=5, unit="кг"),
+            ExtractedItem(product_query="огурцы", quantity=4, unit="кг"),
+        ],
+        comment_clarification="положить отдельно",
+    )
+
+    analytics = service._request_analytics(
+        event,
+        command,
+        ConversationState(),
+        previous_stage=SessionStage.COLLECTING.value,
+        previous_cart_count=0,
+        previous_issue_item_id="",
+    )
+
+    assert analytics["outcome"] == "needs_clarification"
+    assert analytics["failure_reason"] == "ambiguous_comment_scope"
+    assert analytics["user_text"] == event.text
+
+
+def test_pending_comment_answer_uses_dedicated_scope_resolver() -> None:
+    """Не отправляет ответ об области комментария в обычный поиск товаров."""
+    service = object.__new__(UpdateOrchestrator)
+    service.openai = SimpleNamespace(
+        resolve_comment_scope=lambda _text, _items: CommentScopeDecision(
+            action="items",
+            target_item_indexes=[0, 1],
+            confidence=0.99,
+        )
+    )
+    state = ConversationState(
+        pending_comment_items=[
+            ExtractedItem(product_query="Помидоры", quantity=5, unit="кг"),
+            ExtractedItem(product_query="Огурцы", quantity=4, unit="кг"),
+        ],
+        pending_comment_text="положить отдельно",
+    )
+
+    command = service._parse_pending_comment_scope("Для всех товаров", state)
+
+    assert command.intent is Intent.ADD_ITEMS
+    assert command.comment_scope_action == "items"
+    assert command.comment_target_indexes == [0, 1]
+    assert [item.product_query for item in command.items] == ["Помидоры", "Огурцы"]
+
+
+def test_pending_comment_callback_selects_last_item_without_ai() -> None:
+    """Безошибочно обрабатывает кнопку последнего товара по сохранённым индексам."""
+    service = object.__new__(UpdateOrchestrator)
+    service.openai = MagicMock()
+    state = ConversationState(
+        pending_comment_items=[
+            ExtractedItem(product_query="Помидоры"),
+            ExtractedItem(product_query="Огурцы"),
+        ],
+        pending_comment_text="положить отдельно",
+    )
+
+    command = service._parse_pending_comment_scope("v2:comment:last:r7", state)
+
+    assert command.comment_scope_action == "items"
+    assert command.comment_target_indexes == [1]
+    assert command.confidence == 1
+    service.openai.resolve_comment_scope.assert_not_called()
+
+
+def test_request_analytics_can_show_failed_text_when_diagnostics_are_enabled() -> None:
+    """Показывает текст нераспознанной команды только по действующей настройке логов."""
+    service = _analytics_orchestrator(include_user_content=True)
+    event = orchestrator_module.normalize_telegram_update(_claim("привези что-нибудь").payload)
+
+    analytics = service._request_analytics(
+        event,
+        ParsedCommand(intent=Intent.UNKNOWN, text=event.text),
+        ConversationState(),
+        previous_stage=SessionStage.COLLECTING.value,
+        previous_cart_count=0,
+        previous_issue_item_id="",
+    )
+
+    assert analytics["scenario"] == "unrecognized_request"
+    assert analytics["outcome"] == "failed"
+    assert analytics["failure_reason"] == "unrecognized_request"
+    assert analytics["user_text"] == "привези что-нибудь"
+
+
+def test_record_request_outcome_updates_log_and_langfuse_metadata() -> None:
+    """Пишет один и тот же понятный итог в лог и Langfuse."""
+    service = _analytics_orchestrator()
+    trace = MagicMock()
+    log = MagicMock()
+    analytics = {
+        "status": "done",
+        "scenario": "order_status",
+        "intent": "order_status",
+        "outcome": "success",
+        "failure_reason": "",
+        "input_type": "voice",
+    }
+
+    service._record_request_outcome(
+        trace,
+        log,
+        analytics,
+        chat_id="7",
+        venue_code="venue-123",
+    )
+
+    log.info.assert_called_once_with("user_request_outcome", **analytics)
+    trace.update.assert_called_once_with(
+        output=analytics,
+        metadata={
+            "scenario": "order_status",
+            "intent": "order_status",
+            "outcome": "success",
+            "failure_reason": "",
+            "input_type": "voice",
+            "chat_hash": "venue-hash",
+            "venue_hash": "venue-hash",
+        },
     )
 
 

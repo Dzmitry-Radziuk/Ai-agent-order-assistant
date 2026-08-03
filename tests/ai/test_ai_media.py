@@ -8,6 +8,7 @@ from openai import APITimeoutError
 from restaurant_bot.domain.models import ExtractedItem, Intent, ParsedCommand
 from restaurant_bot.integrations import openai_client
 from restaurant_bot.integrations.openai_client import (
+    CommentScopeDecision,
     OpenAIService,
     ParsedInputSchema,
     VisibleActionDecision,
@@ -157,6 +158,43 @@ def test_openai_usage_separates_discounted_cached_tokens() -> None:
         "output": 10,
         "total": 110,
     }
+
+
+@pytest.mark.parametrize(
+    ("include_user_content", "expected_output"),
+    [
+        (False, {"transcript_characters": 33}),
+        (
+            True,
+            {
+                "transcript_characters": 33,
+                "transcript": "Мне нужна кукуруза два килограмма",
+            },
+        ),
+    ],
+)
+def test_voice_transcription_trace_respects_user_content_setting(
+    settings,
+    tmp_path: Path,
+    mocker,
+    include_user_content: bool,
+    expected_output: dict[str, object],
+) -> None:  # type: ignore[no-untyped-def]
+    """Показывает расшифровку в Langfuse только при разрешённом логировании."""
+    configured_settings = settings.model_copy(update={"log_user_content": include_user_content})
+    transcriptions = _Transcriptions(["Мне нужна кукуруза два килограмма"])
+    service = _service(
+        configured_settings,
+        SimpleNamespace(audio=SimpleNamespace(transcriptions=transcriptions)),
+    )
+    generation = mocker.Mock()
+    service.tracer = mocker.MagicMock()
+    service.tracer.generation.return_value.__enter__.return_value = generation
+    audio = tmp_path / "voice.ogg"
+    audio.write_bytes(b"audio")
+
+    assert service.transcribe(audio) == "Мне нужна кукуруза два килограмма"
+    assert generation.update.call_args.kwargs["output"] == expected_output
 
 
 def test_voice_transcription_uses_fallback_when_primary_returns_empty(
@@ -556,14 +594,177 @@ def test_short_product_name_without_quantity_skips_ai(settings, text: str) -> No
 
 
 def test_support_failure_phrase_uses_semantic_ai_instead_of_becoming_product(settings) -> None:  # type: ignore[no-untyped-def]
-    """Передаёт жалобу на работу бота в ИИ и не создаёт из неё товар."""
-    parsed = ParsedInputSchema(intent=Intent.SMALL_TALK)
-    service = _service(settings, SimpleNamespace(responses=_Responses(parsed)))
+    """Распознаёт жалобу без зависимости от решения или доступности ИИ."""
+    service = _service(settings, SimpleNamespace(responses=_FailingResponses()))
 
     command = service.parse_text("Доброе, не работает")
 
     assert command.intent is Intent.SMALL_TALK
     assert command.items == []
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Бот опять не работает",
+        "У меня ничего не происходит",
+        "Не могу добавить товар",
+        "Почему не находится кукуруза?",
+    ],
+)
+def test_support_phrases_never_become_draft_items(settings, text: str) -> None:  # type: ignore[no-untyped-def]
+    """Не записывает распространённые сообщения о сбое как названия товаров."""
+    service = _service(settings, SimpleNamespace(responses=_FailingResponses()))
+
+    command = service.parse_text(text)
+
+    assert command.intent is Intent.SMALL_TALK
+    assert command.items == []
+
+
+def test_mixed_latin_and_cyrillic_product_word_is_safely_repaired(settings) -> None:  # type: ignore[no-untyped-def]
+    """Исправляет однозначную смешанную раскладку, не подбирая похожий товар."""
+    service = _service(settings, SimpleNamespace(responses=_FailingResponses()))
+
+    command = service.parse_text("Tomаты")
+
+    assert command.intent is Intent.ADD_ITEMS
+    assert command.items[0].product_query == "Томаты"
+
+
+def test_pure_latin_brand_is_not_rewritten(settings) -> None:  # type: ignore[no-untyped-def]
+    """Не изменяет легальное латинское название товара или бренда."""
+    service = _service(settings, SimpleNamespace(responses=_FailingResponses()))
+
+    command = service.parse_text("Coca-Cola")
+
+    assert command.intent is Intent.ADD_ITEMS
+    assert command.items[0].product_query == "Coca-Cola"
+
+
+def test_conversational_product_leadin_is_removed_by_semantic_parser(settings) -> None:  # type: ignore[no-untyped-def]
+    """Не включает разговорную вводную в название товара для каталога."""
+    parsed = ParsedInputSchema(
+        intent=Intent.ADD_ITEMS,
+        items=[
+            ExtractedItem(
+                product_query="кукуруза",
+                quantity=10,
+                unit="шт",
+                comment="свежая",
+            )
+        ],
+    )
+    responses = _Responses(parsed)
+    service = _service(settings, SimpleNamespace(responses=responses))
+
+    command = service.parse_text("Мне нужна свежая кукуруза 10 штук.")
+
+    assert len(responses.calls) == 1
+    assert command.items[0].product_query == "кукуруза"
+    assert command.items[0].comment == "свежая"
+
+
+def test_conversational_product_leadin_is_not_recovered_as_comment(settings) -> None:  # type: ignore[no-untyped-def]
+    """Не превращает слова «мне нужна» в комментарий к найденному товару."""
+    parsed = ParsedInputSchema(
+        intent=Intent.ADD_ITEMS,
+        items=[
+            ExtractedItem(
+                product_query="свежая кукуруза",
+                quantity=10,
+                unit="шт",
+                source_line="Мне нужна свежая кукуруза 10 штук.",
+            )
+        ],
+    )
+    service = _service(settings, SimpleNamespace(responses=_Responses(parsed)))
+
+    command = service.parse_text("Мне нужна свежая кукуруза 10 штук.")
+
+    assert command.items[0].product_query == "свежая кукуруза"
+    assert command.items[0].comment == ""
+
+
+def test_multiple_spoken_quantities_force_semantic_product_parser(settings) -> None:  # type: ignore[no-untyped-def]
+    """Не склеивает два товара, если первое количество произнесено словами."""
+    text = "Сироп роза пять штук, сироп вунди 10 штук."
+    parsed = ParsedInputSchema(
+        intent=Intent.ADD_ITEMS,
+        items=[
+            ExtractedItem(product_query="Сироп роза", quantity=5, unit="шт"),
+            ExtractedItem(product_query="Сироп вунди", quantity=10, unit="шт"),
+        ],
+    )
+    responses = _Responses(parsed)
+    service = _service(settings, SimpleNamespace(responses=responses))
+
+    command = service.parse_text(text)
+
+    assert len(responses.calls) == 1
+    assert [(item.product_query, item.quantity) for item in command.items] == [
+        ("Сироп роза", 5),
+        ("Сироп вунди", 10),
+    ]
+
+
+def test_comment_scope_resolver_is_limited_to_provided_item_indexes(settings) -> None:  # type: ignore[no-untyped-def]
+    """Передаёт специальному AI-маршруту только ответ и ожидающие товары."""
+    parsed = CommentScopeDecision(
+        action="items",
+        target_item_indexes=[0, 1],
+        confidence=0.99,
+    )
+    responses = _Responses(parsed)
+    service = _service(settings, SimpleNamespace(responses=responses))
+
+    decision = service.resolve_comment_scope(
+        "Это относится к обоим товарам",
+        ["Помидоры", "Огурцы"],
+    )
+
+    assert decision == parsed
+    request = responses.calls[0]
+    assert request["text_format"] is CommentScopeDecision
+    assert '"index": 0' in str(request["input"])
+    assert '"index": 1' in str(request["input"])
+
+
+def test_vague_comment_scope_is_rejected_even_when_ai_is_overconfident(settings) -> None:  # type: ignore[no-untyped-def]
+    """Переспрашивает при расплывчатом ответе вместо выбора всех товаров."""
+    parsed = CommentScopeDecision(
+        action="items",
+        target_item_indexes=[0, 1],
+        confidence=0.95,
+        reason="Вероятно, пользователь имеет в виду все товары.",
+    )
+    service = _service(settings, SimpleNamespace(responses=_Responses(parsed)))
+
+    decision = service.resolve_comment_scope(
+        "Ну, для нужных товаров",
+        ["Сироп Роза", "Сироп Тархун"],
+    )
+
+    assert decision.action == "ambiguous"
+    assert decision.target_item_indexes == []
+    assert decision.confidence < 0.9
+
+
+def test_inflected_product_name_is_a_safe_comment_scope_anchor(settings) -> None:  # type: ignore[no-untyped-def]
+    """Принимает название товара в обычной разговорной падежной форме."""
+    parsed = CommentScopeDecision(
+        action="items",
+        target_item_indexes=[1],
+        confidence=0.99,
+    )
+    service = _service(settings, SimpleNamespace(responses=_Responses(parsed)))
+
+    decision = service.resolve_comment_scope(
+        "Только у тархуна",
+        ["Сироп Роза", "Сироп Тархун"],
+    )
+
+    assert decision == parsed
 
 
 def test_short_product_with_possible_comment_skips_slow_initial_ai(settings) -> None:  # type: ignore[no-untyped-def]

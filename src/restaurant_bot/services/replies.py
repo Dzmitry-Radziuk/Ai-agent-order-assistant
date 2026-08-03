@@ -9,6 +9,7 @@ from restaurant_bot.domain.models import (
     Button,
     CartItem,
     ConversationState,
+    ExtractedItem,
     ItemStatus,
     SessionStage,
 )
@@ -343,6 +344,44 @@ def added_items_question_reply(_state: ConversationState, added_count: int) -> B
             [Button(text="Нет, к черновику", callback_data="v2:back")],
         ],
     )
+
+
+def comment_scope_clarification_reply(
+    items: list[ExtractedItem],
+    comment: str,
+) -> BotReply:
+    """Просит безопасно выбрать товары для неоднозначного комментария."""
+    visible_items = items[:10]
+    lines = [
+        "⚠️ <b>Уточните комментарий</b>",
+        "",
+        f"К каким товарам относится: <i>{escape(comment)}</i>",
+        "",
+    ]
+    lines.extend(
+        f"{index}. {escape(item.product_query)}"
+        for index, item in enumerate(visible_items, start=1)
+    )
+    if len(items) > len(visible_items):
+        lines.append(f"…и ещё {len(items) - len(visible_items)} позиций")
+    lines.extend(
+        [
+            "",
+            "Ответьте обычной фразой, например: <code>для всех товаров</code>, "
+            "<code>только для огурцов</code>, <code>для второго товара</code> или "
+            "<code>для всей заявки</code>.",
+        ]
+    )
+    rows = [[Button(text="Для всех этих товаров", callback_data="v2:comment:all")]]
+    if len(items) > 1:
+        rows.append([Button(text="Только для последнего", callback_data="v2:comment:last")])
+    rows.extend(
+        [
+            [Button(text="Для всей заявки", callback_data="v2:comment:order")],
+            [Button(text="Не добавлять комментарий", callback_data="v2:comment:cancel")],
+        ]
+    )
+    return BotReply(text="\n".join(lines), rows=rows)
 
 
 def no_current_manual_reply() -> BotReply:

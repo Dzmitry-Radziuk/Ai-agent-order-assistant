@@ -142,6 +142,26 @@ def test_misspelled_product_variant_is_not_moved_to_supplier_comment(
     assert item.candidates[0].product_id == "sangria"
 
 
+def test_unknown_product_variant_is_not_moved_to_supplier_comment(
+    settings: Settings,
+) -> None:
+    """Сохраняет неизвестный вкус частью товара, а не комментарием поставщику."""
+    engine = ConversationEngine(settings)
+    catalog = [
+        CatalogProduct(product_id="rose", name="Сироп Роза, 1л", unit="шт"),
+        CatalogProduct(product_id="tarhun", name="Сироп Тархун, 1л", unit="шт"),
+        CatalogProduct(product_id="feijoa", name="Сироп Фейхоа, 1л", unit="шт"),
+    ]
+    item = CartItem(id="syrup", source_query="Сироп Рамбутан", quantity=3, unit="кг")
+
+    engine._match_item(item, catalog)
+
+    assert item.source_query == "Сироп Рамбутан"
+    assert item.comment == ""
+    assert item.catalog_product_id == ""
+    assert item.status is ItemStatus.AMBIGUOUS
+
+
 def test_short_variant_typo_is_preserved_for_safe_candidate_resolution(
     settings: Settings,
 ) -> None:

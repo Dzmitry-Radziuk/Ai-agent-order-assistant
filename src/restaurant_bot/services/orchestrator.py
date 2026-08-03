@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import re
+from collections import Counter
 from contextlib import suppress
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -33,6 +34,7 @@ from restaurant_bot.integrations.cache import CatalogCache, chat_lock
 from restaurant_bot.integrations.google_sheets import GoogleSheetsGateway
 from restaurant_bot.integrations.openai_client import OpenAIService
 from restaurant_bot.integrations.telegram import TELEGRAM_TRANSIENT_ERRORS, TelegramClient
+from restaurant_bot.logging import sanitize_log_value
 from restaurant_bot.repositories.order_events import OrderEventRepository
 from restaurant_bot.repositories.sessions import SessionRepository
 from restaurant_bot.repositories.updates import UpdateRepository
@@ -43,7 +45,7 @@ from restaurant_bot.services.matching import (
     is_safe_catalog_name_equivalent,
 )
 from restaurant_bot.services.parser import infer_intent, parse_quantity_unit
-from restaurant_bot.services.text import normalize_text, normalize_unit
+from restaurant_bot.services.text import clean_text, normalize_text, normalize_unit
 from restaurant_bot.services.venue_registration import (
     RegistrationResult,
     VenueContext,
@@ -137,6 +139,14 @@ class UpdateOrchestrator:
             chat_lock(self.redis, event.chat_id),
         ):
             processing_message_id: int | None = None
+            analytics = {
+                "status": "done",
+                "scenario": "message_delivery",
+                "intent": "replayed_result",
+                "outcome": "success",
+                "failure_reason": "",
+                "input_type": event.input_type.value,
+            }
             try:
                 result = (
                     EngineResult.model_validate(claim.result)
@@ -148,7 +158,17 @@ class UpdateOrchestrator:
                 if registration.handled:
                     self._complete_registration(update_id, event, claim, registration)
                     self._finish(update_id, "done")
-                    trace.update(output={"status": "done", "route": "registration"})
+                    analytics.update(
+                        scenario="registration",
+                        intent="registration",
+                        outcome="success",
+                    )
+                    self._record_request_outcome(
+                        trace,
+                        log,
+                        analytics,
+                        chat_id=event.chat_id,
+                    )
                     return
 
                 venue_context = self.registration.context_for(event)
@@ -161,7 +181,18 @@ class UpdateOrchestrator:
                     )
                     self._complete_unauthorized(update_id, event, claim)
                     self._finish(update_id, "done")
-                    trace.update(output={"status": "done", "route": "unauthorized"})
+                    analytics.update(
+                        scenario="access",
+                        intent="authorization",
+                        outcome="access_denied",
+                        failure_reason="unauthorized",
+                    )
+                    self._record_request_outcome(
+                        trace,
+                        log,
+                        analytics,
+                        chat_id=event.chat_id,
+                    )
                     return
                 self._ensure_venue_session(event, venue_context)
                 logger.info(
@@ -256,6 +287,7 @@ class UpdateOrchestrator:
                     stage_started = perf_counter()
                     previous_stage = state.stage.value
                     previous_cart_count = len(state.cart)
+                    previous_issue_item_id = state.current_issue_item_id
                     previous_trace_id = state.order_trace_id
                     previous_new_order_confirmation = state.pending_new_order_confirmation
                     result = self.engine.handle(event, command, state, catalog)
@@ -283,6 +315,14 @@ class UpdateOrchestrator:
                         previous_cart_count=previous_cart_count,
                         engine_ms=timings["engine_ms"],
                         **self._state_log(result.state),
+                    )
+                    analytics = self._request_analytics(
+                        event,
+                        command,
+                        result.state,
+                        previous_stage=previous_stage,
+                        previous_cart_count=previous_cart_count,
+                        previous_issue_item_id=previous_issue_item_id,
                     )
 
                     if processing_message_id:
@@ -355,7 +395,13 @@ class UpdateOrchestrator:
                 if result.invalidate_catalog:
                     self.catalog.invalidate(result.state.spreadsheet_id)
                 self._finish(update_id, "done")
-                trace.update(output={"status": "done"})
+                self._record_request_outcome(
+                    trace,
+                    log,
+                    analytics,
+                    chat_id=event.chat_id,
+                    venue_code=result.state.venue_code,
+                )
                 log.info(
                     "telegram_update_processed",
                     total_ms=round((perf_counter() - started_at) * 1000),
@@ -363,6 +409,17 @@ class UpdateOrchestrator:
                 )
             except Exception as exc:
                 log.exception("telegram_update_failed", error=str(exc))
+                analytics.update(
+                    status="failed",
+                    outcome="technical_error",
+                    failure_reason=type(exc).__name__,
+                )
+                self._record_request_outcome(
+                    trace,
+                    log,
+                    analytics,
+                    chat_id=event.chat_id,
+                )
                 trace.update(level="ERROR", status_message=str(exc)[:500])
                 self._finish(update_id, "failed", str(exc))
                 delivery_deferred = (
@@ -386,6 +443,192 @@ class UpdateOrchestrator:
                     except Exception:
                         log.exception("telegram_error_reply_failed")
                 raise
+
+    @staticmethod
+    def _scenario_for_intent(intent: Intent) -> str:
+        """Возвращает короткое название пользовательского сценария."""
+        if intent in {Intent.GREETING, Intent.HELP}:
+            return "onboarding"
+        if intent == Intent.ORDER_STATUS:
+            return "order_status"
+        if intent in {
+            Intent.PRODUCT_ADD,
+            Intent.PRODUCT_ADD_RETRY,
+            Intent.PRODUCT_ADD_SKIP,
+            Intent.PRODUCT_ADD_LIST,
+        }:
+            return "product_request"
+        if intent in {Intent.SUBMIT_REQUEST, Intent.SUBMIT_AS_IS}:
+            return "order_submission"
+        if intent in {
+            Intent.SHOW_CART,
+            Intent.SHOW_FINAL_REVIEW,
+            Intent.CHECK_MIN_SUM,
+            Intent.CHOOSE_SUPPLIER_WARNING,
+            Intent.ADD_SUPPLIER_ITEMS,
+        }:
+            return "order_review"
+        if intent in {Intent.THANKS, Intent.SMALL_TALK}:
+            return "conversation"
+        if intent == Intent.UNKNOWN:
+            return "unrecognized_request"
+        return "draft_management"
+
+    def _request_analytics(
+        self,
+        event: TelegramEvent,
+        command: ParsedCommand,
+        state: ConversationState,
+        *,
+        previous_stage: str,
+        previous_cart_count: int,
+        previous_issue_item_id: str,
+    ) -> dict[str, Any]:
+        """Формирует компактный и обезличенный результат пользовательского запроса."""
+        relevant_items: list[CartItem] = []
+        if command.intent == Intent.ADD_ITEMS:
+            relevant_items = state.cart[previous_cart_count:]
+        elif command.intent in {
+            Intent.SUBMIT_REQUEST,
+            Intent.SUBMIT_AS_IS,
+            Intent.SHOW_FINAL_REVIEW,
+            Intent.CHECK_MIN_SUM,
+        }:
+            if current := state.current_item():
+                relevant_items = [current]
+        elif command.intent in {
+            Intent.SELECT_CANDIDATE,
+            Intent.MANUAL_CURRENT,
+            Intent.SEARCH_ALL_SUPPLIERS,
+            Intent.SWITCH_SUPPLIER,
+            Intent.EDIT_QUANTITY,
+            Intent.ENTER_OTHER_QUANTITY,
+            Intent.USE_CATALOG_UNIT,
+            Intent.UNIT_EDIT,
+            Intent.UNIT_OK,
+            Intent.MERGE_DUPLICATE,
+        }:
+            current = state.current_item()
+            if current and current.id == previous_issue_item_id:
+                relevant_items = [current]
+
+        issue_statuses = {
+            ItemStatus.NOT_FOUND,
+            ItemStatus.AMBIGUOUS,
+            ItemStatus.MISSING_QTY,
+            ItemStatus.UNIT_MISMATCH,
+            ItemStatus.DUPLICATE_PENDING,
+            ItemStatus.AI_PENDING,
+        }
+        issue_counts = Counter(
+            item.status.value for item in relevant_items if item.status in issue_statuses
+        )
+        matched_count = sum(item.status == ItemStatus.MATCHED for item in relevant_items)
+        outcome = "success"
+        failure_reason = ""
+
+        if command.comment_clarification:
+            outcome = "needs_clarification"
+            failure_reason = "ambiguous_comment_scope"
+        elif command.intent == Intent.UNKNOWN:
+            outcome = "failed"
+            failure_reason = "unrecognized_request"
+        elif command.intent == Intent.ADD_ITEMS and not command.items:
+            outcome = "failed"
+            failure_reason = "no_items_recognized"
+        elif state.stage == SessionStage.SUBMISSION_FAILED and command.intent in {
+            Intent.SUBMIT_REQUEST,
+            Intent.SUBMIT_AS_IS,
+        }:
+            outcome = "failed"
+            failure_reason = "submission_failed"
+        elif issue_counts:
+            reason_by_status = (
+                (ItemStatus.NOT_FOUND, "product_not_found"),
+                (ItemStatus.AMBIGUOUS, "ambiguous_product"),
+                (ItemStatus.MISSING_QTY, "missing_quantity"),
+                (ItemStatus.UNIT_MISMATCH, "unit_mismatch"),
+                (ItemStatus.DUPLICATE_PENDING, "duplicate_product"),
+                (ItemStatus.AI_PENDING, "ai_match_pending"),
+            )
+            failure_reason = next(
+                reason for status, reason in reason_by_status if issue_counts.get(status.value, 0)
+            )
+            if matched_count:
+                outcome = "partial"
+            elif failure_reason == "product_not_found":
+                outcome = "failed"
+            else:
+                outcome = "needs_clarification"
+
+        analytics: dict[str, Any] = {
+            "status": "done",
+            "scenario": self._scenario_for_intent(command.intent),
+            "intent": command.intent.value,
+            "outcome": outcome,
+            "failure_reason": failure_reason,
+            "input_type": event.input_type.value,
+            "stage_from": previous_stage,
+            "stage_to": state.stage.value,
+            "item_count": len(command.items),
+            "cart_count": len(state.cart),
+            "issue_count": sum(issue_counts.values()),
+            "issue_types": sorted(issue_counts),
+        }
+        if command.confidence is not None:
+            analytics["confidence"] = command.confidence
+        if outcome != "success":
+            request_text = self._analytics_request_text(event, command)
+            if request_text:
+                request_key = (
+                    "user_text" if self.settings.log_user_content else "request_fingerprint"
+                )
+                analytics[request_key] = sanitize_log_value(
+                    request_text,
+                    key="user_text",
+                    include_user_content=self.settings.log_user_content,
+                    max_content_length=self.settings.log_content_max_length,
+                )
+        return analytics
+
+    @staticmethod
+    def _analytics_request_text(event: TelegramEvent, command: ParsedCommand) -> str:
+        """Выбирает наиболее полезную часть неуспешного запроса для диагностики."""
+        if command.comment_clarification:
+            return event.text or command.text or command.comment_clarification
+        if command.target_query:
+            return command.target_query
+        product_queries = [item.product_query for item in command.items if item.product_query]
+        if product_queries:
+            return " | ".join(product_queries)
+        return command.text or event.text
+
+    def _record_request_outcome(
+        self,
+        trace: Any,
+        log: Any,
+        analytics: dict[str, Any],
+        *,
+        chat_id: str = "",
+        venue_code: str = "",
+    ) -> None:
+        """Записывает один итог запроса в обычный лог и текущую трассу Langfuse."""
+        metadata = {
+            key: analytics[key]
+            for key in (
+                "scenario",
+                "intent",
+                "outcome",
+                "failure_reason",
+                "input_type",
+            )
+        }
+        if chat_id:
+            metadata["chat_hash"] = self.tracer.anonymized_chat_id(chat_id)
+        if venue_code:
+            metadata["venue_hash"] = self.tracer.anonymized_chat_id(venue_code)
+        log.info("user_request_outcome", **analytics)
+        trace.update(output=analytics, metadata=metadata)
 
     @staticmethod
     def _command_log(command: ParsedCommand) -> dict[str, Any]:
@@ -564,6 +807,8 @@ class UpdateOrchestrator:
         processing_message_id: int | None = None,
     ) -> ParsedCommand:
         """Разбирает нормализованное событие пользователя."""
+        if event.input_type == InputKind.CALLBACK and state.pending_comment_items:
+            return self._parse_pending_comment_scope(event.callback_data, state)
         if event.input_type == InputKind.CALLBACK:
             return infer_intent("", event.callback_data)
         if event.input_type == InputKind.TEXT:
@@ -665,6 +910,8 @@ class UpdateOrchestrator:
         state: ConversationState,
     ) -> ParsedCommand:
         """Разбирает текст с учётом кнопок, видимых пользователю."""
+        if state.pending_comment_items:
+            return self._parse_pending_comment_scope(text, state)
         callback_data = self._match_visible_action(text, state)
         if callback_data:
             return infer_intent("", callback_data).model_copy(update={"text": text})
@@ -687,6 +934,69 @@ class UpdateOrchestrator:
         if not selected:
             return parsed
         return infer_intent("", selected).model_copy(update={"text": text})
+
+    def _parse_pending_comment_scope(
+        self,
+        text: str,
+        state: ConversationState,
+    ) -> ParsedCommand:
+        """Разбирает ответ на вопрос об области ожидающего комментария."""
+        callback = clean_text(text).casefold()
+        item_count = len(state.pending_comment_items)
+        action = ""
+        target_indexes: list[int] = []
+        confidence = 0.0
+
+        if callback.startswith("v2:comment:"):
+            target = callback.removeprefix("v2:comment:").split(":r", maxsplit=1)[0]
+            confidence = 1.0
+            if target == "all":
+                action = "items"
+                target_indexes = list(range(item_count))
+            elif target == "last" and item_count:
+                action = "items"
+                target_indexes = [item_count - 1]
+            elif target == "order":
+                action = "order"
+            elif target == "cancel":
+                action = "cancel"
+        else:
+            try:
+                decision = self.openai.resolve_comment_scope(
+                    text,
+                    [item.product_query for item in state.pending_comment_items],
+                )
+            except _OPENAI_TRANSIENT_ERRORS as error:
+                logger.warning(
+                    "comment_scope_transport_failed",
+                    error_type=type(error).__name__,
+                )
+                action = "ambiguous"
+            else:
+                action = decision.action
+                target_indexes = decision.target_item_indexes
+                confidence = decision.confidence
+
+        carries_items = action in {"items", "order"}
+        intent = (
+            Intent.ADD_ITEMS
+            if carries_items
+            else Intent.CANCEL
+            if action == "cancel"
+            else Intent.CLARIFY_CURRENT
+        )
+        return ParsedCommand(
+            intent=intent,
+            text=text,
+            items=(
+                [item.model_copy(deep=True) for item in state.pending_comment_items]
+                if carries_items
+                else []
+            ),
+            comment_scope_action=action or "ambiguous",
+            comment_target_indexes=target_indexes,
+            confidence=confidence,
+        )
 
     @staticmethod
     def _match_visible_action(text: str, state: ConversationState) -> str:
@@ -1053,7 +1363,7 @@ class UpdateOrchestrator:
                 and decision.confidence >= _AI_MATCH_SELECT_MIN_CONFIDENCE
                 and not decision.contradictions
             )
-            if can_select:
+            if can_select and selected is not None:
                 self.engine._apply_catalog(item, selected, catalog)
             elif (
                 decision.action == "not_found"
