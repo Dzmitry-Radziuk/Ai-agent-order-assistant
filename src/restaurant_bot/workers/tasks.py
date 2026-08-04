@@ -102,6 +102,20 @@ def send_order_status(  # type: ignore[no-untyped-def]
     )
 
 
+@celery_app.task(
+    bind=True,
+    autoretry_for=(Exception,),
+    retry_backoff=True,
+    retry_jitter=True,
+    retry_kwargs={"max_retries": SUBMISSION_MAX_RETRIES},
+    name="restaurant_bot.submit_review_order",
+)
+def submit_review_order(self, chat_id: str, token: str) -> None:  # type: ignore[no-untyped-def]
+    """Проверяет и отправляет заявку, открытую из deep-link таблицы."""
+    orchestrator, _ = dependencies()
+    orchestrator.order_review.submit(chat_id, token)
+
+
 @celery_app.task(name="restaurant_bot.cleanup_expired_audit_data")
 def cleanup_expired_audit_data() -> dict[str, int]:
     """Удаляет устаревший аудит и завершённые входящие обновления."""

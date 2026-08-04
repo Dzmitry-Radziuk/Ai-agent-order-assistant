@@ -368,6 +368,18 @@ ID таблицы конкретного заведения из `GOOGLE_VENUE_D
 метаданные; исходный текст пользователя, расшифровка голоса и содержимое фото
 не передаются.
 
+Каждое обращение `telegram_update` дополнительно содержит короткий продуктовый
+итог: `scenario`, `intent`, `outcome`, `failure_reason`, тип сообщения, этапы
+до и после обработки, количество позиций и проблем. Основные значения
+`outcome`: `success`, `partial`, `needs_clarification`, `failed` и
+`technical_error`. По ним в Langfuse можно фильтровать успешные сценарии,
+не найденные товары, неоднозначные названия и нераспознанные команды.
+
+Текст сохраняется только для неуспешных запросов и подчиняется общей настройке
+`LOG_USER_CONTENT`: при `false` Langfuse и обычный лог получают только длину и
+SHA-256-отпечаток, при `true` — диагностический текст с действующим ограничением
+длины. Идентификаторы пользователя и заведения передаются только в виде хеша.
+
 Для расчёта стоимости голосовых сообщений в `Project Settings → Model
 Definitions` должны быть добавлены определения:
 
@@ -380,7 +392,7 @@ Definitions` должны быть добавлены определения:
 подключения выполняется без вывода ключей:
 
 ```bash
-docker compose exec -T worker python -c "from restaurant_bot.config import get_settings; from restaurant_bot.observability import Tracer; t=Tracer(get_settings()); print({'enabled': t.settings.langfuse_enabled, 'client_created': t.client is not None, 'auth_ok': t.client.auth_check() if t.client else False})"
+docker compose exec -T worker python -c "from restaurant_bot.config import get_settings; from restaurant_bot.observability import Tracer; s=get_settings(); t=Tracer(s); print({'enabled': s.langfuse_enabled, 'client_created': t.client is not None, 'auth_ok': t.client.auth_check() if t.client else False})"
 ```
 
 ## Переменные GitLab CI/CD

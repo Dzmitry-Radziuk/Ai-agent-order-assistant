@@ -49,6 +49,10 @@ class Intent(StrEnum):
     ENTER_OTHER_QUANTITY = "enter_other_quantity"
     USE_CATALOG_UNIT = "use_catalog_unit"
     SHOW_FINAL_REVIEW = "show_final_review"
+    REVIEW_ORDER = "review_order"
+    REVIEW_REFRESH = "review_refresh"
+    REVIEW_SUBMIT = "review_submit"
+    REVIEW_CANCEL = "review_cancel"
     ORDER_STATUS = "order_status"
     PRODUCT_ADD = "product_add"
     PRODUCT_ADD_RETRY = "product_add_retry"
@@ -346,6 +350,15 @@ class ConversationState(BaseModel):
     order_status_view_active: bool = False
     order_status_page: int = 0
     order_status_order_numbers: list[str] = Field(default_factory=list)
+    review_token: str = ""
+    review_snapshot_hash: str = ""
+    review_venue_code: str = ""
+    review_submission_in_progress: bool = False
+    # ``cart`` is the regular draft review.  ``sheet_link`` is reserved for
+    # the review card opened from a Google Sheets Telegram deep-link.  Keeping
+    # the origin in persisted state prevents a voice command in the regular
+    # draft from being routed to the sheet-review handler.
+    review_mode: str = "cart"
 
     def current_item(self) -> CartItem | None:
         """Возвращает позицию, ожидающую действия пользователя."""
@@ -382,4 +395,5 @@ class EngineResult(BaseModel):
     order_status_selected_index: int | None = None
     order_status_order_number: str = ""
     enqueue_product_add: bool = False
+    enqueue_review_submission: bool = False
     invalidate_catalog: bool = False

@@ -130,9 +130,9 @@
   </header>
   <main>
     <section class="summary" aria-label="Сводка">
-      <div class="metric"><b>33</b><span>сценариев</span></div>
-      <div class="metric"><b>33</b><span>связаны с pytest</span></div>
-      <div class="metric"><b>22</b><span>критических</span></div>
+      <div class="metric"><b>34</b><span>сценариев</span></div>
+      <div class="metric"><b>34</b><span>связаны с pytest</span></div>
+      <div class="metric"><b>23</b><span>критических</span></div>
       <div class="metric"><b>7</b><span>разделов</span></div>
     </section>
 
@@ -1150,6 +1150,45 @@
         </details>
       </article>
 
+      <article id="scenario-SUB-08" class="scenario-card"
+        data-category="submission"
+        data-priority="critical" data-search="sub-08 проверка заявки по ссылке из таблицы проверка и запись заявки нажимает изображение в таблице и подтверждает текущую заявку. открывает актуальный состав заявки, группирует позиции по поставщикам, показывает комментарии, а перед подтверждением повторно сверяет таблицу. голосовые команды вроде «проверь», «покажи ещё раз», «отправляй» и «не отправляй» проходят через общий ai-маршрут. пользователь подключён к заведению и видит только заявки своего заведения. заявка поставщик сумма статус дата поставки https://t.me/имя_бота?start=review_6461w6 ✅ отправить заявку ↩️ отмена">
+        <div class="card-top">
+          <span class="scenario-id">SUB-08</span>
+          <span class="badges">
+            <span class="status status-live">Работает сейчас</span>
+            <span class="priority priority-critical">Критический</span>
+          </span>
+        </div>
+        <h3>Проверка заявки по ссылке из таблицы</h3>
+        <p class="category-label">Проверка и запись заявки</p>
+        <div class="channels"><span>Кнопка</span><span>Google Sheets</span></div>
+        <dl>
+          <div><dt>Перед началом</dt><dd>Пользователь привязан к заведению, а в листе «Заявка» есть товары с количеством.</dd></div>
+          <div><dt>Пользователь</dt><dd>Нажимает изображение в таблице и подтверждает текущую заявку.</dd></div>
+          <div><dt>Бот</dt><dd>Открывает актуальный состав заявки, группирует позиции по поставщикам, показывает комментарии, а перед подтверждением повторно сверяет таблицу. Голосовые команды вроде «проверь», «покажи ещё раз», «отправляй» и «не отправляй» проходят через общий AI-маршрут.</dd></div>
+          <div class="result"><dt>Итог</dt><dd>При выключенной отправке Web App не вызывается: таблица не изменяется, а пользователь получает понятное предупреждение.</dd></div>
+        </dl>
+        <details>
+          <summary>Что важно</summary>
+          <dl class="contract">
+            <div><dt>Доступ</dt><dd>Пользователь подключён к заведению и видит только заявки своего заведения.</dd></div>
+            <div><dt>Распознаём</dt><dd>заявка, поставщик, сумма, статус, дата поставки</dd></div>
+            <div><dt>Подтверждение</dt><dd>Отправка возможна только после явного нажатия «✅ Отправить заявку».</dd></div>
+            <div><dt>Что изменится</dt><dd>Снимок заявки хранится с одноразовым токеном и отпечатком; старая кнопка или изменившаяся таблица не отправляют прежний состав.</dd></div>
+            <div><dt>Если произошла ошибка</dt><dd>При изменении таблицы бот показывает обновлённый список и просит проверить его заново.</dd></div>
+          </dl>
+        </details>
+        <details>
+          <summary>Примеры фраз</summary>
+          <ul><li>«https://t.me/имя_бота?start=review_6461W6»</li><li>«✅ Отправить заявку»</li><li>«↩️ Отмена»</li></ul>
+        </details>
+        <details>
+          <summary>Связанные pytest-тесты · 8</summary>
+          <ul class="tests"><li><a href="../../tests/input/test_input_routing.py">tests/input/test_input_routing.py</a><span>test_review_deep_link_is_a_dedicated_command</span></li><li><a href="../../tests/input/test_input_routing.py">tests/input/test_input_routing.py</a><span>test_review_callbacks_keep_the_token_and_revision</span></li><li><a href="../../tests/input/test_input_routing.py">tests/input/test_input_routing.py</a><span>test_review_confirmation_stays_local_when_submission_is_disabled</span></li><li><a href="../../tests/input/test_input_routing.py">tests/input/test_input_routing.py</a><span>test_review_voice_maps_arbitrary_confirmation_through_visible_action_ai</span></li><li><a href="../../tests/input/test_input_routing.py">tests/input/test_input_routing.py</a><span>test_review_voice_maps_negative_and_refresh_phrases_without_product_addition</span></li><li><a href="../../tests/review/test_order_review.py">tests/review/test_order_review.py</a><span>test_snapshot_reads_every_department_quantity_and_ignores_empty_rows</span></li><li><a href="../../tests/review/test_order_review.py">tests/review/test_order_review.py</a><span>test_preview_lists_each_product_and_has_confirmation_buttons</span></li><li><a href="../../tests/review/test_order_review.py">tests/review/test_order_review.py</a><span>test_preview_groups_products_by_supplier</span></li></ul>
+        </details>
+      </article>
+
       <article id="scenario-SAF-01" class="scenario-card"
         data-category="safety"
         data-priority="critical" data-search="saf-01 «не добавляй» не добавляет товар защита от неверного действия отказывается от текущей позиции естественной фразой. пропускает только текущую позицию и не воспринимает отрицание как подтверждение. те же права, что у текущего экрана; защитная проверка не расширяет доступ. отрицание текущее действие версия кнопки состояние диалога не добавляй эту позицию убери этот товар нет, это не нужно">
@@ -1464,7 +1503,7 @@
     </section>
   </main>
   <footer>Локальный каталог · версия 2.0 · работает без интернета</footer>
-  <script id="catalog-meta" type="application/json">{"version": "2.0", "total": 33, "linked": 33}</script>
+  <script id="catalog-meta" type="application/json">{"version": "2.0", "total": 34, "linked": 34}</script>
   <script>
     (() => {
       const cards = [...document.querySelectorAll(".scenario-card")];

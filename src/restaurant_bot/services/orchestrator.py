@@ -19,6 +19,7 @@ from restaurant_bot.config import Settings
 from restaurant_bot.db import SessionLocal
 from restaurant_bot.domain.models import (
     BotReply,
+    Button,
     CartItem,
     CatalogProduct,
     ConversationState,
@@ -44,6 +45,7 @@ from restaurant_bot.services.matching import (
     is_broad_category_query,
     is_safe_catalog_name_equivalent,
 )
+from restaurant_bot.services.order_review import OrderReviewService
 from restaurant_bot.services.parser import infer_intent, parse_quantity_unit
 from restaurant_bot.services.text import clean_text, normalize_text, normalize_unit
 from restaurant_bot.services.venue_registration import (
@@ -57,6 +59,7 @@ _OPENAI_TRANSIENT_ERRORS = (APIConnectionError, APITimeoutError, RateLimitError)
 _AI_MATCH_SELECT_MIN_CONFIDENCE = 0.90
 _AI_MATCH_NOT_FOUND_MIN_CONFIDENCE = 0.80
 _AI_MATCH_MIN_SCORE = 40.0
+_SHEET_REVIEW_MODE = "sheet_link"
 
 
 def _catalog_match_evidence(item: CartItem) -> str:
@@ -96,6 +99,7 @@ class UpdateOrchestrator:
         self.engine = ConversationEngine(settings)
         self.tracer = openai_service.tracer
         self.registration = VenueRegistrationService(settings, redis, sheets)
+        self.order_review = OrderReviewService(settings, redis, telegram, sheets)
 
     def process(self, update_id: int) -> None:
         """Обрабатывает одно обновление Telegram целиком."""
@@ -171,7 +175,15 @@ class UpdateOrchestrator:
                     )
                     return
 
-                venue_context = self.registration.context_for(event)
+                venue_context = (
+                    self.registration.context_for_identity(
+                        event.telegram_user_id,
+                        event.chat_id,
+                        force_refresh=True,
+                    )
+                    if self._is_review_event(event)
+                    else self.registration.context_for(event)
+                )
                 if venue_context is None:
                     logger.info(
                         "unauthorized_business_request",
@@ -265,16 +277,25 @@ class UpdateOrchestrator:
                             self._all_suppliers_processing_reply(),
                         )
                     stage_started = perf_counter()
-                    catalog_needed = self._needs_catalog(command)
-                    fresh_catalog_required = self._requires_fresh_catalog(command)
-                    if catalog_needed:
-                        catalog = (
+                    review_command = command.intent in {
+                        Intent.REVIEW_ORDER,
+                        Intent.REVIEW_REFRESH,
+                        Intent.REVIEW_SUBMIT,
+                        Intent.REVIEW_CANCEL,
+                    }
+                    catalog_needed = False if review_command else self._needs_catalog(command)
+                    fresh_catalog_required = (
+                        False if review_command else self._requires_fresh_catalog(command)
+                    )
+                    catalog = (
+                        (
                             self.catalog.get(state.spreadsheet_id, force_refresh=True)
                             if fresh_catalog_required
                             else self.catalog.get(state.spreadsheet_id)
                         )
-                    else:
-                        catalog = []
+                        if catalog_needed
+                        else []
+                    )
                     timings["catalog_ms"] = round((perf_counter() - stage_started) * 1000)
                     log.info(
                         "catalog_ready",
@@ -290,10 +311,16 @@ class UpdateOrchestrator:
                     previous_issue_item_id = state.current_issue_item_id
                     previous_trace_id = state.order_trace_id
                     previous_new_order_confirmation = state.pending_new_order_confirmation
-                    result = self.engine.handle(event, command, state, catalog)
+                    result = (
+                        self._handle_review_command(event, state, command)
+                        if review_command
+                        else self.engine.handle(event, command, state, catalog)
+                    )
 
                     # AI работает за пределами DB-транзакции. Он может выбрать только ID из shortlist.
-                    result = self._resolve_ai_pending(event, result, catalog)
+                    if not review_command:
+                        result = self._resolve_ai_pending(event, result, catalog)
+                        self._leave_sheet_review_on_regular_command(command, result.state)
                     trace_started = bool(result.state.cart and not result.state.order_trace_id)
                     if trace_started:
                         result.state.order_trace_id = str(uuid4())
@@ -383,6 +410,7 @@ class UpdateOrchestrator:
                             (result.enqueue_submission, "submit_order"),
                             (result.enqueue_order_status, "send_order_status"),
                             (result.enqueue_product_add, "submit_product_add"),
+                            (result.enqueue_review_submission, "submit_review_order"),
                         )
                         if enabled
                     ]
@@ -445,12 +473,193 @@ class UpdateOrchestrator:
                 raise
 
     @staticmethod
+    def _leave_sheet_review_on_regular_command(
+        command: ParsedCommand,
+        state: ConversationState,
+    ) -> None:
+        """Отключает режим карточки из таблицы после обычного действия в черновике.
+
+        Неизвестная или явно нераспознанная фраза не должна уничтожать
+        контекст карточки: пользователь может повторить голосовую команду.
+        Любое распознанное обычное действие, напротив, возвращает диалог в
+        стандартный режим черновика и удаляет одноразовые данные карточки.
+        """
+        if state.review_mode != _SHEET_REVIEW_MODE or command.intent == Intent.UNKNOWN:
+            return
+        state.review_mode = "cart"
+        state.review_token = ""
+        state.review_snapshot_hash = ""
+        state.review_venue_code = ""
+        state.review_submission_in_progress = False
+
+    def _handle_review_command(
+        self,
+        event: TelegramEvent,
+        state: ConversationState,
+        command: ParsedCommand,
+    ) -> EngineResult:
+        """Обрабатывает просмотр заявки из deep-link без обращения к n8n."""
+        if command.intent in {Intent.REVIEW_ORDER, Intent.REVIEW_REFRESH}:
+            requested_code = normalize_text(command.callback_target or command.target_query).upper()
+            if requested_code and requested_code != normalize_text(state.venue_code).upper():
+                return EngineResult(
+                    state=state,
+                    reply=BotReply(
+                        text=(
+                            "⛔ <b>Ссылка относится к другому заведению</b>\n\n"
+                            "Откройте ссылку из таблицы своего заведения."
+                        )
+                    ),
+                )
+            context = VenueContext(
+                venue_code=state.venue_code,
+                venue_name=state.venue_name,
+                spreadsheet_id=state.spreadsheet_id,
+                spreadsheet_url=state.spreadsheet_url,
+                telegram_user_id=event.telegram_user_id or event.chat_id,
+                telegram_chat_id=event.chat_id,
+            )
+            snapshot = self.order_review.snapshot(context)
+            token = self.order_review.new_token()
+            state.review_token = token
+            state.review_snapshot_hash = snapshot.fingerprint
+            state.review_venue_code = state.venue_code
+            state.review_submission_in_progress = False
+            state.review_mode = _SHEET_REVIEW_MODE
+            state.stage = SessionStage.REVIEW
+            state.status = "review"
+            return EngineResult(
+                state=state,
+                reply=self.order_review.preview_reply(
+                    snapshot,
+                    token,
+                    edit_message_id=event.callback_message_id,
+                ),
+            )
+
+        token = command.callback_target
+        if (
+            not token
+            or token != state.review_token
+            or (
+                command.callback_revision is not None
+                and command.callback_revision != state.ui_revision
+            )
+        ):
+            return EngineResult(state=state, reply=self._review_stale_reply(state))
+        if command.intent == Intent.REVIEW_CANCEL:
+            state.review_token = ""
+            state.review_snapshot_hash = ""
+            state.review_venue_code = ""
+            state.review_submission_in_progress = False
+            state.review_mode = "cart"
+            state.stage = SessionStage.COLLECTING if state.cart else SessionStage.SUBMITTED
+            state.status = "collecting" if state.cart else "submitted"
+            return EngineResult(
+                state=state,
+                reply=BotReply(
+                    text="Отправка заявки отменена.",
+                    rows=[[Button(text="📦 Показать черновик", callback_data="v2:back")]],
+                ),
+            )
+        if command.intent == Intent.REVIEW_SUBMIT:
+            if state.review_submission_in_progress:
+                return EngineResult(
+                    state=state,
+                    reply=BotReply(text="⏳ Заявка уже проверяется. Подождите немного."),
+                )
+            context = VenueContext(
+                venue_code=state.venue_code,
+                venue_name=state.venue_name,
+                spreadsheet_id=state.spreadsheet_id,
+                spreadsheet_url=state.spreadsheet_url,
+                telegram_user_id=event.telegram_user_id or event.chat_id,
+                telegram_chat_id=event.chat_id,
+            )
+            current = self.order_review.snapshot(context)
+            if current.fingerprint != state.review_snapshot_hash:
+                refreshed_token = self.order_review.new_token()
+                state.review_token = refreshed_token
+                state.review_snapshot_hash = current.fingerprint
+                state.review_submission_in_progress = False
+                state.stage = SessionStage.REVIEW
+                state.status = "review"
+                return EngineResult(
+                    state=state,
+                    reply=self.order_review.preview_reply(
+                        current,
+                        refreshed_token,
+                        changed=True,
+                    ),
+                )
+            if not self.settings.google_order_submission_enabled:
+                state.review_submission_in_progress = False
+                return EngineResult(
+                    state=state,
+                    reply=BotReply(
+                        text=(
+                            "ℹ️ <b>Отправка пока отключена</b>\n\n"
+                            "Заявка проверена, но поставщикам ничего не отправлено. "
+                            "Данные таблицы не изменены."
+                        ),
+                        rows=[
+                            [
+                                Button(
+                                    text="🔄 Обновить заявку",
+                                    callback_data=f"v2:review:{state.review_venue_code}",
+                                )
+                            ],
+                            [Button(text="↩️ Закрыть", callback_data=f"v2:review_cancel:{token}")],
+                        ],
+                    ),
+                )
+            state.review_submission_in_progress = True
+            state.stage = SessionStage.SUBMITTING
+            state.status = "submitting"
+            return EngineResult(
+                state=state,
+                reply=BotReply(text="⏳ Проверяю актуальную заявку перед отправкой…"),
+                enqueue_review_submission=True,
+            )
+        return EngineResult(state=state, reply=self._review_stale_reply(state))
+
+    @staticmethod
+    def _is_review_event(event: TelegramEvent) -> bool:
+        """Определяет, относится ли обновление к deep-link или карточке проверки."""
+        return event.callback_data.startswith("v2:review") or bool(
+            re.fullmatch(
+                r"/start(?:@[A-Za-z0-9_]+)?\s+review_[A-Za-zА-ЯЁ0-9]{4,32}",
+                clean_text(event.text),
+                flags=re.IGNORECASE,
+            )
+        )
+
+    @staticmethod
+    def _review_stale_reply(state: ConversationState) -> BotReply:
+        """Сообщает, что старая кнопка проверки больше не действует."""
+        code = state.review_venue_code or state.venue_code
+        rows = (
+            [[Button(text="🔄 Обновить заявку", callback_data=f"v2:review:{code}")]] if code else []
+        )
+        return BotReply(
+            text="⚠️ Эта карточка заявки устарела. Обновите заявку и проверьте её ещё раз.",
+            rows=rows,
+        )
+
+    @staticmethod
     def _scenario_for_intent(intent: Intent) -> str:
         """Возвращает короткое название пользовательского сценария."""
         if intent in {Intent.GREETING, Intent.HELP}:
             return "onboarding"
         if intent == Intent.ORDER_STATUS:
             return "order_status"
+        if intent in {
+            Intent.REVIEW_ORDER,
+            Intent.REVIEW_REFRESH,
+            Intent.REVIEW_SUBMIT,
+            Intent.REVIEW_CANCEL,
+        }:
+            return "order_review"
         if intent in {
             Intent.PRODUCT_ADD,
             Intent.PRODUCT_ADD_RETRY,
@@ -683,6 +892,7 @@ class UpdateOrchestrator:
             ],
             "product_add_request_count": len(state.product_add_requests),
             "has_pending_submission": state.pending_submission is not None,
+            "review_mode": state.review_mode,
         }
 
     @staticmethod
@@ -807,6 +1017,8 @@ class UpdateOrchestrator:
         processing_message_id: int | None = None,
     ) -> ParsedCommand:
         """Разбирает нормализованное событие пользователя."""
+        if event.input_type == InputKind.CALLBACK and event.callback_data.startswith("v2:review"):
+            return infer_intent("", event.callback_data)
         if event.input_type == InputKind.CALLBACK and state.pending_comment_items:
             return self._parse_pending_comment_scope(event.callback_data, state)
         if event.input_type == InputKind.CALLBACK:
@@ -910,6 +1122,17 @@ class UpdateOrchestrator:
         state: ConversationState,
     ) -> ParsedCommand:
         """Разбирает текст с учётом кнопок, видимых пользователю."""
+        review_match = re.fullmatch(
+            r"/start(?:@[A-Za-z0-9_]+)?\s+review_([A-Za-zА-ЯЁ0-9]{4,32})",
+            clean_text(text),
+            flags=re.IGNORECASE,
+        )
+        if review_match:
+            return ParsedCommand(
+                intent=Intent.REVIEW_ORDER,
+                text=text,
+                callback_target=review_match.group(1),
+            )
         if state.pending_comment_items:
             return self._parse_pending_comment_scope(text, state)
         callback_data = self._match_visible_action(text, state)
@@ -917,6 +1140,9 @@ class UpdateOrchestrator:
             return infer_intent("", callback_data).model_copy(update={"text": text})
 
         parsed = self.openai.parse_text(text)
+        review_command = self._parse_review_voice_command(text, parsed, state)
+        if review_command is not None:
+            return review_command
         if not self._needs_visible_action_ai(text, parsed, state):
             return parsed
         try:
@@ -933,6 +1159,74 @@ class UpdateOrchestrator:
             return ParsedCommand(intent=Intent.UNKNOWN, text=text)
         if not selected:
             return parsed
+        return infer_intent("", selected).model_copy(update={"text": text})
+
+    def _parse_review_voice_command(
+        self,
+        text: str,
+        parsed: ParsedCommand,
+        state: ConversationState,
+    ) -> ParsedCommand | None:
+        """Преобразует произвольную фразу на карточке заявки в безопасное действие."""
+        if state.stage != SessionStage.REVIEW or state.review_mode != _SHEET_REVIEW_MODE:
+            return None
+
+        direct_mapping = {
+            Intent.REVIEW_ORDER: Intent.REVIEW_ORDER,
+            Intent.REVIEW_REFRESH: Intent.REVIEW_REFRESH,
+            Intent.REVIEW_SUBMIT: Intent.REVIEW_SUBMIT,
+            Intent.REVIEW_CANCEL: Intent.REVIEW_CANCEL,
+            Intent.SUBMIT_REQUEST: Intent.REVIEW_SUBMIT,
+            Intent.SUBMIT_AS_IS: Intent.REVIEW_SUBMIT,
+            Intent.CONFIRM: Intent.REVIEW_SUBMIT,
+            Intent.CANCEL: Intent.REVIEW_CANCEL,
+            Intent.BACK: Intent.REVIEW_CANCEL,
+            Intent.CLEAR_CART: Intent.REVIEW_CANCEL,
+            Intent.SHOW_CART: Intent.REVIEW_REFRESH,
+            Intent.SHOW_FINAL_REVIEW: Intent.REVIEW_REFRESH,
+        }
+        mapped_intent = direct_mapping.get(parsed.intent)
+        if mapped_intent is not None:
+            return ParsedCommand(intent=mapped_intent, text=text)
+
+        normalized = normalize_text(text)
+        # A one-letter transcription is not a reliable
+        # navigation command.  Do not let the visible-action model turn noise
+        # into an accidental send/cancel action.
+        words = re.findall(r"[a-zа-яё0-9]+", normalized, flags=re.IGNORECASE)
+        if not any(len(word) >= 2 for word in words):
+            return ParsedCommand(intent=Intent.UNKNOWN, text=text)
+        if re.search(
+            r"\b(?:проверь|проверим|проверить|покажи|показать|открой|открыть|обнови|обновить|посмотрим)\w*\b",
+            normalized,
+        ) and not re.search(
+            r"\b(?:не\s+отправ|не\s+переда|отправ|переда|подтверд|отмен)\w*\b",
+            normalized,
+        ):
+            return ParsedCommand(intent=Intent.REVIEW_REFRESH, text=text)
+
+        # A phrase containing a real product and quantity must remain an item
+        # operation; it must never be mistaken for a confirmation of sending.
+        if parsed.intent == Intent.ADD_ITEMS and any(
+            item.quantity is not None for item in parsed.items
+        ):
+            return None
+        if not state.visible_actions:
+            return None
+        try:
+            selected = self.openai.choose_visible_action(
+                text,
+                state.ui_message_text,
+                state.visible_actions,
+            )
+        except _OPENAI_TRANSIENT_ERRORS as error:
+            logger.warning(
+                "review_voice_action_transport_failed",
+                error_type=type(error).__name__,
+            )
+            return None
+        if not selected:
+            return None
         return infer_intent("", selected).model_copy(update={"text": text})
 
     def _parse_pending_comment_scope(
@@ -1048,6 +1342,8 @@ class UpdateOrchestrator:
         state: ConversationState,
     ) -> bool:
         """Определяет необходимость смыслового выбора видимой кнопки."""
+        if state.stage == SessionStage.REVIEW and state.review_mode == _SHEET_REVIEW_MODE:
+            return False
         if not state.visible_actions or parsed.intent not in {Intent.UNKNOWN, Intent.ADD_ITEMS}:
             return False
         if parsed.intent == Intent.ADD_ITEMS and any(
@@ -1556,6 +1852,10 @@ class UpdateOrchestrator:
             from restaurant_bot.workers.tasks import submit_product_add
 
             submit_product_add.delay(chat_id)
+        if result.enqueue_review_submission:
+            from restaurant_bot.workers.tasks import submit_review_order
+
+            submit_review_order.delay(chat_id, result.state.review_token)
 
     def _finish(self, update_id: int, status: str, error: str | None = None) -> None:
         """Помечает обновление успешно обработанным."""

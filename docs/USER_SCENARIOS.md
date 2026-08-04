@@ -38,9 +38,9 @@
 
 | Показатель | Значение |
 |---|---:|
-| Всего сценариев | 33 |
-| Связаны с pytest | 33 |
-| Критические | 22 |
+| Всего сценариев | 34 |
+| Связаны с pytest | 34 |
+| Критические | 23 |
 | Важные | 8 |
 | Защитные | 3 |
 
@@ -1158,6 +1158,47 @@ stateDiagram-v2
 - [`tests/submission/test_google_sheets_mapping.py`](../tests/submission/test_google_sheets_mapping.py) → `test_latest_order_statuses_filter_foreign_venue_before_selecting_order`
 - [`tests/telegram/test_telegram_commands.py`](../tests/telegram/test_telegram_commands.py) → `test_voice_can_open_order_by_spoken_position`
 - [`tests/telegram/test_telegram_commands.py`](../tests/telegram/test_telegram_commands.py) → `test_voice_can_open_next_order_status_page`
+
+#### SUB-08 · Проверка заявки по ссылке из таблицы
+
+**Приоритет:** Критический<br>
+**Статус:** Работает сейчас<br>
+**Канал:** Кнопка, Google Sheets<br>
+**Предусловие:** Пользователь привязан к заведению, а в листе «Заявка» есть товары с количеством.
+
+**Действие пользователя:** Нажимает изображение в таблице и подтверждает текущую заявку.
+
+**Ответ бота:** Открывает актуальный состав заявки, группирует позиции по поставщикам, показывает комментарии, а перед подтверждением повторно сверяет таблицу. Голосовые команды вроде «проверь», «покажи ещё раз», «отправляй» и «не отправляй» проходят через общий AI-маршрут.
+
+**Результат:** При выключенной отправке Web App не вызывается: таблица не изменяется, а пользователь получает понятное предупреждение.
+
+<details>
+<summary><strong>Что важно для системы</strong></summary>
+
+- **Доступ:** Пользователь подключён к заведению и видит только заявки своего заведения.
+- **Распознаваем:** заявка, поставщик, сумма, статус, дата поставки
+- **Подтверждение:** Отправка возможна только после явного нажатия «✅ Отправить заявку».
+- **Изменение состояния:** Снимок заявки хранится с одноразовым токеном и отпечатком; старая кнопка или изменившаяся таблица не отправляют прежний состав.
+- **Восстановление:** При изменении таблицы бот показывает обновлённый список и просит проверить его заново.
+
+</details>
+
+**Примеры фраз:**
+
+- «https://t.me/имя_бота?start=review_6461W6»
+- «✅ Отправить заявку»
+- «↩️ Отмена»
+
+**Автоматическая проверка:**
+
+- [`tests/input/test_input_routing.py`](../tests/input/test_input_routing.py) → `test_review_deep_link_is_a_dedicated_command`
+- [`tests/input/test_input_routing.py`](../tests/input/test_input_routing.py) → `test_review_callbacks_keep_the_token_and_revision`
+- [`tests/input/test_input_routing.py`](../tests/input/test_input_routing.py) → `test_review_confirmation_stays_local_when_submission_is_disabled`
+- [`tests/input/test_input_routing.py`](../tests/input/test_input_routing.py) → `test_review_voice_maps_arbitrary_confirmation_through_visible_action_ai`
+- [`tests/input/test_input_routing.py`](../tests/input/test_input_routing.py) → `test_review_voice_maps_negative_and_refresh_phrases_without_product_addition`
+- [`tests/review/test_order_review.py`](../tests/review/test_order_review.py) → `test_snapshot_reads_every_department_quantity_and_ignores_empty_rows`
+- [`tests/review/test_order_review.py`](../tests/review/test_order_review.py) → `test_preview_lists_each_product_and_has_confirmation_buttons`
+- [`tests/review/test_order_review.py`](../tests/review/test_order_review.py) → `test_preview_groups_products_by_supplier`
 
 ### Защита от неверного действия
 

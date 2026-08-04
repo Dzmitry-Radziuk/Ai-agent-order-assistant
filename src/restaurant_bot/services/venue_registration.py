@@ -735,7 +735,10 @@ class VenueRegistrationService:
         text = clean_text(event.text)
         match = re.fullmatch(r"/start(?:@[A-Za-z0-9_]+)?(?:\s+(.+))?", text, re.I)
         if match:
-            return "start", clean_text(match.group(1))
+            argument = clean_text(match.group(1))
+            if argument.casefold().startswith("review_"):
+                return "", ""
+            return "start", argument
         match = re.fullmatch(r"/code(?:@[A-Za-z0-9_]+)?(?:\s+(.+))?", text, re.I)
         if match:
             return "code", clean_text(match.group(1))
