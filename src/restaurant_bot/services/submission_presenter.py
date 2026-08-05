@@ -279,11 +279,31 @@ def build_order_status_detail_reply(
     *,
     page: int,
     selected_index: int,
+    detail_page: int = 0,
+    detail_page_count: int = 1,
 ) -> BotReply:
     """Добавляет к подробной заявке возврат к списку и обновление."""
-    return BotReply(
-        text=text,
-        rows=[
+    rows: list[list[Button]] = []
+    if detail_page_count > 1:
+        navigation: list[Button] = []
+        if detail_page > 0:
+            navigation.append(
+                Button(
+                    text="← Назад",
+                    callback_data=f"v2:orderitems:{selected_index}:{detail_page - 1}",
+                )
+            )
+        if detail_page < detail_page_count - 1:
+            navigation.append(
+                Button(
+                    text="Далее →",
+                    callback_data=f"v2:orderitems:{selected_index}:{detail_page + 1}",
+                )
+            )
+        if navigation:
+            rows.append(navigation)
+    rows.extend(
+        [
             [
                 Button(
                     text="Обновить",
@@ -296,7 +316,11 @@ def build_order_status_detail_reply(
                     callback_data=f"v2:orderspage:{page}",
                 )
             ],
-        ],
+        ]
+    )
+    return BotReply(
+        text=text,
+        rows=rows,
     )
 
 
@@ -388,8 +412,14 @@ def _append_legacy_order_status(lines: list[str], order_rows: list[dict[str, Any
         lines.append(product_line)
 
 
-def build_order_status_text(rows: list[dict[str, Any]], state: Any) -> str:
-    """Формирует карточку статусов заявок."""
+_STATUS_DETAIL_PRODUCTS_PER_BLOCK = 8
+_STATUS_DETAIL_BLOCKS_PER_PAGE = 3
+
+
+def _tracked_status_groups(
+    rows: list[dict[str, Any]], state: Any
+) -> tuple[list[str], list[tuple[str, list[dict[str, Any]]]]]:
+    """Return tracked order numbers and rows belonging to them."""
     tracked = list(
         dict.fromkeys(
             [str(getattr(state, "last_order_no", "") or "").strip()]
@@ -397,20 +427,197 @@ def build_order_status_text(rows: list[dict[str, Any]], state: Any) -> str:
         )
     )
     tracked = [value for value in tracked if value][:10]
-    if not tracked:
-        return "<b>Мои заявки</b>\n\nУ вас пока нет заявок, отправленных через этого бота."
     groups: dict[str, list[dict[str, Any]]] = {order_no: [] for order_no in tracked}
     for row in rows:
         order_no = _status_value(row, "№ Заявки", "Номер заявки", "order_no")
         if order_no in groups:
             groups[order_no].append(row)
-    shown = [(order_no, group) for order_no, group in groups.items() if group]
+    return tracked, [(order_no, group) for order_no, group in groups.items() if group]
+
+
+def _aggregated_detail_blocks(
+    order_no: str,
+    order_rows: list[dict[str, Any]],
+    *,
+    display_index: int = 1,
+) -> list[list[str]]:
+    """Split supplier rows and long product lists into safe Telegram-sized blocks."""
+    blocks: list[list[str]] = [[f"{display_index}. <b>Заявка {escape(order_no)}</b>"]]
+    for row in order_rows:
+        supplier = _status_value(
+            row,
+            "Условное название поставщика",
+            "Основной поставщик (Условное наз-ие)",
+            "supplier",
+        )
+        stage = _status_value(row, "Стадия", "Статус", "status", default="Ожидает обработки")
+        delivery = _format_delivery_date(
+            _status_value(
+                row, "Дата поставки", "Дата доставки", "Ожидаемая дата доставки", "delivery_date"
+            )
+        )
+        product_list = _status_value(row, "Список товаров", "Товары", "product_list")
+        manager = _status_value(row, "ФИО менеджера Поставщика", "Менеджер", "manager")
+        phone = _status_value(row, "Телефон", "Телефон поставщика", "phone")
+        product_lines = _escape_multiline(product_list).splitlines() or ["—"]
+        for chunk_index in range(0, len(product_lines), _STATUS_DETAIL_PRODUCTS_PER_BLOCK):
+            chunk = product_lines[chunk_index : chunk_index + _STATUS_DETAIL_PRODUCTS_PER_BLOCK]
+            section: list[str] = []
+            if chunk_index == 0:
+                if supplier:
+                    section.append(f"Поставщик: <b>{escape(supplier)}</b>")
+                section.append(f"Статус: <b>{escape(stage)}</b>")
+                if delivery:
+                    section.append(f"Дата поставки: <b>{escape(delivery)}</b>")
+                section.append("Товары:")
+            else:
+                section.append("Товары (продолжение):")
+            section.extend(chunk)
+            if chunk_index + _STATUS_DETAIL_PRODUCTS_PER_BLOCK >= len(product_lines) and (
+                manager or phone
+            ):
+                contact = ", ".join(escape(value) for value in (manager, phone) if value)
+                section.append(f"Контакт поставщика: {contact}")
+            blocks.append(section)
+    return blocks
+
+
+def _legacy_detail_blocks(
+    order_no: str,
+    order_rows: list[dict[str, Any]],
+    *,
+    display_index: int = 1,
+) -> list[list[str]]:
+    """Split legacy one-product-per-row history into blocks."""
+    details = [
+        (
+            _status_value(
+                row,
+                "Наименование у поставщика",
+                "Наименование у Поставщика",
+                "product_name",
+                default="Товар",
+            ),
+            _status_value(row, "Стадия", "Статус", "status", default="Ожидает обработки"),
+            _format_delivery_date(
+                _status_value(
+                    row,
+                    "Дата доставки",
+                    "Ожидаемая дата доставки",
+                    "Дата поставки",
+                    "delivery_date",
+                )
+            ),
+        )
+        for row in order_rows
+    ]
+    stages = list(dict.fromkeys(stage for _, stage, _ in details if stage))
+    deliveries = list(dict.fromkeys(delivery for _, _, delivery in details if delivery))
+    blocks: list[list[str]] = []
+    for offset in range(0, len(details), _STATUS_DETAIL_PRODUCTS_PER_BLOCK):
+        chunk = details[offset : offset + _STATUS_DETAIL_PRODUCTS_PER_BLOCK]
+        section: list[str] = []
+        if offset == 0:
+            section.append(f"{display_index}. <b>Заявка {escape(order_no)}</b>")
+            if len(stages) == 1:
+                section.append(f"Статус: <b>{escape(stages[0])}</b>")
+            if len(deliveries) == 1:
+                section.append(f"Дата поставки: <b>{escape(deliveries[0])}</b>")
+            section.append("Товары:")
+        else:
+            section.append("Товары (продолжение):")
+        for product, stage, delivery in chunk:
+            product_line = f"• <b>{escape(product)}</b>"
+            if len(stages) > 1:
+                product_line += f" — {escape(stage)}"
+            if len(deliveries) > 1 and delivery:
+                product_line += f" ({escape(delivery)})"
+            section.append(product_line)
+        blocks.append(section)
+    return blocks
+
+
+def _build_order_status_detail_pages(
+    rows: list[dict[str, Any]],
+    state: Any,
+    *,
+    display_index: int = 1,
+) -> list[str]:
+    """Build paginated details while keeping supplier/product boundaries readable."""
+    _, shown = _tracked_status_groups(rows, state)
+    if len(shown) != 1:
+        return []
+    blocks: list[list[str]] = []
+    for order_no, order_rows in shown:
+        if any(_is_aggregated_status_row(row) for row in order_rows):
+            blocks.extend(
+                _aggregated_detail_blocks(
+                    order_no,
+                    order_rows,
+                    display_index=display_index,
+                )
+            )
+        else:
+            blocks.extend(
+                _legacy_detail_blocks(
+                    order_no,
+                    order_rows,
+                    display_index=display_index,
+                )
+            )
+    if not blocks:
+        return []
+    pages: list[str] = []
+    for offset in range(0, len(blocks), _STATUS_DETAIL_BLOCKS_PER_PAGE):
+        page_blocks = blocks[offset : offset + _STATUS_DETAIL_BLOCKS_PER_PAGE]
+        pages.append(
+            "<b>Мои заявки</b>\n\n" + "\n\n".join("\n".join(block) for block in page_blocks)
+        )
+    return pages
+
+
+def order_status_detail_page_count(
+    rows: list[dict[str, Any]],
+    state: Any,
+    *,
+    display_index: int = 1,
+) -> int:
+    """Return the number of pages needed for a status detail card."""
+    return max(
+        1,
+        len(
+            _build_order_status_detail_pages(
+                rows,
+                state,
+                display_index=display_index,
+            )
+        ),
+    )
+
+
+def build_order_status_text(
+    rows: list[dict[str, Any]],
+    state: Any,
+    *,
+    detail_page: int = 0,
+    display_index: int = 1,
+) -> str:
+    """Формирует карточку статусов заявок."""
+    tracked, shown = _tracked_status_groups(rows, state)
+    if not tracked:
+        return "<b>Мои заявки</b>\n\nУ вас пока нет заявок, отправленных через этого бота."
     if not shown:
         return f"<b>Мои заявки</b>\n\nСтатус заявки {escape(tracked[0])} пока не появился в таблице. Попробуйте обновить позже."
 
+    pages = _build_order_status_detail_pages(rows, state, display_index=display_index)
+    if len(pages) > 1:
+        page = min(max(0, detail_page), len(pages) - 1)
+        return f"{pages[page]}\n\nСтраница {page + 1} из {len(pages)}"
+
     lines = ["<b>Мои заявки</b>", ""]
     for index, (order_no, order_rows) in enumerate(shown):
-        lines.append(f"{index + 1}. <b>Заявка {escape(order_no)}</b>")
+        number = display_index if len(shown) == 1 else index + 1
+        lines.append(f"{number}. <b>Заявка {escape(order_no)}</b>")
         if any(_is_aggregated_status_row(row) for row in order_rows):
             _append_aggregated_order_status(lines, order_rows)
         else:

@@ -35,3 +35,18 @@ def test_normalizes_voice_message() -> None:
     assert event.input_type is InputKind.VOICE
     assert event.file_id == "voice-id"
     assert event.mime_type == "audio/ogg"
+
+
+def test_preserves_product_list_line_breaks() -> None:
+    """Сохраняет переносы строк, чтобы большие списки можно было разбить на части."""
+    event = normalize_telegram_update(
+        {
+            "update_id": 9,
+            "message": {
+                "chat": {"id": 42},
+                "text": "Сироп Роза — 1\nГовядина — 2 кг",
+            },
+        }
+    )
+
+    assert event.text == "Сироп Роза — 1\nГовядина — 2 кг"

@@ -23,7 +23,7 @@ from restaurant_bot.integrations.google_sheets import (
     GoogleSheetsGateway,
     OrderSubmissionResult,
 )
-from restaurant_bot.integrations.telegram import TelegramClient
+from restaurant_bot.integrations.telegram import TelegramAPIError, TelegramClient
 from restaurant_bot.repositories.order_events import OrderEventRepository
 from restaurant_bot.repositories.sessions import SessionRepository
 from restaurant_bot.repositories.submissions import SubmissionRepository
@@ -34,6 +34,7 @@ from restaurant_bot.services.submission_presenter import (
     build_order_status_list_reply,
     build_order_status_text,
     group_order_status_rows,
+    order_status_detail_page_count,
     submission_dispatch_uncertain_reply,
     submission_failure_reply,
     submission_local_saved_reply,
@@ -320,6 +321,7 @@ class SubmissionService:
         page: int = 0,
         selected_index: int | None = None,
         order_number: str = "",
+        detail_page: int = 0,
     ) -> None:
         """Показывает список заявок или подробности выбранной заявки."""
         with chat_lock(self.redis, chat_id):
@@ -340,6 +342,7 @@ class SubmissionService:
                     state,
                     selected_index=selected_index,
                     order_number=order_number,
+                    detail_page=detail_page,
                 )
                 return
             self._send_order_status_page(chat_id, state, page=max(0, page))
@@ -372,8 +375,9 @@ class SubmissionService:
             page=page,
             order_numbers=order_numbers,
         )
-        self.telegram.send_reply(
+        self._send_status_reply(
             chat_id,
+            state,
             build_order_status_list_reply(
                 shown_rows,
                 page=page,
@@ -388,6 +392,7 @@ class SubmissionService:
         *,
         selected_index: int | None,
         order_number: str,
+        detail_page: int = 0,
     ) -> None:
         """Показывает поставщиков и товары выбранной реальной заявки."""
         stored_numbers = state.order_status_order_numbers
@@ -409,8 +414,9 @@ class SubmissionService:
             state.venue_name or state.restaurant,
         )
         if not rows:
-            self.telegram.send_reply(
+            self._send_status_reply(
                 chat_id,
+                state,
                 BotReply(
                     text=(
                         "⚠️ <b>Заявка не найдена</b>\n\n"
@@ -431,15 +437,55 @@ class SubmissionService:
         preview_state = state.model_copy(deep=True)
         preview_state.last_order_no = target
         preview_state.submitted_order_numbers = []
-        status_text = build_order_status_text(rows, preview_state)
-        self.telegram.send_reply(
+        status_text = build_order_status_text(
+            rows,
+            preview_state,
+            detail_page=max(0, detail_page),
+            display_index=selected,
+        )
+        self._send_status_reply(
             chat_id,
+            state,
             build_order_status_detail_reply(
                 status_text,
                 page=max(0, state.order_status_page),
                 selected_index=selected,
+                detail_page=max(0, detail_page),
+                detail_page_count=order_status_detail_page_count(
+                    rows,
+                    preview_state,
+                    display_index=selected,
+                ),
             ),
         )
+
+    def _send_status_reply(
+        self,
+        chat_id: str,
+        state: ConversationState,
+        reply: BotReply,
+    ) -> None:
+        """Обновляет одну карточку статусов и не накапливает сообщения."""
+        previous_message_id = state.ui_message_id
+        reply.edit_message_id = previous_message_id or None
+        try:
+            message_id = self.telegram.send_reply(chat_id, reply)
+        except TelegramAPIError as exc:
+            description = str(exc).lower()
+            can_fallback = previous_message_id and any(
+                marker in description
+                for marker in (
+                    "message to edit not found",
+                    "message can't be edited",
+                    "message is too old",
+                )
+            )
+            if not can_fallback:
+                raise
+            reply.edit_message_id = None
+            message_id = self.telegram.send_reply(chat_id, reply)
+        if isinstance(message_id, int):
+            self._persist_worker_ui(chat_id, state.ui_revision, message_id, reply.text)
 
     @staticmethod
     def _persist_order_status_view(
@@ -454,6 +500,10 @@ class SubmissionService:
             row, state = sessions.get_for_update(chat_id)
             state.order_status_view_active = True
             state.order_status_page = page
+            state.order_status_detail_page = 0
+            state.order_status_detail_active = False
+            state.order_status_selected_index = None
+            state.order_status_selected_order_number = ""
             state.order_status_order_numbers = order_numbers
             sessions.save(chat_id, state, row)
 

@@ -153,6 +153,48 @@ def test_voice_can_open_next_order_status_page(settings) -> None:  # type: ignor
     assert result.order_status_page == 1
 
 
+@pytest.mark.parametrize(
+    ("phrase", "cart_page", "expected_page"),
+    [
+        ("следующая страница", 0, 1),
+        ("перейди на предыдущую страницу", 1, 0),
+    ],
+)
+def test_voice_pagination_stays_in_large_draft(
+    settings, phrase: str, cart_page: int, expected_page: int
+) -> None:  # type: ignore[no-untyped-def]
+    """Переключает страницы большого черновика, а не открывает историю заявок."""
+    state = ConversationState(
+        cart_page=cart_page,
+        visible_actions=[
+            {"label": "← Назад", "action_id": "v2:cartpage:0:r1"},
+            {"label": "Далее →", "action_id": "v2:cartpage:1:r1"},
+        ],
+        cart=[
+            CartItem(
+                id=f"item-{index}",
+                source_query=f"Товар {index}",
+                quantity=1,
+                unit="шт",
+                status=ItemStatus.MATCHED,
+            )
+            for index in range(21)
+        ],
+    )
+    event = TelegramEvent(
+        update_id=5,
+        chat_id="1",
+        input_type=InputKind.VOICE,
+        text=phrase,
+    )
+
+    result = ConversationEngine(settings).handle(event, infer_intent(phrase), state, [])
+
+    assert result.enqueue_order_status is False
+    assert result.state.cart_page == expected_page
+    assert f"Страница {expected_page + 1} из 2" in result.reply.text
+
+
 def test_natural_order_status_phrase_contains_selected_position() -> None:
     """Извлекает позицию из полной человеческой фразы."""
     command = infer_intent("Давай посмотрим вторую заявку")
@@ -214,6 +256,8 @@ def test_order_status_voice_selection_accepts_natural_phrases(
         "покажи следующие заявки",
         "покажи более старые",
         "следующая страница",
+        "покажи мне следующую страницу",
+        "вперёд",
     ],
 )
 def test_order_status_voice_navigation_accepts_next_page_phrases(
@@ -242,3 +286,71 @@ def test_order_status_voice_navigation_accepts_next_page_phrases(
 
     assert result.enqueue_order_status is True
     assert result.order_status_page == 2
+
+
+@pytest.mark.parametrize(
+    "phrase",
+    [
+        "предыдущая страница",
+        "покажи более новые",
+        "назад",
+        "листай назад",
+        "вернись назад",
+    ],
+)
+def test_order_status_voice_navigation_accepts_previous_page_phrases(
+    settings,
+    phrase: str,
+) -> None:  # type: ignore[no-untyped-def]
+    """Возвращает список к более новым заявкам по разговорной фразе."""
+    state = ConversationState(
+        order_status_view_active=True,
+        order_status_page=2,
+        order_status_order_numbers=["A-11", "A-12"],
+    )
+    event = TelegramEvent(
+        update_id=7,
+        chat_id="1",
+        input_type=InputKind.VOICE,
+        text=phrase,
+    )
+
+    result = ConversationEngine(settings).handle(
+        event,
+        infer_intent(phrase),
+        state,
+        [],
+    )
+
+    assert result.enqueue_order_status is True
+    assert result.order_status_page == 1
+
+
+def test_order_status_voice_navigation_moves_inside_selected_order(settings) -> None:  # type: ignore[no-untyped-def]
+    """Понимает следующую страницу внутри уже открытой заявки."""
+    state = ConversationState(
+        order_status_view_active=True,
+        order_status_detail_active=True,
+        order_status_page=0,
+        order_status_detail_page=1,
+        order_status_selected_index=2,
+        order_status_selected_order_number="A-2",
+        order_status_order_numbers=["A-1", "A-2"],
+    )
+    event = TelegramEvent(
+        update_id=8,
+        chat_id="1",
+        input_type=InputKind.VOICE,
+        text="предыдущая страница",
+    )
+
+    result = ConversationEngine(settings).handle(
+        event,
+        infer_intent(event.text),
+        state,
+        [],
+    )
+
+    assert result.enqueue_order_status is True
+    assert result.order_status_detail_page == 0
+    assert result.order_status_selected_index == 2

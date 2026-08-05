@@ -17,6 +17,7 @@ from restaurant_bot.integrations.google_sheets import (
     PreparedOrderSubmission,
 )
 from restaurant_bot.services import submission as submission_module
+from restaurant_bot.services.replies import cart_reply
 from restaurant_bot.services.submission import (
     SubmissionService,
     build_order_status_text,
@@ -25,6 +26,7 @@ from restaurant_bot.services.submission import (
     submission_local_saved_reply,
     submission_success_reply,
 )
+from restaurant_bot.services.submission_presenter import order_status_detail_page_count
 
 
 def test_submission_success_card_matches_n8n() -> None:
@@ -36,6 +38,55 @@ def test_submission_success_card_matches_n8n() -> None:
         ("Проверить статус", "v2:orders:r4"),
         ("Новая заявка", "v2:clear:r4"),
     ]
+
+
+def test_large_draft_has_navigation_without_hiding_items() -> None:
+    """Показывает большой черновик частями и даёт перейти к следующей странице."""
+    state = ConversationState(
+        cart=[
+            CartItem(
+                id=f"item-{index}",
+                source_query=f"Товар {index}",
+                catalog_name=f"Товар {index}",
+                quantity=1,
+                unit="шт",
+            )
+            for index in range(45)
+        ]
+    )
+
+    first = cart_reply(state)
+    state.cart_page = 2
+    last = cart_reply(state)
+
+    assert "Страница 1 из 3" in first.text
+    assert "Товар 0" in first.text
+    assert "Товар 20" not in first.text
+    assert any(button.callback_data == "v2:cartpage:1" for row in first.rows for button in row)
+    assert "Страница 3 из 3" in last.text
+    assert "Товар 44" in last.text
+
+
+def test_large_status_detail_has_pages() -> None:
+    """Разбивает длинный список товаров поставщика на страницы истории."""
+    product_list = "\n".join(f"{index}. Товар {index} — 1 шт" for index in range(25))
+    rows = [
+        {
+            "Номер заявки": "A-1",
+            "Условное название поставщика": "Поставщик",
+            "Список товаров": product_list,
+            "Стадия": "Новая заявка",
+        }
+    ]
+    state = type("State", (), {"last_order_no": "A-1", "submitted_order_numbers": []})()
+
+    assert order_status_detail_page_count(rows, state) > 1
+    first = build_order_status_text(rows, state, detail_page=0)
+    last = build_order_status_text(rows, state, detail_page=10)
+
+    assert "Страница 1 из" in first
+    assert "Товар 0" in first
+    assert "Товар 24" in last
 
 
 def test_submission_failure_card_matches_n8n() -> None:
@@ -794,6 +845,7 @@ def test_statuses_open_selected_order_from_shown_list(
     )
     reply = service.telegram.send_reply.call_args.args[1]
     assert "ORDER-2" in reply.text
+    assert "2. <b>Заявка ORDER-2</b>" in reply.text
     assert "Раджабов" in reply.text
     assert reply.rows[-1][0].text == "← К списку заявок"
 

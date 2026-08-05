@@ -38,7 +38,7 @@ class Settings(BaseSettings):
 
     openai_api_key: SecretStr
     openai_text_model: str = "gpt-4o-mini"
-    openai_text_timeout_seconds: float = Field(default=12.0, ge=3.0, le=60.0)
+    openai_text_timeout_seconds: float = Field(default=30.0, ge=3.0, le=60.0)
     openai_text_max_retries: int = Field(default=1, ge=0, le=2)
     openai_vision_model: str = "gpt-5-mini"
     openai_vision_timeout_seconds: float = Field(default=180.0, ge=30.0, le=600.0)

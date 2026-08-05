@@ -7,6 +7,13 @@ from restaurant_bot.domain.models import InputKind, TelegramEvent
 from restaurant_bot.services.text import clean_text
 
 
+def _clean_message_text(value: Any) -> str:
+    """Normalize message text while preserving line boundaries in product lists."""
+    return "\n".join(
+        cleaned for line in str(value or "").splitlines() if (cleaned := clean_text(line))
+    )
+
+
 def normalize_telegram_update(update: dict[str, Any]) -> TelegramEvent:
     """Преобразует обновление Telegram во внутреннее событие."""
     message = update.get("message") or update.get("edited_message") or {}
@@ -15,7 +22,7 @@ def normalize_telegram_update(update: dict[str, Any]) -> TelegramEvent:
     sender = callback.get("from") or message.get("from") or {}
     chat = callback_message.get("chat") or message.get("chat") or {}
 
-    text = clean_text(message.get("text") or message.get("caption"))
+    text = _clean_message_text(message.get("text") or message.get("caption"))
     callback_data = clean_text(callback.get("data"))
     file_id = ""
     mime_type = ""

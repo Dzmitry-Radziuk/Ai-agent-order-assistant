@@ -454,28 +454,44 @@ def product_add_requests_reply(state: ConversationState) -> BotReply:
     return BotReply(text="\n".join(lines), rows=rows)
 
 
+_CART_PAGE_SIZE = 20
+
+
 def cart_reply(state: ConversationState, title: str = "Черновик заявки") -> BotReply:
     """Формирует карточку черновика заявки."""
     items = _active_items(state)
     issues = [item for item in items if item.status in ISSUE_STATUSES]
     ready = [item for item in items if item.status not in ISSUE_STATUSES]
+    paginated = len(items) > _CART_PAGE_SIZE
+    total_pages = max(1, (len(items) + _CART_PAGE_SIZE - 1) // _CART_PAGE_SIZE)
+    page = min(max(0, state.cart_page), total_pages - 1)
+    state.cart_page = page
+    if paginated:
+        page_items = (ready + issues)[page * _CART_PAGE_SIZE : (page + 1) * _CART_PAGE_SIZE]
+        page_ready = [item for item in page_items if item.status not in ISSUE_STATUSES]
+        page_issues = [item for item in page_items if item.status in ISSUE_STATUSES]
+    else:
+        page_ready = ready
+        page_issues = issues
     lines = [f"🧾 <b>{escape(title)}</b>", ""]
+    if paginated:
+        lines.extend([f"Страница {page + 1} из {total_pages}", ""])
     if not ready and not issues:
         lines.append("Товаров пока нет.")
-    for item in ready[:25]:
+    for item in page_ready if paginated else ready[:25]:
         quantity = (
             f"{format_number(item.quantity)} {escape(_item_unit(item))}"
             if item.quantity
             else "количество не указано"
         )
         lines.append(f"• {escape(_item_name(item))} — {quantity}")
-    if len(ready) > 25:
+    if not paginated and len(ready) > 25:
         lines.append(f"…и ещё {len(ready) - 25} поз.")
     if issues:
         if lines[-1] != "":
             lines.append("")
         lines.append("⚠️ <b>Нужно уточнить</b>")
-        for item in issues[:25]:
+        for item in page_issues if paginated else issues[:25]:
             if item.status == ItemStatus.UNIT_MISMATCH:
                 lines.append(
                     f"• {escape(_item_name(item))} — вы указали {format_number(item.quantity)} {escape(item.unit)}; в каталоге заказ в {escape(item.catalog_unit)}"
@@ -489,7 +505,7 @@ def cart_reply(state: ConversationState, title: str = "Черновик заяв
                     else ""
                 )
                 lines.append(f"• {escape(_item_name(item))}{quantity}")
-        if len(issues) > 25:
+        if not paginated and len(issues) > 25:
             lines.append(f"…и ещё {len(issues) - 25} поз.")
     request_count = _request_count(state)
     if request_count:
@@ -500,6 +516,14 @@ def cart_reply(state: ConversationState, title: str = "Черновик заяв
             "Откройте отдельный список кнопкой ниже.",
         ]
     rows: list[list[Button]] = []
+    if paginated:
+        navigation: list[Button] = []
+        if page > 0:
+            navigation.append(Button(text="← Назад", callback_data=f"v2:cartpage:{page - 1}"))
+        if page < total_pages - 1:
+            navigation.append(Button(text="Далее →", callback_data=f"v2:cartpage:{page + 1}"))
+        if navigation:
+            rows.append(navigation)
     if issues:
         count = len(issues)
         mod10, mod100 = count % 10, count % 100

@@ -43,6 +43,7 @@ from restaurant_bot.services.parser import (
     infer_intent,
     is_explicit_item_rejection,
     is_product_add_request_phrase,
+    normalize_command_text,
     parse_product_lines,
     parse_quantity_unit,
 )
@@ -157,6 +158,7 @@ class ConversationEngine:
         # voice alike.
         command = self._contextual_negative_command(command, event, state)
         command = self._contextual_quantity_command(command, event.text, state)
+        command = self._contextual_cart_pagination_command(command, event, state)
         command = self._contextual_order_status_command(command, event, state)
         command = self._contextual_voice_command(command, event, state)
         if command.intent not in {
@@ -342,8 +344,33 @@ class ConversationEngine:
             return EngineResult(state=state, reply=small_talk_reply(state))
         if command.intent == Intent.ORDER_STATUS:
             page = self._order_status_page(command, state)
+            detail_page = self._order_status_detail_page(command, state)
+            detail_requested = bool(
+                command.selected_index is not None
+                or command.selection_query
+                or command.callback_target in {"detail_next", "detail_previous"}
+                or command.callback_target.startswith("detail:")
+            )
+            if command.selected_index is not None:
+                state.order_status_selected_index = command.selected_index
+            if command.selection_query:
+                state.order_status_selected_order_number = command.selection_query
+            if detail_requested:
+                selected_index = (
+                    command.selected_index
+                    if command.selected_index is not None
+                    else state.order_status_selected_index
+                )
+                order_number = command.selection_query or state.order_status_selected_order_number
+            else:
+                state.order_status_selected_index = None
+                state.order_status_selected_order_number = ""
+                selected_index = None
+                order_number = ""
             state.order_status_view_active = True
             state.order_status_page = page
+            state.order_status_detail_page = detail_page
+            state.order_status_detail_active = detail_requested
             return EngineResult(
                 state=state,
                 reply=BotReply(
@@ -355,8 +382,9 @@ class ConversationEngine:
                 ),
                 enqueue_order_status=True,
                 order_status_page=page,
-                order_status_selected_index=command.selected_index,
-                order_status_order_number=command.selection_query,
+                order_status_detail_page=detail_page,
+                order_status_selected_index=selected_index,
+                order_status_order_number=order_number,
             )
         if command.intent == Intent.SHOW_CART:
             if (
@@ -364,6 +392,7 @@ class ConversationEngine:
                 and self._is_generic_show_products_command(command.text)
             ):
                 return EngineResult(state=state, reply=supplier_warning_details_reply(state))
+            state.cart_page = self._cart_page(command, state)
             return EngineResult(state=state, reply=cart_reply(state))
         if command.intent == Intent.START_NEW_ORDER:
             if state.stage == SessionStage.SUBMITTED or not self._has_active_draft_items(state):
@@ -1159,6 +1188,37 @@ class ConversationEngine:
             )
         return command
 
+    def _contextual_cart_pagination_command(
+        self,
+        command: ParsedCommand,
+        event: TelegramEvent,
+        state: ConversationState,
+    ) -> ParsedCommand:
+        """Оставляет голосовую навигацию в черновике, если он разбит на страницы."""
+        page_callbacks: set[int] = set()
+        for action in state.visible_actions:
+            callback_data = action.get("action_id", "")
+            match = re.fullmatch(r"v2:cartpage:(\d+)(?::r\d+)?", callback_data)
+            if match:
+                page_callbacks.add(int(match.group(1)))
+        if not page_callbacks:
+            return command
+
+        raw = event.text or command.text
+        phrase = normalize_command_text(raw)
+        navigation_target = self._status_navigation_target(phrase)
+        if navigation_target not in {"next", "previous"}:
+            return command
+
+        target_page = state.cart_page + (1 if navigation_target == "next" else -1)
+        if target_page not in page_callbacks:
+            target_page = state.cart_page
+        return ParsedCommand(
+            intent=Intent.SHOW_CART,
+            text=raw,
+            callback_target=f"page:{max(0, target_page)}",
+        )
+
     def _contextual_order_status_command(
         self,
         command: ParsedCommand,
@@ -1169,9 +1229,26 @@ class ConversationEngine:
         if not state.order_status_view_active:
             return command
         raw = event.text or command.text
-        phrase = normalize_text(raw)
+        phrase = normalize_command_text(raw)
         if not phrase:
             return command
+        navigation_target = self._status_navigation_target(phrase)
+        if navigation_target:
+            if state.order_status_detail_active:
+                navigation_target = f"detail_{navigation_target}"
+            selected_index = (
+                state.order_status_selected_index if state.order_status_detail_active else None
+            )
+            order_number = (
+                state.order_status_selected_order_number if state.order_status_detail_active else ""
+            )
+            return ParsedCommand(
+                intent=Intent.ORDER_STATUS,
+                text=raw,
+                selected_index=selected_index,
+                selection_query=order_number,
+                callback_target=navigation_target,
+            )
         if command.intent == Intent.ORDER_STATUS and (
             command.selected_index is not None or command.selection_query or command.callback_target
         ):
@@ -1200,28 +1277,6 @@ class ConversationEngine:
                 selected_index=spoken_index,
             )
         if re.fullmatch(
-            r"(?:(?:покаж\w*|открой\w*)\s+)?"
-            r"(?:следующ\w*|дальше|ещё|еще|(?:более\s+)?стар\w*)"
-            r"(?:\s+(?:страниц\w*|заявк\w*|заказ\w*))?",
-            phrase,
-        ):
-            return ParsedCommand(
-                intent=Intent.ORDER_STATUS,
-                text=raw,
-                callback_target="next",
-            )
-        if re.fullmatch(
-            r"(?:(?:покаж\w*|открой\w*)\s+)?"
-            r"(?:предыдущ\w*|новее|(?:более\s+)?нов\w*)"
-            r"(?:\s+(?:страниц\w*|заявк\w*|заказ\w*))?",
-            phrase,
-        ):
-            return ParsedCommand(
-                intent=Intent.ORDER_STATUS,
-                text=raw,
-                callback_target="previous",
-            )
-        if re.fullmatch(
             r"(?:назад(?:\s+к списку)?|к списку|вернись назад|вернись к списку)"
             r"(?:\s+(?:заявок|заказов))?",
             phrase,
@@ -1232,6 +1287,32 @@ class ConversationEngine:
                 callback_target="current",
             )
         return command
+
+    @staticmethod
+    def _status_navigation_target(phrase: str) -> str:
+        """Распознаёт разговорную навигацию по страницам истории."""
+        cleaned = re.sub(
+            r"^(?:(?:ну|покаж\w*|открой\w*|перей\w*|верн\w*|листай\w*|"
+            r"перелист\w*|пролист\w*|поехал\w*|давай\w*|мне|можешь|можно|пожалуйста)\s+)+",
+            "",
+            phrase,
+        ).strip()
+        cleaned = re.sub(r"^(?:на|в|к)\s+", "", cleaned)
+        if "список" in cleaned or "списку" in cleaned:
+            return ""
+        if re.fullmatch(
+            r"(?:следующ\w*|дальше|ещ[её]|(?:более\s+)?стар\w*|впер[её]д)"
+            r"(?:\s+(?:страниц\w*|заявк\w*|заказ\w*))?",
+            cleaned,
+        ):
+            return "next"
+        if re.fullmatch(
+            r"(?:предыдущ\w*|новее|назад|более\s+нов\w*)"
+            r"(?:\s+(?:страниц\w*|заявк\w*|заказ\w*))?",
+            cleaned,
+        ):
+            return "previous"
+        return ""
 
     @staticmethod
     def _order_status_page(command: ParsedCommand, state: ConversationState) -> int:
@@ -1252,6 +1333,34 @@ class ConversationEngine:
         if state.order_status_view_active and phrase in {"обнови", "обновить", "обновить статусы"}:
             return max(0, state.order_status_page)
         return 0
+
+    @staticmethod
+    def _order_status_detail_page(command: ParsedCommand, state: ConversationState) -> int:
+        """Resolve the requested page inside a selected order."""
+        target = command.callback_target
+        if target.startswith("detail:"):
+            try:
+                return max(0, int(target.partition(":")[2]))
+            except ValueError:
+                return 0
+        if target == "detail_next":
+            return max(0, state.order_status_detail_page + 1)
+        if target == "detail_previous":
+            return max(0, state.order_status_detail_page - 1)
+        if command.selected_index is not None or command.selection_query:
+            return 0
+        return max(0, state.order_status_detail_page)
+
+    @staticmethod
+    def _cart_page(command: ParsedCommand, state: ConversationState) -> int:
+        """Resolve the requested page of the current draft."""
+        target = command.callback_target
+        if target.startswith("page:"):
+            try:
+                return max(0, int(target.partition(":")[2]))
+            except ValueError:
+                return 0
+        return max(0, state.cart_page)
 
     def _contextual_voice_command(
         self,

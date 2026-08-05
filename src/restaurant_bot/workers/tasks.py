@@ -91,15 +91,18 @@ def send_order_status(  # type: ignore[no-untyped-def]
     page: int = 0,
     selected_index: int | None = None,
     order_number: str = "",
+    detail_page: int = 0,
 ) -> None:
     """Отправляет список заявок или подробности выбранной заявки."""
     _, submission = dependencies()
-    submission.send_status(
-        chat_id,
-        page=page,
-        selected_index=selected_index,
-        order_number=order_number,
-    )
+    kwargs = {
+        "page": page,
+        "selected_index": selected_index,
+        "order_number": order_number,
+    }
+    if detail_page:
+        kwargs["detail_page"] = detail_page
+    submission.send_status(chat_id, **kwargs)
 
 
 @celery_app.task(

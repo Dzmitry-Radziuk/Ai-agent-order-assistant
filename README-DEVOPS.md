@@ -262,7 +262,7 @@ python3 -c "import secrets; print(secrets.token_urlsafe(48))"
 |---|---:|---:|---|
 | `OPENAI_API_KEY` | Да | Да | API key проекта |
 | `OPENAI_TEXT_MODEL` | Нет | Нет | `gpt-4o-mini` |
-| `OPENAI_TEXT_TIMEOUT_SECONDS` | Нет | Нет | `12`, максимальное ожидание текстового разбора |
+| `OPENAI_TEXT_TIMEOUT_SECONDS` | Нет | Нет | `30`, максимальное ожидание текстового разбора |
 | `OPENAI_TEXT_MAX_RETRIES` | Нет | Нет | `1`, один повтор AI-разбора при временном сетевом сбое |
 | `OPENAI_VISION_MODEL` | Нет | Нет | `gpt-5-mini` |
 | `OPENAI_MATCH_MODEL` | Нет | Нет | `gpt-4o-mini` |

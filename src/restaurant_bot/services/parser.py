@@ -1073,16 +1073,19 @@ def infer_intent(text: str, callback_data: str = "") -> ParsedCommand:
 
 def _parse_order_status_navigation(normalized: str, source_text: str) -> ParsedCommand | None:
     """Разбирает выбор заявки и навигацию по истории естественной фразой."""
-    if has_negation(normalized) or not re.search(
-        r"\b(?:заявк\w*|заказ\w*)\b",
-        normalized,
-    ):
+    if has_negation(normalized):
+        return None
+    has_history_target = bool(re.search(r"\b(?:заявк\w*|заказ\w*|страниц\w*)\b", normalized))
+    if not has_history_target:
         return None
     has_navigation_action = bool(
         re.search(r"\b(?:покаж\w*|откро\w*|открой\w*|посмотр\w*|перейд\w*)\b", normalized)
     )
     has_next_page_wording = bool(
-        re.search(r"\b(?:следующ(?:ие|их|ими)|дальше|стар\w*)\b", normalized)
+        re.search(
+            r"\b(?:следующ\w*|дальше|стар\w*|впер[её]д)\b",
+            normalized,
+        )
     )
     creates_order = bool(re.search(r"\b(?:созда\w*|оформ\w*|нача\w*|сдела\w*)\b", normalized))
     if (
@@ -1094,7 +1097,7 @@ def _parse_order_status_navigation(normalized: str, source_text: str) -> ParsedC
             callback_target="next",
         )
     if re.search(
-        r"\b(?:предыдущ\w*|новее)\b.*\b(?:заявк\w*|заказ\w*)\b",
+        r"\b(?:предыдущ\w*|новее|назад|более\s+нов\w*)\b",
         normalized,
     ):
         return ParsedCommand(
@@ -1253,6 +1256,24 @@ def parse_callback(data: str) -> ParsedCommand:
             selection_query="" if selected_index is not None else rest[-1],
             callback_revision=revision,
         )
+    if action == "orderitems" and len(rest) >= 2:
+        try:
+            selected_index = int(rest[0])
+        except ValueError:
+            selected_index = None
+        try:
+            detail_page = max(0, int(rest[1]))
+        except ValueError:
+            detail_page = 0
+        return ParsedCommand(
+            intent=Intent.ORDER_STATUS,
+            text=data,
+            selected_index=selected_index,
+            selection_query="" if selected_index is not None else rest[0],
+            callback_target=f"detail:{detail_page}",
+            order_status_detail_page=detail_page,
+            callback_revision=revision,
+        )
     if action == "orderspage" and rest:
         try:
             page = max(0, int(rest[-1]))
@@ -1260,6 +1281,17 @@ def parse_callback(data: str) -> ParsedCommand:
             page = 0
         return ParsedCommand(
             intent=Intent.ORDER_STATUS,
+            text=data,
+            callback_target=f"page:{page}",
+            callback_revision=revision,
+        )
+    if action == "cartpage" and rest:
+        try:
+            page = max(0, int(rest[0]))
+        except ValueError:
+            page = 0
+        return ParsedCommand(
+            intent=Intent.SHOW_CART,
             text=data,
             callback_target=f"page:{page}",
             callback_revision=revision,
@@ -1347,7 +1379,8 @@ def parse_product_lines(text: str) -> list[ExtractedItem]:
     items: list[ExtractedItem] = []
     unit_pattern = "|".join(sorted((re.escape(key) for key in UNIT_ALIASES), key=len, reverse=True))
     trailing = re.compile(
-        rf"^(.*?)(?:\s+|[-:])(?P<qty>\d+(?:[,.]\d+)?)\s*(?P<unit>{unit_pattern})?\s*$",
+        rf"^(.*?)(?:(?:\s+|[-—–:])(?P<qty>\d+(?:[,.]\d+)?)\s*(?P<unit>{unit_pattern})|"
+        rf"[-—–:]\s*(?P<bare_qty>\d+(?:[,.]\d+)?))\s*$",
         re.I,
     )
     leading = re.compile(
@@ -1493,7 +1526,9 @@ def parse_product_lines(text: str) -> list[ExtractedItem]:
                 items.append(
                     ExtractedItem(
                         product_query=name,
-                        quantity=float(match.group("qty").replace(",", ".")),
+                        quantity=float(
+                            (match.group("qty") or match.group("bare_qty")).replace(",", ".")
+                        ),
                         unit=normalize_unit(match.group("unit") or ""),
                         source_line=line,
                     )
@@ -1518,6 +1553,9 @@ def parse_product_lines(text: str) -> list[ExtractedItem]:
             for token in normalize_text(stripped).split()
             if token.strip(" .,:;—–-")
         ]
+        has_explicit_bare_quantity = bool(
+            re.search(r"(?:^|\s)[-—–:]\s*\d+(?:[,.]\d+)?\s*$", stripped)
+        )
         for index in range(len(tokens)):
             parsed = parse_number_words(tokens, index)
             if not parsed:
@@ -1528,6 +1566,8 @@ def parse_product_lines(text: str) -> list[ExtractedItem]:
                 if end < len(tokens) and tokens[end] in UNIT_ALIASES
                 else ""
             )
+            if not unit and not has_explicit_bare_quantity:
+                continue
             if end < len(tokens) and unit:
                 end += 1
             if index == 0:

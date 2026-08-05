@@ -12,6 +12,7 @@ from restaurant_bot.integrations.openai_client import (
     OpenAIService,
     ParsedInputSchema,
     VisibleActionDecision,
+    restore_explicit_order_terms,
 )
 from restaurant_bot.observability import Tracer
 
@@ -94,6 +95,20 @@ class _Responses:
         """Имитирует разбор структурированного ответа OpenAI."""
         self.calls.append(kwargs)
         return SimpleNamespace(output_parsed=self.parsed)
+
+
+class _SequenceResponses:
+    """Возвращает отдельный структурированный ответ для каждого чанка списка."""
+
+    def __init__(self, parsed: list[ParsedInputSchema]):
+        """Инициализирует последовательность ответов."""
+        self.parsed = parsed
+        self.calls: list[dict[str, object]] = []
+
+    def parse(self, **kwargs):  # type: ignore[no-untyped-def]
+        """Сохраняет вход чанка и возвращает следующий ответ ИИ."""
+        self.calls.append(kwargs)
+        return SimpleNamespace(output_parsed=self.parsed.pop(0))
 
 
 class _FailingResponses:
@@ -1280,3 +1295,62 @@ def test_free_list_keeps_explicit_quantity_even_if_model_calls_it_order_column(
     )
 
     assert [(item.product_query, item.quantity) for item in command.items] == [("Сироп Роза", 6)]
+
+
+def test_large_explicit_list_is_processed_by_ai_chunks(settings) -> None:  # type: ignore[no-untyped-def]
+    """Разбирает длинный список несколькими запросами ИИ и объединяет результат."""
+    parsed = [
+        ParsedInputSchema(
+            intent=Intent.ADD_ITEMS,
+            items=[
+                ExtractedItem(product_query=f"Товар {index}", quantity=1, unit="шт")
+                for index in range(start, start + 8)
+            ],
+        )
+        for start in (0, 8)
+    ]
+    responses = _SequenceResponses(parsed)
+    service = _service(settings, SimpleNamespace(responses=responses))
+    source = "\n".join(f"Товар {index} — 1" for index in range(16))
+
+    command = service.parse_text(source)
+
+    assert command.intent is Intent.ADD_ITEMS
+    assert len(command.items) == 16
+    assert len(responses.calls) == 2
+
+
+def test_large_list_transport_error_is_not_replaced_with_guessed_items(settings) -> None:  # type: ignore[no-untyped-def]
+    """Не добавляет частичный или детерминированно угаданный список при тайм-ауте ИИ."""
+    service = _service(settings, SimpleNamespace(responses=_TimeoutResponses()))
+    source = "\n".join(f"Товар {index} — 1" for index in range(16))
+
+    with pytest.raises(APITimeoutError):
+        service.parse_text(source)
+
+
+def test_product_name_digits_are_not_bare_quantities() -> None:
+    """Не принимает артикул или год в конце названия за количество заказа."""
+    from restaurant_bot.services.parser import parse_product_lines
+
+    items = parse_product_lines("Вино Кюве 2026")
+    assert len(items) == 1
+    assert items[0].product_query == "Вино Кюве 2026"
+    assert items[0].quantity is None
+
+
+def test_terminal_order_quantity_wins_over_packaging() -> None:
+    """Берёт единицу заказа после тире, а не фасовку из названия товара."""
+    payload = [
+        {
+            "product_query": "Сыр 180 г",
+            "quantity": 180,
+            "unit": "г",
+            "source_line": "Сыр 180 г — 1",
+        }
+    ]
+
+    restored = restore_explicit_order_terms(payload, "Сыр 180 г — 1")
+
+    assert restored[0]["quantity"] == 1
+    assert restored[0]["unit"] == ""

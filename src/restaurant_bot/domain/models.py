@@ -209,6 +209,7 @@ class ParsedCommand(BaseModel):
     confidence: float | None = None
     callback_revision: int | None = None
     callback_target: str = ""
+    order_status_detail_page: int = 0
 
 
 class CatalogProduct(BaseModel):
@@ -349,7 +350,12 @@ class ConversationState(BaseModel):
     pending_new_order_confirmation: bool = False
     order_status_view_active: bool = False
     order_status_page: int = 0
+    order_status_detail_page: int = 0
+    order_status_detail_active: bool = False
+    order_status_selected_index: int | None = None
+    order_status_selected_order_number: str = ""
     order_status_order_numbers: list[str] = Field(default_factory=list)
+    cart_page: int = 0
     review_token: str = ""
     review_snapshot_hash: str = ""
     review_venue_code: str = ""
@@ -392,6 +398,7 @@ class EngineResult(BaseModel):
     enqueue_submission: bool = False
     enqueue_order_status: bool = False
     order_status_page: int = 0
+    order_status_detail_page: int = 0
     order_status_selected_index: int | None = None
     order_status_order_number: str = ""
     enqueue_product_add: bool = False

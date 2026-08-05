@@ -311,6 +311,7 @@ class UpdateOrchestrator:
                     previous_issue_item_id = state.current_issue_item_id
                     previous_trace_id = state.order_trace_id
                     previous_new_order_confirmation = state.pending_new_order_confirmation
+                    previous_order_status_view_active = state.order_status_view_active
                     result = (
                         self._handle_review_command(event, state, command)
                         if review_command
@@ -352,7 +353,15 @@ class UpdateOrchestrator:
                         previous_issue_item_id=previous_issue_item_id,
                     )
 
-                    if processing_message_id:
+                    if (
+                        command.intent == Intent.ORDER_STATUS
+                        and previous_order_status_view_active
+                        and state.ui_message_id
+                    ):
+                        if processing_message_id and processing_message_id != state.ui_message_id:
+                            self.telegram.delete_message(event.chat_id, processing_message_id)
+                        result.reply.edit_message_id = state.ui_message_id
+                    elif processing_message_id:
                         result.reply.edit_message_id = processing_message_id
                     elif event.input_type == InputKind.CALLBACK and event.callback_message_id:
                         result.reply.edit_message_id = event.callback_message_id
@@ -1845,6 +1854,7 @@ class UpdateOrchestrator:
             send_order_status.delay(
                 chat_id,
                 page=result.order_status_page,
+                detail_page=result.order_status_detail_page,
                 selected_index=result.order_status_selected_index,
                 order_number=result.order_status_order_number,
             )

@@ -31,6 +31,7 @@ def test_user_content_logging_is_private_by_default() -> None:
     assert settings.telegram_update_retention_days == 30
     assert settings.telegram_request_timeout_seconds == 15
     assert settings.telegram_connect_timeout_seconds == 5
+    assert settings.openai_text_timeout_seconds == 30
     assert settings.venue_access_cache_ttl_seconds == 60
 
 

@@ -31,6 +31,9 @@ from restaurant_bot.services.text import (
 
 logger = structlog.get_logger(__name__)
 
+_LARGE_ORDER_LIST_MIN_LINES = 10
+_LARGE_ORDER_LIST_CHUNK_SIZE = 8
+
 _EMPTY_AI_VALUES = {
     "unknown",
     "none",
@@ -144,6 +147,23 @@ def _quantities_with_units(source_line: str) -> list[tuple[float, str]]:
     return found
 
 
+def _terminal_order_quantity(source_line: str) -> tuple[float | None, str]:
+    """Read a quantity only when the user marked it at the end of a line."""
+    unit_pattern = "|".join(
+        sorted((re.escape(unit) for unit in UNIT_ALIASES), key=len, reverse=True)
+    )
+    match = re.search(
+        rf"(?:^|\s)[-—–:]\s*(?P<quantity>\d+(?:[,.]\d+)?)\s*(?P<unit>{unit_pattern})?\s*$",
+        clean_text(source_line),
+        flags=re.IGNORECASE,
+    )
+    if match is None:
+        return None, ""
+    return float(match.group("quantity").replace(",", ".")), normalize_unit(
+        match.group("unit") or ""
+    )
+
+
 def _clear_unknown_item_placeholders(items: list[dict[str, Any]]) -> None:
     """Очищает служебные заглушки ИИ в полях маршрутизации товара."""
     for item in items:
@@ -181,6 +201,16 @@ def restore_explicit_order_terms(
     recovered_from_message = parse_product_lines(source_text)
     for index, item in enumerate(items):
         original_line = clean_text(item.get("source_line")) or clean_text(source_text)
+        terminal_quantity, terminal_unit = _terminal_order_quantity(original_line)
+        shared_source = len(items) > 1 and (
+            "\n" in str(item.get("source_line") or "")
+            or normalize_text(original_line) == normalize_text(clean_text(source_text))
+        )
+        if terminal_quantity is not None and not shared_source:
+            item["source_line"] = original_line
+            item["quantity"] = terminal_quantity
+            item["unit"] = terminal_unit
+            continue
         outside_quantity, outside_unit = _quantity_outside_packaged_query(
             clean_text(item.get("product_query")),
             original_line,
@@ -227,6 +257,13 @@ def restore_explicit_order_terms(
         if source is not None:
             if not clean_text(item.get("source_line")):
                 item["source_line"] = source.source_line or clean_text(source_text)
+            source_terminal_quantity, source_terminal_unit = _terminal_order_quantity(
+                source.source_line
+            )
+            if source_terminal_quantity is not None:
+                item["quantity"] = source_terminal_quantity
+                item["unit"] = source_terminal_unit
+                continue
             # The original spoken/source line is authoritative. In
             # particular, the model must not invent "one bottle" for a line
             # that contains no quantity at all.
@@ -1225,12 +1262,87 @@ class OpenAIService:
         return normalized
 
     def parse_text(self, text: str) -> ParsedCommand:
+        """Parse a normal message or a long explicit list in bounded AI calls."""
+        chunks = self._large_order_list_chunks(text)
+        if chunks:
+            return self._parse_large_order_list(text, chunks)
+        return self._parse_text_once(text)
+
+    @staticmethod
+    def _large_order_list_chunks(text: str) -> list[str]:
+        """Split only unambiguous line-based lists; never infer a quantity from a name."""
+        lines = [
+            clean_text(line) for line in re.split(r"[\r\n;]+", str(text or "")) if clean_text(line)
+        ]
+        if len(lines) < _LARGE_ORDER_LIST_MIN_LINES:
+            return []
+        unit_pattern = "|".join(
+            sorted((re.escape(unit) for unit in UNIT_ALIASES), key=len, reverse=True)
+        )
+        explicit_line = re.compile(
+            rf"^.+?\s[-—–:]\s*\d+(?:[,.]\d+)?\s*(?:{unit_pattern})?\s*$",
+            re.IGNORECASE,
+        )
+        comment_line = ""
+        order_lines = lines
+        if not all(explicit_line.fullmatch(line) for line in lines):
+            if (
+                lines
+                and has_explicit_global_comment_scope(lines[-1])
+                and all(explicit_line.fullmatch(line) for line in lines[:-1])
+            ):
+                comment_line = lines[-1]
+                order_lines = lines[:-1]
+            else:
+                return []
+        chunks = [
+            "\n".join(order_lines[offset : offset + _LARGE_ORDER_LIST_CHUNK_SIZE])
+            for offset in range(0, len(order_lines), _LARGE_ORDER_LIST_CHUNK_SIZE)
+        ]
+        if comment_line and chunks:
+            chunks[-1] = f"{chunks[-1]}\n{comment_line}"
+        return chunks
+
+    def _parse_large_order_list(self, source_text: str, chunks: list[str]) -> ParsedCommand:
+        """Parse every list chunk with AI and reject partial/guessed results."""
+        commands: list[ParsedCommand] = []
+        for index, chunk in enumerate(chunks, start=1):
+            command = self._parse_text_once(chunk, force_ai=True)
+            if command.intent != Intent.ADD_ITEMS or not command.items:
+                logger.warning(
+                    "large_order_list_chunk_unrecognized",
+                    chunk_index=index,
+                    chunk_count=len(chunks),
+                    item_count=len(command.items),
+                )
+                return ParsedCommand(intent=Intent.UNKNOWN, text=source_text)
+            commands.append(command)
+        items = [item for command in commands for item in command.items]
+        comments = [command.global_comment for command in commands if command.global_comment]
+        confidence_values = [
+            command.confidence for command in commands if command.confidence is not None
+        ]
+        result = ParsedCommand(
+            intent=Intent.ADD_ITEMS,
+            text=source_text,
+            items=items,
+            global_comment=comments[-1] if comments else "",
+            confidence=min(confidence_values) if confidence_values else None,
+        )
+        logger.info(
+            "large_order_list_parsed",
+            chunk_count=len(chunks),
+            item_count=len(items),
+        )
+        return _repair_command_mixed_script_queries(result)
+
+    def _parse_text_once(self, text: str, *, force_ai: bool = False) -> ParsedCommand:
         """Извлекает структурированную команду из текста."""
         deterministic = infer_intent(text)
-        if self._looks_like_support_message(text):
+        if not force_ai and self._looks_like_support_message(text):
             logger.info("text_support_message_detected", text=text)
             return ParsedCommand(intent=Intent.SMALL_TALK, text=text)
-        if deterministic.intent not in {Intent.UNKNOWN, Intent.ADD_ITEMS}:
+        if not force_ai and deterministic.intent not in {Intent.UNKNOWN, Intent.ADD_ITEMS}:
             logger.info(
                 "text_command_deterministic",
                 text=text,
@@ -1238,7 +1350,7 @@ class OpenAIService:
                 item_count=len(deterministic.items),
             )
             return _repair_command_mixed_script_queries(deterministic)
-        if self._can_use_deterministic_product_list(text, deterministic):
+        if not force_ai and self._can_use_deterministic_product_list(text, deterministic):
             logger.info(
                 "text_product_list_deterministic",
                 text=text,
@@ -1246,7 +1358,9 @@ class OpenAIService:
                 items=[self._item_log(item) for item in deterministic.items],
             )
             return _repair_command_mixed_script_queries(deterministic)
-        if self._can_use_deterministic_single_product_with_quantity(text, deterministic):
+        if not force_ai and self._can_use_deterministic_single_product_with_quantity(
+            text, deterministic
+        ):
             logger.info(
                 "text_single_product_deterministic",
                 text=text,
@@ -1254,7 +1368,7 @@ class OpenAIService:
                 items=[self._item_log(item) for item in deterministic.items],
             )
             return _repair_command_mixed_script_queries(deterministic)
-        if self._can_use_deterministic_short_product(text, deterministic):
+        if not force_ai and self._can_use_deterministic_short_product(text, deterministic):
             logger.info(
                 "text_short_product_deterministic",
                 text=text,
@@ -1262,7 +1376,7 @@ class OpenAIService:
                 items=[self._item_log(item) for item in deterministic.items],
             )
             return _repair_command_mixed_script_queries(deterministic)
-        if self._can_use_deterministic_packaged_product(text, deterministic):
+        if not force_ai and self._can_use_deterministic_packaged_product(text, deterministic):
             logger.info(
                 "text_packaged_product_deterministic",
                 text=text,
@@ -1270,7 +1384,7 @@ class OpenAIService:
                 items=[self._item_log(item) for item in deterministic.items],
             )
             return _repair_command_mixed_script_queries(deterministic)
-        if self._should_skip_ai(text):
+        if not force_ai and self._should_skip_ai(text):
             logger.info(
                 "text_ai_skipped",
                 text=text,
@@ -1308,6 +1422,8 @@ class OpenAIService:
         parsed = response.output_parsed
         if parsed is None:
             logger.warning("text_ai_empty_result", text=text)
+            if force_ai:
+                return ParsedCommand(intent=Intent.UNKNOWN, text=text)
             return _repair_command_mixed_script_queries(deterministic)
         logger.info(
             "text_ai_parsed",
@@ -1332,6 +1448,7 @@ class OpenAIService:
             command.intent == Intent.ADD_MORE
             and deterministic.intent == Intent.ADD_ITEMS
             and deterministic.items
+            and not force_ai
         ):
             logger.warning(
                 "text_ai_navigation_rejected",
