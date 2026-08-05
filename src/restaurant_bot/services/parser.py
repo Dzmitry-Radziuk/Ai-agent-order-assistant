@@ -47,7 +47,10 @@ _COMMANDS: list[tuple[Intent, re.Pattern[str]]] = [
     (
         Intent.CLEAR_CART,
         re.compile(
-            r"^(?:/reset|сброс|сбрось черновик|очисти(?:ть)? (?:заявку|корзину|черновик))$",
+            r"^(?:/reset|сброс|сбрось черновик|очисти(?:ть)? (?:заявку|корзину|черновик)|"
+            r"(?:сброс(?:ить|ь)|очист(?:ить|и)|обнул(?:ить|и))(?: (?:заявку|корзину|черновик))? "
+            r"и (?:начать|начни|начинаем) (?:заново|сначала)|"
+            r"(?:удали|убери) (?:всё|все|всю|весь) и (?:начать|начни|начинаем) (?:заново|сначала))$",
             re.I,
         ),
     ),
@@ -436,7 +439,7 @@ def _infer_negated_command(normalized: str) -> Intent | None:
         has_negated_action(normalized, *stems)
         for stems in (
             ("отправ", "оформ", "подтверж", "переда", "запиш"),
-            ("очист", "очищ", "почист", "сброс", "обнул", "удал", "убер"),
+            ("очист", "очищ", "почист", "сброс", "сбрасы", "обнул", "удал", "убер"),
             ("использ", "остав", "перевед", "конверт"),
             ("выбер", "выбир", "возьм", "бери"),
             ("объедин", "суммир", "прибав", "слож", "увелич"),
@@ -619,11 +622,25 @@ def _infer_free_form_navigation(normalized: str) -> Intent | None:
         return Intent.PRODUCT_ADD_LIST
 
     # Сначала различаем очистку всей заявки и удаление одной позиции.
-    clear_action = _has_word_stem(words, "очист", "сброс", "обнул", "вычист", "стер", "сотри")
+    clear_action = _has_word_stem(
+        words,
+        "очист",
+        "сброс",
+        "сбрасы",
+        "обнул",
+        "вычист",
+        "стер",
+        "сотри",
+    )
     clear_target = _has_word_stem(words, "корзин", "черновик", "заявк", "заказ", "спис")
     remove_all = _has_word_stem(words, "удал", "убер") and _has_word_stem(
         words, "все", "всё", "всю", "весь", "полност", "целик"
     )
+    restart_after_clear = _has_word_stem(words, "начн", "начат") and _has_word_stem(
+        words, "занов", "сначал"
+    )
+    if not has_negation(normalized) and restart_after_clear and (clear_action or remove_all):
+        return Intent.CLEAR_CART
     if (clear_action and clear_target) or remove_all:
         return Intent.CLEAR_CART
     if (

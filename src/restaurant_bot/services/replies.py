@@ -544,12 +544,12 @@ def cart_reply(state: ConversationState, title: str = "Черновик заяв
         rows.append([Button(text=f"Уточнить {count} {word}", callback_data="v2:resolve")])
     else:
         rows.append([Button(text="Отправить в корзину", callback_data="v2:cart")])
-    rows.append([Button(text="Добавить товары", callback_data="v2:add")])
+    rows.append([Button(text="Добавить ещё товары", callback_data="v2:add")])
     if request_count:
         rows.append(
             [Button(text=f"Запросы снабженцу · {request_count}", callback_data="v2:addreqlist")]
         )
-    rows.append([Button(text="Начать заново", callback_data="v2:clear")])
+    rows.append([Button(text="Сбросить и начать заново", callback_data="v2:clear")])
     return BotReply(text="\n".join(lines).strip(), rows=rows)
 
 

@@ -146,6 +146,6 @@ def test_draft_uses_source_button_names() -> None:
 
     assert [[button.text for button in row] for row in reply.rows] == [
         ["Отправить в корзину"],
-        ["Добавить товары"],
-        ["Начать заново"],
+        ["Добавить ещё товары"],
+        ["Сбросить и начать заново"],
     ]
