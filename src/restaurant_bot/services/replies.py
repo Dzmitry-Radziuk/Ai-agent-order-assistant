@@ -29,6 +29,14 @@ ISSUE_STATUSES = {
     ItemStatus.NOT_FOUND,
 }
 
+_NEW_ORDER_MESSAGE = (
+    "🧾 <b>Новая заявка</b>\n\n"
+    "Отправьте товары текстом, голосом или фото — я добавлю их в текущий черновик заказа.\n\n"
+    "Можно отправить один товар, список или фото заполненной таблицы. "
+    "Я распознаю названия, количество и комментарии.\n\n"
+    "Когда закончите, скажите «покажи итог» — я покажу заявку для проверки."
+)
+
 
 class _SupplierWarningGroup(TypedDict):
     """Группирует предупреждения о минимуме поставщика."""
@@ -136,9 +144,7 @@ def welcome_reply(state: ConversationState) -> BotReply:
     first_contact = not bool(state.metadata.get("onboarding_shown"))
     state.metadata["onboarding_shown"] = True
     if first_contact or not (count or requests):
-        return BotReply(
-            text="🧾 <b>Новая заявка</b>\n\nОтправьте товары текстом, голосом или фото."
-        )
+        return BotReply(text=_NEW_ORDER_MESSAGE)
     details = "\n".join(
         part
         for part in (
@@ -182,7 +188,7 @@ def new_order_confirmation_reply(state: ConversationState) -> BotReply:
 
 def new_order_started_reply() -> BotReply:
     """Показывает однозначный пустой экран только что начатой заявки."""
-    return BotReply(text="🧾 <b>Новая заявка</b>\n\nОтправьте товары текстом, голосом или фото.")
+    return BotReply(text=_NEW_ORDER_MESSAGE)
 
 
 def help_reply(state: ConversationState | None = None) -> BotReply:
@@ -455,6 +461,7 @@ def product_add_requests_reply(state: ConversationState) -> BotReply:
 
 
 _CART_PAGE_SIZE = 20
+_FINAL_REVIEW_PAGE_SIZE = 20
 
 
 def cart_reply(state: ConversationState, title: str = "Черновик заявки") -> BotReply:
@@ -731,8 +738,18 @@ def issue_reply(item: CartItem, item_index: int | None = None) -> BotReply:
 def final_review_reply(state: ConversationState) -> BotReply:
     """Формирует карточку финальной проверки."""
     items = _active_items(state)
+    total_pages = max(1, (len(items) + _FINAL_REVIEW_PAGE_SIZE - 1) // _FINAL_REVIEW_PAGE_SIZE)
+    page = min(max(0, state.final_review_page), total_pages - 1)
+    state.final_review_page = page
+    page_items = items[page * _FINAL_REVIEW_PAGE_SIZE : (page + 1) * _FINAL_REVIEW_PAGE_SIZE]
+    paginated = total_pages > 1
     lines = ["📦 <b>Финальная проверка</b>", ""]
-    for index, item in enumerate(items[:20], start=1):
+    if paginated:
+        lines.extend([f"Страница {page + 1} из {total_pages}", ""])
+    for index, item in enumerate(
+        page_items,
+        start=page * _FINAL_REVIEW_PAGE_SIZE + 1,
+    ):
         lines.append(
             f"{index}. {escape(_item_name(item))} — {format_number(item.quantity)} {escape(_item_unit(item) or 'шт')}"
         )
@@ -745,6 +762,14 @@ def final_review_reply(state: ConversationState) -> BotReply:
     ]
     warnings = _supplier_warnings(state)
     rows: list[list[Button]] = []
+    if paginated:
+        navigation: list[Button] = []
+        if page > 0:
+            navigation.append(Button(text="← Назад", callback_data=f"v2:finalpage:{page - 1}"))
+        if page < total_pages - 1:
+            navigation.append(Button(text="Далее →", callback_data=f"v2:finalpage:{page + 1}"))
+        if navigation:
+            rows.append(navigation)
     if len(multiple) == 1:
         item = multiple[0]
         unit = escape(_item_unit(item) or "шт")

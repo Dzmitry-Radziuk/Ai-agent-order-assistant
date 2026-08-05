@@ -22,6 +22,11 @@ from restaurant_bot.services.text import clean_text, escape, normalize_text
 logger = structlog.get_logger(__name__)
 
 
+def _new_order_button() -> list[list[Button]]:
+    """Возвращает кнопку перехода к созданию новой заявки."""
+    return [[Button(text="Новая заявка", callback_data="v2:new")]]
+
+
 class VenueDirectoryError(RuntimeError):
     """Сообщает об ошибке справочника заведений."""
 
@@ -520,7 +525,8 @@ class VenueRegistrationService:
                 return RegistrationResult(
                     handled=True,
                     reply=BotReply(
-                        text=(f"Вы уже подключены к заведению:\n«{escape(context.venue_name)}»")
+                        text=(f"Вы уже подключены к заведению:\n«{escape(context.venue_name)}»"),
+                        rows=_new_order_button(),
                     ),
                     context=context,
                 )
@@ -656,7 +662,7 @@ class VenueRegistrationService:
         )
         return RegistrationResult(
             handled=True,
-            reply=BotReply(text=text),
+            reply=BotReply(text=text, rows=_new_order_button()),
             context=context,
             reset_session=previous is None or previous.venue_code != venue.code,
         )

@@ -338,6 +338,26 @@ def test_start_without_code_explains_how_to_connect(settings) -> None:  # type: 
     assert "ещё не подключено" in result.reply.text
 
 
+def test_start_when_already_connected_shows_new_order_button(settings) -> None:  # type: ignore[no-untyped-def]
+    """Показывает кнопку новой заявки для уже подключённого пользователя."""
+    service = _service(settings, [])
+    service.current = VenueContext(
+        venue_code="6461W6",
+        venue_name="Качели",
+        spreadsheet_id="sheet-venue-1",
+        spreadsheet_url="",
+        telegram_user_id="77",
+        telegram_chat_id="77",
+    )
+
+    result = service.handle(_event("/start"))
+
+    assert result.reply is not None
+    button = result.reply.rows[0][0]
+    assert button.text == "Новая заявка"
+    assert button.callback_data == "v2:new"
+
+
 def test_registration_is_rejected_outside_private_chat(settings) -> None:  # type: ignore[no-untyped-def]
     """Проверяет, что регистрация является rejected вне личный чат."""
     result = _service(settings, [_venue()]).handle(_event("/start 6461W6", chat_type="group"))

@@ -159,10 +159,12 @@ _NATURAL_COMMANDS: list[tuple[Intent, re.Pattern[str]]] = [
     (
         Intent.START_NEW_ORDER,
         re.compile(
-            r"^(?:(?:давай|давайте|хочу|хотим|нужно|надо|можно)? ?"
+            r"^(?:(?:(?:давай|давайте|хочу|хотим|нужно|надо|можно|можешь|можете|пора|попробуем|пожалуйста)\s+)?"
+            r"(?:созда\w*|сдела\w*|нача\w*)\s+(?:заявк\w*|заказ\w*|черновик\w*)|"
+            r"(?:давай|давайте|хочу|хотим|нужно|надо|можно|можешь|можете|пора)? ?"
             r"(?:начать|начни|начинаем|создать|создай|сделать|оформить|открыть)? ?"
             r"(?:новую|новая|другую|следующую|ещ[её] одну) (?:заявку|заявка)|"
-            r"(?:давай|давайте|хочу|хотим|нужно|надо|можно)? ?"
+            r"(?:давай|давайте|хочу|хотим|нужно|надо|можно|можешь|можете|пора)? ?"
             r"(?:начать|начни|начинаем|создать|создай|сделать|оформить|открыть)? ?"
             r"(?:новый|другой|следующий|ещ[её] один) (?:заказ|черновик)|"
             r"начать заново|начни заново|(?:заказ|заявка|черновик) заново)$",
@@ -1169,6 +1171,7 @@ def parse_callback(data: str) -> ParsedCommand:
         # values are the callback contract of Engine v2.1 Prepare in n8n.
         # `cart` opens final checking, while `back` renders the draft.
         "cart": Intent.SHOW_FINAL_REVIEW,
+        "new": Intent.START_NEW_ORDER,
         "submit": Intent.SUBMIT_AS_IS,
         "clear": Intent.CLEAR_CART,
         "cancel": Intent.CANCEL,
@@ -1292,6 +1295,17 @@ def parse_callback(data: str) -> ParsedCommand:
             page = 0
         return ParsedCommand(
             intent=Intent.SHOW_CART,
+            text=data,
+            callback_target=f"page:{page}",
+            callback_revision=revision,
+        )
+    if action == "finalpage" and rest:
+        try:
+            page = max(0, int(rest[0]))
+        except ValueError:
+            page = 0
+        return ParsedCommand(
+            intent=Intent.SHOW_FINAL_REVIEW,
             text=data,
             callback_target=f"page:{page}",
             callback_revision=revision,

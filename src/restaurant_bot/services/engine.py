@@ -159,6 +159,7 @@ class ConversationEngine:
         command = self._contextual_negative_command(command, event, state)
         command = self._contextual_quantity_command(command, event.text, state)
         command = self._contextual_cart_pagination_command(command, event, state)
+        command = self._contextual_final_review_pagination_command(command, event, state)
         command = self._contextual_order_status_command(command, event, state)
         command = self._contextual_voice_command(command, event, state)
         if command.intent not in {
@@ -603,6 +604,8 @@ class ConversationEngine:
                 return EngineResult(state=state, reply=empty_draft_reply())
             state.current_issue_item_id = ""
             state.current_issue_kind = None
+            if command.intent == Intent.SHOW_FINAL_REVIEW:
+                state.final_review_page = self._final_review_page(command, state)
             state.stage = SessionStage.AWAIT_SUBMIT_CONFIRM
             return EngineResult(state=state, reply=final_review_reply(state))
         if command.intent == Intent.SUBMIT_AS_IS:
@@ -969,6 +972,7 @@ class ConversationEngine:
             quantity=extracted.quantity,
             unit=normalize_unit(extracted.unit),
             department=extracted.department or self.settings.default_department,
+            department_quantities=extracted.department_quantities.model_copy(deep=True),
             supplier_hint=extracted.supplier_hint,
             comment=self._merge_comments(item_comment, global_comment),
         )
@@ -1288,6 +1292,37 @@ class ConversationEngine:
             )
         return command
 
+    def _contextual_final_review_pagination_command(
+        self,
+        command: ParsedCommand,
+        event: TelegramEvent,
+        state: ConversationState,
+    ) -> ParsedCommand:
+        """Оставляет голосовую навигацию в постраничной финальной проверке."""
+        page_callbacks: set[int] = set()
+        for action in state.visible_actions:
+            callback_data = action.get("action_id", "")
+            match = re.fullmatch(r"v2:finalpage:(\d+)(?::r\d+)?", callback_data)
+            if match:
+                page_callbacks.add(int(match.group(1)))
+        if not page_callbacks:
+            return command
+
+        raw = event.text or command.text
+        phrase = normalize_command_text(raw)
+        navigation_target = self._status_navigation_target(phrase)
+        if navigation_target not in {"next", "previous"}:
+            return command
+
+        target_page = state.final_review_page + (1 if navigation_target == "next" else -1)
+        if target_page not in page_callbacks:
+            target_page = state.final_review_page
+        return ParsedCommand(
+            intent=Intent.SHOW_FINAL_REVIEW,
+            text=raw,
+            callback_target=f"page:{max(0, target_page)}",
+        )
+
     @staticmethod
     def _status_navigation_target(phrase: str) -> str:
         """Распознаёт разговорную навигацию по страницам истории."""
@@ -1362,6 +1397,17 @@ class ConversationEngine:
                 return 0
         return max(0, state.cart_page)
 
+    @staticmethod
+    def _final_review_page(command: ParsedCommand, state: ConversationState) -> int:
+        """Вычисляет страницу финальной проверки заявки."""
+        target = command.callback_target
+        if target.startswith("page:"):
+            try:
+                return max(0, int(target.partition(":")[2]))
+            except ValueError:
+                return 0
+        return max(0, state.final_review_page)
+
     def _contextual_voice_command(
         self,
         command: ParsedCommand,
@@ -1379,6 +1425,21 @@ class ConversationEngine:
         if not phrase:
             return command
         current = state.current_item()
+
+        # Speech recognition may keep only the adjective from a short command
+        # such as «Новая заявка» and return «Новая».  Treat a lone new-order
+        # adjective as navigation only for voice input and only without an
+        # open issue card; a real product line with a name or quantity remains
+        # ordinary product input.
+        if (
+            current is None
+            and command.intent == Intent.ADD_ITEMS
+            and len(command.items) == 1
+            and command.items[0].quantity is None
+            and normalize_text(command.items[0].product_query)
+            in {"новая", "новую", "новый", "новое"}
+        ):
+            return command.model_copy(update={"intent": Intent.START_NEW_ORDER, "items": []})
 
         if (
             current
@@ -2687,31 +2748,33 @@ class ConversationEngine:
             supplier_totals[item.supplier] += item.amount
         rows = []
         for item in matched:
-            rows.append(
-                {
-                    "Время создания заявки": now.isoformat(),
-                    "Время изменения": now.isoformat(),
-                    "ID заявки": f"{item.supplier}|{state.restaurant}|{order_no}",
-                    "№ Заявки": order_no,
-                    "Условное название поставщика": item.supplier,
-                    "Условное наз-ие заведения": state.restaurant,
-                    "Роль": item.department or self.settings.default_department,
-                    "ID товара": item.catalog_product_id,
-                    "Наименование у поставщика": item.catalog_name,
-                    "Ед.Изм. для заказа": item.catalog_unit,
-                    "Минимальная Кратность в заказе": item.minimum_multiple or "",
-                    "Полезный V, m Нетто Ед.Изм.для Заказа": item.useful_volume or "",
-                    "Цена за Ед.Изм. для заказа": item.price or "",
-                    "Кол-во": item.quantity or "",
-                    "Мин сумма Заказа по Поставщику": item.supplier_minimum_amount or "",
-                    "Комментарий": item.comment,
-                    "Сумма по товару в заказе": item.amount,
-                    "Сумма по заявке к поставщику": supplier_totals[item.supplier],
-                    "Стадия": "Новая заявка",
-                    "Стадия от Заведения": "",
-                    "_department": item.department,
-                }
-            )
+            for department, quantity in self._submission_department_quantities(item):
+                amount = quantity * item.price if item.price is not None else 0.0
+                rows.append(
+                    {
+                        "Время создания заявки": now.isoformat(),
+                        "Время изменения": now.isoformat(),
+                        "ID заявки": f"{item.supplier}|{state.restaurant}|{order_no}",
+                        "№ Заявки": order_no,
+                        "Условное название поставщика": item.supplier,
+                        "Условное наз-ие заведения": state.restaurant,
+                        "Роль": department,
+                        "ID товара": item.catalog_product_id,
+                        "Наименование у поставщика": item.catalog_name,
+                        "Ед.Изм. для заказа": item.catalog_unit,
+                        "Минимальная Кратность в заказе": item.minimum_multiple or "",
+                        "Полезный V, m Нетто Ед.Изм.для Заказа": item.useful_volume or "",
+                        "Цена за Ед.Изм. для заказа": item.price or "",
+                        "Кол-во": quantity or "",
+                        "Мин сумма Заказа по Поставщику": item.supplier_minimum_amount or "",
+                        "Комментарий": item.comment,
+                        "Сумма по товару в заказе": amount,
+                        "Сумма по заявке к поставщику": supplier_totals[item.supplier],
+                        "Стадия": "Новая заявка",
+                        "Стадия от Заведения": "",
+                        "_department": department,
+                    }
+                )
         state.pending_submission = PendingSubmission(
             order_no=order_no,
             trace_id=state.order_trace_id,
@@ -2732,3 +2795,18 @@ class ConversationEngine:
             reply=BotReply(text=f"{progress} <b>{order_no}</b>..."),
             enqueue_submission=True,
         )
+
+    @staticmethod
+    def _submission_department_quantities(item: CartItem) -> list[tuple[str, float]]:
+        """Возвращает количества позиции по отделам для записи в таблицу."""
+        department_values = (
+            ("Зал", item.department_quantities.hall),
+            ("Бар", item.department_quantities.bar),
+            ("Кухня", item.department_quantities.kitchen),
+        )
+        rows = [
+            (department, value) for department, value in department_values if value and value > 0
+        ]
+        if rows:
+            return rows
+        return [(item.department or "Кухня", item.quantity or 0)]

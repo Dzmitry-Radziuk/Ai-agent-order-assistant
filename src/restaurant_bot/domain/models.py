@@ -254,6 +254,7 @@ class CartItem(BaseModel):
     quantity: float | None = None
     unit: str = ""
     department: str = "Кухня"
+    department_quantities: DepartmentQuantities = Field(default_factory=DepartmentQuantities)
     supplier_hint: str = ""
     supplier_search_locked: bool = False
     rename_attempted: bool = False
@@ -356,6 +357,7 @@ class ConversationState(BaseModel):
     order_status_selected_order_number: str = ""
     order_status_order_numbers: list[str] = Field(default_factory=list)
     cart_page: int = 0
+    final_review_page: int = 0
     review_token: str = ""
     review_snapshot_hash: str = ""
     review_venue_code: str = ""

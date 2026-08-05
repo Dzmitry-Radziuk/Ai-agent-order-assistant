@@ -100,7 +100,11 @@ def test_new_order_after_submission_starts_empty_draft_and_preserves_history(
     assert result.state.metadata["registration"] == "kept"
     assert result.state.product_add_requests[0]["request_id"] == "request-1"
     assert result.reply.text == (
-        "🧾 <b>Новая заявка</b>\n\nОтправьте товары текстом, голосом или фото."
+        "🧾 <b>Новая заявка</b>\n\n"
+        "Отправьте товары текстом, голосом или фото — я добавлю их в текущий черновик заказа.\n\n"
+        "Можно отправить один товар, список или фото заполненной таблицы. "
+        "Я распознаю названия, количество и комментарии.\n\n"
+        "Когда закончите, скажите «покажи итог» — я покажу заявку для проверки."
     )
 
 

@@ -1,6 +1,7 @@
 from restaurant_bot.domain.models import (
     CatalogProduct,
     ConversationState,
+    DepartmentQuantities,
     ExtractedItem,
     InputKind,
     Intent,
@@ -57,3 +58,49 @@ def test_submission_row_uses_add_sheet_contract_headers(settings) -> None:  # ty
     assert result.state.pending_submission is not None
     assert result.state.pending_submission.venue_code == "6461W6"
     assert result.state.pending_submission.spreadsheet_id == "venue-sheet-id"
+
+
+def test_submission_splits_photo_quantities_into_department_rows(settings) -> None:  # type: ignore[no-untyped-def]
+    """Разносит количества с фото по отдельным колонкам отделов заявки."""
+    engine = ConversationEngine(settings)
+    event = TelegramEvent(update_id=2, chat_id="11112222", input_type=InputKind.TEXT)
+    catalog = [
+        CatalogProduct(
+            product_id="rose-1",
+            name="Сироп Роза",
+            supplier="Мясной поставщик",
+            unit="шт",
+            price=100,
+        )
+    ]
+    added = engine.handle(
+        event,
+        ParsedCommand(
+            intent=Intent.ADD_ITEMS,
+            items=[
+                ExtractedItem(
+                    product_query="Сироп Роза",
+                    quantity=6,
+                    unit="шт",
+                    department_quantities=DepartmentQuantities(hall=2, bar=1, kitchen=3),
+                )
+            ],
+        ),
+        ConversationState(
+            restaurant="Кафе",
+            role="Повар",
+            venue_code="6461W6",
+            spreadsheet_id="venue-sheet-id",
+        ),
+        catalog,
+    )
+
+    result = engine._prepare_submission(event, added.state)
+    rows = result.state.pending_submission.rows  # type: ignore[union-attr]
+
+    assert [(row["Роль"], row["Кол-во"], row["_department"]) for row in rows] == [
+        ("Зал", 2, "Зал"),
+        ("Бар", 1, "Бар"),
+        ("Кухня", 3, "Кухня"),
+    ]
+    assert [row["Сумма по товару в заказе"] for row in rows] == [200, 100, 300]

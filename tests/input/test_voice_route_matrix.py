@@ -62,6 +62,12 @@ def test_voice_add_more_command_with_transcriber_terminal_punctuation() -> None:
         ("Хочу оформить ещё одну заявку", Intent.START_NEW_ORDER),
         ("Начать заново", Intent.START_NEW_ORDER),
         ("Заказ заново", Intent.START_NEW_ORDER),
+        ("Создать заявку", Intent.START_NEW_ORDER),
+        ("Создай заявку", Intent.START_NEW_ORDER),
+        ("Давай создадим заявку", Intent.START_NEW_ORDER),
+        ("Давайте создадим заказ", Intent.START_NEW_ORDER),
+        ("Пора сделать новую заявку", Intent.START_NEW_ORDER),
+        ("Можешь создать заявку", Intent.START_NEW_ORDER),
     ],
 )
 def test_live_voice_wording_routes_before_product_parsing(phrase: str, intent: Intent) -> None:
@@ -118,6 +124,9 @@ def test_live_voice_wording_routes_before_product_parsing(phrase: str, intent: I
         ("Давайте укажем количество в кг", Intent.ENTER_OTHER_QUANTITY),
         ("Давайте создадим следующий заказ", Intent.START_NEW_ORDER),
         ("Нужно сделать повторную заявку", Intent.START_NEW_ORDER),
+        ("Хочу создать заявку", Intent.START_NEW_ORDER),
+        ("Можно начать заявку", Intent.START_NEW_ORDER),
+        ("Попробуем сделать черновик", Intent.START_NEW_ORDER),
     ],
 )
 def test_free_form_voice_navigation_ignores_fillers_and_word_order(

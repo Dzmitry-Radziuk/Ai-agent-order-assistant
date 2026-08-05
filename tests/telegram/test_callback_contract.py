@@ -13,6 +13,7 @@ from restaurant_bot.services.parser import parse_callback
 def test_callback_actions_have_explicit_state_machine_meanings() -> None:
     """Проверяет, что callback действия имеют явный состояние machine meanings."""
     assert parse_callback("v2:cart").intent is Intent.SHOW_FINAL_REVIEW
+    assert parse_callback("v2:new").intent is Intent.START_NEW_ORDER
     assert parse_callback("v2:back").intent is Intent.BACK
     assert parse_callback("v2:submit").intent is Intent.SUBMIT_AS_IS
     assert parse_callback("v2:addreq:2").intent is Intent.PRODUCT_ADD
@@ -22,10 +23,13 @@ def test_callback_actions_have_explicit_state_machine_meanings() -> None:
 def test_pagination_callbacks_have_explicit_targets() -> None:
     """Разбирает страницы черновика и подробностей заявки без двусмысленности."""
     cart = parse_callback("v2:cartpage:2")
+    final_review = parse_callback("v2:finalpage:2")
     detail = parse_callback("v2:orderitems:3:4")
 
     assert cart.intent is Intent.SHOW_CART
     assert cart.callback_target == "page:2"
+    assert final_review.intent is Intent.SHOW_FINAL_REVIEW
+    assert final_review.callback_target == "page:2"
     assert detail.intent is Intent.ORDER_STATUS
     assert detail.selected_index == 3
     assert detail.order_status_detail_page == 4

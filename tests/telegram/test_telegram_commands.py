@@ -195,6 +195,65 @@ def test_voice_pagination_stays_in_large_draft(
     assert f"Страница {expected_page + 1} из 2" in result.reply.text
 
 
+@pytest.mark.parametrize(
+    ("phrase", "final_review_page", "expected_page"),
+    [
+        ("следующая страница", 0, 1),
+        ("перейди на предыдущую страницу", 1, 0),
+    ],
+)
+def test_voice_pagination_stays_in_large_final_review(
+    settings, phrase: str, final_review_page: int, expected_page: int
+) -> None:  # type: ignore[no-untyped-def]
+    """Переключает страницы финальной проверки, а не открывает историю заявок."""
+    state = ConversationState(
+        final_review_page=final_review_page,
+        visible_actions=[
+            {"label": "← Назад", "action_id": "v2:finalpage:0:r1"},
+            {"label": "Далее →", "action_id": "v2:finalpage:1:r1"},
+        ],
+        cart=[
+            CartItem(
+                id=f"item-{index}",
+                source_query=f"Товар {index}",
+                quantity=1,
+                unit="шт",
+                status=ItemStatus.MATCHED,
+            )
+            for index in range(21)
+        ],
+    )
+    event = TelegramEvent(
+        update_id=6,
+        chat_id="1",
+        input_type=InputKind.VOICE,
+        text=phrase,
+    )
+
+    result = ConversationEngine(settings).handle(event, infer_intent(phrase), state, [])
+
+    assert result.enqueue_order_status is False
+    assert result.state.final_review_page == expected_page
+    assert f"Страница {expected_page + 1} из 2" in result.reply.text
+
+
+def test_voice_short_new_order_transcription_does_not_become_product(settings) -> None:  # type: ignore[no-untyped-def]
+    """Маршрутизирует обрезанную голосовую фразу «Новая» в новую заявку."""
+    state = ConversationState()
+    event = TelegramEvent(
+        update_id=7,
+        chat_id="1",
+        input_type=InputKind.VOICE,
+        text="Новая",
+    )
+
+    result = ConversationEngine(settings).handle(event, infer_intent(event.text), state, [])
+
+    assert result.state.stage.value == "collecting"
+    assert result.state.cart == []
+    assert "Новая заявка" in result.reply.text
+
+
 def test_natural_order_status_phrase_contains_selected_position() -> None:
     """Извлекает позицию из полной человеческой фразы."""
     command = infer_intent("Давай посмотрим вторую заявку")

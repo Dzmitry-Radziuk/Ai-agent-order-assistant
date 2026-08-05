@@ -956,6 +956,11 @@ def test_client_order_sheet_uses_the_selected_department_quantity(settings) -> N
 
     assert command.items[0].department == "Кухня"
     assert command.items[0].quantity == 5
+    assert command.items[0].department_quantities.model_dump() == {
+        "hall": None,
+        "bar": None,
+        "kitchen": 5,
+    }
 
 
 def test_client_order_sheet_ignores_supplier_recognized_from_a_neighbouring_row(
@@ -1036,6 +1041,11 @@ def test_client_order_sheet_sums_only_filled_department_order_cells(settings) ->
 
     assert command.items[0].department == settings.default_department
     assert command.items[0].quantity == 5
+    assert command.items[0].department_quantities.model_dump() == {
+        "hall": 2,
+        "bar": None,
+        "kitchen": 3,
+    }
 
 
 def test_client_order_sheet_drops_row_without_department_order_quantity(settings) -> None:  # type: ignore[no-untyped-def]
