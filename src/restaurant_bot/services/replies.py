@@ -69,7 +69,14 @@ def _request_count(state: ConversationState) -> int:
 def _candidate_button_label(index: int, name: str, max_length: int = 42) -> str:
     """Формирует краткую подпись кандидата для кнопки."""
     prefix = f"{index}. "
-    return prefix + name.strip()[: max(1, max_length - len(prefix))]
+    available = max(1, max_length - len(prefix))
+    value = name.strip()
+    if len(value) <= available:
+        return prefix + value
+    ellipsis = "..."
+    if available <= len(ellipsis):
+        return prefix + ellipsis[:available]
+    return prefix + value[: available - len(ellipsis)].rstrip() + ellipsis
 
 
 def _item_name(item: CartItem) -> str:

@@ -89,6 +89,28 @@ def test_single_ambiguous_candidate_is_presented_only_as_a_similar_product() -> 
     )
 
 
+def test_long_candidate_button_name_ends_with_ellipsis() -> None:
+    """Сокращает длинное название в кнопке, сохраняя понятное начало."""
+    item = CartItem(
+        id="long-name",
+        source_query="вино",
+        status=ItemStatus.AMBIGUOUS,
+        candidates=[
+            Candidate(
+                product_id="long-wine",
+                name="Вино экстра брют белое Аристов Кюве Александр Блан де Блан 0,75 л",
+            )
+        ],
+    )
+
+    reply = issue_reply(item, 0)
+    label = reply.rows[0][0].text
+
+    assert label.startswith("1. Вино экстра брют")
+    assert label.endswith("...")
+    assert len(label) <= 42
+
+
 def test_product_issue_cards_escape_user_and_catalog_text() -> None:
     """Экранирует пользовательский запрос и названия вариантов для Telegram HTML."""
     not_found = issue_reply(

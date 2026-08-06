@@ -237,6 +237,7 @@ _NON_PRODUCT_FRAGMENT_WORDS = (
         "и",
         "или",
         "либо",
+        "на",
         "а",
         "также",
         "комментарий",
@@ -1261,8 +1262,34 @@ def recover_omitted_explicit_items(payload: dict[str, Any], source_text: str) ->
     payload["global_comment"] = global_comment
     _remove_item_global_comment_overlaps(restored, global_comment)
     _recover_missing_item_comments(restored, global_comment)
-    payload["items"] = collapse_comment_shadow_items(restored, global_comment)
+    # Deterministic recovery can append a connector fragment (for example
+    # ``на`` from the packaging phrase ``200 мл на 170 грамм``) after the first
+    # duplicate-collapse pass.  Remove only that exact class of fragment: a
+    # second full duplicate collapse could merge legitimate lines that share
+    # one source string in a long list.
+    payload["items"] = collapse_comment_shadow_items(
+        _remove_connector_fragment_items(restored),
+        global_comment,
+    )
     return payload
+
+
+def _remove_connector_fragment_items(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Удаляет отдельные союзы, ошибочно возвращённые как товарные позиции."""
+    connectors = {"на", "и", "или", "либо", "а", "также"}
+    source_counts: dict[str, int] = {}
+    for item in items:
+        source = normalize_text(item.get("source_line")).strip(" .,;:-—–")
+        if source:
+            source_counts[source] = source_counts.get(source, 0) + 1
+    result: list[dict[str, Any]] = []
+    for item in items:
+        query = normalize_text(item.get("product_query")).strip(" .,;:-—–")
+        source = normalize_text(item.get("source_line")).strip(" .,;:-—–")
+        if query in connectors and source and source_counts.get(source, 0) > 1:
+            continue
+        result.append(item)
+    return result
 
 
 _TEXT_SYSTEM = """
@@ -1295,6 +1322,19 @@ _TEXT_SYSTEM = """
   выражают намерение пользователя и не входят ни в product_query, ни в comment,
   ни в comment_bindings. Сохраняй только содержательное пожелание после такой вводной.
 - Сохраняй исходную строку в source_line. Комментарий сохраняй в comment и не включай его в product_query.
+- Формируй product_query консервативно: название, бренд, сорт, цвет, состояние,
+  обработка, форма, фасовка, упаковка, размер, код и неизвестные слова рядом с
+  категорией остаются частью возможного названия, пока пользователь явно не
+  выразил отдельное пожелание поставщику.
+- Не вырывай из названия одно прилагательное или число только потому, что оно
+  похоже на комментарий. Следующий компонент сверит полное product_query с
+  каталогом и не должен получить уже урезанную позицию.
+- Комментарий начинай только по явному маркеру пожелания или инструкции:
+  «нужно», «нужен/нужна», «желательно», «обязательно», «только», «именно»,
+  «пожалуйста», «просьба», «привезти», «доставить», «положить», «упаковать»,
+  «не заменять», «не смешивать», «не размораживать», «если не будет».
+  Полную формулировку такого пожелания сохраняй дословно, не сокращай до
+  одного слова. Без явного маркера оставляй характеристику в product_query.
 - Комментарий может быть любым текстом пользователя. Порядок слов свободный; не используй закрытый словарь комментариев.
 - Для каждого комментария дополнительно верни comment_bindings: исходный текст комментария,
   scope, target_item_indexes и confidence. Индексы начинаются с нуля и относятся только к итоговому items.
@@ -1327,9 +1367,13 @@ _TEXT_SYSTEM = """
 - Отделяй от возможного названия только явное пожелание о качестве, состоянии, обработке,
   доставке или замене. Само возможное название сохраняй дословно, без исправления.
 - Пример: «говядина 10 кг мраморная без кожи» → product_query включает
-  «говядина мраморная», quantity=10, unit="кг", comment="без кожи"; если такого
+  «говядина мраморная без кожи», quantity=10, unit="кг", comment=""; если такого
   варианта нет в каталоге, оставь позицию неоднозначной.
 - Пример с опечаткой: «сироп рза холодным» → product_query="сироп рза", comment="холодным".
+- Пример с характеристикой в названии: «вино ПЕТРИКОР МАЛЬВАЗИЯ сухое белое 0,75 л — 2 шт»
+  → product_query включает «сухое белое 0,75 л», quantity=2, unit="шт", comment="".
+- Пример с номером варианта: «вино кюве номер один резерв сухое красное — 1 шт»
+  → «номер один» остаётся в product_query как часть названия, comment="".
 - Пример общего комментария: «всё привезти до 9 утра» → global_comment="привезти до 9 утра",
   comment_bindings=[{text: "привезти до 9 утра", scope: "order", target_item_indexes: [], confidence: 0.99}]
   и не создавай из него товар.
@@ -1337,7 +1381,8 @@ _TEXT_SYSTEM = """
   → у куриных лап comment="Желательно завтра с 9 до 14", global_comment пустой,
   comment_bindings=[{text: "Желательно завтра с 9 до 14", scope: "item", target_item_indexes: [0], confidence: 0.98}].
 - Пример локальных и общего комментариев: «сироп тархун в бутылках 10 шт, сироп роза 1 шт в банках, и всё желательно на завтра»
-  → у тархуна comment="в бутылках", у розы comment="в банках", global_comment="желательно на завтра".
+  → «в бутылках» и «в банках» остаются в product_query как возможные
+  характеристики, global_comment="желательно на завтра".
 - Разговорная связка общего охвата не является локальным комментарием:
   «сироп роза 5 шт, главное быстро, и сироп тархун — всё это дело на завтра»
   → у розы comment="главное быстро", у тархуна comment="", global_comment="на завтра".

@@ -289,6 +289,35 @@ def test_shared_source_line_is_not_guessed_as_an_item_comment() -> None:
     assert [item.get("comment", "") for item in restored["items"]] == ["", ""]
 
 
+def test_packaging_connector_is_not_created_as_a_product() -> None:
+    """Не создаёт ложный товар из связки «200 мл на 170 г»."""
+    source = "Горчица зернистая 200 мл на 170 г СТБ Россия"
+    payload = {
+        "intent": Intent.ADD_ITEMS,
+        "items": [
+            {
+                "product_query": "Горчица зернистая",
+                "quantity": 200,
+                "unit": "мл",
+                "comment": "на 170 г",
+                "source_line": source,
+            },
+            {
+                "product_query": "на",
+                "quantity": 170,
+                "unit": "г",
+                "comment": "СТБ Россия",
+                "source_line": source,
+            },
+        ],
+    }
+
+    restored = recover_omitted_explicit_items(payload, source)
+
+    assert [item["product_query"] for item in restored["items"]] == ["Горчица зернистая"]
+    assert restored["items"][0]["comment"] == "на 170 г"
+
+
 def test_root_cut_requirement_is_applied_to_the_products_instead_of_becoming_one() -> None:
     """Переносит требование к срезу корней в комментарии перечисленных товаров."""
     source = "Укроп 2 килограмма, петрушка 3 килограмма, срез корня 5 сантиметров, не больше."

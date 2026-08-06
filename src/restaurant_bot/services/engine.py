@@ -207,6 +207,7 @@ class ConversationEngine:
         if state.pending_comment_items:
             return self._resolve_pending_comment_scope(event, command, state, catalog)
         self._remove_navigation_command_items(state)
+        self._normalize_existing_catalog_comments(state)
         self._remove_cart_comment_shadows(state)
         self._remove_exact_cart_duplicates(state)
 
@@ -1356,7 +1357,18 @@ class ConversationEngine:
         if (
             current.status == ItemStatus.MISSING_QTY
             and quantity is not None
-            and not self._has_named_product_items(command, phrase)
+            and (
+                not self._has_named_product_items(command, phrase)
+                # A parser/ASR pass may classify a bare spoken number such as
+                # «пять» or «один» as candidate #1.  Once the selected item
+                # is already known to be missing a quantity, the context is
+                # stronger than that generic intent and the number is always
+                # the answer to the quantity question.
+                or (
+                    command.intent == Intent.SELECT_CANDIDATE
+                    and self._is_quantity_only_phrase(phrase)
+                )
+            )
         ):
             return command.model_copy(
                 update={
@@ -1367,6 +1379,36 @@ class ConversationEngine:
                 }
             )
         return command
+
+    @staticmethod
+    def _is_quantity_only_phrase(phrase: str) -> bool:
+        """Проверяет, что короткая фраза содержит только число и единицу.
+
+        Это контекстная проверка для карточки «Укажите количество». Она не
+        меняет обычный выбор кандидата: фразы «первый вариант» и «вариант
+        один» не считаются количеством.
+        """
+        normalized = normalize_text(phrase)
+        if not normalized:
+            return False
+        words = normalized.replace(",", ".").split()
+        if words and words[0] in {
+            "первый",
+            "первая",
+            "первое",
+            "второй",
+            "вторая",
+            "третья",
+            "вариант",
+        }:
+            return False
+        allowed = set(UNIT_ALIASES) | set(NUMBER_WORDS)
+        for word in words:
+            if re.fullmatch(r"\d+(?:\.\d+)?", word):
+                continue
+            if word not in allowed:
+                return False
+        return any(re.fullmatch(r"\d+(?:\.\d+)?", word) or word in NUMBER_WORDS for word in words)
 
     def _contextual_cart_pagination_command(
         self,
@@ -2211,6 +2253,57 @@ class ConversationEngine:
             (index for index, candidate in enumerate(state.cart) if candidate.id == item.id), 0
         )
 
+    @staticmethod
+    def _catalog_packaging_measurement(
+        item: CartItem,
+        candidates: list[Candidate],
+    ) -> tuple[float, str] | None:
+        """Находит фасовку, ошибочно распознанную как количество заказа.
+
+        Голосовой разбор не знает каталог и может превратить «Марципан 65
+        грамм» в количество 65 г. Если единственное число строки совпадает с
+        фасовкой кандидата, а единица заказа каталога другая (например, кг),
+        безопаснее сохранить число как атрибут товара и запросить реальное
+        количество в единице каталога.
+        """
+        if item.quantity is None or not item.unit or item.quantity_source:
+            return None
+        source = normalize_text(item.source_line)
+        if not source or _EXPLICIT_ORDER_QUANTITY_RE.search(source) or numeric_range_spans(source):
+            return None
+
+        unit_pattern = "|".join(
+            sorted((re.escape(unit) for unit in UNIT_ALIASES), key=len, reverse=True)
+        )
+        measurements = re.findall(
+            rf"(?<![\w-])(?P<value>\d+(?:[,.]\d+)?)\s*"
+            rf"(?P<unit>{unit_pattern})\b",
+            source,
+            flags=re.IGNORECASE,
+        )
+        if len(measurements) != 1:
+            return None
+        value, raw_unit = measurements[0]
+        spoken_unit = normalize_unit(raw_unit)
+        try:
+            spoken_value = float(value.replace(",", "."))
+        except ValueError:
+            return None
+        if abs(spoken_value - item.quantity) > 1e-9 or spoken_unit != item.unit:
+            return None
+
+        packaging_candidates = [
+            candidate
+            for candidate in candidates
+            if has_compatible_numeric_characteristics(
+                f"{spoken_value:g} {spoken_unit}", candidate.name
+            )
+            and normalize_unit(candidate.unit) != spoken_unit
+        ]
+        if not packaging_candidates:
+            return None
+        return spoken_value, spoken_unit
+
     def _match_item(
         self,
         item: CartItem,
@@ -2218,6 +2311,7 @@ class ConversationEngine:
         search_scope: SearchScope | None = None,
     ) -> None:
         """Сопоставляет позицию с товаром каталога."""
+        self._remove_unanchored_supplier_hint(item)
         search_catalog = catalog
         outside_supplier_candidates: list[Candidate] = []
         if item.supplier_hint:
@@ -2239,6 +2333,14 @@ class ConversationEngine:
                 for candidate in candidates
                 if has_complete_query_evidence(item.source_query, candidate.name)
             ]
+        packaging_measurement = self._catalog_packaging_measurement(item, candidates)
+        if packaging_measurement is not None:
+            packaging_value, packaging_unit = packaging_measurement
+            item.packaging_text = f"{packaging_value:g} {packaging_unit}"
+            item.packaging_role = "catalog_attribute"
+            item.packaging_confidence = max(item.packaging_confidence, 0.86)
+            item.quantity = None
+            item.unit = ""
         item.candidates = candidates
         if not candidates:
             if item.supplier_hint and search_scope != SearchScope.ANY_SUPPLIER:
@@ -2252,6 +2354,7 @@ class ConversationEngine:
                 item.supplier_search_locked = True
             item.status = ItemStatus.NOT_FOUND
             return
+        self._sanitize_catalog_facts_before_resolution(item, candidates[0])
         if not item.comment and len(candidates) >= 2:
             query_words = re.findall(r"[a-zа-я0-9]+", normalize_text(item.source_query), flags=re.I)
             query_tokens = tokens(item.source_query)
@@ -2317,6 +2420,47 @@ class ConversationEngine:
         return ConversationEngine._supplier_comment_start(words) is not None
 
     @staticmethod
+    def _remove_unanchored_supplier_hint(item: CartItem) -> None:
+        """Не считает хвост названия товара поставщиком без явной команды."""
+        hint = normalize_text(item.supplier_hint)
+        source = normalize_text(item.source_line)
+        if not hint or not source:
+            return
+        explicit_supplier = re.search(
+            r"\b(?:поставщик\w*|у\s+поставщик\w*|от\s+поставщик\w*|купить\s+у)\b",
+            source,
+            flags=re.I,
+        )
+        if explicit_supplier:
+            return
+        query = normalize_text(item.source_query)
+        if query and query in source and source.find(query) < source.rfind(hint):
+            item.supplier_hint = ""
+
+    def _sanitize_catalog_facts_before_resolution(
+        self,
+        item: CartItem,
+        candidate: Candidate,
+    ) -> None:
+        """Удаляет характеристики каталога из количества и комментария до ИИ-уточнения."""
+        product_name = candidate.name
+        if item.quantity is not None and item.unit and not item.quantity_source:
+            quantity_text = f"{item.quantity:g} {item.unit}"
+            explicit_order = self._has_explicit_order_quantity(item.source_line, item.quantity)
+            if has_compatible_numeric_characteristics(quantity_text, product_name) and (
+                item.packaging_role == "catalog_attribute" or not explicit_order
+            ):
+                item.quantity = None
+                item.unit = ""
+        item.comment = self._remove_catalog_fact_comments(
+            item.comment,
+            item.source_query,
+            product_name,
+            source_line=item.source_line,
+            include_source_query=True,
+        )
+
+    @staticmethod
     def _supplier_comment_start(words: list[str]) -> int | None:
         """Находит начало явного комментария внутри неизвестного фрагмента."""
         normalized = [normalize_text(word) for word in words if normalize_text(word)]
@@ -2369,9 +2513,22 @@ class ConversationEngine:
         item.supplier_current_sum = product.supplier_current_sum
         item.existing_quantity = product.department_quantities.for_department(item.department) or 0
         self._reconcile_quantity_with_catalog_name(item, product.name)
-        user_comment = item.comment or self._comment_left_after_catalog_match(
-            item.source_query, product.name
+        explicit_comment = self._remove_catalog_fact_comments(
+            item.comment,
+            item.source_query,
+            product.name,
+            source_line=item.source_line,
+            include_source_query=True,
         )
+        derived_comment = self._comment_left_after_catalog_match(item.source_query, product.name)
+        if derived_comment and not self._looks_like_supplier_comment_fragment(
+            re.findall(r"[a-zа-яё0-9]+", normalize_text(derived_comment), flags=re.I)
+        ):
+            # Unmatched words without a supplier-instruction marker are still
+            # part of the user's product name (or an ASR variant). Never write
+            # them into the supplier comment after a candidate is selected.
+            derived_comment = ""
+        user_comment = self._merge_comments(explicit_comment, derived_comment)
         item.comment = self._merge_comments(product.comment, user_comment)
 
         if item.quantity is None:
@@ -2540,6 +2697,26 @@ class ConversationEngine:
             state.current_issue_item_id = ""
 
     @staticmethod
+    def _normalize_existing_catalog_comments(state: ConversationState) -> None:
+        """Очищает ошибки нормализации в уже сохранённом черновике.
+
+        Старый черновик мог быть создан до обновления парсера и содержать
+        фасовку, страну или остаток названия в поле комментария. Повторная
+        обработка удаляет только подтверждённые факты каталога и фразы,
+        состоящие исключительно из количества и единицы измерения; реальные
+        инструкции поставщику сохраняются.
+        """
+        for item in state.cart:
+            if not item.catalog_name or not item.comment:
+                continue
+            item.comment = ConversationEngine._remove_catalog_fact_comments(
+                item.comment,
+                item.source_query,
+                item.catalog_name,
+                include_source_query=True,
+            )
+
+    @staticmethod
     def _remove_exact_cart_duplicates(state: ConversationState) -> None:
         """Объединяет подтверждённые дубликаты позиций черновика."""
         owners: dict[tuple[str, str, str], CartItem] = {}
@@ -2607,6 +2784,122 @@ class ConversationEngine:
             word for index, word in enumerate(query_words) if index not in matched_query_indexes
         ]
         return " ".join(remainder).strip(" .,;")
+
+    @staticmethod
+    def _remove_catalog_fact_comments(
+        comment: str,
+        source_query: str,
+        product_name: str,
+        *,
+        source_line: str = "",
+        include_source_query: bool = False,
+    ) -> str:
+        """Убирает из комментария характеристики, уже подтверждённые каталогом.
+
+        ИИ иногда оставляет часть названия отдельным комментарием: например,
+        «белое» у вина или «номер один» у позиции «№1». Такие слова не являются
+        пожеланием поставщику и не должны записываться в колонку комментария.
+        Явные пожелания («желательно завтра», «без кожи») сохраняются целиком.
+        """
+
+        def canonical_words(value: str) -> list[str]:
+            """Канонизирует числа и подпись «номер» для сравнения с каталогом."""
+            words = re.findall(r"[a-zа-яё0-9]+", normalize_text(value), flags=re.I)
+            result: list[str] = []
+            index = 0
+            while index < len(words):
+                word = words[index]
+                if word == "номер" and index + 1 < len(words):
+                    number = NUMBER_WORDS.get(words[index + 1])
+                    if number is not None and float(number).is_integer():
+                        result.append(str(int(number)))
+                        index += 2
+                        continue
+                if word in NUMBER_WORDS and float(NUMBER_WORDS[word]).is_integer():
+                    result.append(str(int(NUMBER_WORDS[word])))
+                else:
+                    result.append(word)
+                index += 1
+            return result
+
+        def compact_words(value: str) -> set[str]:
+            """Возвращает компактные формы для «д/п», «дп» и похожих записей."""
+            compact = {
+                re.sub(r"[^a-zа-яё0-9]", "", word)
+                for word in canonical_words(value)
+                if re.sub(r"[^a-zа-яё0-9]", "", word)
+            }
+            compact.update(
+                re.sub(r"[^a-zа-яё0-9]", "", group)
+                for group in re.findall(
+                    r"[a-zа-яё0-9]+(?:[/.-][a-zа-яё0-9]+)+",
+                    normalize_text(value),
+                    flags=re.I,
+                )
+            )
+            return compact
+
+        catalog_facts = set(canonical_words(product_name))
+        query_facts = set(canonical_words(source_query)) if include_source_query else set()
+        compact_catalog_facts = compact_words(product_name)
+        compact_query_facts = compact_words(source_query) if include_source_query else set()
+        packaging_aliases = {
+            "коробка": "кор",
+            "коробке": "кор",
+            "коробки": "кор",
+            "короб": "кор",
+        }
+        normalized_unit_words = {normalize_text(alias) for alias in UNIT_ALIASES} | {
+            normalize_text(unit) for unit in UNIT_ALIASES.values()
+        }
+        normalized_unit_values = {normalize_text(unit) for unit in UNIT_ALIASES.values()}
+
+        def is_quantity_only_part(words: list[str]) -> bool:
+            """Определяет остаток количества, который не является пожеланием."""
+            has_number = False
+            has_unit = False
+            for word in words:
+                if word == "и":
+                    continue
+                if re.fullmatch(r"\d+(?:[.,]\d+)?", word) or word in NUMBER_WORDS:
+                    has_number = True
+                    continue
+                if (
+                    word in normalized_unit_words
+                    or normalize_text(normalize_unit(word)) in normalized_unit_values
+                ):
+                    has_unit = True
+                    continue
+                return False
+            return bool(words) and has_number and has_unit
+
+        if not catalog_facts and not query_facts:
+            return comment
+        kept: list[str] = []
+        for part in re.split(r"[;,]", str(comment or "")):
+            cleaned = " ".join(part.split()).strip(" .,;")
+            if not cleaned:
+                continue
+            part_words = canonical_words(cleaned)
+            normalized_part_words = [packaging_aliases.get(word, word) for word in part_words]
+            part_compact = compact_words(cleaned)
+            if is_quantity_only_part(part_words):
+                continue
+            all_catalog_facts = all(
+                word in catalog_facts
+                or word in query_facts
+                or word in {"в", "на", "из", "по"}
+                or packaging_aliases.get(word, word) in catalog_facts
+                for word in normalized_part_words
+            )
+            compact_catalog_match = bool(part_compact) and all(
+                word in compact_catalog_facts or word in compact_query_facts
+                for word in part_compact
+            )
+            if part_words and (all_catalog_facts or compact_catalog_match):
+                continue
+            kept.append(cleaned)
+        return "; ".join(kept)
 
     def _find_duplicate(self, state: ConversationState, item: CartItem) -> CartItem | None:
         """Находит дубликат товарной позиции."""

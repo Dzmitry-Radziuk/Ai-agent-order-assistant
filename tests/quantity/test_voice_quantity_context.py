@@ -351,6 +351,26 @@ def test_unknown_voice_quantity_fills_current_missing_quantity(
     assert result.state.cart[0].status is ItemStatus.UNIT_MISMATCH
 
 
+@pytest.mark.parametrize("phrase", ["5", "пять", "один", "5 штук"])
+def test_missing_quantity_number_overrides_candidate_intent(
+    settings,
+    phrase: str,
+) -> None:  # type: ignore[no-untyped-def]
+    """Считает короткий ответ количеством даже при ошибочном intent select_candidate."""
+    engine = ConversationEngine(settings)
+    state = _missing_quantity_state(engine)
+
+    result = engine.handle(
+        _voice(phrase),
+        ParsedCommand(intent=Intent.SELECT_CANDIDATE, selected_index=1, text=phrase),
+        state,
+        [],
+    )
+
+    assert result.state.cart[0].quantity == (5 if phrase.startswith(("5", "пять")) else 1)
+    assert result.state.cart[0].status is ItemStatus.MATCHED
+
+
 def test_voice_unit_entry_removes_previous_false_command_items(settings) -> None:  # type: ignore[no-untyped-def]
     """Удаляет ложные товары, созданные прошлыми ответами на эту карточку."""
     engine = ConversationEngine(settings)

@@ -1,7 +1,13 @@
 import pytest
 
 from restaurant_bot.config import Settings
-from restaurant_bot.domain.models import CartItem, CatalogProduct, ItemStatus
+from restaurant_bot.domain.models import (
+    Candidate,
+    CartItem,
+    CatalogProduct,
+    ConversationState,
+    ItemStatus,
+)
 from restaurant_bot.services.engine import ConversationEngine
 from restaurant_bot.services.matching import (
     can_auto_select,
@@ -216,6 +222,236 @@ def test_catalog_packaging_attribute_must_match_candidate(settings: Settings) ->
 
     assert item.status is ItemStatus.AMBIGUOUS
     assert item.catalog_product_id == ""
+
+
+def test_spoken_catalog_packaging_is_not_used_as_order_quantity(settings: Settings) -> None:
+    """Не превращает фасовку из голосового названия в количество заказа."""
+    item = CartItem(
+        id="marzipan",
+        source_query="Марципан",
+        source_line="Марципан 65 грамм",
+        quantity=65,
+        unit="г",
+    )
+    catalog = [
+        CatalogProduct(product_id="small", name="Марципан 65гр", unit="кг"),
+        CatalogProduct(product_id="large", name="Марципан 1/5кг", unit="кг"),
+    ]
+
+    ConversationEngine(settings)._match_item(item, catalog)
+
+    assert item.quantity is None
+    assert item.unit == ""
+    assert item.packaging_text == "65 г"
+    assert item.packaging_role == "catalog_attribute"
+    assert item.status is ItemStatus.AMBIGUOUS
+
+
+def test_explicit_order_quantity_is_not_reclassified_as_packaging(settings: Settings) -> None:
+    """Сохраняет количество, если пользователь явно попросил его заказать."""
+    item = CartItem(
+        id="marzipan",
+        source_query="Марципан",
+        source_line="Закажи Марципан 65 грамм",
+        quantity=65,
+        unit="г",
+    )
+    catalog = [CatalogProduct(product_id="small", name="Марципан 65гр", unit="кг")]
+
+    ConversationEngine(settings)._match_item(item, catalog)
+
+    assert item.quantity == 65
+    assert item.unit == "г"
+    assert item.packaging_role == "none"
+
+
+def test_catalog_product_facts_are_not_saved_as_supplier_comments(settings: Settings) -> None:
+    """Не записывает подтверждённые слова названия в комментарий поставщику."""
+    engine = ConversationEngine(settings)
+    catalog = [
+        CatalogProduct(
+            product_id="petricor",
+            name="Вино ПЕТРИКОР МАЛЬВАЗИЯ сухое белое 0,75л",
+            unit="шт",
+        ),
+        CatalogProduct(
+            product_id="cuvee-one",
+            name="Вино Кюве №1 резерв сухое красное 0,75л",
+            unit="шт",
+        ),
+    ]
+
+    white_wine = CartItem(
+        id="petricor",
+        source_query="Вино ПЕТРИКОР МАЛЬВАЗИЯ сухое белое",
+        comment="белое",
+        quantity=2,
+        unit="шт",
+    )
+    cuvee = CartItem(
+        id="cuvee-one",
+        source_query="Вино Кюве резерв сухое красное",
+        comment="номер один",
+        quantity=1,
+        unit="шт",
+    )
+
+    engine._match_item(white_wine, catalog)
+    engine._match_item(cuvee, catalog)
+
+    assert white_wine.comment == ""
+    assert cuvee.comment == ""
+
+
+def test_asr_product_residue_is_not_saved_as_supplier_comment(settings: Settings) -> None:
+    """Не сохраняет остаток ошибочной расшифровки названия как комментарий."""
+    engine = ConversationEngine(settings)
+    item = CartItem(
+        id="temelion",
+        source_query="Абрау-Дюрсо белое т. миллион винтаж 20 0,75 литра",
+        quantity=5,
+        unit="шт",
+    )
+    product = CatalogProduct(
+        product_id="temelion",
+        name="Вино брют белое «Темелион Винтаж 20»0,75л",
+        unit="шт",
+    )
+
+    engine._apply_catalog(
+        item,
+        Candidate(
+            product_id=product.product_id,
+            name=product.name,
+            unit=product.unit,
+        ),
+        [product],
+    )
+
+    assert item.comment == ""
+
+
+def test_catalog_title_facts_are_not_quantity_or_comment(settings: Settings) -> None:
+    """Не принимает фасовку, страну и упаковку полного названия за заказ."""
+    engine = ConversationEngine(settings)
+    product = CatalogProduct(
+        product_id="hondashi",
+        name='Бульон рыбный Хондаши ТМ "OTOSAN", 1 кг, 10 кг/кор, Китай',
+        supplier="Поставщик",
+        unit="шт",
+    )
+    item = CartItem(
+        id="hondashi",
+        source_query="Бульон рыбный Хондаши ТМ Ото-сан",
+        source_line="Бульон рыбный Хондаши ТМ Ото-сан, 1 кг, 10 кг в коробке, Китай",
+        quantity=10,
+        unit="кг",
+        supplier_hint="Китай",
+        comment="1 кг, в коробке, китай",
+        packaging_text="10 кг в коробке",
+        packaging_role="catalog_attribute",
+    )
+
+    engine._match_item(item, [product])
+
+    assert item.catalog_product_id == ""
+    assert item.candidates[0].product_id == product.product_id
+    assert item.quantity is None
+    assert item.unit == ""
+    assert item.comment == ""
+    assert item.supplier_hint == ""
+    assert item.status is ItemStatus.AMBIGUOUS
+
+
+def test_quantity_only_comment_residue_is_removed(settings: Settings) -> None:
+    """Удаляет из комментария продублированные количество и единицы товара."""
+    engine = ConversationEngine(settings)
+    product = CatalogProduct(
+        product_id="hazelnut",
+        name="Фундук 13/15 1кг",
+        unit="кг",
+    )
+    item = CartItem(
+        id="hazelnut",
+        source_query="Фундук три пятнадцатых",
+        source_line="Фундук три пятнадцатых один килограмм десять килограмм",
+        quantity=10,
+        unit="кг",
+        comment="один килограмм десять килограмм",
+    )
+
+    engine._match_item(item, [product])
+
+    assert item.comment == ""
+
+
+def test_saved_catalog_comment_is_normalized_when_draft_is_reopened() -> None:
+    """Очищает ошибочный комментарий в черновике, созданном старой версией."""
+    item = CartItem(
+        id="hondashi",
+        source_query="Бульон рыбный Хондаши ТМ Ото-сан",
+        catalog_name='Бульон рыбный Хондаши ТМ "OTOSAN", 1 кг, 10 кг/кор, Китай',
+        comment="1 кг, в коробке, китай",
+    )
+    state = ConversationState(cart=[item])
+
+    ConversationEngine._normalize_existing_catalog_comments(state)
+
+    assert state.cart[0].comment == ""
+
+
+def test_exact_catalog_title_number_requires_explicit_order_quantity(settings: Settings) -> None:
+    """Не считает число из полного названия заказом без явной просьбы пользователя."""
+    engine = ConversationEngine(settings)
+    product = CatalogProduct(
+        product_id="jam",
+        name="Джем Клубничный 1кг д/п",
+        supplier="Поставщик",
+        unit="шт",
+    )
+    item = CartItem(
+        id="jam",
+        source_query="Джем клубничный",
+        source_line="Джем клубничный один килограмм дп",
+        quantity=1,
+        unit="кг",
+        supplier_hint="дп",
+        comment="дп",
+    )
+
+    engine._match_item(item, [product])
+
+    assert item.catalog_product_id == product.product_id
+    assert item.quantity is None
+    assert item.unit == ""
+    assert item.comment == ""
+    assert item.status is ItemStatus.MISSING_QTY
+
+
+def test_explicit_quantity_after_catalog_title_is_preserved(settings: Settings) -> None:
+    """Сохраняет отдельное количество после полного названия товара."""
+    engine = ConversationEngine(settings)
+    product = CatalogProduct(
+        product_id="jam",
+        name="Джем Клубничный 1кг д/п",
+        supplier="Поставщик",
+        unit="шт",
+    )
+    item = CartItem(
+        id="jam",
+        source_query="Джем клубничный",
+        source_line="Джем клубничный один килограмм дп — 2 шт",
+        quantity=2,
+        unit="шт",
+    )
+
+    engine._match_item(item, [product])
+
+    assert item.catalog_product_id == product.product_id
+    assert item.quantity == 2
+    assert item.unit == "шт"
+    assert item.comment == ""
+    assert item.status is ItemStatus.MATCHED
 
 
 def test_one_word_category_never_auto_selects_the_only_catalog_candidate(
