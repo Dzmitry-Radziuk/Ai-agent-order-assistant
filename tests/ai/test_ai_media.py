@@ -216,6 +216,9 @@ def test_voice_transcription_uses_fallback_when_primary_returns_empty(
     settings, tmp_path: Path
 ) -> None:  # type: ignore[no-untyped-def]
     """Проверяет, что голос распознавание голоса использует резервную модель когда основная модель возвращает пустой результат."""
+    settings = settings.model_copy(
+        update={"openai_transcribe_fallback_model": "gpt-4o-mini-transcribe"}
+    )
     transcriptions = _Transcriptions(["", "сироп роза десять штук"])
     service = _service(
         settings, SimpleNamespace(audio=SimpleNamespace(transcriptions=transcriptions))
@@ -229,6 +232,19 @@ def test_voice_transcription_uses_fallback_when_primary_returns_empty(
         settings.openai_transcribe_fallback_model,
     ]
     assert all(call["language"] == "ru" for call in transcriptions.calls)
+
+
+def test_voice_transcription_does_not_repeat_the_same_model(settings, tmp_path: Path) -> None:  # type: ignore[no-untyped-def]
+    """Не делает второй дорогой запрос, если резервная модель совпадает с основной."""
+    transcriptions = _Transcriptions([""])
+    service = _service(
+        settings, SimpleNamespace(audio=SimpleNamespace(transcriptions=transcriptions))
+    )
+    audio = tmp_path / "voice.ogg"
+    audio.write_bytes(b"audio")
+
+    assert service.transcribe(audio) == ""
+    assert len(transcriptions.calls) == 1
 
 
 def test_voice_transcription_receives_context_prompt(settings, tmp_path: Path) -> None:  # type: ignore[no-untyped-def]
@@ -793,6 +809,21 @@ def test_short_product_with_possible_comment_skips_slow_initial_ai(settings) -> 
     assert command.items[0].product_query == "сироп рза холодным"
 
 
+def test_variant_qualified_short_product_uses_semantic_ai(settings) -> None:  # type: ignore[no-untyped-def]
+    """Передаёт неизвестный признак товара в ИИ, а не угадывает базовую позицию."""
+    parsed = ParsedInputSchema(
+        intent=Intent.ADD_ITEMS,
+        items=[ExtractedItem(product_query="Свинина сало обжаренное")],
+    )
+    responses = _Responses(parsed)
+    service = _service(settings, SimpleNamespace(responses=responses))
+
+    command = service.parse_text("Свинина сало обжаренное")
+
+    assert len(responses.calls) == 1
+    assert command.items[0].product_query == "Свинина сало обжаренное"
+
+
 def test_original_packaged_product_line_is_preserved_for_catalog_check(settings) -> None:  # type: ignore[no-untyped-def]
     """Сохраняет исходное название для отделения фасовки по каталогу."""
     text = "Концентрат Интерквас красного сусла, 650г"
@@ -811,6 +842,32 @@ def test_original_packaged_product_line_is_preserved_for_catalog_check(settings)
     command = service.parse_text(text)
 
     assert command.items[0].source_line == text
+
+
+def test_numeric_range_with_supplier_qualifier_uses_semantic_ai(settings) -> None:  # type: ignore[no-untyped-def]
+    """Не принимает поставщика и признак товара за часть названия при диапазоне."""
+    text = "Форель филе свежая 0,8-1,2 килограмма, зачищенная Тринца 5 килограмм."
+    parsed = ParsedInputSchema(
+        intent=Intent.ADD_ITEMS,
+        items=[
+            ExtractedItem(
+                product_query="Форель филе свежая 0,8-1,2 килограмма",
+                quantity=5,
+                unit="кг",
+                supplier_hint="Тринца",
+                comment="зачищенная",
+                source_line=text,
+            )
+        ],
+    )
+    service = _service(settings, SimpleNamespace(responses=_Responses(parsed)))
+
+    command = service.parse_text(text)
+
+    assert command.items[0].supplier_hint == "Тринца"
+    assert command.items[0].product_query == "Форель филе свежая 0,8-1,2 килограмма"
+    assert command.items[0].comment == "зачищенная"
+    assert (command.items[0].quantity, command.items[0].unit) == (5, "кг")
 
 
 def test_text_ai_unknown_placeholders_do_not_lock_supplier_search(settings) -> None:  # type: ignore[no-untyped-def]

@@ -1,12 +1,16 @@
+import pytest
+
 from restaurant_bot.config import Settings
 from restaurant_bot.domain.models import CartItem, CatalogProduct, ItemStatus
 from restaurant_bot.services.engine import ConversationEngine
 from restaurant_bot.services.matching import (
     can_auto_select,
     has_complete_query_evidence,
+    has_conflicting_catalog_qualifiers,
     is_broad_category_query,
     is_safe_catalog_name_equivalent,
     rank_candidates,
+    unverified_product_terms,
 )
 
 
@@ -32,6 +36,22 @@ def test_safe_catalog_name_equivalence_rejects_related_different_products() -> N
     assert not is_safe_catalog_name_equivalent("сливки", "Сливки 33%, 1л")
 
 
+def test_safe_equivalence_requires_user_named_size_range() -> None:
+    """Не считает товар эквивалентным, если в каталоге отсутствует размер из запроса."""
+    assert not is_safe_catalog_name_equivalent(
+        "Филе форели 0,9-1,3 килограмма",
+        "Филе форели",
+    )
+    assert is_safe_catalog_name_equivalent(
+        "Филе форели 0,9-1,3 килограмма",
+        "Филе форели 0.9–1.3 кг",
+    )
+    assert is_safe_catalog_name_equivalent(
+        "Филе форели 0,9 -- 1,3 килограмма",
+        "Филе форели 0.9–1.3 кг",
+    )
+
+
 def test_exact_product_is_auto_selected_but_category_query_is_not() -> None:
     """Проверяет, что точный товар является auto выбранный but категория query является не."""
     catalog = [
@@ -41,6 +61,161 @@ def test_exact_product_is_auto_selected_but_category_query_is_not() -> None:
 
     assert can_auto_select(rank_candidates("сироп роза", catalog))
     assert not can_auto_select(rank_candidates("сироп", catalog))
+
+
+def test_size_range_requires_an_equivalent_catalog_row(settings: Settings) -> None:
+    """Не выбирает единственный базовый товар вместо позиции с другим размером."""
+    engine = ConversationEngine(settings)
+    item = CartItem(
+        id="trout",
+        source_query="Филе форели 0,9-1,3 килограмма",
+        quantity=None,
+        source_line="Филе форели 0,9-1,3 килограмма",
+    )
+
+    engine._match_item(
+        item,
+        [CatalogProduct(product_id="plain-trout", name="Филе форели", unit="кг")],
+    )
+
+    assert item.catalog_product_id == ""
+    assert item.status is ItemStatus.AMBIGUOUS
+
+
+def test_size_range_matches_the_same_catalog_variant_without_becoming_comment(
+    settings: Settings,
+) -> None:
+    """Сохраняет диапазон в поиске и выбирает только вариант с теми же характеристиками."""
+    engine = ConversationEngine(settings)
+    source = "Филе форели 0,9-1,3 килограмма"
+    item = CartItem(id="trout", source_query=source, source_line=source)
+    catalog = [
+        CatalogProduct(
+            product_id="range-trout",
+            name="Филе форели 0,9-1,3 кг",
+            unit="кг",
+        ),
+    ]
+
+    engine._match_item(item, catalog)
+
+    assert item.catalog_product_id == "range-trout"
+    assert item.comment == ""
+    assert item.quantity is None
+    assert item.status is ItemStatus.MISSING_QTY
+
+
+def test_conflicting_product_qualifier_blocks_automatic_catalog_selection(
+    settings: Settings,
+) -> None:
+    """Не превращает противоречивую характеристику товара в комментарий."""
+    assert has_conflicting_catalog_qualifiers(
+        "Свинина уши копчёные",
+        "Свинина Уши Свежие, (кг)",
+    )
+    assert has_conflicting_catalog_qualifiers(
+        "Свинина рулька задняя",
+        "Свинина Рулька Передняя",
+    )
+
+    item = CartItem(
+        id="pork",
+        source_query="Свинина уши копчёные",
+        quantity=5,
+        unit="кг",
+    )
+    ConversationEngine(settings)._match_item(
+        item,
+        [
+            CatalogProduct(
+                product_id="fresh-ears",
+                name="Свинина Уши Свежие, (кг)",
+                unit="кг",
+            )
+        ],
+    )
+
+    assert item.catalog_product_id == ""
+    assert item.status is ItemStatus.AMBIGUOUS
+    assert item.comment == ""
+
+
+def test_full_name_term_missing_from_catalog_is_not_saved_as_comment(
+    settings: Settings,
+) -> None:
+    """Не подставляет единственный вариант, если каталог потерял признак товара."""
+    item = CartItem(
+        id="mustard",
+        source_query="Горчица Дижонская CHATEL, ведро, 1 кг, Франция",
+        quantity=1,
+        unit="шт",
+    )
+    catalog = [
+        CatalogProduct(
+            product_id="mustard-chatel",
+            name="Горчица Дижонская CHATEL, ведро, 1 кг",
+            unit="шт",
+        )
+    ]
+
+    ConversationEngine(settings)._match_item(item, catalog)
+
+    assert item.catalog_product_id == ""
+    assert item.status is ItemStatus.AMBIGUOUS
+    assert item.comment == ""
+
+
+@pytest.mark.parametrize(
+    ("query", "catalog_name"),
+    [
+        ("Свинина сало обжаренное", "Свинина Сало копченое. (кг)"),
+        ("Рис квадратный", "Рис круглый, 1 кг"),
+    ],
+)
+def test_product_variant_is_not_replaced_by_the_only_similar_catalog_row(
+    settings: Settings,
+    query: str,
+    catalog_name: str,
+) -> None:
+    """Не выбирает единственную похожую строку при несовпадении характеристики."""
+    item = CartItem(id="variant", source_query=query, quantity=1, unit="кг")
+
+    ConversationEngine(settings)._match_item(
+        item,
+        [CatalogProduct(product_id="similar", name=catalog_name, unit="кг")],
+    )
+
+    assert item.source_query == query
+    assert item.comment == ""
+    assert item.catalog_product_id == ""
+    assert item.status is ItemStatus.AMBIGUOUS
+
+
+def test_short_unknown_term_is_not_treated_as_a_voice_typo_without_catalog_evidence() -> None:
+    """Не разрешает короткий неизвестный признак только из-за сильной категории."""
+    assert unverified_product_terms("свинина сало икс", "Свинина Сало копченое") == ["икс"]
+    assert unverified_product_terms("сироп рза", "Сироп Роза") == []
+
+
+def test_catalog_packaging_attribute_must_match_candidate(settings: Settings) -> None:
+    """Не игнорирует обязательную фасовку при выборе из каталога."""
+    item = CartItem(
+        id="trout",
+        source_query="Форель филе",
+        packaging_text="0,8-1,3 кг",
+        packaging_role="catalog_attribute",
+        packaging_confidence=0.9,
+        quantity=5,
+        unit="кг",
+    )
+
+    ConversationEngine(settings)._match_item(
+        item,
+        [CatalogProduct(product_id="trout", name="Форель филе 1,5-2 кг", unit="кг")],
+    )
+
+    assert item.status is ItemStatus.AMBIGUOUS
+    assert item.catalog_product_id == ""
 
 
 def test_one_word_category_never_auto_selects_the_only_catalog_candidate(
@@ -116,8 +291,8 @@ def test_unsupported_beef_qualifier_becomes_comment_before_candidate_choice(
 
     engine._match_item(item, catalog)
 
-    assert item.source_query == "говядина"
-    assert item.comment == "мраморная"
+    assert item.source_query == "говядина мраморная"
+    assert item.comment == ""
     assert item.status is ItemStatus.AMBIGUOUS
     assert item.catalog_product_id == ""
 

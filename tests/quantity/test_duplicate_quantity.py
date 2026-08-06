@@ -60,6 +60,77 @@ def test_repeated_product_with_quantity_requires_explicit_merge(settings) -> Non
     assert "Вы добавляете: 3 шт" in duplicate.reply.text
 
 
+def test_repeated_product_with_other_unit_keeps_duplicate_warning(settings) -> None:  # type: ignore[no-untyped-def]
+    """Не объединяет повторный товар, если единица в голосовой фразе другая."""
+    engine = ConversationEngine(settings)
+    catalog = [CatalogProduct(product_id="rose", name="Сироп Роза", supplier="Сиропы", unit="шт")]
+    first = engine.handle(
+        _event(),
+        ParsedCommand(
+            intent=Intent.ADD_ITEMS,
+            items=[ExtractedItem(product_query="Сироп Роза", quantity=5, unit="шт")],
+        ),
+        ConversationState(),
+        catalog,
+    )
+
+    duplicate = engine.handle(
+        _event(),
+        ParsedCommand(
+            intent=Intent.ADD_ITEMS,
+            items=[ExtractedItem(product_query="Сироп Роза", quantity=2, unit="бан")],
+        ),
+        first.state,
+        catalog,
+    )
+
+    assert duplicate.state.cart[1].status is ItemStatus.DUPLICATE_PENDING
+    assert "Товар уже есть в черновике" in duplicate.reply.text
+    assert "2 бан" in duplicate.reply.text
+    assert "в шт" in duplicate.reply.text
+    assert "После добавления" not in duplicate.reply.text
+
+
+def test_remove_and_edit_ignore_skipped_rows_with_same_product(settings) -> None:  # type: ignore[no-untyped-def]
+    """Команды изменения и удаления выбирают активную строку, а не старый дубль."""
+    engine = ConversationEngine(settings)
+    active = engine._build_item(ExtractedItem(product_query="Филе форели", quantity=5, unit="кг"))
+    active.id = "active"
+    active.catalog_product_id = "trout"
+    active.catalog_name = "Филе форели"
+    active.catalog_unit = "кг"
+    active.status = ItemStatus.MATCHED
+    skipped = active.model_copy(deep=True)
+    skipped.id = "skipped"
+    skipped.status = ItemStatus.SKIPPED
+    state = ConversationState(cart=[active, skipped])
+
+    removed = engine.handle(
+        _event(),
+        ParsedCommand(intent=Intent.REMOVE_ITEM, target_query="филе форели"),
+        state,
+        [],
+    )
+    assert removed.state.cart[0].status is ItemStatus.SKIPPED
+    assert removed.state.cart[1].status is ItemStatus.SKIPPED
+    assert "Позиция удалена" in removed.reply.text
+
+    active.status = ItemStatus.MATCHED
+    edited = engine.handle(
+        _event(),
+        ParsedCommand(
+            intent=Intent.EDIT_QUANTITY,
+            target_query="филе форели",
+            edit_quantity=2,
+            edit_unit="кг",
+        ),
+        state,
+        [],
+    )
+    assert edited.state.cart[0].quantity == 2
+    assert edited.state.cart[1].status is ItemStatus.SKIPPED
+
+
 def test_duplicate_merge_adds_only_the_confirmed_increment(settings) -> None:  # type: ignore[no-untyped-def]
     """Проверяет, что дубликат merge добавляет только confirmed увеличение."""
     engine = ConversationEngine(settings)

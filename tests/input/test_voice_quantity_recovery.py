@@ -70,6 +70,222 @@ def test_model_quantity_wins_when_source_also_contains_packaging() -> None:
     assert restored[0]["source_line"] == source
 
 
+def test_voice_range_only_line_drops_model_invented_quantity() -> None:
+    """Диапазон фасовки не становится количеством заказа после AI-разбора."""
+    source = "Филе форели свежее 0,8-1,2 килограмма зачищенное 3НС"
+    items = [
+        {
+            "product_query": "Филе форели свежее",
+            "quantity": 0.8,
+            "unit": "кг",
+            "source_line": source,
+        }
+    ]
+
+    restored = restore_explicit_order_terms(items, source)
+
+    assert restored[0]["quantity"] is None
+    assert restored[0]["unit"] == ""
+
+
+def test_voice_range_line_uses_only_explicit_order_quantity() -> None:
+    """Явное количество после диапазона имеет приоритет над endpoint диапазона."""
+    source = "Филе форели 0,8-1,2 кг зачищенное 10 кг"
+    items = [
+        {
+            "product_query": "Филе форели",
+            "quantity": 0.8,
+            "unit": "кг",
+            "source_line": source,
+        }
+    ]
+
+    restored = restore_explicit_order_terms(items, source)
+
+    assert (restored[0]["quantity"], restored[0]["unit"]) == (10.0, "кг")
+
+
+def test_voice_range_line_keeps_explicit_bare_order_quantity() -> None:
+    """Сохраняет явно указанное число после диапазона даже без единицы."""
+    source = "Филе форели 0,8-1,2 кг зачищенное — 2"
+    items = [
+        {
+            "product_query": "Филе форели",
+            "quantity": 0.8,
+            "unit": "кг",
+            "source_line": source,
+        }
+    ]
+
+    restored = restore_explicit_order_terms(items, source)
+
+    assert (restored[0]["quantity"], restored[0]["unit"]) == (2.0, "")
+
+
+def test_voice_range_is_restored_to_product_query_not_comment() -> None:
+    """Возвращает размер в поиск, даже если AI оставил его вне product_query."""
+    source = "Филе форели 0,9-1,3 килограмма зачищенное, Тринца."
+    payload = {
+        "intent": Intent.ADD_ITEMS,
+        "items": [
+            {
+                "product_query": "Филе форели",
+                "quantity": 1.3,
+                "unit": "кг",
+                "comment": "0,9-1,3 килограмма зачищенное",
+                "source_line": source,
+            }
+        ],
+    }
+
+    restored = recover_omitted_explicit_items(payload, source)
+    item = restored["items"][0]
+
+    assert "0,9-1,3 килограмма" in item["product_query"]
+    assert "0,9-1,3" not in item["comment"]
+    assert item["quantity"] is None
+    assert item["unit"] == ""
+
+
+def test_catalog_packaging_role_is_preserved_when_order_quantity_is_separate() -> None:
+    """Сохраняет фасовку в поиске и отделяет её от количества заказа."""
+    source = "Форель филе 0,8-1,3 кг, зачищенная — 5 кг"
+    restored = recover_omitted_explicit_items(
+        {
+            "intent": Intent.ADD_ITEMS,
+            "items": [
+                {
+                    "product_query": "Форель филе",
+                    "quantity": 5,
+                    "unit": "кг",
+                    "comment": "зачищенная",
+                    "source_line": source,
+                }
+            ],
+        },
+        source,
+    )
+
+    item = restored["items"][0]
+    assert item["packaging_role"] == "catalog_attribute"
+    assert item["packaging_confidence"] >= 0.85
+    assert "0,8-1,3 кг" in item["product_query"]
+    assert item["comment"] == "зачищенная"
+    assert (item["quantity"], item["unit"]) == (5.0, "кг")
+
+
+def test_packaging_preference_stays_in_full_comment() -> None:
+    """Не переносит явно сформулированное пожелание о фасовке в название."""
+    source = "Форель филе — 5 кг. Нужна фасовка по 0,8-1,3 кг"
+    restored = recover_omitted_explicit_items(
+        {
+            "intent": Intent.ADD_ITEMS,
+            "items": [
+                {
+                    "product_query": "Форель филе",
+                    "quantity": 5,
+                    "unit": "кг",
+                    "comment": "Нужна фасовка по 0,8-1,3 кг",
+                    "source_line": source,
+                }
+            ],
+        },
+        source,
+    )
+
+    item = restored["items"][0]
+    assert item["packaging_role"] == "user_preference"
+    assert "0,8-1,3 кг" not in item["product_query"]
+    assert item["comment"] == "Нужна фасовка по 0,8-1,3 кг"
+
+
+def test_ambiguous_packaging_role_is_not_moved_between_fields() -> None:
+    """Не угадывает роль диапазона в неоднозначной формулировке."""
+    source = "Форель филе, фасовка 0,8-1,3 кг, 5 кг"
+    restored = recover_omitted_explicit_items(
+        {
+            "intent": Intent.ADD_ITEMS,
+            "items": [
+                {
+                    "product_query": "Форель филе",
+                    "quantity": 5,
+                    "unit": "кг",
+                    "comment": "фасовка 0,8-1,3 кг",
+                    "source_line": source,
+                }
+            ],
+        },
+        source,
+    )
+
+    item = restored["items"][0]
+    assert item["packaging_role"] == "ambiguous"
+    assert "0,8-1,3 кг" not in item["product_query"]
+    assert "0,8-1,3 кг" in item["comment"]
+
+
+def test_ai_duplicate_items_from_one_voice_line_are_collapsed() -> None:
+    """Объединяет AI-дубликаты с раздельно распознанными комментарием и количеством."""
+    source = "Форель свежая 0.8-1.3 кг, зачищенная тринце, 10 кг."
+    payload = {
+        "intent": Intent.ADD_ITEMS,
+        "items": [
+            {
+                "product_query": "Форель свежая",
+                "quantity": None,
+                "unit": "кг",
+                "comment": "зачищенная тринце",
+                "source_line": source,
+            },
+            {
+                "product_query": "Форель свежая",
+                "quantity": 10,
+                "unit": "кг",
+                "comment": "",
+                "source_line": source,
+            },
+        ],
+    }
+
+    restored = recover_omitted_explicit_items(payload, source)
+
+    assert len(restored["items"]) == 1
+    item = restored["items"][0]
+    assert "0.8-1.3 кг" in item["product_query"]
+    assert (item["quantity"], item["unit"]) == (10.0, "кг")
+    assert item["comment"] == "зачищенная тринце"
+
+
+def test_ai_packaging_alternative_drops_connector_fragment() -> None:
+    """Не создаёт отдельный товар из слова «или» в вариантах фасовки."""
+    source = "Капуста квашеная ведро 5 кг или 4,5 кг, два ведра."
+    payload = {
+        "intent": Intent.ADD_ITEMS,
+        "items": [
+            {
+                "product_query": "Капуста квашеная",
+                "quantity": 2,
+                "unit": "ведро",
+                "comment": "5 кг или 4,5 кг",
+                "source_line": source,
+            },
+            {
+                "product_query": "или",
+                "quantity": 4.5,
+                "unit": "кг",
+                "comment": "два ведра",
+                "source_line": source,
+            },
+        ],
+    }
+
+    restored = recover_omitted_explicit_items(payload, source)
+
+    assert len(restored["items"]) == 1
+    assert restored["items"][0]["product_query"] == "Капуста квашеная"
+    assert (restored["items"][0]["quantity"], restored["items"][0]["unit"]) == (2.0, "ведро")
+
+
 def test_empty_voice_model_result_recovers_every_explicit_product() -> None:
     """Проверяет, что пустой результат голос модель результат восстанавливает каждый явный товар."""
     payload = {"intent": Intent.UNKNOWN, "items": []}

@@ -20,8 +20,8 @@ def _event() -> TelegramEvent:
     return TelegramEvent(update_id=1, chat_id="123456", input_type=InputKind.TEXT)
 
 
-def test_convertible_units_are_converted_to_catalog_unit(settings) -> None:  # type: ignore[no-untyped-def]
-    """Проверяет, что конвертируемые единицы измерения являются преобразуются в каталог единица измерения."""
+def test_convertible_units_require_explicit_catalog_unit_confirmation(settings) -> None:  # type: ignore[no-untyped-def]
+    """Не меняет названную пользователем единицу без явного подтверждения."""
     result = ConversationEngine(settings).handle(
         _event(),
         ParsedCommand(
@@ -33,8 +33,9 @@ def test_convertible_units_are_converted_to_catalog_unit(settings) -> None:  # t
     )
 
     item = result.state.cart[0]
-    assert item.status is ItemStatus.MATCHED
-    assert (item.quantity, item.unit, item.catalog_unit) == (1, "л", "л")
+    assert item.status is ItemStatus.UNIT_MISMATCH
+    assert (item.quantity, item.unit, item.catalog_unit) == (1000, "мл", "л")
+    assert "Этот товар заказывается" in result.reply.text
 
 
 def test_incompatible_unit_requires_confirmation_instead_of_silent_change(settings) -> None:  # type: ignore[no-untyped-def]

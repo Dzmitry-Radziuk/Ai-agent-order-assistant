@@ -329,13 +329,15 @@
       "priority": "critical",
       "channels": ["Голос"],
       "precondition": "Заведение подключено, Telegram и сервис распознавания голоса доступны.",
-      "user_action": "Называет товары, количества и комментарии обычной разговорной фразой.",
-      "bot_response": "Показывает этап распознавания, превращает речь в позиции и не переносит количество между соседними товарами.",
-      "result": "В черновик попадают только произнесённые товары и количества.",
-      "examples": ["Добавь пять килограммов картофеля", "Сыр пармезан два килограмма и сливки десять штук"],
+      "user_action": "Называет товары, количества и комментарии обычной разговорной фразой, а на карточке уточнения отвечает коротко: «одна бутылка», «ладно, бутылка», «десять килограммов».",
+      "bot_response": "Показывает этап распознавания, превращает речь в позиции, связывает короткий ответ с текущим товаром и не переносит количество между соседними товарами.",
+      "result": "В черновик попадают только произнесённые товары и количества. Диапазон размера или фасовка вроде «0,8–1,2 кг» остаётся характеристикой товара и не становится количеством заказа.",
+      "examples": ["Добавь пять килограммов картофеля", "Сыр пармезан два килограмма и сливки десять штук", "Филе форели 0,8–1,2 кг, мне нужно 10 кг", "Ладно, бутылка"],
       "test_refs": [
         "tests/conversation/test_orchestrator_pipeline.py::test_voice_pipeline_shows_progress_before_transcription",
-        "tests/input/test_voice_input_contract.py::test_shared_source_line_does_not_copy_last_quantity_to_every_product"
+        "tests/input/test_voice_input_contract.py::test_shared_source_line_does_not_copy_last_quantity_to_every_product",
+        "tests/conversation/test_engine.py::test_explicit_quantity_after_product_range_survives_catalog_reconciliation",
+        "tests/quantity/test_voice_quantity_context.py::test_voice_short_container_answer_fills_missing_quantity_in_review"
       ]
     },
     {

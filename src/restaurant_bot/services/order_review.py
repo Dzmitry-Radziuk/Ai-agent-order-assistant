@@ -16,6 +16,7 @@ from restaurant_bot.integrations.cache import chat_lock
 from restaurant_bot.integrations.google_sheets import GoogleSheetsGateway
 from restaurant_bot.integrations.telegram import TelegramClient
 from restaurant_bot.repositories.sessions import SessionRepository
+from restaurant_bot.services.replies import format_item_comment
 from restaurant_bot.services.text import escape
 from restaurant_bot.services.venue_registration import VenueContext, VenueRegistrationService
 
@@ -157,7 +158,7 @@ class OrderReviewService:
                     f"• {escape(item.name)} — {format_quantity(item.quantity)} {escape(item.unit)}"
                 ]
                 if item.comment:
-                    item_lines.append(f"  Комментарий: {escape(item.comment)}")
+                    item_lines.append(format_item_comment(item.comment))
                 item_block = "\n".join(item_lines)
                 prefix = supplier_header if item_index == 0 else ""
                 separator = "\n\n" if prefix else "\n"

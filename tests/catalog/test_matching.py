@@ -64,6 +64,26 @@ def test_catalog_packaging_number_is_not_treated_as_ordered_quantity() -> None:
     assert [candidate.product_id for candidate in candidates] == ["rose"]
 
 
+def test_packaging_only_overlap_does_not_create_unrelated_candidates() -> None:
+    """Не показывает товары, совпавшие с запросом только по фасовке."""
+    catalog = [
+        CatalogProduct(
+            product_id="oil", name="Масло растительное 1л", supplier="Продукты", unit="шт"
+        ),
+        CatalogProduct(
+            product_id="bleach",
+            name="Средство отбеливающее жидкое, Белизна 1л",
+            supplier="Хозтовары",
+            unit="шт",
+        ),
+        CatalogProduct(
+            product_id="cream", name="Сливки 33% Натуральные 1л БМК", supplier="Молочные", unit="шт"
+        ),
+    ]
+
+    assert rank_candidates("Сироп Роза, 1л", catalog) == []
+
+
 def test_joined_voice_product_name_keeps_safe_catalog_candidate() -> None:
     """Проверяет, что слитное голос товар название сохраняет безопасный каталог кандидат."""
     candidates = rank_candidates("сыропроза", _catalog())

@@ -161,6 +161,7 @@ def test_new_voice_product_with_decimal_quantity_does_not_select_old_candidate(
                     unit="кг",
                     supplier_hint="Тринца",
                     comment="зачищенное",
+                    source_line=text,
                 )
             ],
         ),
@@ -184,8 +185,11 @@ def test_new_voice_product_with_decimal_quantity_does_not_select_old_candidate(
     assert len(result.state.cart) == 2
     assert result.state.cart[0].status is ItemStatus.AMBIGUOUS
     assert result.state.cart[0].catalog_product_id == ""
-    assert result.state.cart[1].catalog_product_id == "trout"
-    assert result.state.cart[1].quantity == 1.3
+    # «зачищенное» не подтверждено строкой каталога, поэтому базовая форель
+    # не подставляется автоматически.
+    assert result.state.cart[1].catalog_product_id == ""
+    assert result.state.cart[1].quantity is None
+    assert result.state.cart[1].status is ItemStatus.AMBIGUOUS
     assert result.state.cart[1].supplier_hint == ""
 
 

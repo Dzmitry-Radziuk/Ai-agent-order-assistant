@@ -333,7 +333,7 @@
 
       <article id="scenario-INP-02" class="scenario-card"
         data-category="input"
-        data-priority="critical" data-search="inp-02 добавление товаров голосом добавление товаров называет товары, количества и комментарии обычной разговорной фразой. показывает этап распознавания, превращает речь в позиции и не переносит количество между соседними товарами. пользователь подключён к активному заведению. товар количество единица поставщик комментарий добавь пять килограммов картофеля сыр пармезан два килограмма и сливки десять штук">
+        data-priority="critical" data-search="inp-02 добавление товаров голосом добавление товаров называет товары, количества и комментарии обычной разговорной фразой, а на карточке уточнения отвечает коротко: «одна бутылка», «ладно, бутылка», «десять килограммов». показывает этап распознавания, превращает речь в позиции, связывает короткий ответ с текущим товаром и не переносит количество между соседними товарами. пользователь подключён к активному заведению. товар количество единица поставщик комментарий добавь пять килограммов картофеля сыр пармезан два килограмма и сливки десять штук филе форели 0,8–1,2 кг, мне нужно 10 кг ладно, бутылка">
         <div class="card-top">
           <span class="scenario-id">INP-02</span>
           <span class="badges">
@@ -346,9 +346,9 @@
         <div class="channels"><span>Голос</span></div>
         <dl>
           <div><dt>Перед началом</dt><dd>Заведение подключено, Telegram и сервис распознавания голоса доступны.</dd></div>
-          <div><dt>Пользователь</dt><dd>Называет товары, количества и комментарии обычной разговорной фразой.</dd></div>
-          <div><dt>Бот</dt><dd>Показывает этап распознавания, превращает речь в позиции и не переносит количество между соседними товарами.</dd></div>
-          <div class="result"><dt>Итог</dt><dd>В черновик попадают только произнесённые товары и количества.</dd></div>
+          <div><dt>Пользователь</dt><dd>Называет товары, количества и комментарии обычной разговорной фразой, а на карточке уточнения отвечает коротко: «одна бутылка», «ладно, бутылка», «десять килограммов».</dd></div>
+          <div><dt>Бот</dt><dd>Показывает этап распознавания, превращает речь в позиции, связывает короткий ответ с текущим товаром и не переносит количество между соседними товарами.</dd></div>
+          <div class="result"><dt>Итог</dt><dd>В черновик попадают только произнесённые товары и количества. Диапазон размера или фасовка вроде «0,8–1,2 кг» остаётся характеристикой товара и не становится количеством заказа.</dd></div>
         </dl>
         <details>
           <summary>Что важно</summary>
@@ -356,17 +356,17 @@
             <div><dt>Доступ</dt><dd>Пользователь подключён к активному заведению.</dd></div>
             <div><dt>Распознаём</dt><dd>товар, количество, единица, поставщик, комментарий</dd></div>
             <div><dt>Подтверждение</dt><dd>Не нужно для понятной позиции: товар добавляется только в черновик. Неоднозначность требует уточнения.</dd></div>
-            <div><dt>Что изменится</dt><dd>В черновик попадают только произнесённые товары и количества.</dd></div>
+            <div><dt>Что изменится</dt><dd>В черновик попадают только произнесённые товары и количества. Диапазон размера или фасовка вроде «0,8–1,2 кг» остаётся характеристикой товара и не становится количеством заказа.</dd></div>
             <div><dt>Если произошла ошибка</dt><dd>Сохранить уже распознанные позиции и попросить повторить только непонятную часть.</dd></div>
           </dl>
         </details>
         <details>
           <summary>Примеры фраз</summary>
-          <ul><li>«Добавь пять килограммов картофеля»</li><li>«Сыр пармезан два килограмма и сливки десять штук»</li></ul>
+          <ul><li>«Добавь пять килограммов картофеля»</li><li>«Сыр пармезан два килограмма и сливки десять штук»</li><li>«Филе форели 0,8–1,2 кг, мне нужно 10 кг»</li><li>«Ладно, бутылка»</li></ul>
         </details>
         <details>
-          <summary>Связанные pytest-тесты · 2</summary>
-          <ul class="tests"><li><a href="../../tests/conversation/test_orchestrator_pipeline.py">tests/conversation/test_orchestrator_pipeline.py</a><span>test_voice_pipeline_shows_progress_before_transcription</span></li><li><a href="../../tests/input/test_voice_input_contract.py">tests/input/test_voice_input_contract.py</a><span>test_shared_source_line_does_not_copy_last_quantity_to_every_product</span></li></ul>
+          <summary>Связанные pytest-тесты · 4</summary>
+          <ul class="tests"><li><a href="../../tests/conversation/test_orchestrator_pipeline.py">tests/conversation/test_orchestrator_pipeline.py</a><span>test_voice_pipeline_shows_progress_before_transcription</span></li><li><a href="../../tests/input/test_voice_input_contract.py">tests/input/test_voice_input_contract.py</a><span>test_shared_source_line_does_not_copy_last_quantity_to_every_product</span></li><li><a href="../../tests/conversation/test_engine.py">tests/conversation/test_engine.py</a><span>test_explicit_quantity_after_product_range_survives_catalog_reconciliation</span></li><li><a href="../../tests/quantity/test_voice_quantity_context.py">tests/quantity/test_voice_quantity_context.py</a><span>test_voice_short_container_answer_fills_missing_quantity_in_review</span></li></ul>
         </details>
       </article>
 

@@ -5,7 +5,7 @@ import re
 from difflib import SequenceMatcher
 
 from restaurant_bot.domain.models import Candidate, CatalogProduct
-from restaurant_bot.services.text import normalize_text
+from restaurant_bot.services.text import UNIT_ALIASES, normalize_text, normalize_unit
 
 _STOP_WORDS = {
     "и",
@@ -30,6 +30,90 @@ _STOP_WORDS = {
     "свежее",
 }
 
+# Эти слова не описывают отдельную позицию каталога. Их нужно исключать из
+# проверки дополнительных характеристик, иначе единицы измерения и союзы
+# будут выглядеть как «лишние» слова запроса.
+_QUALIFIER_IGNORED_WORDS = set(UNIT_ALIASES) | {
+    "и",
+    "или",
+    "либо",
+    "а",
+    "также",
+    "процент",
+    "процента",
+    "процентов",
+    "процентный",
+    "процентная",
+    "процентное",
+    "процентные",
+}
+
+# Attribute groups are independent of the catalog size. Unknown properties are
+# sent to semantic review instead of being silently added as comments.
+_CONTRADICTORY_QUALIFIER_GROUPS = (
+    (
+        "свеж",
+        "копчен",
+        "заморож",
+        "охлажд",
+        "сушен",
+        "вялен",
+        "солен",
+        "маринован",
+        "варен",
+        "отвар",
+        "жарен",
+        "обжар",
+        "запеч",
+        "грил",
+        "пропар",
+    ),
+    ("передн", "задн"),
+    ("верхн", "нижн"),
+    ("лев", "прав"),
+    ("филе", "тушк", "фарш", "кусоч"),
+    ("кругл", "квадрат", "длиннозерн", "пропар"),
+)
+
+# Признаки, которые обычно являются частью наименования или варианта товара.
+# Это не словарь каталога: набор защищает неизвестные позиции от подмены,
+# когда в каталоге есть только похожая базовая категория.
+_PRODUCT_VARIANT_QUALIFIER_ROOTS = {
+    root for group in _CONTRADICTORY_QUALIFIER_GROUPS for root in group
+} | {
+    "мрамор",
+    "бескост",
+    "безкост",
+    "мякот",
+    "размер",
+    "фасов",
+    "упаков",
+}
+_HIGH_RISK_UNSCOPED_VARIANT_ROOTS = {
+    "обжар",
+    "жарен",
+    "копчен",
+    "заморож",
+    "запеч",
+    "грил",
+    "квадрат",
+    "кругл",
+    "длиннозерн",
+    "мрамор",
+    "зачищ",
+    "пропар",
+    "передн",
+    "задн",
+    "верхн",
+    "нижн",
+    "филе",
+    "тушк",
+    "фарш",
+    "кусоч",
+    "бескост",
+    "безкост",
+}
+
 
 def _compact_voice_name(value: str) -> str:
     """Уплотняет голосовое название товара для поиска."""
@@ -46,6 +130,91 @@ def tokens(value: str) -> set[str]:
         for token in re.findall(r"[a-zа-я0-9]+", normalize_text(value))
         if len(token) > 1 and token not in _STOP_WORDS
     }
+
+
+def _product_identity_tokens(value: str) -> set[str]:
+    """Возвращает слова товара без фасовки и числовых признаков.
+
+    Числа и единицы измерения проверяются отдельными правилами. Иначе запрос
+    «Сироп Роза, 1л» совпадает с любым товаром, где встречается «1л».
+    """
+    return {
+        token
+        for token in tokens(value)
+        if token not in UNIT_ALIASES and not any(char.isdigit() for char in token)
+    }
+
+
+def _qualifier_tokens(value: str) -> list[str]:
+    """Возвращает значимые слова запроса для проверки свойств товара."""
+    return [
+        token
+        for token in re.findall(r"[a-zа-я0-9]+", normalize_text(value), flags=re.I)
+        if len(token) > 1
+        and token not in _QUALIFIER_IGNORED_WORDS
+        and not token.isdigit()
+        and not any(char.isdigit() for char in token)
+    ]
+
+
+def _qualifier_root(token: str) -> str:
+    """Сворачивает русскую форму атрибута к корню группы вариантов."""
+    normalized = normalize_text(token)
+    for group in _CONTRADICTORY_QUALIFIER_GROUPS:
+        for root in group:
+            if normalized.startswith(root):
+                return root
+    return ""
+
+
+def has_conflicting_catalog_qualifiers(query: str, product_name: str) -> bool:
+    """Проверяет явное противоречие свойств запроса и строки каталога.
+
+    Неизвестные слова не считаются конфликтом сами по себе: они могут быть
+    произвольным пожеланием поставщику. Но если пользователь явно назвал
+    взаимоисключающий атрибут, например «копчёные», а каталог предлагает
+    «свежие», автоматический выбор запрещается.
+    """
+    query_qualifiers = _qualifier_tokens(query)
+    product_qualifiers = _qualifier_tokens(product_name)
+    query_roots = {_qualifier_root(token) for token in query_qualifiers} - {""}
+    product_roots = {_qualifier_root(token) for token in product_qualifiers} - {""}
+    for group in _CONTRADICTORY_QUALIFIER_GROUPS:
+        query_group = query_roots.intersection(group)
+        product_group = product_roots.intersection(group)
+        if query_group and product_group and query_group.isdisjoint(product_group):
+            return True
+    return False
+
+
+def has_product_variant_qualifier(value: str) -> bool:
+    """Определяет признак, который нельзя молча считать комментарием.
+
+    Такой признак должен либо совпасть с названием каталога, либо привести к
+    уточнению. Это предотвращает выбор базового товара вместо нужного варианта
+    для произвольных названий и не требует перечислять весь каталог.
+    """
+    return any(
+        token.startswith(root)
+        for token in _qualifier_tokens(value)
+        for root in _PRODUCT_VARIANT_QUALIFIER_ROOTS
+    )
+
+
+def has_unscoped_product_variant_qualifier(value: str) -> bool:
+    """Проверяет риск подмены, когда AI ошибочно назвал признак комментарием."""
+    normalized = normalize_text(value)
+    if not normalized or re.search(
+        r"(?:^|\s)(?:только|обязательно|желательно|нужн\w*|просьб\w*|"
+        r"пожалуйста|без|не|на\s+завтра|достав\w*|привез\w*)\b",
+        normalized,
+    ):
+        return False
+    return any(
+        token.startswith(root)
+        for token in _qualifier_tokens(normalized)
+        for root in _HIGH_RISK_UNSCOPED_VARIANT_ROOTS
+    )
 
 
 def supplier_matches_hint(supplier: str, supplier_hint: str) -> bool:
@@ -77,8 +246,13 @@ def _token_matches(query_token: str, product_token: str) -> bool:
 
 def has_catalog_search_evidence(query: str, product: CatalogProduct) -> bool:
     """Проверяет наличие достаточных оснований для показа кандидата."""
-    query_tokens = tokens(query)
-    product_tokens = tokens(product.name)
+    normalized_query = normalize_text(query)
+    normalized_name = normalize_text(product.name)
+    if normalized_query and normalized_query == normalized_name:
+        return True
+
+    query_tokens = _product_identity_tokens(query)
+    product_tokens = _product_identity_tokens(product.name)
     if not query_tokens or not product_tokens:
         return False
     if any(
@@ -118,6 +292,52 @@ def query_evidence_tokens(query: str, product_name: str) -> set[str]:
     }
 
 
+def unverified_product_terms(query: str, product_name: str) -> list[str]:
+    """Возвращает длинные признаки запроса, которых нет в названии каталога.
+
+    Короткий фрагмент до четырёх символов допускается только как вероятная
+    ошибка распознавания речи рядом с похожим словом каталога. Числа и единицы
+    проверяются отдельными правилами.
+    """
+    query_tokens = tokens(query)
+    if not query_tokens:
+        return []
+    normalized_query = normalize_text(query)
+    normalized_name = normalize_text(product_name)
+    compact_query = _compact_voice_name(normalized_query)
+    compact_name = _compact_voice_name(normalized_name)
+    if (
+        normalized_query
+        and " " not in normalized_query
+        and len(compact_query) >= 6
+        and len(compact_name) >= 6
+        and compact_query[0] == compact_name[0]
+        and SequenceMatcher(None, compact_query, compact_name).ratio() >= 0.77
+    ):
+        # ASR can merge a multiword product into one token, e.g. «сыропроза».
+        return []
+    evidence = query_evidence_tokens(query, product_name)
+    product_tokens = tokens(product_name)
+    return [
+        token
+        for token in re.findall(r"[a-zа-яё0-9]+", normalize_text(query), flags=re.I)
+        if token in query_tokens
+        and token not in evidence
+        and token not in UNIT_ALIASES
+        and not token.isdigit()
+        and not any(char.isdigit() for char in token)
+        and (
+            len(token) > 4
+            or not any(
+                len(product_token) >= 3
+                and token[0] == product_token[0]
+                and SequenceMatcher(None, token, product_token).ratio() >= 0.7
+                for product_token in product_tokens
+            )
+        )
+    ]
+
+
 def _identity_token_matches(query_token: str, product_token: str) -> bool:
     """Сопоставляет только безопасные грамматические формы одного слова."""
     if query_token == product_token:
@@ -141,9 +361,17 @@ def _identity_token_matches(query_token: str, product_token: str) -> bool:
 
 def is_safe_catalog_name_equivalent(query: str, product_name: str) -> bool:
     """Проверяет, что запрос и каталог называют один товар, а не похожую категорию."""
-    query_tokens = {token for token in tokens(query) if not any(char.isdigit() for char in token)}
+    if not has_compatible_numeric_characteristics(query, product_name):
+        return False
+    query_tokens = {
+        token
+        for token in tokens(query)
+        if not any(char.isdigit() for char in token) and token not in UNIT_ALIASES
+    }
     product_tokens = {
-        token for token in tokens(product_name) if not any(char.isdigit() for char in token)
+        token
+        for token in tokens(product_name)
+        if not any(char.isdigit() for char in token) and token not in UNIT_ALIASES
     }
     if len(query_tokens) < 2 or len(query_tokens) != len(product_tokens):
         return False
@@ -153,6 +381,83 @@ def is_safe_catalog_name_equivalent(query: str, product_name: str) -> bool:
     ) and all(
         any(_identity_token_matches(query_token, product_token) for query_token in query_tokens)
         for product_token in product_tokens
+    )
+
+
+def _numeric_characteristics(value: str) -> list[tuple[float, float | None, str]]:
+    """Извлекает размеры, диапазоны и фасовку из названия товара."""
+    normalized = normalize_text(str(value).replace("–", "-").replace("—", "-")).replace(",", ".")
+    if not normalized:
+        return []
+    unit_pattern = "|".join(
+        sorted(
+            (re.escape(unit) for unit in UNIT_ALIASES),
+            key=len,
+            reverse=True,
+        )
+    )
+    range_pattern = re.compile(
+        rf"(?<!\w)(?P<left>\d+(?:\.\d+)?)\s*(?:--|-)\s*"
+        rf"(?P<right>\d+(?:\.\d+)?)(?:\s*(?P<unit>{unit_pattern}))?\b",
+        flags=re.IGNORECASE,
+    )
+    characteristics: list[tuple[float, float | None, str]] = []
+    masked = list(normalized)
+    for match in range_pattern.finditer(normalized):
+        characteristics.append(
+            (
+                float(match.group("left")),
+                float(match.group("right")),
+                _normalize_characteristic_unit(match.group("unit") or ""),
+            )
+        )
+        masked[match.start() : match.end()] = [" "] * (match.end() - match.start())
+
+    single_pattern = re.compile(
+        rf"(?<![\w-])(?P<value>\d+(?:\.\d+)?)(?:\s*(?P<unit>{unit_pattern}))?\b",
+        flags=re.IGNORECASE,
+    )
+    for match in single_pattern.finditer("".join(masked)):
+        characteristics.append(
+            (
+                float(match.group("value")),
+                None,
+                _normalize_characteristic_unit(match.group("unit") or ""),
+            )
+        )
+    return characteristics
+
+
+def _normalize_characteristic_unit(value: str) -> str:
+    """Нормализует единицу характеристики без зависимости от каталога."""
+    return normalize_unit(value)
+
+
+def _same_numeric_characteristic(
+    left: tuple[float, float | None, str],
+    right: tuple[float, float | None, str],
+) -> bool:
+    """Сравнивает одиночный размер или диапазон товара."""
+    return (
+        abs(left[0] - right[0]) <= 1e-9
+        and (
+            (left[1] is None and right[1] is None)
+            or (left[1] is not None and right[1] is not None and abs(left[1] - right[1]) <= 1e-9)
+        )
+        and (not left[2] or left[2] == right[2])
+    )
+
+
+def has_compatible_numeric_characteristics(query: str, product_name: str) -> bool:
+    """Проверяет наличие в каталоге всех явно названных размеров и фасовок."""
+    query_characteristics = _numeric_characteristics(query)
+    product_characteristics = _numeric_characteristics(product_name)
+    return not query_characteristics or all(
+        any(
+            _same_numeric_characteristic(query_value, product_value)
+            for product_value in product_characteristics
+        )
+        for query_value in query_characteristics
     )
 
 

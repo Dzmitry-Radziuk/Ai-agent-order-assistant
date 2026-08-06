@@ -1,5 +1,5 @@
 from restaurant_bot.domain.models import Candidate, CartItem, ConversationState, ItemStatus
-from restaurant_bot.services.replies import cart_reply, help_reply, issue_reply
+from restaurant_bot.services.replies import cart_reply, final_review_reply, help_reply, issue_reply
 
 
 def test_help_explains_how_to_include_product_and_order_comments() -> None:
@@ -149,3 +149,29 @@ def test_draft_uses_source_button_names() -> None:
         ["Добавить ещё товары"],
         ["Сбросить и начать заново"],
     ]
+
+
+def test_item_comment_is_italic_and_rendered_under_product_in_draft_and_final_review() -> None:
+    """Показывает комментарий под товаром одинаково в черновике и финальной проверке."""
+    state = ConversationState(
+        cart=[
+            CartItem(
+                id="rose",
+                source_query="Сироп Роза",
+                catalog_name="Сироп Роза",
+                quantity=5,
+                unit="шт",
+                comment="на завтра и без замены",
+                status=ItemStatus.MATCHED,
+            )
+        ]
+    )
+
+    draft = cart_reply(state)
+    final = final_review_reply(state)
+    expected = "<i>Комментарий: на завтра и без замены</i>"
+
+    assert expected in draft.text
+    assert expected in final.text
+    assert draft.text.index("Сироп Роза") < draft.text.index(expected)
+    assert final.text.index("Сироп Роза") < final.text.index(expected)

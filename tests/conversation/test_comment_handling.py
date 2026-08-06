@@ -402,8 +402,8 @@ def test_arbitrary_item_comment_survives_ambiguous_choice_and_submission(setting
 
     item = added.state.cart[0]
     assert item.status is ItemStatus.AMBIGUOUS
-    assert item.source_query == "говядина"
-    assert item.comment == "мраморная без кожи"
+    assert item.source_query == "говядина мраморная"
+    assert item.comment == "без кожи"
 
     selected = engine.handle(
         _event(),
@@ -413,10 +413,10 @@ def test_arbitrary_item_comment_survives_ambiguous_choice_and_submission(setting
     )
 
     assert selected.state.cart[0].status is ItemStatus.MATCHED
-    assert selected.state.cart[0].comment == "мраморная без кожи"
+    assert selected.state.cart[0].comment == "без кожи"
     pending = engine._prepare_submission(_event(), selected.state)
     assert pending.state.pending_submission is not None
-    assert pending.state.pending_submission.rows[0]["Комментарий"] == "мраморная без кожи"
+    assert pending.state.pending_submission.rows[0]["Комментарий"] == "без кожи"
 
 
 def test_typo_resolution_preserves_item_and_global_comments(settings) -> None:  # type: ignore[no-untyped-def]

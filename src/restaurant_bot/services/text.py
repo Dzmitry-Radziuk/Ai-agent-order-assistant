@@ -76,6 +76,11 @@ UNIT_ALIASES: dict[str, str] = {
     "бутылка": "бут",
     "бутылки": "бут",
     "бутылок": "бут",
+    "ведро": "ведро",
+    "ведра": "ведро",
+    "ведер": "ведро",
+    "вёдра": "ведро",
+    "вёдер": "ведро",
 }
 
 NUMBER_WORDS: dict[str, float] = {
@@ -171,6 +176,22 @@ def normalize_unit(value: Any) -> str:
     """Нормализует единицу измерения."""
     text = normalize_text(value)
     return UNIT_ALIASES.get(text, clean_text(value))
+
+
+def numeric_range_spans(value: Any) -> list[tuple[int, int]]:
+    """Находит диапазоны характеристик товара, например ``0,8–1,2 кг``."""
+    text = clean_text(value)
+    if not text:
+        return []
+    unit_pattern = "|".join(
+        sorted((re.escape(unit) for unit in UNIT_ALIASES), key=len, reverse=True)
+    )
+    pattern = re.compile(
+        rf"(?<!\w)\d+(?:[,.]\d+)?\s*(?:--|[-–—])\s*\d+(?:[,.]\d+)?"
+        rf"(?:\s*(?:{unit_pattern}))?\b",
+        flags=re.IGNORECASE,
+    )
+    return [match.span() for match in pattern.finditer(text)]
 
 
 def to_float(value: Any) -> float | None:

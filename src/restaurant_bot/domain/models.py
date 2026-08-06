@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from enum import StrEnum
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -169,6 +169,14 @@ class ExtractedItem(BaseModel):
     printed_reference_text: str = ""
     order_entry_text: str = ""
     order_entry_type: str = ""
+    packaging_text: str = ""
+    packaging_role: Literal[
+        "none",
+        "catalog_attribute",
+        "user_preference",
+        "ambiguous",
+    ] = "none"
+    packaging_confidence: float = Field(default=0, ge=0, le=1)
 
     @field_validator(
         "product_query",
@@ -183,6 +191,7 @@ class ExtractedItem(BaseModel):
         "printed_reference_text",
         "order_entry_text",
         "order_entry_type",
+        "packaging_text",
     )
     @classmethod
     def strip_text(cls, value: str) -> str:
@@ -251,6 +260,14 @@ class CartItem(BaseModel):
     source_line: str = ""
     quantity_source: str = ""
     order_entry_type: str = ""
+    packaging_text: str = ""
+    packaging_role: Literal[
+        "none",
+        "catalog_attribute",
+        "user_preference",
+        "ambiguous",
+    ] = "none"
+    packaging_confidence: float = Field(default=0, ge=0, le=1)
     quantity: float | None = None
     unit: str = ""
     department: str = "Кухня"

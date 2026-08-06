@@ -47,6 +47,21 @@ def _unit_mismatch_state(engine: ConversationEngine) -> ConversationState:
     return ConversationState(current_issue_item_id=item.id, cart=[item])
 
 
+def _missing_quantity_state(engine: ConversationEngine) -> ConversationState:
+    """Создаёт карточку товара без количества на финальной проверке."""
+    item = engine._build_item(ExtractedItem(product_query="Вино белое"))
+    item.id = "wine"
+    item.status = ItemStatus.MISSING_QTY
+    item.catalog_product_id = "wine-product"
+    item.catalog_name = "Вино белое"
+    item.catalog_unit = "шт"
+    return ConversationState(
+        stage=SessionStage.REVIEW,
+        current_issue_item_id=item.id,
+        cart=[item],
+    )
+
+
 def test_voice_generic_correction_repeats_fix_quantity_button(settings) -> None:  # type: ignore[no-untyped-def]
     """Открывает варианты и не меняет количество без решения пользователя."""
     engine = ConversationEngine(settings)
@@ -305,6 +320,37 @@ def test_voice_quantity_phrases_fix_open_unit_card_from_review(
     assert result.state.cart[0].unit == "кг"
 
 
+@pytest.mark.parametrize(
+    ("phrase", "expected"),
+    [
+        ("10 килограмм", 10),
+        ("десять килограмм", 10),
+        ("10 кг", 10),
+        ("нужно 10 кило", 10),
+    ],
+)
+def test_unknown_voice_quantity_fills_current_missing_quantity(
+    settings,
+    phrase: str,
+    expected: float,
+) -> None:  # type: ignore[no-untyped-def]
+    """Применяет короткий голосовой ответ к открытой карточке после unknown от AI."""
+    engine = ConversationEngine(settings)
+    state = _missing_quantity_state(engine)
+
+    result = engine.handle(
+        _voice(phrase),
+        ParsedCommand(intent=Intent.UNKNOWN, text=phrase),
+        state,
+        [],
+    )
+
+    assert len(result.state.cart) == 1
+    assert result.state.cart[0].quantity == expected
+    assert result.state.cart[0].unit == "кг"
+    assert result.state.cart[0].status is ItemStatus.UNIT_MISMATCH
+
+
 def test_voice_unit_entry_removes_previous_false_command_items(settings) -> None:  # type: ignore[no-untyped-def]
     """Удаляет ложные товары, созданные прошлыми ответами на эту карточку."""
     engine = ConversationEngine(settings)
@@ -368,3 +414,29 @@ def test_voice_product_list_is_not_consumed_by_open_quantity_card(settings) -> N
         ("parsley", 3),
         ("celery", 5),
     ]
+
+
+@pytest.mark.parametrize("phrase", ["Ладно, бутылка.", "Одна бутылка."])
+def test_voice_short_container_answer_fills_missing_quantity_in_review(
+    settings,
+    phrase: str,
+) -> None:  # type: ignore[no-untyped-def]
+    """Записывает одну текущую позицию для разговорного ответа с тарой."""
+    engine = ConversationEngine(settings)
+    state = _missing_quantity_state(engine)
+
+    result = engine.handle(
+        _voice(phrase),
+        ParsedCommand(
+            intent=Intent.ADD_ITEMS,
+            text=phrase,
+            items=[ExtractedItem(product_query=phrase)],
+        ),
+        state,
+        [],
+    )
+
+    assert len(result.state.cart) == 1
+    assert result.state.cart[0].quantity == 1
+    assert result.state.cart[0].unit == "шт"
+    assert result.state.cart[0].status is ItemStatus.MATCHED

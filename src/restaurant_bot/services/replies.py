@@ -82,6 +82,11 @@ def _item_unit(item: CartItem) -> str:
     return item.unit or item.catalog_unit or ""
 
 
+def format_item_comment(comment: str) -> str:
+    """Формирует курсивную строку комментария под товаром."""
+    return f"  <i>Комментарий: {escape(comment)}</i>"
+
+
 def _package_count_suggestion(item: CartItem) -> tuple[int, float, str] | None:
     """Предлагает число упаковок по весу или объёму в названии."""
     if (
@@ -492,6 +497,8 @@ def cart_reply(state: ConversationState, title: str = "Черновик заяв
             else "количество не указано"
         )
         lines.append(f"• {escape(_item_name(item))} — {quantity}")
+        if item.comment:
+            lines.append(format_item_comment(item.comment))
     if not paginated and len(ready) > 25:
         lines.append(f"…и ещё {len(ready) - 25} поз.")
     if issues:
@@ -512,6 +519,8 @@ def cart_reply(state: ConversationState, title: str = "Черновик заяв
                     else ""
                 )
                 lines.append(f"• {escape(_item_name(item))}{quantity}")
+            if item.comment:
+                lines.append(format_item_comment(item.comment))
         if not paginated and len(issues) > 25:
             lines.append(f"…и ещё {len(issues) - 25} поз.")
     request_count = _request_count(state)
@@ -568,6 +577,29 @@ def issue_reply(item: CartItem, item_index: int | None = None) -> BotReply:
             rows=[[Button(text="Не добавлять", callback_data=f"v2:skip:{index}")]],
         )
     if item.status == ItemStatus.UNIT_MISMATCH:
+        if item.duplicate_existing_quantity is not None and item.issue_message:
+            existing_unit = item.duplicate_existing_unit or item.catalog_unit or "шт"
+            incoming_unit = item.unit or item.catalog_unit or existing_unit
+            return BotReply(
+                text=(
+                    f"⚠️ <b>Товар уже есть в черновике</b>\n\n{name}\n\n"
+                    f"В черновике: <b>{format_number(item.duplicate_existing_quantity)} "
+                    f"{escape(existing_unit)}</b>\n"
+                    f"Вы указали: <b>{format_number(item.quantity)} "
+                    f"{escape(incoming_unit)}</b>.\n\n"
+                    f"Этот товар заказывается <b>в {escape(item.catalog_unit)}</b>.\n"
+                    f"Чтобы объединить позиции, укажите количество в {escape(item.catalog_unit)}."
+                ),
+                rows=[
+                    [
+                        Button(
+                            text=f"Ввести количество в {item.catalog_unit}",
+                            callback_data=f"v2:unitedit:{index}",
+                        )
+                    ],
+                    [Button(text="Не добавлять повторно", callback_data=f"v2:skip:{index}")],
+                ],
+            )
         unit_rows: list[list[Button]] = []
         package_suggestion = _package_count_suggestion(item)
         if package_suggestion is not None:
@@ -606,6 +638,32 @@ def issue_reply(item: CartItem, item_index: int | None = None) -> BotReply:
     if item.status == ItemStatus.DUPLICATE_PENDING:
         unit = _item_unit(item) or item.duplicate_existing_unit or "шт"
         existing_quantity = item.duplicate_existing_quantity
+        if (
+            item.catalog_unit
+            and item.unit
+            and normalize_unit(item.unit) != normalize_unit(item.catalog_unit)
+        ):
+            existing_unit = item.duplicate_existing_unit or item.catalog_unit
+            return BotReply(
+                text=(
+                    f"⚠️ <b>Товар уже есть в черновике</b>\n\n{name}\n\n"
+                    f"В черновике: <b>{format_number(existing_quantity)} "
+                    f"{escape(existing_unit)}</b>\n"
+                    f"Вы указали: <b>{format_number(item.quantity)} "
+                    f"{escape(item.unit)}</b>.\n\n"
+                    f"Этот товар заказывается <b>в {escape(item.catalog_unit)}</b>.\n"
+                    f"Чтобы объединить позиции, укажите количество в {escape(item.catalog_unit)}."
+                ),
+                rows=[
+                    [
+                        Button(
+                            text=f"Ввести количество в {item.catalog_unit}",
+                            callback_data=f"v2:unitedit:{index}",
+                        )
+                    ],
+                    [Button(text="Не добавлять повторно", callback_data=f"v2:skip:{index}")],
+                ],
+            )
         if not item.quantity:
             return BotReply(
                 text=(
@@ -753,6 +811,8 @@ def final_review_reply(state: ConversationState) -> BotReply:
         lines.append(
             f"{index}. {escape(_item_name(item))} — {format_number(item.quantity)} {escape(_item_unit(item) or 'шт')}"
         )
+        if item.comment:
+            lines.append(format_item_comment(item.comment))
     multiple = [
         item
         for item in items

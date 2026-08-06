@@ -153,6 +153,45 @@ def test_quantity_after_full_packaged_name_is_kept_as_order_quantity(settings) -
     assert item.status is ItemStatus.MATCHED
 
 
+def test_explicit_quantity_after_product_range_survives_catalog_reconciliation(
+    settings,
+) -> None:  # type: ignore[no-untyped-def]
+    """Сохраняет заказанное количество после диапазона размера товара."""
+    source = "Филе форели свежее 0,8-1,2 килограмма, зачищенное от тринца. Мне нужно 10 килограмм."
+    catalog = [
+        CatalogProduct(
+            product_id="trout",
+            name="Филе форели свежее 0,8-1,2 кг",
+            supplier="Поставщик",
+            unit="кг",
+        )
+    ]
+    command = ParsedCommand(
+        intent=Intent.ADD_ITEMS,
+        items=[
+            ExtractedItem(
+                product_query="Филе форели свежее 0,8-1,2 килограмма",
+                quantity=10,
+                unit="кг",
+                source_line=source,
+            )
+        ],
+    )
+
+    result = ConversationEngine(settings).handle(
+        _event(source),
+        command,
+        ConversationState(),
+        catalog,
+    )
+
+    item = result.state.cart[0]
+    assert item.catalog_product_id == "trout"
+    assert item.quantity == 10
+    assert item.unit == "кг"
+    assert item.status is ItemStatus.MATCHED
+
+
 def test_shortened_ai_name_matches_packaged_catalog_product(settings) -> None:  # type: ignore[no-untyped-def]
     """Сверяет исходное полное название и сохраняет количество заказа."""
     name = "Сыр Швейцарский Сыробогатов 180гр"

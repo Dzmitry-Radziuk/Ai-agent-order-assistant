@@ -42,8 +42,12 @@ from restaurant_bot.repositories.updates import UpdateRepository
 from restaurant_bot.services.engine import ConversationEngine
 from restaurant_bot.services.input_normalizer import normalize_telegram_update
 from restaurant_bot.services.matching import (
+    has_compatible_numeric_characteristics,
+    has_conflicting_catalog_qualifiers,
+    has_unscoped_product_variant_qualifier,
     is_broad_category_query,
     is_safe_catalog_name_equivalent,
+    unverified_product_terms,
 )
 from restaurant_bot.services.order_review import OrderReviewService
 from restaurant_bot.services.parser import infer_intent, parse_quantity_unit
@@ -692,6 +696,52 @@ class UpdateOrchestrator:
             return "unrecognized_request"
         return "draft_management"
 
+    @staticmethod
+    def _effective_analytics_command(
+        event: TelegramEvent,
+        command: ParsedCommand,
+        state: ConversationState,
+        previous_issue_item_id: str,
+    ) -> ParsedCommand:
+        """Восстанавливает контекстное уточнение количества для аналитики.
+
+        Парсер может закономерно вернуть ``unknown`` для короткого ответа
+        вроде «5 штук» или «10 килограмм»: смысл такой фразы определяется
+        открытой карточкой товара. Движок уже применяет количество к текущей
+        позиции, поэтому итоговый лог не должен записывать обработанный ответ
+        как нераспознанный запрос.
+        """
+        if command.intent is not Intent.UNKNOWN or not previous_issue_item_id:
+            return command
+
+        quantity, unit = ConversationEngine._spoken_quantity(event.text or command.text)
+        if quantity is None:
+            return command
+
+        item = next(
+            (candidate for candidate in state.cart if candidate.id == previous_issue_item_id),
+            None,
+        )
+        if (
+            item is None
+            or item.quantity is None
+            or item.status
+            not in {
+                ItemStatus.MATCHED,
+                ItemStatus.UNIT_MISMATCH,
+            }
+        ):
+            return command
+
+        return command.model_copy(
+            update={
+                "intent": Intent.EDIT_QUANTITY,
+                "edit_quantity": quantity,
+                "edit_unit": unit,
+                "target_query": "",
+            }
+        )
+
     def _request_analytics(
         self,
         event: TelegramEvent,
@@ -703,6 +753,12 @@ class UpdateOrchestrator:
         previous_issue_item_id: str,
     ) -> dict[str, Any]:
         """Формирует компактный и обезличенный результат пользовательского запроса."""
+        command = self._effective_analytics_command(
+            event,
+            command,
+            state,
+            previous_issue_item_id,
+        )
         relevant_items: list[CartItem] = []
         if command.intent == Intent.ADD_ITEMS:
             relevant_items = state.cart[previous_cart_count:]
@@ -726,8 +782,11 @@ class UpdateOrchestrator:
             Intent.UNIT_OK,
             Intent.MERGE_DUPLICATE,
         }:
-            current = state.current_item()
-            if current and current.id == previous_issue_item_id:
+            current = next(
+                (item for item in state.cart if item.id == previous_issue_item_id),
+                None,
+            )
+            if current:
                 relevant_items = [current]
 
         issue_statuses = {
@@ -1058,7 +1117,10 @@ class UpdateOrchestrator:
                         )
                         return ParsedCommand(intent=Intent.UNKNOWN, text="")
                     high_accuracy_retry = False
-                    if self._requires_high_accuracy_transcription(transcript, state):
+                    if (
+                        self._requires_high_accuracy_transcription(transcript, state)
+                        and self._has_distinct_transcription_fallback()
+                    ):
                         high_accuracy_retry = True
                         primary_transcript = transcript
                         try:
@@ -1413,6 +1475,17 @@ class UpdateOrchestrator:
                 "путай «грамм» и «килограмм». Ничего не заменяй и не придумывай. "
                 "Верни только произнесённый русский текст."
             )
+        if current and current.status == ItemStatus.MISSING_QTY and current.catalog_unit:
+            expected_unit = normalize_unit(current.catalog_unit)
+            product_name = current.catalog_name or current.source_query
+            return (
+                "Русская речь сотрудника кафе. Пользователь отвечает на просьбу указать "
+                f"количество товара «{product_name}» в {expected_unit}. Он может сказать "
+                "только число («пять», «5») или число с единицей («пять штук», «5 кг»). "
+                "Обязательно сохрани произнесённое число и единицу измерения. Короткий "
+                "ответ с числом — это количество, а не команда «не добавлять». Не заменяй "
+                "число командой и не придумывай текст. Верни только произнесённый русский текст."
+            )
         visible_actions = getattr(state, "visible_actions", [])
         visible = "; ".join(
             action.get("label", "") for action in visible_actions[:10] if action.get("label")
@@ -1492,6 +1565,23 @@ class UpdateOrchestrator:
             for candidate in current.candidates
         ]
         return max(scores, default=0) < 2
+
+    def _has_distinct_transcription_fallback(self) -> bool:
+        """Разрешает повтор только при реально отличающейся модели."""
+        settings = getattr(self.openai, "settings", None)
+        primary = getattr(settings, "openai_transcribe_model", None)
+        fallback = getattr(settings, "openai_transcribe_fallback_model", None)
+        if not isinstance(primary, str) or not isinstance(fallback, str):
+            # Unit tests and lightweight adapters may not expose Settings;
+            # preserve their explicit retry contract.
+            return True
+        primary_name = primary.strip().casefold()
+        fallback_name = fallback.strip().casefold()
+        if not primary_name or not fallback_name or primary_name == fallback_name:
+            return False
+        # A cheaper ``mini`` model is a failure fallback, not a quality retry:
+        # replacing a good primary transcript with it would reduce accuracy.
+        return not ("mini" in fallback_name and "mini" not in primary_name)
 
     @staticmethod
     def _attach_ui_revision(reply: BotReply, revision: int) -> None:
@@ -1600,6 +1690,17 @@ class UpdateOrchestrator:
         for item in result.state.cart:
             if item.status != ItemStatus.AMBIGUOUS or not item.candidates:
                 continue
+            if item.packaging_role == "ambiguous" or has_unscoped_product_variant_qualifier(
+                item.comment
+            ):
+                continue
+            if (
+                item.packaging_role == "catalog_attribute"
+                and not has_compatible_numeric_characteristics(
+                    item.packaging_text, item.candidates[0].name
+                )
+            ):
+                continue
             equivalent_products = [
                 product
                 for product in catalog
@@ -1667,6 +1768,15 @@ class UpdateOrchestrator:
                 and selected.score >= _AI_MATCH_MIN_SCORE
                 and decision.confidence >= _AI_MATCH_SELECT_MIN_CONFIDENCE
                 and not decision.contradictions
+                and has_compatible_numeric_characteristics(item.source_query, selected.name)
+                and (
+                    item.packaging_role != "catalog_attribute"
+                    or has_compatible_numeric_characteristics(item.packaging_text, selected.name)
+                )
+                and not has_conflicting_catalog_qualifiers(item.source_query, selected.name)
+                and not has_unscoped_product_variant_qualifier(item.comment)
+                and item.packaging_role != "ambiguous"
+                and not unverified_product_terms(item.source_query, selected.name)
             )
             if can_select and selected is not None:
                 self.engine._apply_catalog(item, selected, catalog)

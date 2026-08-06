@@ -55,6 +55,52 @@ def test_trailing_order_quantity_is_separated_from_compact_packaging() -> None:
     )
 
 
+def test_numeric_range_in_product_name_is_not_order_quantity() -> None:
+    """Не принимает диапазон фасовки или размера за количество заказа."""
+    items = parse_product_lines("Филе форели свежее 0,8-1,2 килограмма зачищенное 3НС")
+
+    assert len(items) == 1
+    assert items[0].product_query == "Филе форели свежее 0,8-1,2 килограмма зачищенное 3НС"
+    assert items[0].quantity is None
+    assert items[0].unit == ""
+
+
+def test_numeric_range_with_double_hyphen_is_not_order_quantity() -> None:
+    """Распознаёт ASCII-запись диапазона с двумя дефисами как характеристику товара."""
+    items = parse_product_lines("Филе форели 0,8 -- 1,2 килограмма зачищенное")
+
+    assert len(items) == 1
+    assert items[0].quantity is None
+    assert items[0].unit == ""
+
+
+def test_numeric_range_keeps_explicit_quantity_after_product_name() -> None:
+    """После диапазона берёт только явно названное количество заказа."""
+    items = parse_product_lines("Филе форели 0,8-1,2 кг зачищенное 10 кг")
+
+    assert len(items) == 1
+    assert items[0].product_query == "Филе форели 0,8-1,2 кг зачищенное"
+    assert (items[0].quantity, items[0].unit) == (10, "кг")
+
+
+def test_alternative_packaging_is_not_split_into_fake_products() -> None:
+    """Сохраняет варианты фасовки одной позиции и отделяет заказанное число ведер."""
+    items = parse_product_lines("Капуста квашеная ведро 5 кг или 4,5 кг, два ведра.")
+
+    assert len(items) == 1
+    assert "5 кг или 4,5 кг" in items[0].product_query
+    assert (items[0].quantity, items[0].unit) == (2, "ведро")
+
+
+def test_product_code_range_is_kept_before_explicit_order_quantity() -> None:
+    """Не отрезает код товара с дефисом перед количеством заказа."""
+    items = parse_product_lines("Филе форели зачищенное 30-08 1,3 килограмма.")
+
+    assert len(items) == 1
+    assert items[0].product_query == "Филе форели зачищенное 30-08"
+    assert (items[0].quantity, items[0].unit) == (1.3, "кг")
+
+
 def test_russian_google_sheets_currency_is_parsed_like_n8n() -> None:
     """Проверяет, что русские Google таблицы валюта является parsed like n8n."""
     assert to_float("р.100,0") == 100

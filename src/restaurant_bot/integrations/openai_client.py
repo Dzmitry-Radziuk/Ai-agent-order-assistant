@@ -13,6 +13,7 @@ from pydantic import BaseModel, Field
 from restaurant_bot.config import Settings
 from restaurant_bot.domain.models import ExtractedItem, Intent, ParsedCommand
 from restaurant_bot.observability import Tracer
+from restaurant_bot.services.matching import has_product_variant_qualifier
 from restaurant_bot.services.parser import (
     has_explicit_global_comment_scope,
     infer_intent,
@@ -20,10 +21,12 @@ from restaurant_bot.services.parser import (
     parse_quantity_unit,
 )
 from restaurant_bot.services.text import (
+    NUMBER_WORDS,
     UNIT_ALIASES,
     clean_text,
     normalize_text,
     normalize_unit,
+    numeric_range_spans,
     parse_number_words,
     remove_global_comment_overlap,
     to_float,
@@ -44,6 +47,15 @@ _EMPTY_AI_VALUES = {
     "не указано",
     "не указан",
 }
+
+_PACKAGING_ROLE_CONFIDENCE_THRESHOLD = 0.85
+_PACKAGING_PREFERENCE_RE = re.compile(
+    r"(?:нужн\w*\s+(?:фасов\w*|упаков\w*)|желательно\b|"
+    r"только\s+(?:в|по|упаков\w*|фасов\w*)|"
+    r"(?:упаков\w*|фасов\w*)\s+(?:должн\w*|по)\b|"
+    r"упаков\w*\s+по\b|привез\w*\s+(?:кусоч\w*|по)\b)",
+    flags=re.I,
+)
 
 
 class CommentBindingSchema(BaseModel):
@@ -129,6 +141,12 @@ def _quantities_with_units(source_line: str) -> list[tuple[float, str]]:
     """Извлекает все явно указанные количества вместе с единицами."""
     normalized = normalize_text(source_line).replace(",", ".")
     normalized = re.sub(r"(?<=\d)(?=[a-zа-я])", " ", normalized, flags=re.I)
+    range_spans = numeric_range_spans(normalized)
+    if range_spans:
+        characters = list(normalized)
+        for start, end in range_spans:
+            characters[start:end] = [" "] * (end - start)
+        normalized = "".join(characters)
     tokens = [token.strip(" .,:;—–-") for token in normalized.split()]
     found: list[tuple[float, str]] = []
     index = 0
@@ -154,7 +172,7 @@ def _terminal_order_quantity(source_line: str) -> tuple[float | None, str]:
     )
     match = re.search(
         rf"(?:^|\s)[-—–:]\s*(?P<quantity>\d+(?:[,.]\d+)?)\s*(?P<unit>{unit_pattern})?\s*$",
-        clean_text(source_line),
+        clean_text(source_line).rstrip(" .!?"),
         flags=re.IGNORECASE,
     )
     if match is None:
@@ -162,6 +180,24 @@ def _terminal_order_quantity(source_line: str) -> tuple[float | None, str]:
     return float(match.group("quantity").replace(",", ".")), normalize_unit(
         match.group("unit") or ""
     )
+
+
+def _trailing_quantity_with_unit(source_line: str) -> tuple[float | None, str]:
+    """Находит количество с единицей в самом конце строки, вне диапазона."""
+    unit_pattern = "|".join(
+        sorted((re.escape(unit) for unit in UNIT_ALIASES), key=len, reverse=True)
+    )
+    source = clean_text(source_line).rstrip(" .!?,;:)")
+    match = re.search(
+        rf"(?<![\d-])(?P<quantity>\d+(?:[,.]\d+)?)\s*(?P<unit>{unit_pattern})\s*$",
+        source,
+        flags=re.IGNORECASE,
+    )
+    if match is None or any(
+        start < match.end() and match.start() < end for start, end in numeric_range_spans(source)
+    ):
+        return None, ""
+    return float(match.group("quantity").replace(",", ".")), normalize_unit(match.group("unit"))
 
 
 def _clear_unknown_item_placeholders(items: list[dict[str, Any]]) -> None:
@@ -192,6 +228,106 @@ def _query_is_already_represented(known_query: str, recovered_query: str) -> boo
         )
         for known in known_tokens
     )
+
+
+_NON_PRODUCT_FRAGMENT_WORDS = (
+    set(UNIT_ALIASES)
+    | set(NUMBER_WORDS)
+    | {
+        "и",
+        "или",
+        "либо",
+        "а",
+        "также",
+        "комментарий",
+        "комментария",
+        "общий",
+        "товар",
+        "товары",
+        "позиция",
+        "позиции",
+        "заявка",
+        "заявку",
+        "заказ",
+        "заказа",
+    }
+)
+
+
+def _contains_product_query_word(value: str) -> bool:
+    """Проверяет, содержит ли фрагмент самостоятельное название товара."""
+    words = re.findall(r"[a-zа-яё0-9]+", normalize_text(value), flags=re.I)
+    return any(
+        len(word) > 1
+        and word not in _NON_PRODUCT_FRAGMENT_WORDS
+        and not word.isdigit()
+        and not any(char.isdigit() for char in word)
+        for word in words
+    )
+
+
+def _collapse_redundant_ai_items(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Схлопывает дубли одного источника и отбрасывает служебные обломки.
+
+    Модель иногда возвращает одну голосовую позицию дважды: отдельно с
+    комментарием и отдельно с количеством. Также диапазон фасовки может
+    превращаться в псевдотовар «или». Такие элементы не являются двумя
+    товарами и не должны попадать в черновик.
+    """
+    collapsed: list[dict[str, Any]] = []
+    for item in items:
+        query = clean_text(item.get("product_query"))
+        source = normalize_text(item.get("source_line")).strip(" .,;:-—–")
+        if (
+            not _contains_product_query_word(query)
+            and collapsed
+            and source
+            and source == normalize_text(collapsed[-1].get("source_line")).strip(" .,;:-—–")
+        ):
+            continue
+        duplicate = None
+        for existing in collapsed:
+            existing_source = normalize_text(existing.get("source_line")).strip(" .,;:-—–")
+            if not source or source != existing_source:
+                continue
+            existing_query = clean_text(existing.get("product_query"))
+            if normalize_text(existing_query) != normalize_text(query):
+                continue
+            existing_quantity = to_float(existing.get("quantity"))
+            quantity = to_float(item.get("quantity"))
+            if (
+                existing_quantity is not None
+                and quantity is not None
+                and abs(existing_quantity - quantity) > 1e-9
+            ):
+                continue
+            duplicate = existing
+            break
+        if duplicate is None:
+            collapsed.append(item)
+            continue
+
+        if (
+            to_float(duplicate.get("quantity")) is None
+            and to_float(item.get("quantity")) is not None
+        ):
+            duplicate["quantity"] = item.get("quantity")
+            duplicate["unit"] = item.get("unit") or duplicate.get("unit") or ""
+        if not clean_text(duplicate.get("supplier_hint")) and clean_text(item.get("supplier_hint")):
+            duplicate["supplier_hint"] = item.get("supplier_hint")
+        if clean_text(duplicate.get("packaging_role")) in {"", "none"} and clean_text(
+            item.get("packaging_role")
+        ) not in {"", "none"}:
+            duplicate["packaging_text"] = item.get("packaging_text") or ""
+            duplicate["packaging_role"] = item.get("packaging_role")
+            duplicate["packaging_confidence"] = item.get("packaging_confidence") or 0
+        if not clean_text(duplicate.get("comment")) and clean_text(
+            item.get("user_comment_to_supplier")
+        ):
+            duplicate["comment"] = item.get("user_comment_to_supplier")
+        elif clean_text(item.get("comment")):
+            _append_local_item_comment(duplicate, item.get("comment"))
+    return collapsed
 
 
 def restore_explicit_order_terms(
@@ -226,6 +362,33 @@ def restore_explicit_order_terms(
         explicit_terms = _quantities_with_units(original_line)
         model_quantity = to_float(item.get("quantity"))
         model_unit = normalize_unit(item.get("unit"))
+        if numeric_range_spans(original_line):
+            trailing_quantity, trailing_unit = _trailing_quantity_with_unit(original_line)
+            if trailing_quantity is None:
+                # Вариант «... 0,9-1,3 кг - 2» содержит явно заказанное
+                # количество без единицы. Концы диапазона к нему не относятся.
+                trailing_quantity, trailing_unit = _terminal_order_quantity(original_line)
+            if len(explicit_terms) == 1 and trailing_quantity is not None:
+                # После справочного диапазона безопасным количеством является
+                # только отдельно названное значение заказа.
+                item["source_line"] = original_line
+                item["quantity"], item["unit"] = trailing_quantity, trailing_unit
+                continue
+            if len(explicit_terms) == 1 and model_quantity is not None:
+                explicit_quantity, explicit_unit = explicit_terms[0]
+                if abs(model_quantity - explicit_quantity) <= 1e-9:
+                    # Разрешаем комментарий после явно распознанного заказа,
+                    # например ``... 10 кг, желательно завтра``.
+                    item["source_line"] = original_line
+                    item["quantity"], item["unit"] = explicit_quantity, explicit_unit
+                    continue
+            if not explicit_terms or len(explicit_terms) == 1:
+                # ИИ не должен превращать первый endpoint диапазона в заказ.
+                # Дальше обычный диалог попросит пользователя уточнить объём.
+                item["source_line"] = original_line
+                item["quantity"] = None
+                item["unit"] = ""
+                continue
         if (
             len(items) == 1
             and len(explicit_terms) >= 2
@@ -948,6 +1111,105 @@ def _remove_item_global_comment_overlaps(
         item["user_comment_to_supplier"] = cleaned
 
 
+def _source_numeric_ranges(value: str) -> list[str]:
+    """Возвращает исходные текстовые диапазоны из строки пользователя."""
+    source = clean_text(value)
+    return [source[start:end] for start, end in numeric_range_spans(source)]
+
+
+def _packaging_role_from_context(
+    item: dict[str, Any], source: str, range_text: str
+) -> tuple[str, float]:
+    """Определяет роль диапазона с безопасным неоднозначным запасным вариантом."""
+    role = clean_text(item.get("packaging_role")) or "none"
+    try:
+        confidence = float(item.get("packaging_confidence") or 0)
+    except (TypeError, ValueError):
+        confidence = 0
+    if role in {"catalog_attribute", "user_preference"} and confidence >= (
+        _PACKAGING_ROLE_CONFIDENCE_THRESHOLD
+    ):
+        return role, confidence
+    if role == "ambiguous":
+        return "ambiguous", max(confidence, 0.5)
+
+    normalized_source = normalize_text(source)
+    if _PACKAGING_PREFERENCE_RE.search(normalized_source):
+        return "user_preference", 0.9
+    range_end = normalized_source.find(normalize_text(range_text))
+    if re.search(r"\b(?:фасов\w*|упаков\w*)\b", normalized_source):
+        return "ambiguous", 0.5
+    if range_end >= 0:
+        return "catalog_attribute", 0.9
+    return "ambiguous", 0.5
+
+
+def _append_reference_range_to_query(item: dict[str, Any], range_text: str) -> None:
+    """Возвращает диапазон размера из комментария обратно в поисковое название."""
+    query = clean_text(item.get("product_query"))
+    if not query:
+        return
+    normalized_range = (
+        normalize_text(range_text).replace(",", ".").replace("–", "-").replace("—", "-")
+    )
+    normalized_query = normalize_text(query).replace(",", ".").replace("–", "-").replace("—", "-")
+    if normalized_range in normalized_query:
+        return
+    item["product_query"] = f"{query} {range_text}".strip()
+
+
+def _remove_reference_range_from_comment(item: dict[str, Any], range_text: str) -> None:
+    """Удаляет размер товара из комментария, если модель ошибочно положила его туда."""
+    numbers = re.findall(r"\d+(?:[,.]\d+)?", range_text)
+    if len(numbers) != 2:
+        return
+    left = re.escape(numbers[0]).replace(",", "[,.]")
+    right = re.escape(numbers[1]).replace(",", "[,.]")
+    unit_pattern = "|".join(
+        sorted((re.escape(unit) for unit in UNIT_ALIASES), key=len, reverse=True)
+    )
+    pattern = re.compile(
+        rf"(?<!\w){left}\s*(?:--|[-–—])\s*{right}(?:\s*(?:{unit_pattern}))?(?!\w)",
+        flags=re.IGNORECASE,
+    )
+    for field in ("comment", "user_comment_to_supplier"):
+        cleaned = pattern.sub(" ", clean_text(item.get(field)))
+        item[field] = re.sub(r"\s+", " ", cleaned).strip(" .,;:-—–")
+
+
+def _restore_reference_ranges_in_queries(
+    items: list[dict[str, Any]],
+    source_text: str,
+    deterministic: list[ExtractedItem],
+) -> None:
+    """Не даёт ИИ потерять размер или фасовку из поискового названия."""
+    for index, item in enumerate(items):
+        source_line = clean_text(item.get("source_line"))
+        ranges = _source_numeric_ranges(source_line)
+        if not ranges and len(items) == 1:
+            ranges = _source_numeric_ranges(source_text)
+        if not ranges and len(items) == len(deterministic):
+            ranges = _source_numeric_ranges(deterministic[index].source_line)
+        if len(ranges) != 1:
+            continue
+        range_text = ranges[0]
+        role, confidence = _packaging_role_from_context(
+            item, source_line or source_text, range_text
+        )
+        item["packaging_text"] = range_text
+        item["packaging_role"] = role
+        item["packaging_confidence"] = confidence
+        if role == "catalog_attribute":
+            _append_reference_range_to_query(item, range_text)
+            _remove_reference_range_from_comment(item, range_text)
+        elif role == "user_preference" and not clean_text(item.get("comment")):
+            preference_match = _PACKAGING_PREFERENCE_RE.search(source_line or source_text)
+            if preference_match:
+                item["comment"] = clean_text(
+                    (source_line or source_text)[preference_match.start() :]
+                )
+
+
 def recover_omitted_explicit_items(payload: dict[str, Any], source_text: str) -> dict[str, Any]:
     """Восстанавливает пропущенные явно названные товары."""
     items = list(payload.get("items") or [])
@@ -961,6 +1223,7 @@ def recover_omitted_explicit_items(payload: dict[str, Any], source_text: str) ->
         return payload
 
     items = _apply_semantic_comment_bindings(payload, items, bindings, source_text)
+    items = _collapse_redundant_ai_items(items)
 
     deterministic = parse_product_lines(source_text)
     if not items and deterministic:
@@ -970,6 +1233,7 @@ def recover_omitted_explicit_items(payload: dict[str, Any], source_text: str) ->
         return payload
 
     items = remove_unsupported_query_qualifiers(items, source_text)
+    _restore_reference_ranges_in_queries(items, source_text, deterministic)
     _repair_mixed_script_product_queries(items)
     known_queries = [normalize_text(item.get("product_query")) for item in items]
     for recovered in deterministic:
@@ -1049,7 +1313,10 @@ _TEXT_SYSTEM = """
   отдельно положить огурцы или оба товара друг от друга. Не угадывай.
 - Если область названа явно, применяй её: «оба товара положить отдельно» → scope=group.
 - Никогда не создавай отдельный item из комментария или из фрагмента между двумя товарами.
-- Слова о качестве, обработке, доставке, замене и пожеланиях пользователя сохраняй дословно в comment, а не в product_query.
+- Явное пожелание поставщику о доставке, замене или обращении сохраняй дословно в
+  comment. Слово о качестве, обработке, сорте, форме, бренде или фасовке рядом с
+  категорией может быть частью названия товара: сначала сохрани его в
+  product_query и проверь по каталогу, не подставляй похожую позицию.
 - Требование к обработке после группы товаров относится ко всей непосредственно перечисленной группе,
   а не является новым товаром. Например, «укроп 2 кг, петрушка 3 кг, срез корня 5 см, не больше»
   → только укроп и петрушка; у обеих позиций comment="срез корня 5 см, не больше",
@@ -1059,7 +1326,9 @@ _TEXT_SYSTEM = """
   Не переноси такое слово в comment только потому, что оно написано неправильно.
 - Отделяй от возможного названия только явное пожелание о качестве, состоянии, обработке,
   доставке или замене. Само возможное название сохраняй дословно, без исправления.
-- Пример: «говядина 10 кг мраморная без кожи» → product_query="говядина", quantity=10, unit="кг", comment="мраморная без кожи".
+- Пример: «говядина 10 кг мраморная без кожи» → product_query включает
+  «говядина мраморная», quantity=10, unit="кг", comment="без кожи"; если такого
+  варианта нет в каталоге, оставь позицию неоднозначной.
 - Пример с опечаткой: «сироп рза холодным» → product_query="сироп рза", comment="холодным".
 - Пример общего комментария: «всё привезти до 9 утра» → global_comment="привезти до 9 утра",
   comment_bindings=[{text: "привезти до 9 утра", scope: "order", target_item_indexes: [], confidence: 0.99}]
@@ -1077,6 +1346,28 @@ _TEXT_SYSTEM = """
   Не считай неизвестное слово после товара поставщиком без явных оснований.
 - Если количество без единицы, сохрани число, а unit оставь пустым.
 - Число в фасовке или объёме внутри названия не является количеством заказа, если заказанное количество указано отдельно после тире или в конце.
+- Диапазон чисел с дефисом или длинным тире — например «0,8–1,2 кг», «1–3 л» или «30–08» —
+  не является автоматически ни количеством, ни комментарием. Определи его роль:
+  компактная фасовка рядом с названием при отдельном количестве заказа —
+  packaging_role="catalog_attribute"; явная просьба «нужна фасовка», «желательно»,
+  «только упаковками», «упаковать по» или «привезти кусками по» —
+  packaging_role="user_preference" и полное пожелание оставь в comment; если роль
+  неочевидна — packaging_role="ambiguous".
+- Для packaging_role возвращай packaging_text с исходным диапазоном и
+  packaging_confidence от 0 до 1. Ставь confidence не ниже 0.9 только при явном
+  контексте. При сомнении не переноси диапазон между product_query и comment.
+- Пример характеристики: «Форель филе 0,8–1,3 кг, зачищенная — 5 кг» →
+  product_query включает «0,8–1,3 кг» и «зачищенная», quantity=5 кг,
+  packaging_role="catalog_attribute", comment пустой.
+- Пример пожелания: «Форель филе — 5 кг. Нужна фасовка по 0,8–1,3 кг» →
+  product_query="Форель филе", quantity=5 кг, packaging_role="user_preference",
+  comment содержит всю фразу о фасовке.
+- Пример сомнения: «Форель филе, фасовка 0,8–1,3 кг, 5 кг» →
+  packaging_role="ambiguous"; не выбирай товар автоматически.
+- Не разбивай диапазон на несколько товаров и не выбирай его первый или последний
+  конец как количество заказа.
+- Если в строке есть только такой диапазон и нет отдельного количества заказа, верни quantity=null
+  и не придумывай количество. Если после диапазона явно сказано «— 10 кг», количеством является только 10 кг.
 - Неполное или неоднозначное название сохраняй как его сообщил пользователь. Не заменяй его своим вариантом.
 
 Примеры:
@@ -1114,7 +1405,10 @@ _PHOTO_SYSTEM = """
 Комментарий может быть любым текстом. Порядок слов свободный; не используй закрытый словарь комментариев.
 Если комментарий относится ко всем позициям, верни его в global_comment, индивидуальный — в comment.
 Верни intent=add_items, document_type и items с product_query, quantity, unit, department, supplier_hint, comment, source_line,
-source_department, department_quantities, quantity_source, printed_reference_text, order_entry_text, order_entry_type.
+source_department, department_quantities, quantity_source, printed_reference_text, order_entry_text, order_entry_type,
+packaging_text, packaging_role и packaging_confidence. Диапазон или фасовка рядом с названием
+имеет роль catalog_attribute только при уверенном подтверждении строкой каталога; явное пожелание
+о фасовке имеет роль user_preference и сохраняется в comment; при сомнении используй ambiguous.
 Если это наша таблица заявки с колонками «Зал», «Бар», «Кухня», верни все три значения в department_quantities
 в полях hall, bar, kitchen соответственно. Количество может быть напечатано или вписано ручкой.
 Для client_order_sheet всегда оставляй supplier_hint пустым. Поставщик будет определён по найденной строке
@@ -1170,7 +1464,10 @@ _MATCH_SYSTEM = """
 - небольшая ошибка распознавания в названии при совпадении самого товара — select.
 
 Если подходят несколько — ambiguous. Если ни один — not_found. Не используй внешние знания для
-выдумывания позиций. confidence показывает уверенность именно в выбранном action.
+выдумывания позиций. Единственный кандидат тоже нельзя выбирать автоматически, если в его названии
+нет явно названного пользователем размера, диапазона, фасовки, кода или другого обязательного признака.
+Диапазон вроде «0,8–1,3 кг» должен совпадать с характеристикой кандидата; он не является количеством
+заказа и не может быть отброшен в комментарий. confidence показывает уверенность именно в выбранном action.
 """.strip()
 
 _VISIBLE_ACTION_SYSTEM = """
@@ -1470,6 +1767,11 @@ class OpenAIService:
         """Проверяет возможность разбора списка без вызова ИИ."""
         if command.intent != Intent.ADD_ITEMS or len(command.items) < 2:
             return False
+        # A numeric range may be a size, package, or product code. Keep these
+        # lines on the semantic path so supplier and product qualifiers are
+        # not swallowed into one deterministic product name.
+        if numeric_range_spans(text):
+            return False
         if OpenAIService._has_conversational_product_leadin(text):
             return False
 
@@ -1502,6 +1804,9 @@ class OpenAIService:
             name = normalize_text(match.group("name")).strip(" -:—–")
             if not name or re.search(r"\d", name) or suspicious_words.search(name):
                 return False
+            if has_product_variant_qualifier(name):
+                # Keep product variants on the catalog-verified semantic path.
+                return False
             if normalize_text(item.product_query) != name:
                 return False
             if item.quantity is None or not item.unit or clean_text(item.comment):
@@ -1527,6 +1832,12 @@ class OpenAIService:
         raw_source = clean_text(text)
         source = raw_source.rstrip(" .!?")
         item_source = clean_text(item.source_line).rstrip(" .!?")
+        if numeric_range_spans(source):
+            # Do not bypass semantic parsing: this form can contain both a
+            # supplier name and product qualifiers after the numeric range.
+            return False
+        if has_product_variant_qualifier(item.product_query):
+            return False
         unit_pattern = "|".join(
             sorted((re.escape(unit) for unit in UNIT_ALIASES), key=len, reverse=True)
         )
@@ -1577,6 +1888,7 @@ class OpenAIService:
             and not item.comment
             and not command.global_comment
             and normalize_text(query) == normalize_text(text)
+            and not has_product_variant_qualifier(query)
         )
 
     @staticmethod
@@ -1682,12 +1994,24 @@ class OpenAIService:
                 fallback_used=False,
             )
             return text
-        with path.open("rb") as audio:
-            request["model"] = (
-                self.settings.openai_transcribe_model
-                if high_accuracy
-                else self.settings.openai_transcribe_fallback_model
+        primary_model = str(request["model"])
+        fallback_model = (
+            self.settings.openai_transcribe_model
+            if high_accuracy
+            else self.settings.openai_transcribe_fallback_model
+        )
+        if (
+            not fallback_model
+            or primary_model.strip().casefold() == str(fallback_model).strip().casefold()
+        ):
+            logger.warning(
+                "voice_transcription_fallback_skipped",
+                reason="same_model",
+                model=primary_model,
             )
+            return ""
+        with path.open("rb") as audio:
+            request["model"] = fallback_model
             request["file"] = audio
             with self.tracer.generation(
                 "openai.transcribe",
@@ -1860,6 +2184,9 @@ class OpenAIService:
             "printed_reference_text": item.printed_reference_text,
             "order_entry_text": item.order_entry_text,
             "order_entry_type": item.order_entry_type,
+            "packaging_text": item.packaging_text,
+            "packaging_role": item.packaging_role,
+            "packaging_confidence": item.packaging_confidence,
         }
 
     def choose_catalog_candidate(

@@ -325,6 +325,47 @@ def test_request_analytics_can_show_failed_text_when_diagnostics_are_enabled() -
     assert analytics["user_text"] == "привези что-нибудь"
 
 
+@pytest.mark.parametrize(
+    ("status", "expected_outcome", "expected_reason"),
+    [
+        (ItemStatus.MATCHED, "success", ""),
+        (ItemStatus.UNIT_MISMATCH, "needs_clarification", "unit_mismatch"),
+    ],
+)
+def test_request_analytics_recovers_contextual_voice_quantity(
+    status: ItemStatus,
+    expected_outcome: str,
+    expected_reason: str,
+) -> None:
+    """Не считает обработанный короткий голосовой ответ нераспознанным."""
+    service = _analytics_orchestrator()
+    event = orchestrator_module.normalize_telegram_update(_voice_claim().payload).model_copy(
+        update={"text": "10 килограмм"}
+    )
+    item = CartItem(
+        id="rice",
+        source_query="Рис круглый",
+        quantity=10,
+        unit="кг",
+        status=status,
+    )
+    state = ConversationState(cart=[item])
+
+    analytics = service._request_analytics(
+        event,
+        ParsedCommand(intent=Intent.UNKNOWN, text=event.text),
+        state,
+        previous_stage=SessionStage.REVIEW.value,
+        previous_cart_count=1,
+        previous_issue_item_id=item.id,
+    )
+
+    assert analytics["intent"] == Intent.EDIT_QUANTITY.value
+    assert analytics["scenario"] == "draft_management"
+    assert analytics["outcome"] == expected_outcome
+    assert analytics["failure_reason"] == expected_reason
+
+
 def test_record_request_outcome_updates_log_and_langfuse_metadata() -> None:
     """Пишет один и тот же понятный итог в лог и Langfuse."""
     service = _analytics_orchestrator()

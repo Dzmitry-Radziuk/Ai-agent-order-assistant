@@ -9,6 +9,7 @@ from restaurant_bot.services.text import (
     clean_text,
     normalize_text,
     normalize_unit,
+    numeric_range_spans,
     parse_number_words,
 )
 
@@ -1403,7 +1404,9 @@ def parse_product_lines(text: str) -> list[ExtractedItem]:
         return []
     lines = [clean_text(line) for line in re.split(r"\n+", source) if clean_text(line)]
     if len(lines) == 1 and source.count(",") >= 2 and not re.search(r"[.!?]", source):
-        comma_parts = [clean_text(line) for line in source.split(",") if clean_text(line)]
+        comma_parts = [
+            clean_text(line) for line in re.split(r"(?<!\d),(?!\d)", source) if clean_text(line)
+        ]
         if not any(_is_standalone_quantity(part) for part in comma_parts):
             lines = comma_parts
 
@@ -1427,6 +1430,19 @@ def parse_product_lines(text: str) -> list[ExtractedItem]:
         rf")",
         re.I,
     )
+    alternative_packaging = re.compile(
+        rf"\d+(?:[,.]\d+)?\s*(?:{unit_pattern})\s+"
+        rf"(?:или|либо)\s+\d+(?:[,.]\d+)?\s*(?:{unit_pattern})\b",
+        re.I,
+    )
+    number_words_pattern = "|".join(
+        sorted((re.escape(word) for word in NUMBER_WORDS), key=len, reverse=True)
+    )
+    trailing_word_quantity = re.compile(
+        rf"(?P<quantity>(?:{number_words_pattern})(?:\s+(?:{number_words_pattern}))*)\s+"
+        rf"(?P<unit>{unit_pattern})\s*[.!?]*$",
+        re.I,
+    )
 
     for line in lines:
         stripped = re.sub(
@@ -1435,6 +1451,10 @@ def parse_product_lines(text: str) -> list[ExtractedItem]:
         if _is_standalone_quantity(stripped):
             continue
         packaging_spans = [match.span() for match in packaging.finditer(stripped)]
+        alternative_packaging_spans = [
+            match.span() for match in alternative_packaging.finditer(stripped)
+        ]
+        reference_range_spans = numeric_range_spans(stripped)
         quantity_marks = [
             mark
             for mark in re.finditer(
@@ -1443,7 +1463,17 @@ def parse_product_lines(text: str) -> list[ExtractedItem]:
                 flags=re.I,
             )
             if not any(start <= mark.start() < end for start, end in packaging_spans)
+            and not any(
+                start < mark.end() and mark.start() < end for start, end in reference_range_spans
+            )
+            and not any(
+                start < mark.end() and mark.start() < end
+                for start, end in alternative_packaging_spans
+            )
         ]
+        has_explicit_bare_quantity = bool(
+            re.search(r"(?:^|\s)[-—–:]\s*\d+(?:[,.]\d+)?\s*$", stripped)
+        )
         # Recover several products spoken in one segment by using each
         # explicit quantity as the boundary of the preceding product.
         if len(quantity_marks) >= 2 and not re.search(r"[—–-]\s*\d", stripped):
@@ -1550,7 +1580,38 @@ def parse_product_lines(text: str) -> list[ExtractedItem]:
         if packaging_spans and not quantity_marks:
             items.append(ExtractedItem(product_query=stripped, source_line=line))
             continue
+        if reference_range_spans and not quantity_marks and not has_explicit_bare_quantity:
+            # Без отдельного маркера диапазон не может быть заказанным
+            # Do not pass a range endpoint to the fallback quantity parser.
+            items.append(ExtractedItem(product_query=stripped, source_line=line))
+            continue
+        if alternative_packaging_spans:
+            # Alternative package sizes belong to one product. If a spoken
+            # order quantity follows them, split only that final quantity.
+            word_quantity = trailing_word_quantity.search(stripped)
+            if word_quantity:
+                quantity_tokens = normalize_text(word_quantity.group("quantity")).split()
+                parsed_quantity = parse_number_words(quantity_tokens, 0)
+                if parsed_quantity is not None and parsed_quantity[1] == len(quantity_tokens):
+                    name = clean_text(stripped[: word_quantity.start()]).strip(" ,;:-—–")
+                    if name:
+                        items.append(
+                            ExtractedItem(
+                                product_query=name,
+                                quantity=parsed_quantity[0],
+                                unit=normalize_unit(word_quantity.group("unit")),
+                                source_line=line,
+                            )
+                        )
+                        continue
         match = trailing.match(stripped)
+        if match:
+            quantity_span = match.span("qty") if match.group("qty") else match.span("bare_qty")
+            if any(
+                start < quantity_span[1] and quantity_span[0] < end
+                for start, end in reference_range_spans
+            ):
+                match = None
         if match:
             name = clean_text(match.group(1)).strip(" -:—–")
             if name:
@@ -1584,9 +1645,6 @@ def parse_product_lines(text: str) -> list[ExtractedItem]:
             for token in normalize_text(stripped).split()
             if token.strip(" .,:;—–-")
         ]
-        has_explicit_bare_quantity = bool(
-            re.search(r"(?:^|\s)[-—–:]\s*\d+(?:[,.]\d+)?\s*$", stripped)
-        )
         for index in range(len(tokens)):
             parsed = parse_number_words(tokens, index)
             if not parsed:

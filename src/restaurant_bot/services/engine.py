@@ -28,13 +28,17 @@ from restaurant_bot.domain.models import (
 )
 from restaurant_bot.services.matching import (
     can_auto_select,
+    has_compatible_numeric_characteristics,
     has_complete_query_evidence,
+    has_conflicting_catalog_qualifiers,
+    has_unscoped_product_variant_qualifier,
     is_broad_category_query,
     nearest_valid_multiple,
     query_evidence_tokens,
     rank_candidates,
     supplier_matches_hint,
     tokens,
+    unverified_product_terms,
 )
 from restaurant_bot.services.parser import (
     clean_command_target,
@@ -81,11 +85,13 @@ from restaurant_bot.services.submission_presenter import (
     submission_dispatch_uncertain_reply,
 )
 from restaurant_bot.services.text import (
+    NUMBER_WORDS,
     UNIT_ALIASES,
     convert_quantity,
     escape,
     normalize_text,
     normalize_unit,
+    numeric_range_spans,
     parse_number_words,
     remove_global_comment_overlap,
 )
@@ -119,6 +125,67 @@ _SUPPLIER_COMMENT_MODIFIER_RE = re.compile(
     r"енно|ано|но|мелко|крупно)$",
     flags=re.I,
 )
+_SUPPLIER_COMMENT_HINT_ROOTS = {
+    "холод",
+    "тепл",
+    "охлажд",
+    "достав",
+    "привез",
+    "нарез",
+    "зачищ",
+    "натер",
+    "раздел",
+    "мелк",
+    "крупн",
+    "сроч",
+    "завтр",
+    "сегодн",
+    "утр",
+    "вечер",
+    "позвон",
+}
+_EXPLICIT_ORDER_QUANTITY_RE = re.compile(
+    r"(?:мне\s+)?(?:нужн(?:о|а|ы)|надо|закаж(?:и|ем|у)|добав(?:ь|ить)|"
+    r"постав(?:ь|ить)|возьм(?:и|ем)|количеств(?:о|ом)?|вес)\b",
+    flags=re.I,
+)
+_SINGLE_CONTAINER_UNITS = {
+    "банка",
+    "бутылка",
+    "пачка",
+    "упаковка",
+    "коробка",
+    "ведро",
+    "рулон",
+    "пакет",
+    "штука",
+    "штуку",
+    "штуке",
+}
+_QUANTITY_LEADIN_WORDS = {
+    "да",
+    "давай",
+    "одна",
+    "один",
+    "одно",
+    "одну",
+    "возьми",
+    "возьмем",
+    "закажи",
+    "заказать",
+    "ладно",
+    "мне",
+    "нужна",
+    "нужен",
+    "нужно",
+    "ок",
+    "окей",
+    "поставь",
+    "поставить",
+    "пусть",
+    "тогда",
+    "хорошо",
+}
 
 
 class ConversationEngine:
@@ -306,6 +373,7 @@ class ConversationEngine:
             and state.stage
             in {
                 SessionStage.COLLECTING,
+                SessionStage.REVIEW,
                 SessionStage.AWAIT_MULTIPLE_QUANTITY,
                 SessionStage.AWAIT_UNIT_QUANTITY,
             }
@@ -318,16 +386,33 @@ class ConversationEngine:
                 assert item is not None
                 item.quantity = quantity
                 item.unit = unit or item.catalog_unit or item.unit
+                short_container_quantity, short_container_unit = self._spoken_unit_only_quantity(
+                    event.text or command.text
+                )
+                if (
+                    item.status == ItemStatus.MISSING_QTY
+                    and short_container_quantity is not None
+                    and short_container_unit in {"бут", "бан"}
+                    and item.catalog_unit == "шт"
+                ):
+                    # A short container answer on a quantity card means one
+                    # catalog item; an explicit count such as "8 банок" still
+                    # follows the strict unit-mismatch path below.
+                    item.unit = item.catalog_unit
                 if item.status == ItemStatus.DUPLICATE_PENDING:
+                    # Повторную позицию можно объединить только после
+                    # подтверждения в единице каталога. Нельзя молча считать
+                    # «банку» штукой или килограммы граммами.
+                    if (
+                        item.catalog_unit
+                        and item.unit
+                        and normalize_unit(item.unit) != normalize_unit(item.catalog_unit)
+                    ):
+                        return self._advance(state)
                     return self._confirm_current(state)
                 if item.catalog_unit and item.unit and item.unit != item.catalog_unit:
-                    converted = convert_quantity(item.quantity, item.unit, item.catalog_unit)
-                    if converted is not None:
-                        item.quantity = converted
-                        item.unit = item.catalog_unit
-                    else:
-                        item.status = ItemStatus.UNIT_MISMATCH
-                        return self._advance(state)
+                    item.status = ItemStatus.UNIT_MISMATCH
+                    return self._advance(state)
                 item.status = (
                     ItemStatus.MATCHED
                     if item.catalog_product_id or item.catalog_name or item.catalog_unit
@@ -800,7 +885,11 @@ class ConversationEngine:
                     state.current_issue_item_id = same_missing.id
                     continue
                 duplicate = self._find_duplicate(state, item)
-                if duplicate and item.status in {ItemStatus.MATCHED, ItemStatus.MISSING_QTY}:
+                if duplicate and item.status in {
+                    ItemStatus.MATCHED,
+                    ItemStatus.MISSING_QTY,
+                    ItemStatus.UNIT_MISMATCH,
+                }:
                     item.status = ItemStatus.DUPLICATE_PENDING
                     item.issue_message = duplicate.id
                     item.duplicate_existing_quantity = duplicate.quantity or 0
@@ -963,19 +1052,106 @@ class ConversationEngine:
         """Создаёт позицию черновика из распознанного товара."""
         item_comment = extracted.comment or extracted.user_comment_to_supplier
         item_comment = self._remove_global_comment_overlap(item_comment, global_comment)
+        quantity = extracted.quantity
+        unit = normalize_unit(extracted.unit)
+        if quantity is not None and not extracted.quantity_source and extracted.source_line:
+            source_items = parse_product_lines(extracted.source_line)
+            if (
+                len(source_items) == 1
+                and source_items[0].quantity is None
+                and not self._has_explicit_order_quantity(
+                    extracted.source_line,
+                    quantity,
+                )
+            ):
+                # Последняя защита от ошибочного количества, которое модель
+                # взяла из диапазона размера или фасовки в исходной строке.
+                quantity = None
+                unit = ""
         return CartItem(
             id=uuid4().hex[:12],
             source_query=extracted.product_query,
             source_line=extracted.source_line,
             quantity_source=extracted.quantity_source,
             order_entry_type=extracted.order_entry_type,
-            quantity=extracted.quantity,
-            unit=normalize_unit(extracted.unit),
+            packaging_text=extracted.packaging_text,
+            packaging_role=extracted.packaging_role,
+            packaging_confidence=extracted.packaging_confidence,
+            quantity=quantity,
+            unit=unit,
             department=extracted.department or self.settings.default_department,
             department_quantities=extracted.department_quantities.model_copy(deep=True),
             supplier_hint=extracted.supplier_hint,
             comment=self._merge_comments(item_comment, global_comment),
         )
+
+    @staticmethod
+    def _has_explicit_order_quantity(source_line: str, quantity: float | None) -> bool:
+        """Отличает объём заказа от чисел в размере или фасовке товара."""
+        if quantity is None:
+            return False
+        source = str(source_line or "").strip()
+        if not source:
+            return False
+        range_spans = numeric_range_spans(source)
+        masked = list(source)
+        for start, end in range_spans:
+            masked[start:end] = [" "] * (end - start)
+        masked_source = "".join(masked)
+        unit_pattern = "|".join(
+            sorted((re.escape(unit) for unit in UNIT_ALIASES), key=len, reverse=True)
+        )
+        number_word_pattern = "|".join(
+            sorted((re.escape(word) for word in NUMBER_WORDS), key=len, reverse=True)
+        )
+        value_pattern = re.compile(
+            rf"(?<![\w-])(?P<value>\d+(?:[,.]\d+)?|"
+            rf"(?:{number_word_pattern})(?:\s+(?:{number_word_pattern}))*)"
+            rf"\s*(?P<unit>{unit_pattern})?\b",
+            flags=re.I,
+        )
+        values: list[float] = []
+        for match in value_pattern.finditer(masked_source):
+            raw_value = match.group("value").casefold()
+            try:
+                value = float(raw_value.replace(",", "."))
+            except ValueError:
+                tokens = raw_value.split()
+                parsed = parse_number_words(tokens, 0)
+                value = parsed[0] if parsed and parsed[1] == len(tokens) else -1
+            if value >= 0:
+                values.append(value)
+        if not values or not any(abs(value - quantity) <= 1e-9 for value in values):
+            return False
+        # A numeric range is reference data. Any matching value outside it is
+        # an order quantity, even when the user omitted an explicit verb.
+        if range_spans:
+            return True
+        if _EXPLICIT_ORDER_QUANTITY_RE.search(masked_source):
+            return True
+        # A second number or a terminal dash makes the last value an order
+        # quantity, while a lone ``180 грамм`` remains a product characteristic.
+        if len(values) > 1:
+            return True
+        return bool(
+            re.search(
+                rf"(?:^|[-—–:])\s*\d+(?:[,.]\d+)?\s*(?:{unit_pattern})?\s*$",
+                masked_source,
+                flags=re.I,
+            )
+        )
+
+    @staticmethod
+    def _spoken_unit_only_quantity(text: str) -> tuple[float | None, str]:
+        """Понимает короткое «ладно, бутылка» как одну текущую позицию."""
+        tokens = [
+            token
+            for token in re.findall(r"[a-zа-яё]+", normalize_text(text), flags=re.I)
+            if token not in _QUANTITY_LEADIN_WORDS
+        ]
+        if len(tokens) != 1 or tokens[0] not in _SINGLE_CONTAINER_UNITS:
+            return None, ""
+        return 1, normalize_unit(tokens[0])
 
     @staticmethod
     def _validate_supplier_hint(
@@ -1022,7 +1198,7 @@ class ConversationEngine:
         for item in parse_product_lines(text):
             if item.quantity is not None:
                 return item.quantity, item.unit
-        return None, ""
+        return ConversationEngine._spoken_unit_only_quantity(text)
 
     @staticmethod
     def _mentions_expected_unit(text: str, expected_unit: str) -> bool:
@@ -2095,15 +2271,42 @@ class ConversationEngine:
                 )
             ):
                 comment_words = [word for word in query_words if word not in first_evidence]
-                if self._looks_like_supplier_comment_fragment(comment_words):
-                    product_words = [word for word in query_words if word in first_evidence]
-                    item.comment = self._merge_comments(item.comment, " ".join(comment_words))
+                comment_start = self._supplier_comment_start(comment_words)
+                if comment_start is not None:
+                    supplier_comment_words = comment_words[comment_start:]
+                    product_extra_words = comment_words[:comment_start]
+                    product_words = [
+                        word
+                        for word in query_words
+                        if word in first_evidence or word in product_extra_words
+                    ]
+                    item.comment = self._merge_comments(
+                        item.comment, " ".join(supplier_comment_words)
+                    )
                     item.source_query = " ".join(product_words)
                     candidates = rank_candidates(item.source_query, search_catalog, supplier_hint)
                     item.candidates = candidates
         item.supplier_search_locked = False
         broad_query = is_broad_category_query(item.source_query, candidates)
-        if broad_query or not can_auto_select(candidates):
+        unverified_terms = self._unverified_query_terms(item.source_query, candidates[0].name)
+        if (
+            broad_query
+            or not can_auto_select(candidates)
+            or not has_compatible_numeric_characteristics(item.source_query, candidates[0].name)
+            or (
+                item.packaging_role == "catalog_attribute"
+                and not has_compatible_numeric_characteristics(
+                    item.packaging_text, candidates[0].name
+                )
+            )
+            or has_conflicting_catalog_qualifiers(item.source_query, candidates[0].name)
+            or has_unscoped_product_variant_qualifier(item.comment)
+            or item.packaging_role == "ambiguous"
+            or (
+                unverified_terms
+                and not self._looks_like_supplier_comment_fragment(unverified_terms)
+            )
+        ):
             item.status = ItemStatus.AMBIGUOUS
             return
         self._apply_catalog(item, candidates[0], catalog)
@@ -2111,14 +2314,38 @@ class ConversationEngine:
     @staticmethod
     def _looks_like_supplier_comment_fragment(words: list[str]) -> bool:
         """Отличает инструкцию поставщику от неизвестной части названия товара."""
+        return ConversationEngine._supplier_comment_start(words) is not None
+
+    @staticmethod
+    def _supplier_comment_start(words: list[str]) -> int | None:
+        """Находит начало явного комментария внутри неизвестного фрагмента."""
         normalized = [normalize_text(word) for word in words if normalize_text(word)]
         if not normalized:
-            return False
-        if any(word in _SUPPLIER_COMMENT_PREFIXES for word in normalized):
-            return True
-        if normalized[0].endswith(("ть", "ться", "йте")):
-            return True
-        return all(_SUPPLIER_COMMENT_MODIFIER_RE.search(word) for word in normalized)
+            return None
+        for index, word in enumerate(normalized):
+            if word in _SUPPLIER_COMMENT_PREFIXES:
+                return index
+            if word.endswith(("ть", "ться", "йте")):
+                return index
+        for index, word in enumerate(normalized):
+            if any(word.startswith(root) for root in _SUPPLIER_COMMENT_HINT_ROOTS) and all(
+                _SUPPLIER_COMMENT_MODIFIER_RE.search(suffix) for suffix in normalized[index:]
+            ):
+                # Слова до явного пожелания остаются частью названия. Например,
+                # «сироп рза холодным» сохраняет «рза» в поиске.
+                return index
+        return None
+
+    @staticmethod
+    def _unverified_query_terms(query: str, product_name: str) -> list[str]:
+        """Возвращает значимые слова запроса, которых нет в строке каталога.
+
+        Единицы измерения и числа проверяются отдельными правилами. Остальные
+        слова должны быть подтверждены названием каталога либо явно признаны
+        пользовательским пожеланием; иначе единственный похожий кандидат не
+        может быть выбран автоматически.
+        """
+        return unverified_product_terms(query, product_name)
 
     def _apply_catalog(
         self,
@@ -2150,13 +2377,15 @@ class ConversationEngine:
         if item.quantity is None:
             item.status = ItemStatus.MISSING_QTY
             return
-        if item.unit and item.catalog_unit and item.unit != item.catalog_unit:
-            converted = convert_quantity(item.quantity, item.unit, item.catalog_unit)
-            if converted is None:
-                item.status = ItemStatus.UNIT_MISMATCH
-                return
-            item.quantity = converted
-            item.unit = item.catalog_unit
+        if (
+            item.unit
+            and item.catalog_unit
+            and normalize_unit(item.unit) != normalize_unit(item.catalog_unit)
+        ):
+            # A spoken unit is user intent. Even convertible pairs are
+            # confirmed before changing the order silently.
+            item.status = ItemStatus.UNIT_MISMATCH
+            return
         elif not item.unit:
             item.unit = item.catalog_unit
 
@@ -2192,6 +2421,25 @@ class ConversationEngine:
     def _reconcile_quantity_with_catalog_name(item: CartItem, product_name: str) -> None:
         """Отделяет количество заказа от фасовки в полном названии."""
         if item.quantity_source:
+            return
+        if numeric_range_spans(item.source_line):
+            parsed_source = parse_product_lines(item.source_line)
+            if len(parsed_source) == 1:
+                parsed_item = parsed_source[0]
+                item.source_query = product_name
+                if not ConversationEngine._has_explicit_order_quantity(
+                    item.source_line,
+                    item.quantity,
+                ):
+                    item.quantity = parsed_item.quantity
+                    item.unit = parsed_item.unit if parsed_item.quantity is not None else ""
+                if item.comment and normalize_text(item.comment) in normalize_text(product_name):
+                    item.comment = ""
+                return
+            # A shared multi-product source line is reconciled by the parser
+            # before it reaches the catalog. Do not parse its normalized token
+            # stream: ``0,9-1,3`` would otherwise start with a false zero.
+            item.source_query = product_name
             return
         source_tokens = re.findall(r"[a-zа-я0-9%]+", normalize_text(item.source_line), flags=re.I)
         product_tokens = re.findall(r"[a-zа-я0-9%]+", normalize_text(product_name), flags=re.I)
@@ -2451,7 +2699,11 @@ class ConversationEngine:
             ConversationState(cart=[current for current in state.cart if current.id != item.id]),
             item,
         )
-        if duplicate and item.status in {ItemStatus.MATCHED, ItemStatus.MISSING_QTY}:
+        if duplicate and item.status in {
+            ItemStatus.MATCHED,
+            ItemStatus.MISSING_QTY,
+            ItemStatus.UNIT_MISMATCH,
+        }:
             item.status = ItemStatus.DUPLICATE_PENDING
             item.issue_message = duplicate.id
             item.duplicate_existing_quantity = duplicate.quantity or 0
@@ -2584,6 +2836,13 @@ class ConversationEngine:
         item = state.current_item()
         if item and item.status == ItemStatus.DUPLICATE_PENDING:
             existing = next((row for row in state.cart if row.id == item.issue_message), None)
+            if (
+                existing
+                and item.catalog_unit
+                and item.unit
+                and normalize_unit(item.unit) != normalize_unit(item.catalog_unit)
+            ):
+                return self._advance(state)
             if existing:
                 existing.quantity = (existing.quantity or 0) + (item.quantity or 0)
                 item.status = ItemStatus.SKIPPED
@@ -2653,7 +2912,8 @@ class ConversationEngine:
         """Находит только однозначно названную позицию черновика."""
         if not target_query:
             return None
-        by_id = next((row for row in state.cart if row.id == target_query), None)
+        active_rows = [row for row in state.cart if row.status != ItemStatus.SKIPPED]
+        by_id = next((row for row in active_rows if row.id == target_query), None)
         if by_id is not None:
             return by_id
 
@@ -2667,7 +2927,7 @@ class ConversationEngine:
                     ),
                     row,
                 )
-                for row in state.cart
+                for row in active_rows
             ),
             key=lambda pair: pair[0],
             reverse=True,
@@ -2695,13 +2955,15 @@ class ConversationEngine:
             SessionStage.AWAIT_MULTIPLE_QUANTITY,
         }
         quantity = command.edit_quantity
-        if command.edit_unit and item.catalog_unit:
-            converted = convert_quantity(quantity, command.edit_unit, item.catalog_unit)
-            if converted is None:
-                return EngineResult(
-                    state=state, reply=issue_reply(item, self._item_index(state, item))
-                )
-            quantity = converted
+        if (
+            command.edit_unit
+            and item.catalog_unit
+            and normalize_unit(command.edit_unit) != normalize_unit(item.catalog_unit)
+        ):
+            item.quantity = quantity
+            item.unit = normalize_unit(command.edit_unit)
+            item.status = ItemStatus.UNIT_MISMATCH
+            return self._advance(state)
         item.quantity = quantity
         item.unit = item.catalog_unit or command.edit_unit or item.unit
         if item.catalog_product_id:

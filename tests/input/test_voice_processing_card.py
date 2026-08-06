@@ -107,6 +107,22 @@ def test_exact_visible_action_with_terminal_punctuation_does_not_retry_transcrip
     )
 
 
+def test_same_transcription_model_disables_quality_retry() -> None:
+    """Не повторяет успешное распознавание той же самой моделью."""
+    orchestrator = object.__new__(UpdateOrchestrator)
+    orchestrator.openai = SimpleNamespace(
+        settings=SimpleNamespace(
+            openai_transcribe_model="gpt-4o-transcribe",
+            openai_transcribe_fallback_model="gpt-4o-transcribe",
+        )
+    )
+
+    assert not orchestrator._has_distinct_transcription_fallback()
+    orchestrator.openai.settings.openai_transcribe_fallback_model = "gpt-4o-mini-transcribe"
+
+    assert not orchestrator._has_distinct_transcription_fallback()
+
+
 def _awaiting_kilograms_state() -> ConversationState:
     """Создаёт состояние ожидания количества текущего товара в килограммах."""
     item = CartItem(
@@ -145,6 +161,30 @@ def test_quantity_voice_prompt_contains_expected_catalog_unit() -> None:
     assert "в кг" in prompt
     assert "грамм" in prompt
     assert "килограмм" in prompt
+
+
+def test_missing_quantity_voice_prompt_prioritizes_number_over_skip_command() -> None:
+    """Подсказывает модели не путать короткое количество с командой пропуска."""
+    item = CartItem(
+        id="wine",
+        source_query="Вино белое",
+        catalog_product_id="wine-product",
+        catalog_name="Вино белое",
+        catalog_unit="шт",
+        status=ItemStatus.MISSING_QTY,
+    )
+    state = ConversationState(
+        stage=SessionStage.REVIEW,
+        current_issue_item_id=item.id,
+        cart=[item],
+    )
+
+    prompt = UpdateOrchestrator._voice_transcription_prompt(state)
+
+    assert "только число" in prompt
+    assert "пять" in prompt
+    assert "не добавлять" in prompt
+    assert "это количество" in prompt
 
 
 def test_high_accuracy_retry_corrects_gram_kilogram_confusion(tmp_path) -> None:  # type: ignore[no-untyped-def]

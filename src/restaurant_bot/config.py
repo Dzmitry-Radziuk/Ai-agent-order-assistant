@@ -43,7 +43,7 @@ class Settings(BaseSettings):
     openai_vision_model: str = "gpt-5-mini"
     openai_vision_timeout_seconds: float = Field(default=180.0, ge=30.0, le=600.0)
     openai_match_model: str = "gpt-4o-mini"
-    openai_transcribe_model: str = "gpt-4o-mini-transcribe"
+    openai_transcribe_model: str = "gpt-4o-transcribe"
     openai_transcribe_fallback_model: str = "gpt-4o-transcribe"
 
     database_url: str = "postgresql+psycopg://bot:bot@localhost:5432/bot"

@@ -250,6 +250,94 @@ def test_ai_rejects_semantically_conflicting_pork_candidate(settings) -> None:  
     assert matcher.calls[0][2] == "без костей, без шкуры, без хрящей"
 
 
+def test_ai_cannot_override_numeric_range_mismatch(settings) -> None:  # type: ignore[no-untyped-def]
+    """Не принимает вариант каталога, даже если AI ошибочно выбрал другой диапазон."""
+    product = CatalogProduct(
+        product_id="trout",
+        name="Форель Филе свежее 0,8-1,2кг 20-22 кг/кор",
+        supplier="Рыба",
+        unit="кг",
+    )
+    item = CartItem(
+        id="trout",
+        source_query="Филе форели 0,8-1,3 килограмма зачищенное трим С",
+        quantity=5,
+        unit="кг",
+        status=ItemStatus.AMBIGUOUS,
+        candidates=[
+            Candidate(
+                product_id=product.product_id,
+                name=product.name,
+                supplier=product.supplier,
+                unit=product.unit,
+                score=92,
+            )
+        ],
+    )
+    matcher = _Matcher(
+        ProductMatchDecision(
+            action="select",
+            selected_product_id=product.product_id,
+            confidence=0.99,
+        )
+    )
+    result = EngineResult(state=ConversationState(cart=[item]), reply=issue_reply(item, 0))
+
+    resolved = _orchestrator(settings, matcher)._resolve_ai_pending(
+        TelegramEvent(update_id=8, chat_id="123456", input_type=InputKind.VOICE),
+        result,
+        [product],
+    )
+
+    assert resolved.state.cart[0].status is ItemStatus.AMBIGUOUS
+    assert resolved.state.cart[0].catalog_product_id == ""
+    assert resolved.state.cart[0].comment == ""
+
+
+def test_ai_cannot_fill_missing_full_name_term(settings) -> None:  # type: ignore[no-untyped-def]
+    """Не принимает кандидата, в названии которого отсутствует обязательный признак."""
+    product = CatalogProduct(
+        product_id="mustard",
+        name="Горчица Дижонская CHATEL, ведро, 1 кг",
+        supplier="Соусный поставщик",
+        unit="шт",
+    )
+    item = CartItem(
+        id="mustard",
+        source_query="Горчица Дижонская CHATEL, ведро, 1 кг, Франция",
+        quantity=1,
+        unit="шт",
+        status=ItemStatus.AMBIGUOUS,
+        candidates=[
+            Candidate(
+                product_id=product.product_id,
+                name=product.name,
+                supplier=product.supplier,
+                unit=product.unit,
+                score=96,
+            )
+        ],
+    )
+    matcher = _Matcher(
+        ProductMatchDecision(
+            action="select",
+            selected_product_id=product.product_id,
+            confidence=0.99,
+        )
+    )
+    result = EngineResult(state=ConversationState(cart=[item]), reply=issue_reply(item, 0))
+
+    resolved = _orchestrator(settings, matcher)._resolve_ai_pending(
+        TelegramEvent(update_id=9, chat_id="123456", input_type=InputKind.VOICE),
+        result,
+        [product],
+    )
+
+    assert resolved.state.cart[0].status is ItemStatus.AMBIGUOUS
+    assert resolved.state.cart[0].catalog_product_id == ""
+    assert resolved.state.cart[0].comment == ""
+
+
 def test_ai_reranker_never_replaces_a_one_word_category_query(settings) -> None:  # type: ignore[no-untyped-def]
     """Проверяет, что ИИ reranker никогда не replaces a один слово категория query."""
     candidate = Candidate(
