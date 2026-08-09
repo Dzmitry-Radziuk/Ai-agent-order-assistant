@@ -1930,3 +1930,14 @@ persistence, `_advance()`, `_find_cart_item()`, другие modal states, UX и
 - `tests/conversation/test_voice_route_safety.py`: passed.
 - Existing unrelated baseline failures remain separately tracked; no parser/comment
   or prompt changes were made for them.
+
+## AWAIT_PRODUCT_ADD_DETAILS — FOLLOW-UP ROUTING SAFETY
+
+- Contextual rewrites are now disabled when `PRODUCT_ADD_DETAILS` policy returns
+  `INTERRUPT`, so the pending product-add prompt cannot rewrite an independent command.
+- Candidate textual fallback is `NOT_APPLICABLE` while `AWAIT_PRODUCT_ADD_DETAILS` is
+  active, including when the source item is also `AMBIGUOUS` with candidates.
+- The legacy `PRODUCT_ADD` phrase fallback is skipped for the same interrupted route;
+  explicit `ADD_ITEMS` continues through ordinary cart routing.
+- Regression coverage added for text descriptions, candidate overlap, and explicit add
+  interruption. `AWAIT_ADD_MORE_CONFIRM` remains the next functional step.

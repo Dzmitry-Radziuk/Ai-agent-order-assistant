@@ -206,6 +206,7 @@ class ConversationEngine:
             and not modal_decision.duplicate_interrupted
             and not modal_decision.unit_mismatch_interrupted
             and not modal_decision.manual_details_interrupted
+            and not modal_decision.product_add_details_interrupted
         ):
             command = self._contextual_negative_command(command, event, state)
             command = self._contextual_quantity_command(command, event.text, state)
@@ -295,6 +296,7 @@ class ConversationEngine:
                 "добав",
             )
             and is_product_add_request_phrase(event.text or command.text)
+            and not modal_decision.product_add_details_interrupted
         ):
             command = ParsedCommand(
                 intent=Intent.PRODUCT_ADD,

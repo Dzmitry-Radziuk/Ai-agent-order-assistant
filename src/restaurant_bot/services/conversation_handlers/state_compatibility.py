@@ -202,7 +202,10 @@ class StateCompatibilityPolicy:
         state: ConversationState,
     ) -> CompatibilityDecision:
         """Разрешает выбор кандидата только в открытом контексте AMBIGUOUS."""
-        if state.stage is SessionStage.AWAIT_MANUAL_DETAILS:
+        if state.stage in {
+            SessionStage.AWAIT_MANUAL_DETAILS,
+            SessionStage.AWAIT_PRODUCT_ADD_DETAILS,
+        }:
             return CompatibilityDecision(CompatibilityAction.NOT_APPLICABLE)
         item = state.current_item()
         if (
