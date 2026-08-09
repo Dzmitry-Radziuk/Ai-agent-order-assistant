@@ -796,6 +796,182 @@ global ParsedCommand
 
 ## ARCHITECTURAL REFACTOR STATUS
 
+## REVIEW / MODAL CONTEXTS - ANALYSIS COMPLETE / IMPLEMENTATION PENDING
+
+Анализ выполнен на HEAD `2f9cafff9e5c1e551a72e0f1168af457b2e75205`, ветка
+`decompose_bot`. Application code, parser, prompts, callbacks и существующие
+CompatibilityContext не изменялись. Следующий функциональный этап остаётся
+`review/modal contexts`; `pending_new_order_confirmation` не начинался.
+
+### 1. Inventory: semantic context versus UI metadata
+
+| Context / fields | Owner and lifecycle | Classification | Stale/interruption risk |
+|---|---|---|---|
+| `stage=REVIEW`, `review_mode="cart"`, `final_review_page`, `cart_page` | `ConversationEngine`, `FinalReviewHandler`, `replies.py`; обычный draft/final-review | обычный editable UI, не отдельный review modal | низкий; новый ADD/EDIT/REMOVE должен менять актуальный cart |
+| `stage=REVIEW`, `review_mode="sheet_link"` | `UpdateOrchestrator._handle_review_command`, `OrderReviewService`; token/fingerprint до cancel/submit | отдельный semantic review context | высокий: текст/voice проходят специальный router и могут быть подменены visible action |
+| `review_token`, `review_snapshot_hash`, `review_venue_code`, `review_submission_in_progress` | orchestrator при входе/refresh/cancel/submit; worker/service при submission | semantic snapshot metadata для sheet review | token/hash должны жить до fresh submit или cancel; UNKNOWN сейчас сохраняет их намеренно, что может продлить старый режим |
+| `AWAIT_SUBMIT_CONFIRM` | уже покрыт `CompatibilityContext.SUBMIT_CONFIRM` | завершённый modal context | не переоткрывать в этом этапе |
+| `current_issue_item_id`, `current_issue_kind` | engine/final review и issue handlers | semantic pointer к item; не generic review | stale возможен после удаления/пересчёта, существующие handlers очищают pointer |
+| `edit_multiple_index`, `CartItem.suggested_quantity` | engine quantity/multiple handlers | semantic quantity context, уже покрыт quantity/modal flows | stale возможен после interrupt; не создавать новый review context |
+| `order_status_view_active`, `order_status_*` | `OrderStatusHandler`, `submission.py` worker | read-only/navigation metadata | не должно определять смысл новой команды; engine снимает view для распознанной обычной команды |
+| `ui_revision`, `ui_message_id`, `ui_message_text`, `visible_actions` | orchestrator/replies/Telegram adapter | UI metadata | stale callback защищается revision; visible actions опасны только если используются как semantic fallback |
+
+Actual `review_mode` values: `"cart"` (default ordinary draft) и
+`"sheet_link"` (deep-link/sheet review). Значение `"sheet"` в коде не найдено;
+его нельзя вводить по аналогии.
+
+### 2. Review intents and owners
+
+| Intent | Source | TEXT/VOICE | CALLBACK | Mutation/effect | Owner |
+|---|---|---|---|---|---|
+| `REVIEW_ORDER`, `REVIEW_REFRESH` | parser/deep-link or review router | sheet review refresh | `v2:review:*` | Google Sheets read, new token/fingerprint, preview | orchestrator + `OrderReviewService.snapshot` |
+| `REVIEW_SUBMIT` | review router/parser | only sheet review confirmation path | token + revision checked | fresh Sheets read, optional enqueue/external submission | orchestrator + `OrderReviewService.submit` |
+| `REVIEW_CANCEL` | review router/parser | sheet review cancel/back | token + revision checked | clear sheet metadata, return to cart | orchestrator |
+| `SHOW_CART`, `SHOW_FINAL_REVIEW` | global parser/callback parser | ordinary cart routing | explicit UI callback | local UI/page state | engine/`FinalReviewHandler` |
+| `CHECK_MIN_SUM`, supplier intents | global parser and explicit callbacks | normal engine routing | callback target item | catalog read or item/supplier chooser | engine/supplier handlers |
+| `ACCEPT_SUGGESTED_QUANTITY`, `KEEP_CURRENT_QUANTITY`, `KEEP_MULTIPLE`, `FIX_MULTIPLE`, `EDIT_MULTIPLE`, `ENTER_OTHER_QUANTITY` | parser/callback parser | quantity modal routing | explicit callback or parsed command | mutate only targeted item quantity/issue fields | engine quantity flow |
+
+Supplier and multiple warnings are not one shared review state: their targets
+are item-level fields and callback payloads. They must not be folded into a
+generic `REVIEW_MODAL` policy.
+
+### 3. Sheet-review flow and side-effect boundary
+
+`/start review_<venue>` or `v2:review:<venue>` -> `REVIEW_ORDER` ->
+`OrderReviewService.snapshot()` reads the live sheet -> preview card with
+`v2:review_submit:<token>` and `v2:review_cancel:<token>` -> fresh callback
+revision/token validation -> refresh on fingerprint mismatch or submit.
+
+Before `REVIEW_SUBMIT`, this is not the ordinary cart and it does not create a
+frozen `PendingSubmission`; the snapshot fingerprint is the freshness guard.
+`REVIEW_SUBMIT` may enqueue the submission and perform the external side effect.
+Cancel and regular recognized commands return to `review_mode="cart"` and clear
+sheet metadata. Ordinary cart editing remains possible before actual submission.
+
+### 4. Current input order and first unsafe transition
+
+The real text path is:
+
+`UpdateOrchestrator._parse_text_in_context()` -> global `openai.parse_text()` ->
+`_parse_review_voice_command()` (despite its name this is called for TEXT too) ->
+contextual comment/visible-action fallbacks -> orchestrator review dispatch or
+`ConversationEngine.handle()`.
+
+Voice transcribes first and then uses the same text path. Photo recognition
+returns a parsed command directly and does not pass through the sheet-review
+text router. Callbacks use explicit `parse_callback()` and token/revision guards.
+
+The first confirmed unsafe transition is in
+`_parse_review_voice_command()` for `stage=REVIEW` and
+`review_mode="sheet_link"`:
+
+1. global parsing runs;
+2. direct review mappings can replace global intents with `REVIEW_*`;
+3. a concrete `ADD_ITEMS` with a quantity is protected, but an `ADD_ITEMS`
+   without quantity is not;
+4. if no direct mapping applies, visible-action AI may map the free text to
+   submit/cancel;
+5. the resulting `REVIEW_*` command bypasses `ConversationEngine` and therefore
+   bypasses `StateCompatibilityPolicy`.
+
+Thus a new product without quantity, an uncertain phrase, or an independent
+edit can be interpreted as a sheet-review button action. This is a routing
+boundary problem, not a parser/comment/catalog problem. Existing tests confirm
+the intentional but unsafe arbitrary-phrase-to-visible-submit behavior.
+
+### 5. Current engine priority
+
+`ConversationEngine.handle()` currently evaluates global command, voice
+normalization, `evaluate_modal_routing`, stale callback revision, submission
+failure recovery, submit/add-more/comment/manual/product-add/candidate and other
+modal handlers, contextual rewrites, generic intents, review/final-review
+handlers, and navigation. This ordering is correct for the already completed
+contexts. Sheet review is the exception: orchestrator dispatches `REVIEW_*`
+before engine, so it has no policy decision today.
+
+`StateCompatibilityPolicy.context_for()` has contexts for quantity, comment,
+manual/product-add details, candidate, not-found, duplicate, unit mismatch,
+add-more, submit-confirm and submission-failed. It intentionally has no generic
+plain-`REVIEW` context.
+
+### 6. Priority and interrupt map
+
+| Active context | Continue | Interrupt | Ambiguous/reject |
+|---|---|---|---|
+| sheet review (`sheet_link`) | explicit review refresh/submit/cancel semantics with valid token context | concrete ADD/EDIT/REMOVE, SHOW_CART, ORDER_STATUS, HELP/THANKS, START_NEW_ORDER, CLEAR_CART | uncertain free text: no submission and no cart mutation |
+| ordinary cart review (`cart`) | normal final-review pagination/submit-confirm rules already implemented | normal editable cart intents | existing `SUBMIT_CONFIRM` behavior |
+| supplier warning | targeted supplier callback/intent only | independent product/navigation/help intents | unknown target: no supplier mutation |
+| multiple/suggested quantity | targeted quantity intent only | independent product/navigation/help intents | no guessed quantity |
+| order-status view | status pagination/detail callbacks | any recognized cart/product command | unknown leaves read-only view unchanged |
+
+Callbacks remain an explicit UI path. A stale callback must fail token/revision
+validation before any review, supplier, multiple, pagination or order-status
+mutation.
+
+### 7. Draft editing and passive commands
+
+For ordinary cart/final review, before `_prepare_submission()` the current cart
+must remain editable: change quantity, remove item, add item, edit comment,
+leave final review, then rebuild review from the current cart. `SUBMISSION_FAILED`
+recovery is separate and must not become a lock for ordinary `REVIEW`.
+
+`HELP`, `THANKS`, `GREETING`, and `SMALL_TALK` must never confirm, submit, choose
+supplier, or choose a multiple quantity merely because a review UI is visible.
+
+### 8. Minimal future implementation boundary
+
+Do not add `if review_mode` logic to every handler and do not create a generic
+review catch-all. The next implementation should introduce one narrow structured
+context for the `sheet_link` route only (name to be decided after tests), or
+reuse an equivalent policy boundary if it can be expressed without duplicating
+intent sets. It must receive `ParsedCommand` plus structured state, never raw
+language.
+
+The policy decision belongs after global parsing and before
+`_parse_review_voice_command()`/review dispatch. Independent commands must reach
+normal routing; only a confirmed sheet-review action may continue the sheet
+flow; uncertain input must preserve token/snapshot and avoid side effects.
+Callbacks stay outside this text/voice policy. No parser, prompt, comment,
+matching, catalog, or submission changes are part of this analysis.
+
+### 9. Future regression matrix (implementation phase only)
+
+For each real semantic context, cover TEXT, VOICE, PHOTO, fresh callback and
+stale callback against: continue-current, ADD, REMOVE, EDIT, BACK, CANCEL,
+SHOW_CART, ORDER_STATUS, HELP, THANKS, START_NEW_ORDER and CLEAR_CART. Include
+sheet review with a product both with and without quantity, arbitrary text,
+photo with/without recognizable products, token mismatch, revision mismatch,
+fingerprint refresh, supplier warning targets, suggested/multiple quantity, and
+editing every cart item before submission. No new tests were added in this
+analysis-only phase.
+
+### 10. Decomposition, MAX and agent-harness notes
+
+No decomposition was started. Current responsibilities remain split between
+orchestrator (input/review dispatch), engine (cart/state routing), final review,
+navigation, replies, parser and `OrderReviewService`; a later move must be
+behavior-preserving with temporary re-exports and focused regression checks.
+
+MAX is not integrated. Review semantics currently depend on Telegram callback
+data, message editing and `ui_revision`; a future adapter boundary should be
+`Telegram/MAX adapter -> normalized incoming event -> conversation core ->
+normalized reply`.
+
+The agent harness remains `ANALYZE -> PLAN -> IMPLEMENT -> VERIFY -> STOP` with
+structured parser output, policy authorization, deterministic side effects and
+idempotency/checkpoints. This note does not authorize an autonomous production
+loop.
+
+### 11. Checks and status
+
+- Application code was not changed.
+- No tests were added or modified; the known historical full-suite failures were
+  not touched.
+- `git ls-files .env` is empty; GitLab was not used.
+- `git diff --check` and the markdown-link check are required for this docs-only
+  commit.
+- `NEXT FUNCTIONAL STEP` remains `review/modal contexts`.
+
 Архитектурный аудит выполнен только документально. Код приложения не переносился,
 поведение не менялось. Зафиксирован один безопасный кандидат для будущего
 механического переноса — разбиение `openai_prompts.py` на prompt-модули с
