@@ -61,6 +61,7 @@ from restaurant_bot.services.conversation_handlers.state_compatibility import (
 )
 from restaurant_bot.services.matching import (
     has_compatible_numeric_characteristics,
+    has_complete_query_evidence,
     nearest_valid_multiple,
     query_evidence_tokens,
 )
@@ -2159,6 +2160,24 @@ class ConversationEngine:
                     item.status = ItemStatus.NOT_FOUND
                     return
         item.supplier_search_locked = False
+        reconciliation_candidate: Candidate | None = None
+        if candidates:
+            primary = candidates[0]
+            primary_evidence = query_evidence_tokens(item.source_query, primary.name)
+            primary_decision = self.catalog_resolver.decide(
+                item.source_query,
+                candidates,
+                comment=item.comment,
+                packaging_text=item.packaging_text,
+                packaging_role=item.packaging_role,
+            )
+            if (
+                has_complete_query_evidence(item.source_query, primary.name)
+                or primary_decision is CatalogDecision.AUTO_SELECT
+                or (len(candidates) == 1 and len(primary_evidence) >= 2)
+            ):
+                reconciliation_candidate = primary
+        self._sanitize_catalog_facts_before_resolution(item, reconciliation_candidate)
         decision = self.catalog_resolver.decide(
             item.source_query,
             candidates,
@@ -2197,15 +2216,20 @@ class ConversationEngine:
     def _sanitize_catalog_facts_before_resolution(
         self,
         item: CartItem,
-        candidate: Candidate,
+        candidate: Candidate | None,
     ) -> None:
         """Удаляет характеристики каталога из количества и комментария до ИИ-уточнения."""
-        product_name = candidate.name
+        product_name = candidate.name if candidate is not None else ""
         if item.quantity is not None and item.unit and not item.quantity_source:
             quantity_text = f"{item.quantity:g} {item.unit}"
             explicit_order = self._has_explicit_order_quantity(item.source_line, item.quantity)
-            if has_compatible_numeric_characteristics(quantity_text, product_name) and (
-                item.packaging_role == "catalog_attribute" or not explicit_order
+            if (
+                has_compatible_numeric_characteristics(quantity_text, product_name)
+                and (item.packaging_role == "catalog_attribute" or not explicit_order)
+            ) or (
+                not explicit_order
+                and item.source_line
+                and normalize_text(item.source_line) == normalize_text(product_name)
             ):
                 item.quantity = None
                 item.unit = ""
@@ -2301,7 +2325,15 @@ class ConversationEngine:
             item.catalog_comment_source = (
                 CommentSource.CATALOG if product.comment else CommentSource.NONE
             )
-            item.comment = self._remove_exact_comment_fragments(item.comment, product.comment)
+            if not (
+                item.source_line
+                and item.comment_source
+                in {
+                    CommentSource.SEMANTIC,
+                    CommentSource.EXPLICIT_MARKER,
+                }
+            ):
+                item.comment = self._remove_exact_comment_fragments(item.comment, product.comment)
             if not item.comment:
                 item.comment_source = CommentSource.NONE
 
@@ -2310,11 +2342,22 @@ class ConversationEngine:
         """Отделяет количество заказа от фасовки в полном названии."""
         if item.quantity_source:
             return
+        if (
+            item.quantity is not None
+            and item.source_line
+            and normalize_text(item.source_line) == normalize_text(product_name)
+            and not ConversationEngine._has_explicit_order_quantity(
+                item.source_line,
+                item.quantity,
+            )
+        ):
+            item.quantity = None
+            item.unit = ""
+            return
         if numeric_range_spans(item.source_line):
             parsed_source = parse_product_lines(item.source_line)
             if len(parsed_source) == 1:
                 parsed_item = parsed_source[0]
-                item.source_query = product_name
                 if not ConversationEngine._has_explicit_order_quantity(
                     item.source_line,
                     item.quantity,
@@ -2325,7 +2368,6 @@ class ConversationEngine:
             # A shared multi-product source line is reconciled by the parser
             # before it reaches the catalog. Do not parse its normalized token
             # stream: ``0,9-1,3`` would otherwise start with a false zero.
-            item.source_query = product_name
             return
         source_tokens = re.findall(r"[a-zа-я0-9%]+", normalize_text(item.source_line), flags=re.I)
         product_tokens = re.findall(r"[a-zа-я0-9%]+", normalize_text(product_name), flags=re.I)
@@ -2352,8 +2394,8 @@ class ConversationEngine:
                 explicit_quantity = (quantity, unit)
                 break
 
-        item.source_query = product_name
-        item.quantity, item.unit = explicit_quantity
+        if item.quantity is None and explicit_quantity[0] is not None:
+            item.quantity, item.unit = explicit_quantity
 
     @staticmethod
     def _suggested_quantity_for_multiple(item: CartItem) -> float | None:
@@ -2620,8 +2662,6 @@ class ConversationEngine:
                 return False
             return bool(words) and has_number and has_unit
 
-        if not catalog_facts and not query_facts:
-            return comment
         kept: list[str] = []
         for part in re.split(r"[;,]", str(comment or "")):
             cleaned = " ".join(part.split()).strip(" .,;")
@@ -2631,6 +2671,15 @@ class ConversationEngine:
             normalized_part_words = [packaging_aliases.get(word, word) for word in part_words]
             part_compact = compact_words(cleaned)
             if is_quantity_only_part(part_words):
+                continue
+            normalized_part = normalize_text(cleaned)
+            if (
+                source_line
+                and normalized_part
+                and f" {normalized_part} " in f" {normalize_text(source_line)} "
+                and f" {normalized_part} " in f" {normalize_text(source_query)} "
+            ):
+                kept.append(cleaned)
                 continue
             all_catalog_facts = all(
                 word in catalog_facts

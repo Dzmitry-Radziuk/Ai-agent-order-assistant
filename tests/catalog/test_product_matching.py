@@ -454,6 +454,81 @@ def test_explicit_quantity_after_catalog_title_is_preserved(settings: Settings) 
     assert item.status is ItemStatus.MATCHED
 
 
+def test_catalog_apply_preserves_user_provenance_and_is_idempotent(settings: Settings) -> None:
+    """Сохраняет исходные поля пользователя при повторном применении каталога."""
+    engine = ConversationEngine(settings)
+    product = CatalogProduct(
+        product_id="parmesan",
+        name="Пармезан",
+        supplier="Поставщик",
+        unit="кг",
+        comment="справочное примечание",
+    )
+    item = CartItem(
+        id="parmesan",
+        source_query="Пармезан",
+        source_line="Пармезан — 2 кг",
+        quantity=2,
+        unit="кг",
+        supplier_hint="Поставщик",
+        comment="привезти холодным",
+    )
+
+    engine._match_item(item, [product])
+    first_snapshot = (
+        item.source_query,
+        item.source_line,
+        item.quantity,
+        item.unit,
+        item.supplier_hint,
+        item.comment,
+        item.catalog_name,
+        item.catalog_comment,
+    )
+
+    engine._apply_catalog(
+        item,
+        Candidate(product_id=product.product_id, name=product.name, unit=product.unit),
+        [product],
+    )
+
+    assert (
+        item.source_query,
+        item.source_line,
+        item.quantity,
+        item.unit,
+        item.supplier_hint,
+        item.comment,
+        item.catalog_name,
+        item.catalog_comment,
+    ) == first_snapshot
+
+
+def test_source_owned_product_fact_comment_survives_catalog_cleanup(settings: Settings) -> None:
+    """Не удаляет продублированное в запросе требование пользователя."""
+    engine = ConversationEngine(settings)
+    product = CatalogProduct(
+        product_id="pork-neck",
+        name="Шея свиная без костей",
+        supplier="Поставщик",
+        unit="кг",
+    )
+    item = CartItem(
+        id="pork-neck",
+        source_query="Шея свиная без костей",
+        source_line="Шея свиная 5 кг без костей",
+        quantity=5,
+        unit="кг",
+        comment="без костей",
+    )
+
+    engine._match_item(item, [product])
+
+    assert item.source_query == "Шея свиная без костей"
+    assert item.source_line == "Шея свиная 5 кг без костей"
+    assert item.comment == "без костей"
+
+
 def test_one_word_category_never_auto_selects_the_only_catalog_candidate(
     settings: Settings,
 ) -> None:

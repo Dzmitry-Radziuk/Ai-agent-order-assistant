@@ -90,7 +90,8 @@ def test_short_catalog_supplier_matches_selected_full_supplier_name(settings) ->
     assert item.supplier_search_locked is False
     assert item.status is ItemStatus.MISSING_QTY
     assert item.quantity is None
-    assert item.source_query == name
+    assert item.source_query == "Филейный край говяжий с/м В/У"
+    assert item.source_line == name
     assert item.comment == ""
     assert "Укажите количество" in result.reply.text
 

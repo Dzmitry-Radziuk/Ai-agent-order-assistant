@@ -3466,13 +3466,11 @@ policy, parser normalization, engine routing и focused regression tests.
 
 ## NEXT FUNCTIONAL STEP
 
-`DATA INTEGRITY BLOCK D — catalog/title/attribute reconciliation`.
+`DATA INTEGRITY BLOCK E — catalog candidate evidence and matcher boundary` (analysis only;
+implementation not started). Block D is complete at the catalog/title/attribute boundary;
+Block E requires separate approval and must not move provenance logic back into parser/postprocessing.
 
-Block C завершён и остановлен на границе source provenance. Следующий этап
-может отдельно рассматривать catalog-dependent quantity/title sanitization;
-не смешивать его с Block C и не начинать автоматически.
-
-## BLOCK D PLAN — READY / IMPLEMENTATION PENDING
+## BLOCK D PLAN — EXECUTED
 
 - План: [docs/DATA_INTEGRITY_BLOCK_D_PLAN.md](docs/DATA_INTEGRITY_BLOCK_D_PLAN.md).
 - Owner: catalog boundary in `ConversationEngine` — `_match_item()` pre-decision
@@ -3492,5 +3490,39 @@ Block C завершён и остановлен на границе source prov
   remain separate from supplier comments.
 - Block E boundary: no changes to candidate ranking, fuzzy/morphological matching,
   `has_catalog_search_evidence()`, thresholds, or AI matcher contract.
-- Next action: review and explicitly approve this plan before implementation. The current
-  application and tests remain unchanged by the planning stage.
+- Plan approved and implemented in the existing catalog boundary; no parser, prompts,
+  matching, state machine, PHOTO or decomposition changes were made.
+
+## BLOCK D — DONE
+
+- Owner: `ConversationEngine._match_item()` / `_sanitize_catalog_facts_before_resolution()` /
+  `_reconcile_quantity_with_catalog_name()` / `_apply_catalog()`.
+- Candidate reconciliation runs before `CatalogResolver.decide()` only with a strict primary
+  candidate: complete query evidence, an already auto-selectable primary, or at least two
+  independent evidence tokens for a single candidate. Quantity-only residue is cleaned without
+  using a weak candidate to delete user text.
+- Catalog title metadata is kept in `catalog_name` and `catalog_*` fields. The catalog path no
+  longer assigns `product_name` to `source_query`, and it never rewrites `source_line` or
+  supplier hints. Explicit order quantity/unit remain authoritative; unproven catalog packaging
+  can clear only the scalar quantity that it demonstrably explains.
+- Comment ownership is source-aware: a fragment present in both the original source line and the
+  full product query survives even when the same fact is present in the catalog title. Catalog
+  comments remain separate. Refresh does not remove source-backed semantic/explicit user comments;
+  legacy drafts without source evidence retain the old catalog-fragment cleanup.
+- Added regressions for source/query/line preservation, source-owned duplicated product facts,
+  and idempotent catalog application. The supplier-lock expectation now asserts the provenance
+  contract (`source_query` is the parsed product query; `source_line` is the full user line).
+- Focused catalog/supplier suite: **39 passed**. Provenance/comment integrity suite:
+  **50 passed**; the one remaining failure in the combined comment run is the pre-existing
+  `tests/conversation/test_comment_handling.py::test_late_global_comment_applies_to_existing_and_new_items_without_overlap`.
+- Block A focused safety: **11 passed**. Block B/C safety: **12 passed** (7 Block B and 5
+  Block C MUST FIX). `mypy src`, Ruff check and `git diff --check` passed. Ruff format check
+  still reports the pre-existing unrelated formatting drift in `engine.py`; no unrelated lines
+  were reformatted.
+- Full-suite delta from the pre-Block-D baseline (**1252 collected / 1226 passed / 26 failed**):
+  **1254 collected / 1233 passed / 21 failed / 0 skipped / 0 xfailed / 0 errors** in 15.24s
+  after two new regression tests. The five fixed old failures are the four catalog MUST FIX nodeids and
+  `tests/supplier/test_supplier_lock.py::test_short_catalog_supplier_matches_selected_full_supplier_name`.
+  No new failure nodeids appeared; the remaining 21 are the documented PHOTO, routing/UX,
+  stale scenario-catalog, shadow/voice, quantity and comment baseline failures.
+- Block D stops at the catalog/title/attribute boundary. **Block E is not started.**
