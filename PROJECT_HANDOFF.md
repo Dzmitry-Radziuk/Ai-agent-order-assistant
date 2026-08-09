@@ -3626,3 +3626,22 @@ Block E requires separate approval and must not move provenance logic back into 
   card; engine modification is not currently required.
 - The next action is explicit approval of a future test-contract migration only;
   do not fix the four stale assertions or the other 14 baseline failures here.
+
+## BLOCK G — CLOSED / CONTRACT MIGRATION COMPLETE
+
+- Functional fixes: **0**. Production code and prompts remain unchanged.
+- Contract migrations: **4/4**. The PHOTO tests now assert handwritten
+  replacement/non-summation and row-local/empty-row semantics; voice tests now
+  assert the current recovery-card title while preserving exact button IDs and
+  empty-cart safety.
+- Focused migrated tests: **4 passed**. PHOTO behavioral coverage, voice
+  neighbors, and Block F safety suites remain green.
+- Full suite before: **1254 collected / 1236 passed / 18 failed**.
+- Full suite after: **1254 collected / 1240 passed / 14 failed / 0 skipped /
+  0 xfailed / 0 errors**, duration **17.965s**.
+- Fixed old nodeids are exactly the four Block G contract tests. No new failure
+  nodeids appeared. The remaining 14 are the pre-existing seven stale scenario
+  docs tests plus seven unrelated duplicate/comment/voice provenance/shadow and
+  quantity failures; they were not changed.
+- Block G is closed. The next step must be a separately approved roadmap task,
+  not a Block G production implementation.
