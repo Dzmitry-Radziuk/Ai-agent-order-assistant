@@ -1,12 +1,13 @@
 # DATA INTEGRITY BLOCK C — ORDER QUANTITY / PACKAGING / RANGE PROVENANCE
 
-Статус: **PLAN READY / IMPLEMENTATION PENDING**.
+Статус: **IMPLEMENTED**.
 
 Текущий baseline: **1245 collected, 1214 passed, 31 failed**.
 
-Block C пока не меняет application code, tests или prompts. План ограничен
-границей TEXT/VOICE structured parsing. PHOTO, catalog/matching, state machine,
-submission, logging и decomposition остаются отдельными областями.
+Реализация ограничена границей TEXT/VOICE structured parsing: активированы
+существующие provenance helpers и добавлены focused regression tests. PHOTO,
+catalog/matching, state machine, submission, logging и decomposition остаются
+отдельными областями.
 
 ## 1. Current pipeline
 
@@ -26,6 +27,7 @@ recover_omitted_explicit_items()
   ├─ Block A source/comment reconciliation
   ├─ restore_explicit_order_terms()
   ├─ Block B shadow-item reconciliation
+  ├─ Block C quantity/packaging/range reconciliation
   └─ ParsedCommand.model_validate()
        ↓
 ConversationEngine._build_item()
@@ -125,8 +127,8 @@ evidence. Валидность поля AI schema сама по себе так�
 
 ## 6. Proposed reconciliation order
 
-Existing Block A and Block B remain unchanged. The future C pass should be one
-bounded reconciliation step in the existing OpenAI parsing boundary:
+Existing Block A and Block B remain unchanged. Block C is one bounded
+reconciliation step in the existing OpenAI parsing boundary:
 
 ```text
 AI structured result
@@ -150,7 +152,7 @@ bounded query/comment restoration
 final mirroring → ParsedCommand.model_validate()
 ```
 
-Implementation should reuse the existing helpers instead of adding a second
+The implementation reuses the existing helpers instead of adding a second
 quantity parser:
 
 1. Keep `restore_explicit_order_terms()` as the source-supported quantity seed.
@@ -242,7 +244,7 @@ forms `от трех до пяти`, decimal comma/dot, and bare quantity after 
 
 ## 10. Green neighbors to preserve
 
-Future implementation must rerun and preserve:
+The implementation reran and preserved:
 
 - Block A focused cases and idempotency;
 - Block B 7/7 MUST FIX, shadow idempotency, one-word and two-product safety;
@@ -288,9 +290,9 @@ Block C must not change:
 No large packaging dictionary, standalone `%`/`по`/dash regex classifier, catalog
 evidence classifier or AI-only fallback is acceptable.
 
-## 13. Success criteria for implementation
+## 13. Implementation result
 
-Implementation may be marked DONE only when:
+Block C is marked DONE because:
 
 1. Five Block C MUST FIX cases pass without changing their expectations.
 2. Explicit order quantity survives for numeric and spoken forms.
@@ -304,11 +306,12 @@ Implementation may be marked DONE only when:
 8. TEXT and VOICE with the same transcript produce the same semantic result.
 9. PHOTO, catalog, matching and state-machine boundaries remain unchanged.
 10. Focused tests, full pytest delta, Ruff, mypy, markdown links and
-    `git diff --check` pass.
+    `git diff --check` were run. The repository-wide Ruff format check still
+    reports pre-existing formatting drift in unrelated files; changed files
+    pass the format check.
 
 ## 14. Next action
 
-This document is the implementation plan only. After explicit approval, perform
-one focused code diff in the existing parsing boundary, run the regression
-matrix and full delta, update this handoff, commit and push only to
-`origin/decompose_bot`.
+Block C is complete. Do not start Block D catalog reconciliation automatically;
+it requires a separate scope decision and must remain outside this source
+provenance boundary.

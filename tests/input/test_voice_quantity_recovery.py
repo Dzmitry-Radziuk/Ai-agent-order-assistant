@@ -396,6 +396,168 @@ def test_ambiguous_packaging_role_is_not_moved_between_fields() -> None:
     assert item["comment_source"] == "none"
 
 
+def test_source_order_quantity_wins_over_conflicting_ai_scalar() -> None:
+    """Сохраняет количество заказа, доказанное исходной фразой."""
+    source = "Курица 5 кг"
+    restored = recover_omitted_explicit_items(
+        {
+            "intent": Intent.ADD_ITEMS,
+            "items": [
+                {
+                    "product_query": "Курица",
+                    "quantity": 3,
+                    "unit": "кг",
+                    "source_line": source,
+                }
+            ],
+        },
+        source,
+    )
+
+    item = restored["items"][0]
+    assert (item["quantity"], item["unit"]) == (5.0, "кг")
+
+
+def test_packaging_only_measurement_does_not_become_order_quantity() -> None:
+    """Не принимает вес упаковки за количество заказа."""
+    source = "Сыр в упаковке 500 г"
+    restored = recover_omitted_explicit_items(
+        {
+            "intent": Intent.ADD_ITEMS,
+            "items": [
+                {
+                    "product_query": "Сыр",
+                    "quantity": 500,
+                    "unit": "г",
+                    "source_line": source,
+                }
+            ],
+        },
+        source,
+    )
+
+    item = restored["items"][0]
+    assert item["quantity"] is None
+    assert item["unit"] == ""
+    assert item["packaging_text"] == "500 г"
+    assert item["packaging_role"] == "catalog_attribute"
+
+
+def test_order_and_packaging_keep_separate_roles() -> None:
+    """Сохраняет заказанное количество отдельно от фасовки."""
+    source = "Сыр 5 кг, упаковки по 500 г"
+    restored = recover_omitted_explicit_items(
+        {
+            "intent": Intent.ADD_ITEMS,
+            "items": [
+                {
+                    "product_query": "Сыр",
+                    "quantity": 500,
+                    "unit": "г",
+                    "source_line": source,
+                }
+            ],
+        },
+        source,
+    )
+
+    item = restored["items"][0]
+    assert (item["quantity"], item["unit"]) == (5.0, "кг")
+    assert item["packaging_text"] == "упаковки по 500 г"
+    assert item["packaging_role"] == "catalog_attribute"
+
+
+def test_dash_range_never_becomes_endpoint_quantity() -> None:
+    """Очищает AI-число, если источник содержит только диапазон."""
+    source = "Говядина 500–700 г"
+    restored = recover_omitted_explicit_items(
+        {
+            "intent": Intent.ADD_ITEMS,
+            "items": [
+                {
+                    "product_query": "Говядина",
+                    "quantity": 500,
+                    "unit": "г",
+                    "source_line": source,
+                }
+            ],
+        },
+        source,
+    )
+
+    item = restored["items"][0]
+    assert item["quantity"] is None
+    assert item["unit"] == ""
+    assert "500–700 г" in item["product_query"]
+
+
+def test_percentage_and_order_quantity_keep_distinct_roles() -> None:
+    """Не превращает процент товара в количество заказа."""
+    source = "Сыр 45% 5 кг"
+    restored = recover_omitted_explicit_items(
+        {
+            "intent": Intent.ADD_ITEMS,
+            "items": [
+                {
+                    "product_query": "Сыр 45%",
+                    "quantity": 45,
+                    "unit": "%",
+                    "source_line": source,
+                }
+            ],
+        },
+        source,
+    )
+
+    item = restored["items"][0]
+    assert "45%" in item["product_query"]
+    assert (item["quantity"], item["unit"]) == (5.0, "кг")
+
+
+def test_quantity_packaging_reconciliation_is_idempotent() -> None:
+    """Повторная provenance-сверка не меняет результат."""
+    source = "Сыр 5 кг, упаковки по 500 г"
+    payload = {
+        "intent": Intent.ADD_ITEMS,
+        "items": [
+            {
+                "product_query": "Сыр",
+                "quantity": 500,
+                "unit": "г",
+                "source_line": source,
+            }
+        ],
+    }
+
+    once = recover_omitted_explicit_items(payload, source)
+    twice = recover_omitted_explicit_items(once, source)
+
+    assert twice == once
+
+
+def test_text_and_voice_transcripts_share_quantity_packaging_result() -> None:
+    """Одинаковый текст и транскрипт голоса дают одинаковую семантику."""
+    source = "Сыр в упаковке 500 г"
+    payload = {
+        "intent": Intent.ADD_ITEMS,
+        "items": [
+            {
+                "product_query": "Сыр",
+                "quantity": 500,
+                "unit": "г",
+                "source_line": source,
+            }
+        ],
+    }
+
+    text_result = recover_omitted_explicit_items(payload.copy(), source)
+    voice_result = recover_omitted_explicit_items(
+        {"intent": Intent.ADD_ITEMS, "items": [dict(payload["items"][0])]}, source
+    )
+
+    assert text_result["items"] == voice_result["items"]
+
+
 def test_ai_duplicate_items_from_one_voice_line_are_collapsed() -> None:
     """Объединяет AI-дубликаты с раздельно распознанными комментарием и количеством."""
     source = "Форель свежая 0.8-1.3 кг, зачищенная тринце, 10 кг."

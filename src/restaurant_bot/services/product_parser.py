@@ -16,6 +16,11 @@ from restaurant_bot.services.text import (
     parse_number_words,
 )
 
+_PACKAGING_REFERENCE_PREFIX_RE = re.compile(
+    r"(?:\b(?:в|на)\s+)?(?:упаковк\w*|фасовк\w*|бутылк\w*)\s*$",
+    flags=re.I,
+)
+
 
 def _is_standalone_quantity(value: str) -> bool:
     """Проверяет, что фрагмент содержит только количество и единицу."""
@@ -130,6 +135,11 @@ def _spoken_measurement_pair(
     return None
 
 
+def _is_packaging_reference_prefix(value: str) -> bool:
+    """Проверяет, что перед числом явно названа фасовка, а не заказ."""
+    return bool(_PACKAGING_REFERENCE_PREFIX_RE.search(clean_text(value)))
+
+
 def _single_product_packaging_item(
     text: str,
     source_line: str,
@@ -142,6 +152,23 @@ def _single_product_packaging_item(
     first = quantity_marks[0]
     last = quantity_marks[-1]
     between = text[first.end() : last.start()]
+    packaging_lead = re.search(
+        r"\b(?:упаковк\w*|фасовк\w*)(?:\s+по)?\b",
+        between,
+        flags=re.I,
+    )
+    if len(quantity_marks) == 2 and packaging_lead is not None:
+        product_query = clean_text(text[: first.start()]).strip(" .,;:!?-—–")
+        if product_query:
+            return ExtractedItem(
+                product_query=product_query,
+                quantity=float(first.group(1).replace(",", ".")),
+                unit=normalize_unit(first.group("unit") or ""),
+                source_line=source_line,
+                packaging_text=clean_text(f"{between[packaging_lead.start() :]} {last.group(0)}"),
+                packaging_role="catalog_attribute",
+                packaging_confidence=0.9,
+            )
     order_lead = re.search(
         r"\b(?:нужно|надо|закаж(?:и|ем|у)|постав(?:ь|ить)|возьм(?:и|ем)|"
         r"добав(?:ь|ить)|количеств(?:о|ом)?|мне)\b",
@@ -306,6 +333,20 @@ def parse_product_lines(text: str) -> list[ExtractedItem]:
                 for start, end in alternative_packaging_spans
             )
         ]
+        if len(quantity_marks) == 1 and _is_packaging_reference_prefix(
+            stripped[: quantity_marks[0].start()]
+        ):
+            mark = quantity_marks[0]
+            items.append(
+                ExtractedItem(
+                    product_query=stripped,
+                    source_line=line,
+                    packaging_text=clean_text(mark.group(0)),
+                    packaging_role="catalog_attribute",
+                    packaging_confidence=0.9,
+                )
+            )
+            continue
         packaged_item = _single_product_packaging_item(stripped, line, quantity_marks)
         if packaged_item is not None:
             items.append(packaged_item)

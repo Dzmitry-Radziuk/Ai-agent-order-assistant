@@ -405,6 +405,16 @@ def restore_explicit_order_terms(
                 for quantity, unit in explicit_terms
             )
         ):
+            if len(recovered_from_message) == 1 and recovered_from_message[0].quantity is not None:
+                source_item = recovered_from_message[0]
+                item["quantity"] = source_item.quantity
+                item["unit"] = source_item.unit
+                item["source_line"] = original_line
+                if source_item.packaging_role != "none":
+                    item["packaging_text"] = source_item.packaging_text
+                    item["packaging_role"] = source_item.packaging_role
+                    item["packaging_confidence"] = source_item.packaging_confidence
+                continue
             item["source_line"] = original_line
             item["quantity"] = model_quantity
             item["unit"] = model_unit
@@ -1323,6 +1333,12 @@ def _restore_unordered_measurement_pair(
     recovered = deterministic[0]
     if recovered.packaging_role not in {"ambiguous", "catalog_attribute"}:
         return
+    # A deterministic item with its own explicit quantity already proves that
+    # the source contains an order term.  In that case the packaging helper
+    # must not replace a valid order+packaging result with the whole source
+    # line or clear the quantity.
+    if recovered.quantity is not None:
+        return
     item = items[0]
     item["product_query"] = recovered.product_query
     item["quantity"] = None
@@ -1442,6 +1458,8 @@ def recover_omitted_explicit_items(payload: dict[str, Any], source_text: str) ->
     items = _collapse_shadow_item_projections(
         items, source_text, deterministic, global_comment, bindings
     )
+    _restore_unordered_measurement_pair(items, deterministic)
+    _restore_reference_ranges_in_queries(items, source_text, deterministic)
     for item in items:
         if item.get("comment") and not item.get("user_comment_to_supplier"):
             item["user_comment_to_supplier"] = item["comment"]

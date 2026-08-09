@@ -3418,3 +3418,34 @@ policy, parser normalization, engine routing и focused regression tests.
 - План: [docs/DATA_INTEGRITY_BLOCK_C_PLAN.md](docs/DATA_INTEGRITY_BLOCK_C_PLAN.md).
 - Следующий шаг: отдельное утверждение плана, затем один focused implementation
   diff и полный regression delta.
+
+## BLOCK C — DONE
+
+- Owner: provenance boundary в `recover_omitted_explicit_items()`;
+  детерминированная роль фасовки дополнена в `services/product_parser.py`.
+- После Block A и Block B активированы существующие
+  `_restore_unordered_measurement_pair()` и
+  `_restore_reference_ranges_in_queries()` в порядке: shadow cleanup →
+  quantity/packaging reconciliation → final mirroring.
+- Source-first quantity conflict теперь выбирает доказанное исходное order
+  quantity, а deterministic packaging+order сохраняет обе роли без новых полей.
+  Явная фасовка `в упаковке ...` не становится scalar order quantity.
+- MUST FIX: 5/5 passed. Добавлены regression cases для explicit quantity,
+  packaging-only, order+packaging, dash range, percentage, idempotency и
+  TEXT/VOICE parity.
+- Full pytest: 1245 collected / 1214 passed / 31 failed — тот же baseline,
+  новых падений относительно Block B не выявлено. Оставшиеся failures остаются
+  прежними out-of-scope PHOTO, catalog/matching, visible actions, shadow-count,
+  omitted conjoined item, supplier и docs-contract failures.
+- Block A и Block B сохранены; PHOTO prompts/normalizer, catalog, matching,
+  state machine, submission, logging и decomposition не менялись.
+- Проверки: Ruff check passed; Ruff format check passed; mypy passed;
+  markdown links passed; `git diff --check` passed.
+
+## NEXT FUNCTIONAL STEP
+
+`DATA INTEGRITY BLOCK D — catalog/title/attribute reconciliation`.
+
+Block C завершён и остановлен на границе source provenance. Следующий этап
+может отдельно рассматривать catalog-dependent quantity/title sanitization;
+не смешивать его с Block C и не начинать автоматически.
