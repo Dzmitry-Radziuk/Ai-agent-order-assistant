@@ -1941,3 +1941,157 @@ persistence, `_advance()`, `_find_cart_item()`, другие modal states, UX и
   explicit `ADD_ITEMS` continues through ordinary cart routing.
 - Regression coverage added for text descriptions, candidate overlap, and explicit add
   interruption. `AWAIT_ADD_MORE_CONFIRM` remains the next functional step.
+
+## AWAIT_ADD_MORE_CONFIRM — ANALYSIS COMPLETE / IMPLEMENTATION PENDING
+
+### Граница текущего состояния
+
+`AWAIT_ADD_MORE_CONFIRM` устанавливается в `_advance()` только после того, как
+обработан добавленный batch и `_first_unresolved(state)` не нашёл нерешённых позиций.
+Перед установкой prompt очищаются `current_issue_item_id` и `current_issue_kind`, а
+`pending_added_items_count` переносится в локальный `prompt_count` и сразу сбрасывается
+в `0`. Поэтому штатное состояние prompt не относится к конкретному `CartItem`.
+
+Точка входа одна: `_advance(state, added_count=...)` →
+`added_items_question_reply(state, prompt_count)`. Текущий UI-контракт:
+
+- текст: `Товар добавлен в черновик заказа` / `Товары добавлены в черновик заказа`;
+- вопрос: `Добавить ещё товары?`;
+- `Да, добавить товары` → `v2:add` → `Intent.ADD_MORE`;
+- `Нет, к черновику` → `v2:back` → `Intent.BACK`.
+
+`parse_callback()` оставляет callback-путь явным. Ревизия `:rN` проверяется в engine до
+мутации; устаревшая кнопка только повторно показывает текущую карточку. Callback не
+смешивается с semantic policy.
+
+### Порядок текущего engine
+
+Сейчас порядок обработки такой:
+
+1. `evaluate_modal_routing()` вызывается, но для `AWAIT_ADD_MORE_CONFIRM` решения нет:
+   `CompatibilityContext` не содержит этого состояния.
+2. Выполняются общие contextual rewrites.
+3. Если пришёл конкретный `ADD_ITEMS`, stage синхронно меняется на `COLLECTING`.
+4. `BACK/CANCEL/SHOW_CART` в `AWAIT_ADD_MORE_CONFIRM` сбрасывают
+   `pending_added_items_count`, переводят state в `REVIEW` и возвращают `cart_reply()`.
+5. Далее идут passive/navigation handlers, обычный `ADD_ITEMS`, quantity/edit/remove,
+   final-review и submit handlers.
+
+Таким образом, modal-состояние определяется отдельными ветками engine, а не единой
+точкой `ParsedCommand → StateCompatibilityPolicy → routing`.
+
+### Проверка входных фраз
+
+Ниже зафиксирован результат текущего deterministic `infer_intent()` и фактическая
+ветка engine для state с одним matched-товаром и `stage=AWAIT_ADD_MORE_CONFIRM`.
+
+| Вход | Global ParsedCommand | Contextual rewrite | Текущая ветка и эффект |
+|---|---|---|---|
+| `да` | `CONFIRM` | TEXT: нет; VOICE: `ADD_MORE` | TEXT вызывает `_confirm_current()` и повторно доходит до add-more prompt; VOICE переводит в `COLLECTING`. |
+| `да, добавим ещё` | `ADD_ITEMS`, один item с разговорной фразой | TEXT: нет; VOICE: `ADD_MORE` по explicit yes | TEXT сбрасывает stage и пытается добавить псевдотовар; VOICE корректно продолжает сбор. |
+| `давай добавим ещё` | `ADD_MORE` | не требуется | `COLLECTING`, prompt сбрасывается. |
+| `давай ещё` | `ADD_ITEMS`, один item без количества | не требуется для TEXT | TEXT добавляет разговорный фрагмент как товар; это тот же риск, что и выше. |
+| `нет` | `CANCEL` | VOICE дополнительно → `BACK` | `REVIEW`, `pending_added_items_count=0`, cart не меняется. |
+| `не надо` | отрицательная команда/`CANCEL` в зависимости от parser output | VOICE → `BACK` при распознанном отказе | Ожидаемая ветка `REVIEW`; нужен regression на обе modality. |
+| `хватит` | `ADD_ITEMS`, один item | VOICE → `BACK` по prefix `хват` | TEXT может добавить псевдотовар; VOICE возвращает черновик. |
+| `покажи черновик` | `SHOW_CART` | не требуется | `REVIEW`, count сбрасывается, cart не меняется. |
+| `назад` | `BACK` | не требуется | `REVIEW`, count сбрасывается, cart не меняется. |
+| `пармезан 3 кг` | конкретный `ADD_ITEMS` | не требуется | Сначала `COLLECTING`, затем обычный add; старый batch не переносится, duplicate/qty/unit flows работают в collecting context. |
+| `добавь пармезан 3 кг` | `ADD_ITEMS`, `explicit_add_items=True` | не требуется | Та же обычная ветка нового товара, без наследования metadata prompt. |
+| `удали сыр` | `REMOVE_ITEM` | не требуется | `_remove_item()` помечает найденную строку `SKIPPED`; именованный remove возвращает cart reply, но сам branch не нормализует stage. |
+| `измени количество сыра на 5 кг` | `EDIT_QUANTITY` | quantity helper может уточнить target | `_edit_quantity()` изменяет найденную позицию и вызывает `_advance()`; при отсутствии unresolved обычно получается `REVIEW`. |
+| `покажи статус` | `ORDER_STATUS` | не требуется | OrderStatusHandler запускает чтение истории; cart не меняется, stage add-more сам по себе не сбрасывается. |
+| `новая заявка` | `START_NEW_ORDER` | не требуется | При активном cart ставится `pending_new_order_confirmation`; при пустом/отправленном cart создаётся fresh state. |
+| `очисти черновик` | `CLEAR_CART` | не требуется | `_start_new_order()` создаёт fresh state, count и cart очищаются. |
+| `спасибо` | `THANKS` | не требуется | Passive handler отвечает без мутации cart; stage остаётся прежним. |
+| `помощь` | `HELP` | не требуется | Passive handler отвечает без мутации cart; stage остаётся прежним. |
+| `отправляй` / `отправить заявку` | `SUBMIT_REQUEST` | VOICE также нормализуется в submit | FinalReviewHandler переводит в `AWAIT_SUBMIT_CONFIRM`, новый товар не создаётся. |
+| `да, отправляй` | `SUBMIT_REQUEST` в текущем deterministic parser | VOICE prefix также → submit | `AWAIT_SUBMIT_CONFIRM`; требуется отдельный TEXT/VOICE regression, чтобы global parser не вернул `ADD_ITEMS`. |
+| `ну` / `не знаю` / `может быть` / `ладно` | текущий deterministic parser возвращает `ADD_ITEMS` с фрагментом без quantity | специального safe fallback нет | Фрагмент может стать новой позицией и открыть quantity/other issue; это небезопасно для modal prompt. |
+
+Для перечисленных строк с обычными навигационными intent общая проблема не в мутации
+cart, а в том, что stage иногда остаётся `AWAIT_ADD_MORE_CONFIRM` после passive,
+order-status или именованного remove. Следующий вход затем снова видит старую modal
+ветку, хотя пользователь уже выполнил независимое действие.
+
+### TEXT / VOICE / PHOTO
+
+Голосовые команды проходят тот же global parse, но дополнительно попадают в
+`_contextual_voice_command()`. Только там сейчас сосредоточены правила `да`, `хватит`,
+`отправляй` и некоторых разговорных вариантов. Поэтому TEXT и VOICE неэквивалентны:
+voice исправляет часть ошибочных `ADD_ITEMS`, а text — нет.
+
+PHOTO не блокируется этим stage: если после prompt приходит photo с items, ранняя ветка
+`AWAIT_ADD_MORE_CONFIRM + ADD_ITEMS` сначала переводит state в `COLLECTING`, после чего
+фото проходит обычный add-items flow. Фото без items получает обычный
+`photo_without_quantities_reply`; архитектуру фото менять не требуется.
+
+### Lifecycle `pending_added_items_count`
+
+Поле используется только в engine:
+
+- `_advance(added_count=N)` записывает число позиций нового batch;
+- если unresolved ещё есть, число временно живёт до их обработки;
+- когда unresolved нет, `_advance()` читает число, создаёт `AWAIT_ADD_MORE_CONFIRM` и
+  немедленно сбрасывает его в `0`;
+- `_skip_current()` уменьшает число на один при пропуске unresolved item;
+- `_clear_transient_dialog_state()` и ветка `BACK/CANCEL/SHOW_CART` сбрасывают его в `0`.
+
+В штатном add-more prompt count уже равен нулю. Потенциально stale значение возможно,
+если state был сохранён между unresolved/independent command или если именованный
+`REMOVE_ITEM`, passive intent либо `ORDER_STATUS` оставили stage без нормализации. При
+следующем `_advance()` такое значение способно снова показать вопрос «Добавить ещё
+товары?». Поле удалять нельзя; lifecycle должен быть покрыт regression tests.
+
+### Нужен ли `CompatibilityContext.ADD_MORE_CONFIRM`
+
+Да, нужен как единая точка совместимости для modal navigation stage, но только при
+валидном инварианте: `stage=AWAIT_ADD_MORE_CONFIRM`, `current_issue_item_id` пуст,
+нет pending comment/product-add/manual refs и нет unresolved item. Если этот инвариант
+нарушен, приоритет должны иметь уже существующие item-specific contexts (comment,
+product-add, manual, candidate, not-found, duplicate, unit, quantity), а не add-more.
+
+Предлагаемые решения policy:
+
+| ParsedCommand | `ADD_MORE_CONFIRM` action | Контракт |
+|---|---|---|
+| `ADD_MORE`, явное «да» | `CONTINUE` | Перевести в `COLLECTING`, показать prompt для новых товаров. |
+| concrete `ADD_ITEMS` | `CONTINUE` с normal reprocess | Сначала сбросить modal stage, затем выполнить обычный add-items; не переносить batch metadata. |
+| `BACK`, `CANCEL`, `SHOW_CART`, явное «нет» | `CONTINUE` по navigation contract | Перейти в `REVIEW`, count=0, cart не менять. |
+| `SUBMIT_REQUEST`, `SHOW_FINAL_REVIEW`, `REMOVE_ITEM`, `EDIT_QUANTITY`, `ORDER_STATUS`, `START_NEW_ORDER`, `CLEAR_CART`, `HELP`, `THANKS` и другие strong intents | `INTERRUPT` | Обычный routing; add-more context не подменяет команду. |
+| `UNKNOWN` без надёжного смысла | `AMBIGUOUS` | Повторить вопрос/не менять cart и count; не создавать item. |
+| stale/невалидный callback | `REJECT` | Текущий callback revision contract, без мутации. |
+
+`ADD_ITEMS` требует отдельного решения контракта: policy не должна разбирать raw natural
+language. Текущий parser иногда отдаёт разговорное «да, давай добавим ещё» как item, поэтому
+одной policy над существующим `ParsedCommand` недостаточно без подтверждённого semantic
+признака «ответ на prompt» либо корректного global parse. Это открытый вопрос реализации,
+а не повод добавлять regex в engine.
+
+### Граница следующей реализации
+
+Изменения должны ограничиться `StateCompatibilityPolicy`, `ModalRoutingDecision`, одной
+точкой preemption в `ConversationEngine` и regression tests. Не менять parser/prompts,
+matching, product-add и предыдущие modal contexts без отдельного доказательства. Не
+добавлять `suspended_interaction`, не менять `_advance()` и `_find_cart_item()`.
+
+До кода зафиксировать black-box matrix:
+
+- TEXT/VOICE: `да`, `давай добавим ещё`, `да, давай добавим ещё`, `нет`, `не надо`,
+  `хватит`, direct/explicit `ADD_ITEMS`, `SHOW_CART`, `REMOVE_ITEM`, `EDIT_QUANTITY`,
+  `SUBMIT_REQUEST`, `ORDER_STATUS`, `THANKS`, `HELP`, random/unknown;
+- PHOTO: список товара сразу после prompt и пустое фото;
+- CALLBACK: `v2:add`, `v2:back`, их revision suffix и stale revision;
+- state invariants: count cleanup, отсутствие metadata leakage, duplicate после direct
+  product в `COLLECTING`, отсутствие мутации cart при passive/navigation;
+- проверить, что `AWAIT_ADD_MORE_CONFIRM` не возникает при оставшемся unresolved item.
+
+### Итог анализа
+
+- Первый подтверждённый unsafe transition: TEXT «да, давай добавим ещё» (также «хватит»
+  и random-фразы) → global `ADD_ITEMS` с псевдотоваром → обычный add flow. Voice-only
+  contextual rewrite скрывает этот дефект, но не устраняет разницу modality.
+- `CompatibilityContext.ADD_MORE_CONFIRM` нужен; implementation пока не начиналась.
+- `NEXT FUNCTIONAL STEP` остаётся `AWAIT_ADD_MORE_CONFIRM`.
+- В application code, parser, prompts, matching и callbacks в рамках этого анализа ничего
+  не изменялось.
