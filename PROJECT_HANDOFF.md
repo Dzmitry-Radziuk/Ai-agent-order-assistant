@@ -2120,3 +2120,281 @@ matching, comment logic, `_advance()` или предыдущие modal contexts
 ## NEXT FUNCTIONAL STEP
 
 `AWAIT_SUBMIT_CONFIRM` — следующий функциональный этап StateCompatibilityPolicy.
+
+## AWAIT_SUBMIT_CONFIRM — ANALYSIS COMPLETE / IMPLEMENTATION PENDING (2026-08-09)
+
+Этап проанализирован без изменения application code, parser, prompts, matching,
+quantity, product-add, submission implementation, Telegram-контрактов и предыдущих
+modal contexts. `NEXT FUNCTIONAL STEP` остаётся `AWAIT_SUBMIT_CONFIRM`.
+
+### Entry contract и валидный контекст
+
+`FinalReviewHandler` переводит state в `AWAIT_SUBMIT_CONFIRM`, когда для
+`SUBMIT_REQUEST` или `SHOW_FINAL_REVIEW` нет `first_unresolved(state)` и есть хотя бы
+один `MATCHED` item. Перед этим он очищает `current_issue_item_id` и
+`current_issue_kind`. При unresolved он оставляет пользователя на issue card, а при
+пустом наборе `MATCHED` возвращает `empty_draft_reply()`.
+
+`SUBMIT_AS_IS` приходит, в частности, из callback `v2:submit`; его обработчик сначала
+повторяет unresolved guard, затем проверяет multiple/suggested quantity warning.
+`CHECK_MIN_SUM` в обычном engine-пути перехватывается отдельной веткой и возвращает
+`supplier_warning_details_reply()`; standalone `FinalReviewHandler` также знает этот
+intent для повторного показа final review.
+
+Истинный submit-confirm контекст безопасен только при следующем инварианте:
+
+```text
+stage == AWAIT_SUBMIT_CONFIRM
+нет unresolved item
+есть хотя бы один MATCHED item
+нет более приоритетного current issue / pending modal context
+```
+
+При нарушении инварианта submit confirmation не должен иметь приоритет над
+item-specific context.
+
+### Текущий UI-контракт
+
+`final_review_reply()` формирует заголовок «📦 Финальная проверка», показывает до 20
+активных позиций на странице и сохраняет `final_review_page`.
+
+- pagination: `v2:finalpage:{page}`;
+- обычная отправка: `Отправить в таблицу заказа` → `v2:submit`;
+- возврат: `К черновику` → `v2:back`;
+- один multiple warning: `Выбрать количество` → `v2:mulone`,
+  `Оставить {current} {unit}` → `v2:keepwarn`;
+- несколько multiple warnings: `Выбрать количество` → `v2:mulone`;
+- supplier/minimum warning: `Показать товары поставщика` или
+  `Проверить минимальные суммы` → `v2:minsum`.
+
+Оркестратор добавляет к callback текущую ревизию `:rN` перед отправкой. Поэтому
+реальный callback final review имеет тот же action с суффиксом revision.
+
+### Фактический порядок engine и первый unsafe transition
+
+Для TEXT/VOICE фактический порядок в `ConversationEngine.handle()` такой:
+
+```text
+DialogueResponse normalization
+→ для VOICE при CONFIRM/ADD_MORE _contextual_voice_command()
+→ evaluate_modal_routing()
+→ stale callback guard
+→ contextual modal branches / navigation handlers
+→ generic CONFIRM → _confirm_current()
+→ FinalReviewHandler.handle()
+→ _prepare_submission()
+```
+
+Первый submit-specific unsafe transition — строка с generic branch
+`if command.intent == Intent.CONFIRM: return self._confirm_current(state)` до вызова
+`FinalReviewHandler`. Поэтому текстовый `CONFIRM` не является подтверждением отправки
+на `AWAIT_SUBMIT_CONFIRM`: он обслуживается общим механизмом подтверждения текущего
+item и вызывает `_advance()`.
+
+Для VOICE существует ещё более раннее modality-specific расхождение:
+`_contextual_voice_command()` до policy переписывает affirmative/prefix
+`подтверждаю`/`отправляй` в `SUBMIT_AS_IS`, а отрицание — в `BACK`.
+
+### TEXT и VOICE: подтверждённые black-box результаты
+
+Deterministic parser возвращает:
+
+| Фраза | ParsedCommand | DialogueResponse |
+|---|---|---|
+| `да` | `CONFIRM` | `AFFIRM` |
+| `подтверждаю` | `CONFIRM` | `AFFIRM` |
+| `всё верно` | `CONFIRM` | `AFFIRM` |
+| `да, отправляй` | `SUBMIT_REQUEST` | `NONE` |
+| `отправляй` | `SUBMIT_REQUEST` | `NONE` |
+| `нет` | `CANCEL` | `DECLINE` |
+| `передумал` | `CANCEL` | `DECLINE` |
+| `назад` | `BACK` | `NONE` |
+
+Текстовый engine на matched item в `AWAIT_SUBMIT_CONFIRM` даёт:
+
+- `да`, `подтверждаю`, `всё верно` → generic `_confirm_current()`, `stage=REVIEW`,
+  `enqueue_submission=False`;
+- `да, отправляй`, `отправляй` → `FinalReviewHandler` повторно рисует final review,
+  `stage=AWAIT_SUBMIT_CONFIRM`, `enqueue_submission=False`;
+- `нет`, `передумал`, `назад` → `stage=COLLECTING`, cart сохраняется, enqueue нет.
+
+Голосовой engine с тем же parser output доходит до другого результата:
+
+- `да`, `подтверждаю`, `всё верно`, `да, отправляй`, `отправляй` после contextual
+  rewrite → `SUBMIT_AS_IS` → `_prepare_submission()`, `stage=SUBMITTING`,
+  `enqueue_submission=True`;
+- `нет`, `передумал`, `назад` → voice rewrite в `BACK`, затем `COLLECTING`, cart
+  сохраняется.
+
+Таким образом, текущие TEXT и VOICE неэквивалентны на confirmation screen.
+
+### DialogueResponse
+
+Существующий контракт достаточен и не требует нового enum:
+
+- `AFFIRM` — возможный affirmative answer текущего modal;
+- `DECLINE` — отказ/возврат;
+- `UNCERTAIN` — безопасное повторение вопроса или уточнение;
+- `NONE` — маршрутизация по обычному `intent`.
+
+Сейчас policy не имеет `CompatibilityContext.SUBMIT_CONFIRM`, поэтому эти значения
+не образуют единой точки принятия решения для final review. Дополнительный
+`submit_confirmation_response` не вводить.
+
+### Независимые команды на confirmation screen
+
+После global parsing они проходят обычные ветки engine, но stage не всегда
+нормализуется одинаково:
+
+- concrete `ADD_ITEMS` → обычное добавление; новый item не получает metadata старого
+  confirmation context, submission не запускается; после `_advance()` строится новый
+  review/issue flow;
+- `REMOVE_ITEM` → найденный item помечается `SKIPPED` и возвращается cart reply; при
+  именованном удалении текущий `AWAIT_SUBMIT_CONFIRM` может сохраниться;
+- `EDIT_QUANTITY` → редактируется выбранный item и вызывается `_advance()`, обычно
+  возвращая `REVIEW`, если unresolved больше нет;
+- `SHOW_CART` → cart reply без мутации; специальная просьба показать товары без
+  черновика даёт supplier warning details;
+- `ORDER_STATUS`, `THANKS`, `HELP` → navigation/passive handler, cart не меняется;
+  stage может сохраниться;
+- `START_NEW_ORDER` при активном cart открывает `pending_new_order_confirmation`, а
+  `CLEAR_CART` сразу создаёт fresh collecting state.
+
+Ни один из этих intents не должен подменяться submit-confirm fallback. Отдельно
+нужны regression tests на сохранение/нормализацию stage после independent command.
+
+### Неуверенные и случайные фразы
+
+`dialogue_response_for()` распознаёт `ну`, `не знаю`, `может быть`, `ладно` как
+`UNCERTAIN`, но deterministic fallback одновременно возвращает `ADD_ITEMS` с
+псевдотоваром без quantity. На `AWAIT_SUBMIT_CONFIRM` текущий engine добавляет такой
+item (обычно со статусом `NOT_FOUND`) вместо безопасного повторения final review.
+Это подтверждённая зона regression coverage для будущей policy; новый regex в engine
+сейчас не добавлялся.
+
+### Multiple / suggested quantity warning
+
+`FinalReviewHandler.SUBMIT_AS_IS` блокирует подготовку submission, если у `MATCHED`
+позиции `suggested_quantity != quantity`, повторно оставляет stage
+`AWAIT_SUBMIT_CONFIRM` и возвращает `final_review_reply()` с warning buttons.
+`KEEP_MULTIPLE`/`KEEP_CURRENT_QUANTITY` очищает suggestion, `ACCEPT_SUGGESTED_QUANTITY`
+принимает recommendation, `ENTER_OTHER_QUANTITY` переводит в ручной quantity flow.
+До снятия warning реальная отправка не начинается. Повторный submit при неизменённом
+warning безопасно остаётся на этом экране; quantity semantics не менять.
+
+### BACK / CANCEL / DECLINE
+
+- callback `v2:back` и callback input возвращают `cart_reply()` без очистки stage;
+- текстовый `BACK` очищает transient dialog refs и ставит `COLLECTING`;
+- generic `CANCEL` очищает transient refs, ставит `COLLECTING`, cart сохраняется и
+  возвращается reply с заголовком «Отправка отменена»;
+- parser `DECLINE` представлен `CANCEL`, а voice contextual path дополнительно
+  нормализует отрицание в `BACK`.
+
+Это также требует единого policy решения: возврат к draft и cancel отправки — не
+одно и то же действие, но оба не должны запускать submission.
+
+### Реальная граница side effects
+
+До `SUBMIT_AS_IS` и успешного прохождения guards confirmation screen не создаёт
+`PendingSubmission`, не ставит `SUBMITTING` и не enqueue-ит Celery task.
+
+`_prepare_submission()`:
+
+1. блокирует повтор после `dispatch_uncertain`;
+2. повторно использует существующие `pending_submission.order_no/rows`, если snapshot
+   уже создан;
+3. иначе собирает только `MATCHED` items, создаёт order number и immutable rows,
+   включая quantity, department и comment;
+4. сохраняет `PendingSubmission`, ставит `stage=SUBMITTING`/`status=submitting` и
+   возвращает `enqueue_submission=True`.
+
+Только после checkpoint engine-result оркестратор ставит Celery task. Google Sheets и
+центральная отправка находятся в `SubmissionService.submit()`; `submission.py` в этом
+этапе не менялся.
+
+Защиты от двойной отправки уже существуют: deduplication update в
+`UpdateRepository`, checkpoint `state_applied/reply_sent/tasks_enqueued`, chat lock,
+повторное использование order number/rows и блокировка повторной отправки после
+`dispatch_started` без completion. Новую idempotency-защиту не добавлять в рамках
+анализа.
+
+### PHOTO, callbacks и pagination
+
+PHOTO проходит через `InputRecognitionService._recognize_photo()` и
+`openai.parse_photo()`, а затем попадает в обычный engine `ADD_ITEMS` путь. Наличие
+`AWAIT_SUBMIT_CONFIRM` само по себе photo не блокирует. Фото с items добавляет строки
+обычным matching/quantity flow; фото без items возвращает
+`photo_without_quantities_reply()` без мутации cart. `DialogueResponse` для PHOTO не
+подменяет photo parser.
+
+Fresh callbacks final review: `v2:submit`, `v2:back`, `v2:finalpage:{page}`,
+`v2:minsum`, `v2:mulone`, `v2:keepwarn` (с добавленной ревизией при отправке).
+Stale `callback_revision != state.ui_revision` проверяется в engine до modal transition,
+cleanup или другой state mutation; он возвращает текущую issue/cart reply и не может
+enqueue submission. Pagination остаётся UI-route внутри review и не является
+подтверждением отправки.
+
+Отдельный `review_mode=sheet` deep-link flow имеет собственные token/fingerprint и
+revision guards. Он не является тем же обычным cart `AWAIT_SUBMIT_CONFIRM` и не должен
+смешиваться с новой policy.
+
+### Unresolved priority
+
+Текущий `first_unresolved()` приоритет: `DUPLICATE_PENDING`, `UNIT_MISMATCH`,
+`MISSING_QTY`, `AMBIGUOUS`, `NOT_FOUND`, `NEW`, `AI_PENDING`. `FinalReviewHandler`
+проверяет его перед submit/show-review. `MANUAL_DETAILS`, `PRODUCT_ADD_DETAILS` и
+`COMMENT_SCOPE` представлены stage/pending refs и перехватываются раньше через
+существующие modal policies; в `StateCompatibilityPolicy` submit context пока нет.
+
+Будущий `SUBMIT_CONFIRM` должен уступать любому активному item-specific modal
+context/ref и `first_unresolved()`. Рекомендуемый порядок: comment/product-add/manual,
+candidate/not-found/duplicate/unit/quantity, затем submit-confirm только для
+валидного matched-only state.
+
+### Предлагаемый policy boundary (без реализации)
+
+Добавить в существующую `StateCompatibilityPolicy` один контекст
+`CompatibilityContext.SUBMIT_CONFIRM` и один `ModalRoutingDecision` field. Policy
+получает только `ParsedCommand`, `DialogueResponse` и state context; raw natural
+language в ней не разбирается.
+
+| ParsedCommand / contextual result | SUBMIT_CONFIRM action | Ожидаемый контракт |
+|---|---|---|
+| `SUBMIT_AS_IS`, `DialogueResponse.AFFIRM` после однозначного submit intent | CONTINUE | FinalReviewHandler → guards → `_prepare_submission` |
+| `BACK`, `CANCEL`, `DialogueResponse.DECLINE` | CONTINUE | обычный возврат/cancel, без enqueue |
+| final-review pagination, `SHOW_FINAL_REVIEW`, `SHOW_CART`, `CHECK_MIN_SUM` | CONTINUE | соответствующий UI/details route, без submit |
+| concrete `ADD_ITEMS`, `REMOVE_ITEM`, `EDIT_QUANTITY`, `ORDER_STATUS`, `HELP`, `THANKS`, `START_NEW_ORDER`, `CLEAR_CART` | INTERRUPT | обычный routing, submit context не подменяет команду |
+| `DialogueResponse.UNCERTAIN`, UNKNOWN без надёжного intent | AMBIGUOUS | повторить final review/уточнить, cart и state не менять |
+| stale/invalid callback | REJECT | существующий revision guard, без mutation/enqueue |
+
+`SUBMIT_REQUEST` нужно отдельно определить как повторный запрос final review (без
+enqueue) либо как explicit confirmation только после отдельного UX-решения; текущий
+код фактически выбирает первый вариант. `CONFIRM` нельзя оставлять generic branch
+перед FinalReviewHandler.
+
+### Будущий regression plan
+
+Зафиксировать для TEXT и VOICE один набор: `да`, `подтверждаю`, `всё верно`,
+`отправляй`, `да, отправляй`, `нет`, `не отправляй`, `передумал`, `назад`, concrete
+`ADD_ITEMS`, `REMOVE_ITEM`, `EDIT_QUANTITY`, `SHOW_CART`, `ORDER_STATUS`, `THANKS`,
+`HELP`, `START_NEW_ORDER`, `CLEAR_CART`, UNKNOWN и UNCERTAIN. Отдельно проверить PHOTO
+с items/без items, fresh/stale submit/back/pagination callbacks, supplier warning,
+20+ item pagination, unresolved priority, multiple warning, repeated submit и отсутствие
+mutation/enqueue на AMBIGUOUS.
+
+### Итог анализа
+
+- application behavior в рамках этого этапа не менялся;
+- подтверждён основной unsafe order: generic `CONFIRM` до `FinalReviewHandler`;
+- подтверждено modality расхождение TEXT/VOICE на affirmative confirmation;
+- `CompatibilityContext.SUBMIT_CONFIRM` нужен как единая точка policy, но реализация
+  отложена до отдельного functional diff;
+- `SUBMISSION_FAILED` остаётся отдельным следующим этапом и здесь не анализируется
+  глубже retry semantics;
+- `suspended_interaction` не требуется для этого анализа.
+
+## NEXT FUNCTIONAL STEP
+
+`AWAIT_SUBMIT_CONFIRM` — реализовать только после отдельного согласования минимального
+policy diff и regression tests; `SUBMISSION_FAILED` пока не начинать.
