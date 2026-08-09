@@ -1206,6 +1206,13 @@ class UpdateOrchestrator:
                 text=text,
                 callback_target=review_match.group(1),
             )
+        # A clear reference to a button belongs to the current screen. Keep
+        # it out of the generic product parser, except while a comment-scope
+        # answer is being resolved by its dedicated contextual flow.
+        if not state.pending_comment_items:
+            callback_data = self._match_visible_action(text, state)
+            if callback_data:
+                return infer_intent("", callback_data).model_copy(update={"text": text})
         parsed = self.openai.parse_text(text)
         review_command = self._parse_sheet_review_command(text, parsed, state)
         if review_command is not None:
@@ -1239,6 +1246,8 @@ class UpdateOrchestrator:
             )
             return ParsedCommand(intent=Intent.UNKNOWN, text=text)
         if not selected:
+            if parsed.intent is Intent.ADD_ITEMS and parsed.items:
+                return ParsedCommand(intent=Intent.UNKNOWN, text=text)
             return parsed
         return infer_intent("", selected).model_copy(update={"text": text})
 
@@ -1375,7 +1384,14 @@ class UpdateOrchestrator:
             return False
         if not state.visible_actions or parsed.intent not in {Intent.UNKNOWN, Intent.ADD_ITEMS}:
             return False
-        if parsed.intent == Intent.ADD_ITEMS and parsed.items:
+        if (
+            parsed.intent == Intent.ADD_ITEMS
+            and parsed.items
+            and (
+                parsed.explicit_add_items
+                or any(item.quantity is not None or item.unit for item in parsed.items)
+            )
+        ):
             return False
         words = normalize_text(text).split()
         action_stems = (
@@ -1400,6 +1416,7 @@ class UpdateOrchestrator:
             "повтор",
             "пропуст",
             "пров",
+            "прав",
         )
         return state.stage not in {SessionStage.COLLECTING, SessionStage.REVIEW} or any(
             word.startswith(action_stems) for word in words

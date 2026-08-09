@@ -3576,3 +3576,34 @@ Block E requires separate approval and must not move provenance logic back into 
   узкий helper в input recognition.
 - Baseline остаётся **1254 collected / 1233 passed / 21 failed**; остальные 18 failures не
   затягиваются в Block F. Следующий шаг — отдельное утверждение плана.
+
+## BLOCK F — DONE
+
+- Owner: `UpdateOrchestrator._parse_text_in_context` in
+  `src/restaurant_bot/services/orchestrator.py`. No parser, prompt, engine,
+  matching, catalog, callback, or state-policy contracts were changed.
+- TEXT/VOICE now use the same ordering: review deep-link and explicit callback
+  paths, deterministic match against current `visible_actions`, global parse,
+  contextual comment fallback, deterministic fallback, then narrow semantic
+  visible-action resolution.
+- Deterministic screen matching runs before generic product parsing only when no
+  pending comment-scope context exists. This keeps comment-scope preemption
+  global-parse-first while preventing a visible label from becoming a product.
+- Concrete `ADD_ITEMS` evidence (explicit-add marker or quantity/unit) remains
+  authoritative. Action-like pseudo-items may use the semantic visible-action
+  resolver; an empty/invalid/timeout result becomes `UNKNOWN` with no mutation.
+- Visible action IDs remain allowlisted by the current state and synthetic
+  callbacks retain the current UI revision. Voice continues through the shared
+  text parser after transcription.
+- Block F MUST FIX: **3/3 green** in
+  `tests/input/test_voice_processing_card.py`; adjacent input, voice-control,
+  callback-contract, and comment-scope-preemption tests also pass.
+- Fresh full suite: **1254 collected / 1236 passed / 18 failed / 0 skipped /
+  0 xfailed / 0 errors**, duration **16.291s**. The three fixed nodeids are the
+  prior visible-action failures; no new failure nodeids appeared. The remaining
+  18 are the documented pre-existing PHOTO, duplicate/comment/UX, stale scenario
+  catalog, voice-shadow, and quantity baseline failures.
+- Ruff check, mypy, markdown links, and `git diff --check` pass. Ruff format check
+  still reports pre-existing unrelated formatting drift in `orchestrator.py`;
+  no unrelated formatting was applied.
+- Block A–E contracts remain unchanged; Block G and decomposition are not started.
