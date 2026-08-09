@@ -3554,3 +3554,25 @@ Block E requires separate approval and must not move provenance logic back into 
   изменении не трогать. Parser, prompts, PHOTO, state machine и decomposition out of scope.
 - Следующий шаг: отдельное утверждение плана, затем только focused implementation и regression
   delta. До утверждения код и tests не менять.
+
+## BLOCK F PLAN — READY / IMPLEMENTATION PENDING
+
+- Block E закрыт без functional fix (`MUST FIX = 0`). Block F анализирует только
+  visible-action routing для TEXT/VOICE; callbacks и modal StateCompatibilityPolicy не меняются.
+- Предварительный MUST FIX: **3** — все три находятся в
+  `tests/input/test_voice_processing_card.py`. Первые bad transitions зафиксированы в
+  [docs/DATA_INTEGRITY_BLOCK_F_PLAN.md](docs/DATA_INTEGRITY_BLOCK_F_PLAN.md): generic
+  `parse_text` выполняется до deterministic screen match, а `_needs_visible_action_ai()`
+  отсекает action-like pseudo-items как будто это реальные товары.
+- Owners: deterministic visible match — `InputRecognitionService.match_visible_action`;
+  fallback ordering — `UpdateOrchestrator._parse_text_in_context`; semantic choice —
+  `OpenAIService.choose_visible_action`; callback conversion — `parser.parse_callback`/
+  `infer_intent`; visible action persistence — `_attach_ui_revision` и `_store_visible_actions`.
+- Safety: action IDs только из текущего `state.visible_actions`, AI не обходит allowlist и
+  confidence gate, concrete product/quantity не заменяется кнопкой, semantic timeout даёт
+  `UNKNOWN` без mutation.
+- Matching, catalog resolver, parser, prompts, engine, Block A–E provenance и decomposition
+  остаются вне scope. Ожидаемый implementation footprint — orchestrator, при необходимости
+  узкий helper в input recognition.
+- Baseline остаётся **1254 collected / 1233 passed / 21 failed**; остальные 18 failures не
+  затягиваются в Block F. Следующий шаг — отдельное утверждение плана.
