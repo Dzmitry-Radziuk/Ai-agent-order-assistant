@@ -174,3 +174,89 @@ def test_non_empty_ai_item_list_is_kept_without_deterministic_append() -> None:
         "говядина",
     ]
     assert restored["global_comment"] == "на завтра"
+
+
+def test_shadow_collapse_keeps_two_real_products_and_one_word_items() -> None:
+    """Не удаляет однословный товар и две независимые позиции."""
+    source = "курица 5 кг и сыр 2 кг"
+    payload = {
+        "intent": Intent.ADD_ITEMS,
+        "items": [
+            {"product_query": "курица", "quantity": 5, "unit": "кг", "source_line": source},
+            {"product_query": "сыр", "quantity": 2, "unit": "кг", "source_line": source},
+        ],
+    }
+
+    restored = recover_omitted_explicit_items(payload, source)
+
+    assert [(item["product_query"], item["quantity"]) for item in restored["items"]] == [
+        ("курица", 5.0),
+        ("сыр", 2.0),
+    ]
+
+
+def test_shadow_collapse_keeps_intentional_duplicate_occurrences() -> None:
+    """Не схлопывает два явно заказанных количества одного товара."""
+    source = "курица 5 кг, курица 3 кг"
+    payload = {
+        "intent": Intent.ADD_ITEMS,
+        "items": [
+            {"product_query": "курица", "quantity": 5, "unit": "кг", "source_line": source},
+            {"product_query": "курица", "quantity": 3, "unit": "кг", "source_line": source},
+        ],
+    }
+
+    restored = recover_omitted_explicit_items(payload, source)
+
+    assert [item["quantity"] for item in restored["items"]] == [5.0, 3.0]
+
+
+def test_shadow_collapse_removes_contained_query_from_one_source_occurrence() -> None:
+    """Удаляет только query-фрагмент той же товарной occurrence."""
+    source = "сыр пармезан 1 кг"
+    payload = {
+        "intent": Intent.ADD_ITEMS,
+        "items": [
+            {
+                "product_query": "сыр пармезан",
+                "quantity": 1,
+                "unit": "кг",
+                "source_line": source,
+            },
+            {"product_query": "пармезан", "quantity": 1, "unit": "кг", "source_line": source},
+        ],
+    }
+
+    restored = recover_omitted_explicit_items(payload, source)
+
+    assert [item["product_query"] for item in restored["items"]] == ["сыр пармезан"]
+
+
+def test_shadow_collapse_is_idempotent_for_comment_projection() -> None:
+    """Повторный shadow pass не меняет уже очищенный список."""
+    source = "сироп роза холодным 3 штуки"
+    payload = {
+        "intent": Intent.ADD_ITEMS,
+        "items": [
+            {
+                "product_query": "сироп роза",
+                "quantity": None,
+                "unit": "",
+                "comment": "холодным",
+                "source_line": source,
+            },
+            {
+                "product_query": "холодным",
+                "quantity": 3,
+                "unit": "шт",
+                "comment": ".",
+                "source_line": source,
+            },
+        ],
+    }
+
+    once = recover_omitted_explicit_items(payload, source)
+    twice = recover_omitted_explicit_items(once, source)
+
+    assert twice == once
+    assert len(twice["items"]) == 1

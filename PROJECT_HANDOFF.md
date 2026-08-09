@@ -3315,8 +3315,9 @@ credentials, authorization tokens) не логировать. В текущем 
 
 ## NEXT FUNCTIONAL STEP
 
-`Block B — shadow item collapse` после отдельного утверждения плана. Block A
-завершён; до следующего подтверждения код, каталог и state machine не менять.
+`Block C — packaging/quantity boundary` после отдельного утверждения плана.
+Block B завершён; до следующего подтверждения код, каталог и state machine не
+менять.
 
 ## FULL REGRESSION AUDIT — COMPLETE / FIXES PENDING
 
@@ -3367,21 +3368,34 @@ credentials, authorization tokens) не логировать. В текущем 
 Декомпозиция не продолжалась. Изменения ограничены существующими границами
 policy, parser normalization, engine routing и focused regression tests.
 
-## BLOCK B PLAN — READY / IMPLEMENTATION PENDING
+## BLOCK B — DONE
 
 - Owner: `recover_omitted_explicit_items()` в
   `src/restaurant_bot/integrations/openai_parsing.py`, после Block A
   source-evidence reconciliation и до `ParsedCommand.model_validate`.
-- MUST FIX: 7 shadow/connector/root/duplicate regression tests; conjoined-item
-  restoration и packaging quantity cases отмечены как conditional follow-ups.
-- Planned helpers: source-occurrence gate, trailing processing projection,
-  comment/global shadow cleanup, connector-only cleanup, strict duplicate pass,
-  contained-fragment pass. Существующие helpers нельзя включать без единой
-  ownership policy.
-- Защита: не удалять по token count, каталогу, blacklist или длине; сохранять
-  one-word products, две реальные позиции, intentional duplicates, quantity,
-  comments и source_line; обеспечить идемпотентность.
+- Порядок boundary: source occurrence reference → trailing processing projection
+  → local/global comment shadow → connector-only projection → strict duplicate →
+  contained query fragment → final item list.
+- Активированы/адаптированы только существующие helpers: `_apply_trailing_root_processing_comment`,
+  `collapse_comment_shadow_items`, `_remove_connector_fragment_items`,
+  `_collapse_redundant_ai_items`, `_remove_contained_query_fragments`; добавлен
+  локальный source-aware reconciliation для вариантов одной occurrence. Новые
+  model fields, prompts, PHOTO, catalog/matching и state machine не менялись.
+- MUST FIX: 7/7 passed. Runtime `_parse_text_once` integration, Block A соседние
+  тесты, one-word product, две реальные позиции, intentional duplicate и
+  idempotency regression tests passed.
+- Безопасность: удаление требует source-line/комментарий/global-scope или
+  structural source anchor; short/common token, catalog match и blacklist не
+  являются самостоятельным доказательством. Quantity не суммируется; перенос
+  возможен только при доказанном shadow ownership, units с конфликтом не
+  схлопываются. Порядок реальных items сохраняется.
+- Full pytest: BEFORE 1240 collected / 1201 passed / 39 failed; AFTER 1245
+  collected / 1214 passed / 31 failed. Все 7 MUST FIX стали зелёными; новых
+  падений относительно зафиксированного baseline не выявлено. Оставшиеся 31 —
+  прежние out-of-scope failures PHOTO, catalog, visible actions, packaging /
+  quantity semantics, omitted conjoined item, duplicate prompt, supplier и docs.
+- `test_partial_voice_model_result_restores_the_omitted_conjoined_item` оставлен
+  без изменения: Block B не добавляет реальный товар без детерминированного
+  доказательства отдельной occurrence. Packaging quantity semantics также
+  оставлены для Block C.
 - План: [docs/DATA_INTEGRITY_BLOCK_B_PLAN.md](docs/DATA_INTEGRITY_BLOCK_B_PLAN.md).
-- Следующий шаг: отдельное утверждение этого плана, затем только минимальная
-  реализация Block B. Block C, каталог, state machine и decomposition пока не
-  начинать.

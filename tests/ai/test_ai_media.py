@@ -419,6 +419,37 @@ def test_parse_text_runtime_reconciles_ai_comment_with_source(settings) -> None:
     assert command.items[0].unit == "кг"
 
 
+def test_parse_text_runtime_collapses_shadow_item(settings) -> None:  # type: ignore[no-untyped-def]
+    """Проверяет подключение shadow reconciliation через runtime boundary."""
+    source = "сироп роза холодным 3 штуки"
+    parsed = ParsedInputSchema(
+        intent=Intent.ADD_ITEMS,
+        items=[
+            ExtractedItem(
+                product_query="сироп роза",
+                quantity=None,
+                unit="",
+                comment="холодным",
+                source_line=source,
+            ),
+            ExtractedItem(
+                product_query="холодным",
+                quantity=3,
+                unit="шт",
+                comment=".",
+                source_line=source,
+            ),
+        ],
+    )
+    service = _service(settings, SimpleNamespace(responses=_Responses(parsed)))
+
+    command = service._parse_text_once(source)
+
+    assert len(command.items) == 1
+    assert command.items[0].quantity == 3
+    assert command.items[0].unit == "шт"
+
+
 def test_ai_global_comment_scope_filler_is_not_saved_as_local_comment(settings) -> None:  # type: ignore[no-untyped-def]
     """Удаляет разговорную связку общего комментария из комментария последнего товара."""
     source = "Сироп роза 5 штук, главное быстро, и сироп тархун — всё это дело на завтра."
