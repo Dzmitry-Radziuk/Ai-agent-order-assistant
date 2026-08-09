@@ -169,6 +169,13 @@ class ConversationEngine:
             CompatibilityAction.AMBIGUOUS,
         }:
             return self._resolve_pending_comment_scope(event, command, state, catalog)
+        if modal_decision.manual_details.action is CompatibilityAction.AMBIGUOUS:
+            current = state.current_item()
+            if current is not None:
+                return EngineResult(
+                    state=state,
+                    reply=issue_reply(current, self._item_index(state, current)),
+                )
         if (
             modal_decision.not_found.action is CompatibilityAction.AMBIGUOUS
             and command.intent is Intent.ADD_ITEMS
@@ -198,6 +205,7 @@ class ConversationEngine:
             and not modal_decision.not_found_interrupted
             and not modal_decision.duplicate_interrupted
             and not modal_decision.unit_mismatch_interrupted
+            and not modal_decision.manual_details_interrupted
         ):
             command = self._contextual_negative_command(command, event, state)
             command = self._contextual_quantity_command(command, event.text, state)
@@ -747,7 +755,11 @@ class ConversationEngine:
                         reply=product_add_sending_reply(),
                         enqueue_product_add=True,
                     )
-            if state.stage == SessionStage.AWAIT_MANUAL_DETAILS and state.current_issue_item_id:
+            if (
+                modal_decision.manual_details.action is CompatibilityAction.CONTINUE
+                and state.stage == SessionStage.AWAIT_MANUAL_DETAILS
+                and state.current_issue_item_id
+            ):
                 current = state.current_item()
                 if current and command.items:
                     current.source_query = command.items[0].product_query

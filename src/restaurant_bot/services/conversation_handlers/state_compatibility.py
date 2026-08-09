@@ -34,6 +34,7 @@ class CompatibilityContext(StrEnum):
 
     QUANTITY = "quantity"
     COMMENT_SCOPE = "comment_scope"
+    MANUAL_DETAILS = "manual_details"
     CANDIDATE_SELECTION = "candidate_selection"
     NOT_FOUND = "not_found"
     DUPLICATE_PENDING = "duplicate_pending"
@@ -89,6 +90,8 @@ class StateCompatibilityPolicy:
         context = context or self.context_for(state)
         if context is CompatibilityContext.COMMENT_SCOPE:
             return self._evaluate_comment_scope(command, state)
+        if context is CompatibilityContext.MANUAL_DETAILS:
+            return self._evaluate_manual_details(command, state)
         if context is CompatibilityContext.CANDIDATE_SELECTION:
             return self._evaluate_candidate_selection(command, state)
         if context is CompatibilityContext.NOT_FOUND:
@@ -119,12 +122,44 @@ class StateCompatibilityPolicy:
         # handler for short answers such as a bare number or unit phrase.
         return CompatibilityDecision(CompatibilityAction.CONTINUE)
 
+    def _evaluate_manual_details(
+        self,
+        command: ParsedCommand,
+        state: ConversationState,
+    ) -> CompatibilityDecision:
+        """Разделяет новое намерение и ответ на запрос нового названия."""
+        if (
+            state.stage is not SessionStage.AWAIT_MANUAL_DETAILS
+            or not state.current_issue_item_id
+            or state.current_item() is None
+        ):
+            return CompatibilityDecision(CompatibilityAction.NOT_APPLICABLE)
+
+        if command.intent is Intent.ADD_ITEMS:
+            if self._has_concrete_new_items(command):
+                return CompatibilityDecision(CompatibilityAction.INTERRUPT)
+            if len(command.items) == 1 and normalize_text(
+                command.items[0].product_query
+            ):
+                return CompatibilityDecision(CompatibilityAction.CONTINUE)
+            return CompatibilityDecision(CompatibilityAction.AMBIGUOUS)
+
+        if command.intent in {Intent.MANUAL_CURRENT, Intent.SKIP_CURRENT}:
+            return CompatibilityDecision(CompatibilityAction.CONTINUE)
+        if command.intent is Intent.UNKNOWN:
+            return CompatibilityDecision(CompatibilityAction.AMBIGUOUS)
+        if command.intent in self._INTERRUPT_INTENTS:
+            return CompatibilityDecision(CompatibilityAction.INTERRUPT)
+        return CompatibilityDecision(CompatibilityAction.INTERRUPT)
+
     def _evaluate_candidate_selection(
         self,
         command: ParsedCommand,
         state: ConversationState,
     ) -> CompatibilityDecision:
         """Разрешает выбор кандидата только в открытом контексте AMBIGUOUS."""
+        if state.stage is SessionStage.AWAIT_MANUAL_DETAILS:
+            return CompatibilityDecision(CompatibilityAction.NOT_APPLICABLE)
         item = state.current_item()
         if (
             item is None
@@ -338,6 +373,12 @@ class StateCompatibilityPolicy:
         if state.pending_comment_items:
             return CompatibilityContext.COMMENT_SCOPE
         item = state.current_item()
+        if (
+            state.stage is SessionStage.AWAIT_MANUAL_DETAILS
+            and state.current_issue_item_id
+            and item is not None
+        ):
+            return CompatibilityContext.MANUAL_DETAILS
         if item is not None and item.status is ItemStatus.AMBIGUOUS and item.candidates:
             return CompatibilityContext.CANDIDATE_SELECTION
         if item is not None and item.status is ItemStatus.NOT_FOUND:

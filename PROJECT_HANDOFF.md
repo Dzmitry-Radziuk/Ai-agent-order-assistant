@@ -1543,9 +1543,9 @@ NOT_FOUND, comments, quantity semantics, `_find_cart_item()` и `_advance()` в
 
 `NEXT FUNCTIONAL STEP`: **AWAIT_MANUAL_DETAILS**.
 
-## 30. Анализ AWAIT_MANUAL_DETAILS (implementation pending)
+## 30. AWAIT_MANUAL_DETAILS (implemented)
 
-`UNIT_MISMATCH` подтверждён как DONE. Текущий этап: **AWAIT_MANUAL_DETAILS — ANALYSIS COMPLETE / IMPLEMENTATION PENDING**.
+`UNIT_MISMATCH` подтверждён как DONE. Этап **AWAIT_MANUAL_DETAILS — DONE**.
 
 ### 1. Реальный flow и call sites
 
@@ -1594,7 +1594,7 @@ NOT_FOUND, comments, quantity semantics, `_find_cart_item()` и `_advance()` в
 
 Для TEXT `UpdateOrchestrator._parse_text_in_context()` (`orchestrator.py:1121-1172`) сначала вызывает `self.openai.parse_text(text)`, затем только при необходимости применяет pending-comment и visible-action contextual fallback. Для VOICE транскрипция (`input_recognition.py:120-130`) вызывает тот же callback `parse_text`, поэтому отдельного manual voice bypass нет. Callback обрабатывается отдельным явным путём.
 
-В `ConversationEngine.handle()` policy вычисляется до contextual rewrites (`engine.py:153-163`), но текущие `ModalRoutingDecision`/`CompatibilityContext` не имеют manual context. Поэтому concrete `ADD_ITEMS` не блокирует manual branch.
+До реализации policy вычислялась до contextual rewrites (`engine.py:153-163`), но `ModalRoutingDecision`/`CompatibilityContext` не имели manual context. Поэтому concrete `ADD_ITEMS` не блокировал manual branch. Теперь этот контекст вычисляется до status-based fallback и блокирует hijack.
 
 Фактическая проверка с `AWAIT_MANUAL_DETAILS` и старым `NOT_FOUND` item:
 
@@ -1605,7 +1605,7 @@ NOT_FOUND, comments, quantity semantics, `_find_cart_item()` и `_advance()` в
 | voice после транскрипции `пармезан три килограмма` | тот же результат, что и TEXT |
 | `ну потом` / `не знаю` / `как-нибудь` при искусственно сформированном `ADD_ITEMS` без quantity | старый item также перезаписывается новым текстом; это показывает защитный пробел, если upstream нарушил контракт `UNKNOWN` для случайной фразы |
 
-Первый неверный переход — `engine.py:750`, где manual branch игнорирует уже рассчитанное решение `StateCompatibilityPolicy(NOT_FOUND)=INTERRUPT` и забирает concrete `ADD_ITEMS` себе. До этой точки global parse и NOT_FOUND policy не теряют команду.
+Первый неверный переход был в `engine.py:750`, где manual branch игнорировал уже рассчитанное решение `StateCompatibilityPolicy(NOT_FOUND)=INTERRUPT` и забирал concrete `ADD_ITEMS` себе. Теперь branch выполняется только при `MANUAL_DETAILS=CONTINUE`; concrete команда проходит обычный ADD_ITEMS routing.
 
 ### 5. Уже существующие intents и фактические переходы
 
@@ -1623,11 +1623,11 @@ NOT_FOUND, comments, quantity semantics, `_find_cart_item()` и `_advance()` в
 | `EDIT_QUANTITY` | обычная quantity/edit ветка | может менять quantity текущего item и перевести его в `UNIT_MISMATCH`; это не manual answer |
 | `SELECT_CANDIDATE` | candidate handler | для manual item без candidates безопасно не выбирает старый вариант |
 
-Таким образом, strong independent intents уже маршрутизируются централизованно, но для manual stage отсутствует policy-gate перед `ADD_ITEMS` branch.
+Таким образом, strong independent intents маршрутизируются централизованно, а manual stage получил отдельный policy-gate перед `ADD_ITEMS` branch.
 
 ### 6. Random input, REJECT и data isolation
 
-При корректном global parse случайные фразы должны быть `UNKNOWN`; текущий engine для такого сообщения не создаёт новую позицию. Однако если upstream вернёт случайную фразу как `ADD_ITEMS` с одним exact query без quantity, существующая NOT_FOUND policy трактует её как manual continuation, и branch мутирует старый item. Policy не должна самостоятельно разбирать raw natural language; это должен оставаться контракт global parser. В implementation нужен безопасный `AMBIGUOUS`/retry для `UNKNOWN` и сохранение данных при невозможном manual ответе.
+При корректном global parse случайные фразы должны быть `UNKNOWN`; engine возвращает существующую unresolved-карточку без изменения draft. Policy не разбирает raw natural language. `UNKNOWN` получает `AMBIGUOUS`, а concrete `ADD_ITEMS` — `INTERRUPT`.
 
 Текущий concrete `ADD_ITEMS` нарушает изоляцию: новый product name/quantity/unit записываются в старый item, а новый item не получает собственного `CartItem`, candidates, catalog metadata или issue context. Старый item теряет исходный source query и получает чужие quantity/unit. Это именно тот data leak, который должен закрыть следующий функциональный diff.
 
@@ -1645,13 +1645,13 @@ Policy должна принимать готовый `ParsedCommand` и state, 
 
 TEXT и VOICE используют один global parse → policy → engine маршрут; отдельного manual voice bypass нет. Callback contract не меняется.
 
-`suspended_interaction` не нужен: незавершённый item и его candidates/status уже сохраняются в `ConversationState.cart`, а focus — в `current_issue_item_id/current_issue_kind`. После фактического independent add сейчас manual branch не даёт выполниться normal append. В нормальной ветке `_advance()` выбирает первый unresolved item, оставляет stage `COLLECTING` и возвращает его issue card; автоматического возврата в отдельный manual prompt нет. Это наблюдение относится к сохранённому `OPEN UX QUESTION — MODAL RESUME / FOCUS` и в этом анализе не меняется.
+`suspended_interaction` не нужен: незавершённый item и его candidates/status уже сохраняются в `ConversationState.cart`, а focus — в `current_issue_item_id/current_issue_kind`. После реализации independent add выполняется normal append. `_advance()` выбирает первый unresolved item, оставляет stage `COLLECTING` и возвращает его issue card; автоматического возврата в отдельный manual prompt нет. Это наблюдение относится к сохранённому `OPEN UX QUESTION — MODAL RESUME / FOCUS` и в этом этапе не менялось.
 
 Удаление текущего manual item через `REMOVE_ITEM` очищает `current_issue_item_id/current_issue_kind`, помечает item `SKIPPED` и вызывает pruning pending comment IDs. `manual_item_index` не является рабочей ссылкой и очищается общим transient reset. `OPEN ISSUE — AMBIGUOUS CART TARGET RESOLUTION` не затрагивался.
 
 ### 9. Regression plan перед implementation
 
-Добавить после отдельного подтверждения реализации:
+Добавлены regression tests:
 
 1. валидный manual answer без quantity → `CONTINUE`, меняется только выбранный item;
 2. второй допустимый manual action, если он подтверждён текущим flow → `CONTINUE`;
@@ -1664,4 +1664,26 @@ TEXT и VOICE используют один global parse → policy → engine �
 9. callback `skip/back` сохраняет отдельный explicit UI path;
 10. `_advance()`/resume behavior зафиксирован отдельным тестом, но не изменён.
 
-На этом этапе не менялись parser, prompts, matching, предыдущие modal states, quantity semantics, `_advance()`, `_find_cart_item()`, persistence, transport или MAX support. Известные test debt и открытые UX/architecture вопросы сохранены. Следующий функциональный этап остаётся `AWAIT_MANUAL_DETAILS`; implementation ожидает отдельного подтверждения.
+На этом этапе не менялись parser, prompts, matching, предыдущие modal states, quantity semantics, `_advance()`, `_find_cart_item()`, persistence, transport или MAX support. `suspended_interaction` не добавлялся.
+
+### 10. Результаты реализации
+
+- Добавлен `CompatibilityContext.MANUAL_DETAILS`.
+- `context_for()` проверяет active manual prompt до `CANDIDATE_SELECTION`, `NOT_FOUND`, `DUPLICATE_PENDING`, `UNIT_MISMATCH` и quantity contexts.
+- Valid manual rename остаётся `CONTINUE`.
+- Concrete `ADD_ITEMS` (`пармезан 3 кг`, `добавь укроп 2 кг`) получает `INTERRUPT` и создаёт отдельный `CartItem`.
+- Manual item и его candidates/status/comment/quantity сохраняются при interrupt.
+- Candidate fallback не запускается поверх manual prompt.
+- TEXT и VOICE используют один policy path.
+- `SHOW_CART`, `THANKS`, `REMOVE_ITEM`, callbacks `skip/back` используют существующие маршруты.
+- `_advance()` и `_find_cart_item()` не менялись.
+
+Проверки:
+
+- manual и связанные modal/conversation regression tests — passed;
+- `tests/conversation` — baseline: 3 известных failure, новых падений от этого diff не обнаружено;
+- `tests/input/test_voice_input_contract.py` — 9 известных dirty failures, не связанных с этим diff;
+- `ruff check` изменённых модулей и теста — passed;
+- `git diff --check` — passed.
+
+`NEXT FUNCTIONAL STEP`: **AWAIT_PRODUCT_ADD_DETAILS**.
