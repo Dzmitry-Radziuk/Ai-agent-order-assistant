@@ -3438,12 +3438,18 @@ policy, parser normalization, engine routing и focused regression tests.
   duration 15.47s. Рост collection на 7 — это добавленные Block C regression
   tests; сохранённый результат 1245/1214/31 был baseline до Block C и не является
   свежим post-Block-C результатом.
-- Block C исправил 5 ранее failing MUST FIX: ambiguous weight pair, from-to range,
-  catalog packaging role with separate order quantity, packaging preference и
-  ambiguous packaging role. Новых failure categories относительно baseline не
-  обнаружено; оставшиеся падения относятся к прежним PHOTO, catalog/matching,
-  visible-action, comment/UX, shadow-count, omitted-conjoined-item, supplier и
-  stale docs-contract сценариям.
+- Exact nodeid delta против Block B full-suite baseline: исправлены 5 ранее
+  failing MUST FIX — `test_voice_ambiguous_weight_pair_clears_model_quantity`,
+  `test_voice_from_to_range_clears_model_quantity`,
+  `test_catalog_packaging_role_is_preserved_when_order_quantity_is_separate`,
+  `test_packaging_preference_stays_in_full_comment` и
+  `test_ambiguous_packaging_role_is_not_moved_between_fields`.
+- Exact NEW/REGRESSED set содержит 2 nodeid:
+  `tests/conversation/test_comment_handling.py::test_recovered_local_comments_reach_each_own_order_row`
+  и `tests/input/test_voice_input_contract.py::test_local_comments_are_recovered_when_ai_leaves_them_only_in_source_lines`.
+  Поэтому арифметика: 31 − 5 + 2 = 28. Остальные падения относятся к прежним
+  PHOTO, catalog/matching, visible-action, comment/UX, shadow-count,
+  omitted-conjoined-item, supplier и stale docs-contract сценариям.
 - Block A и Block B сохранены; PHOTO prompts/normalizer, catalog, matching,
   state machine, submission, logging и decomposition не менялись.
 - Проверки: Ruff check passed; изменённые Block C файлы проходят Ruff format;
