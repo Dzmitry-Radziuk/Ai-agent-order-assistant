@@ -2448,3 +2448,283 @@ callbacks.
 `SUBMISSION_FAILED` — отдельный analysis/implementation этап. Не смешивать его с
 текущим `AWAIT_SUBMIT_CONFIRM` и не менять retry/uncertain submission semantics до
 нового согласования.
+
+## SUBMISSION_FAILED — ANALYSIS COMPLETE / IMPLEMENTATION PENDING
+
+Анализ выполнен на `e304ce85410ace02d8bb47c5c982684dcf2b5b11`, ветка
+`decompose_bot`. Application code не менялся.
+
+### Две разные причины входа в SUBMISSION_FAILED
+
+#### Обычный повторяемый failure: `SubmissionService._fail()`
+
+Внешний worker вызывает `_fail()` только при `report_failure=True` после исчерпания
+своих Celery retry. До этого временная ошибка сохраняется через
+`_remember_transient_error()` и task автоматически повторяется.
+
+Фактический контракт `_fail()`:
+
+- `state.stage = SUBMISSION_FAILED`;
+- `state.status` не изменяется. После `_prepare_submission()` это обычно остаётся
+  `submitting`, а не отдельный failure status;
+- `state.pending_submission` сохраняется;
+- `pending_submission.last_error` заполняется;
+- `pending_submission.failed_stage` не заполняется и обычно остаётся пустым;
+- `SubmissionRecord.last_error` заполняется;
+- в `OrderEvent` добавляется `submission_failed` со статусом `error`;
+- `SubmissionRecord` не имеет отдельной колонки `failed_stage`; это поле есть только
+  у `PendingSubmission`, сохранённого в session state.
+
+Это обычный retryable-контекст только по отсутствию подтверждённого dispatch
+uncertain. Сам текст ошибки не является источником решения.
+
+#### Неопределённый dispatch: `SubmissionService._mark_dispatch_uncertain()`
+
+Этот путь запускается либо при обнаружении в записи
+`dispatch_started=True and dispatch_completed=False`, либо после исключения из
+`send_order_submission()`.
+
+Фактический контракт:
+
+- `state.stage = SUBMISSION_FAILED`;
+- `state.status = dispatch_uncertain`;
+- `pending_submission.failed_stage = dispatch_uncertain`;
+- `pending_submission.last_error` заполняется;
+- `SubmissionRecord.dispatch_started` остаётся true,
+  `dispatch_completed` остаётся false;
+- `SubmissionRecord.last_error` заполняется;
+- в `OrderEvent` добавляется `submission_dispatch_uncertain` со статусом
+  `uncertain`;
+- `_send_dispatch_uncertain_once()` отправляет предупреждение один раз и отмечает
+  `dispatch_uncertain_notified`.
+
+Это не обычный failure и не должно попадать в generic retry policy.
+
+### Failure phase matrix
+
+| Точка ошибки | Stage/status | Pending/record checkpoints | Повтор | Риск |
+|---|---|---|---|---|
+| До `increment_catalog_quantities` | `SUBMISSION_FAILED`, status от предыдущего state | `catalog_updated=false`, остальные false; pending сохранён | повторяет snapshot | безопасно, если side effect ещё не начался |
+| Во время catalog update до checkpoint | тот же обычный `_fail` | `catalog_updated=false` даже если внешний вызов частично применился | повторяет increment | **не доказано безопасно**: timeout после применения может дать повторное изменение |
+| После catalog checkpoint, во время cache invalidation | ordinary failure | `catalog_updated=true` | increment пропускается | side effect каталога не повторяется |
+| Во время recalculation | ordinary failure | `catalog_updated=true`, `recalc_done=false` | повторяет recalculation | повторный recalc, но не POST |
+| После `recalc_done`, до `dispatch_started` | ordinary failure | catalog/recalc true, dispatch false | пропускает завершённые этапы | безопасно для внешней заявки |
+| После `_mark_dispatch_started()` до ответа POST | `SUBMISSION_FAILED`, `dispatch_uncertain` | started true, completed false | запрещён | результат POST неизвестен, duplicate order возможен |
+| После ответа POST, но при ошибке `_mark_dispatch_completed()` | обычный `_fail` на уровне engine/task | started true, completed может остаться false | worker повторно увидит started/incomplete и переведёт в uncertain до POST | повторный POST блокируется, но UI некоторое время обычный |
+| После `dispatch_completed`, при ошибке finalize | ordinary `_fail` | dispatch completed true | пропускает POST и повторяет finalize | внешняя заявка не дублируется |
+| После finalize, при Telegram completion notification | stage не становится failed | record finalized true, completion_notified false; pending уже очищен | `_load_unnotified_completion()` повторяет только уведомление | order не дублируется |
+
+`history_written` существует в модели `SubmissionRecord`, но текущий
+`SubmissionService.submit()` его не устанавливает и отдельной history-фазы в этом
+pipeline нет.
+
+### Необратимая граница dispatch
+
+Точный порядок:
+
+`_mark_dispatch_started()` → commit `dispatch_started=true` → HTTP POST →
+`_mark_dispatch_completed()`.
+
+Перед POST worker повторно читает запись. Если started уже true, а completed false,
+он вызывает `_mark_dispatch_uncertain()` и не вызывает `prepare_order_submission()` или
+`send_order_submission()` повторно. Поэтому safety не зависит только от кнопки:
+
+- `pending_submission.failed_stage == dispatch_uncertain` блокирует
+  `_prepare_submission()` ещё в engine;
+- `SubmissionService.submit()` повторно блокирует POST по `SubmissionRecord`;
+- fresh `v2:submit` при dispatch uncertain не enqueue-ит задачу;
+- stale callback отбрасывается до state mutation;
+- worker task после dispatch uncertain не получает исключение от самого POST и не
+  запускает автоматический повтор.
+
+Остаётся UI-особенность: worker отправляет uncertain-card отдельным сообщением и не
+обновляет `ui_revision`/`visible_actions` в session. Старая кнопка submit может
+остаться технически доступной, но её fresh callback снова блокируется pending marker,
+а stale callback — revision guard.
+
+### UI и callback contracts
+
+Обычный failure:
+
+- текст: `⚠️ <b>Отправка не завершена</b>`, номер заявки и фраза о пропущенных
+  завершённых этапах;
+- кнопки: `Повторить отправку` → `v2:submit`, `К черновику` → `v2:back`;
+- `_callback_with_revision()` добавляет `:rN`.
+
+Dispatch uncertain:
+
+- текст: `⚠️ <b>Нужно проверить отправку</b>`, order code и явный запрет повторной
+  отправки;
+- `rows=[]`, retry button отсутствует;
+- order code показывается пользователю;
+- state остаётся `SUBMISSION_FAILED`/`dispatch_uncertain`;
+- pending snapshot сохраняется.
+
+### Retry button и snapshot reuse
+
+Fresh `v2:submit:rN` проходит `parse_callback()` как `SUBMIT_AS_IS`, затем:
+
+`ConversationEngine` → `FinalReviewHandler.SUBMIT_AS_IS` → `_prepare_submission()` →
+если `pending_submission.order_no` и `rows` существуют, используется тот же order
+number и тот же snapshot → `SUBMITTING` → `enqueue_submission=True` →
+`SubmissionService.submit()`.
+
+Новый order number и rows при retry не создаются. Checkpoint reuse обеспечивается в
+`SubmissionService.submit()`:
+
+- `catalog_updated=true` пропускает повторный catalog increment;
+- `recalc_done=true` пропускает recalculation;
+- `dispatch_completed=true` пропускает POST и использует сохранённый external order;
+- `order_no` и `rows` берутся из `PendingSubmission`/`SubmissionRecord.payload`.
+
+### Первый unsafe transition: failure → back/edit → retry frozen snapshot
+
+Это наиболее опасный подтверждённый переход текущего кода.
+
+1. При обычном failure `pending_submission` сохраняется с исходными rows.
+2. Callback `v2:back` возвращает `cart_reply()`, но оставляет stage
+   `SUBMISSION_FAILED` и pending snapshot.
+3. Текстовая команда «назад» ставит `COLLECTING`, очищает только transient dialog
+   fields и также сохраняет pending snapshot.
+4. Пользователь меняет количество или удаляет/добавляет товар.
+5. Fresh `v2:submit` снова вызывает `_prepare_submission()` и enqueue-ит старые rows.
+
+Black-box reproduction на текущем checkout: в cart quantity была изменена с `2` на
+`9`, но после retry `pending_submission.rows` сохранил `Кол-во=2`, order number
+остался прежним, `stage=SUBMITTING`, `enqueue_submission=True`.
+
+Следствие: retry после редактирования отправляет не текущий cart, а замороженный
+snapshot. Если `catalog_updated=false`, retry дополнительно может повторить catalog
+side effect по старым rows. Это не duplicate POST при dispatch uncertain, но это
+нарушение ожидаемой связи «retry → актуальный черновик» и потенциальный duplicate
+catalog increment после неясного ответа Google Sheets.
+
+### BACK, независимые команды и новая заявка
+
+Для обычного failure и dispatch uncertain текущий engine фактически ведёт себя так:
+
+- `SHOW_CART`, `HELP`, `THANKS`, `ORDER_STATUS` не очищают pending snapshot;
+- `ADD_ITEMS`, `REMOVE_ITEM`, `EDIT_QUANTITY` меняют текущий cart, но не меняют
+  `pending_submission`;
+- `ADD_MORE` переводит stage в `COLLECTING`, pending сохраняется;
+- callback `BACK` оставляет `SUBMISSION_FAILED`, текстовый `BACK` переводит в
+  `COLLECTING`;
+- `START_NEW_ORDER` и `CLEAR_CART` создают `_fresh_order_state()`, очищают cart и
+  pending submission из session state;
+- `SubmissionRecord` и `OrderEvent` при этом не удаляются, поэтому audit trail
+  сохраняется;
+- для dispatch uncertain после new/clear state теряет удобный pending marker, но
+  database record с `dispatch_started=true/completed=false` остаётся защитой от POST.
+
+Отзыв доступа проверяется в `SubmissionService.submit()` до основного `try`. При
+отказе доступа отправляется access-disabled reply, но stage/status не переводятся в
+`SUBMISSION_FAILED`; pending остаётся. Это отдельный эксплуатационный gap, не обход
+access protection.
+
+### TEXT / VOICE / `/submit` фактическая маршрутизация
+
+Deterministic `infer_intent()` сейчас возвращает:
+
+| Фраза | Intent | Текущий результат в обычном `SUBMISSION_FAILED` |
+|---|---|---|
+| «повтори» | `ADD_ITEMS` с псевдопозицией | пытается добавить/сопоставить новый item; retry не выполняется |
+| «повтори отправку» | `SUBMIT_AS_IS` | retry snapshot, enqueue |
+| «отправь ещё раз» | `ADD_ITEMS` с псевдопозицией | не retry, возможна лишняя unresolved позиция |
+| «отправляй» | `SUBMIT_REQUEST` | показывает final review, enqueue нет |
+| «да» | `CONFIRM` + `AFFIRM` | generic confirm/current-item route, enqueue нет |
+| «попробуй снова» | `ADD_ITEMS` с псевдопозицией | не retry |
+| `/submit` | `SUBMIT_REQUEST` | показывает final review, enqueue нет |
+
+Для VOICE после transcription используется тот же parser/engine contract; на stage
+`SUBMISSION_FAILED` submit-specific voice fallback не добавляет отдельного retry
+правила. Поэтому misclassification коротких retry-фраз переносится и на voice.
+
+При `dispatch_uncertain` ни одна из этих фраз не выполняет повторный POST:
+`SUBMIT_AS_IS` блокируется `_prepare_submission()`, `SUBMIT_REQUEST` только
+показывает review, а псевдотоварные `ADD_ITEMS` могут менять cart, но не запускают
+внешнюю отправку.
+
+### Completion notification и Celery
+
+`submit_order` использует `autoretry_for=(Exception,)`, backoff/jitter и до восьми
+повторов. `report_failure=True` включается только на финальной попытке; поэтому
+обычная failure-card появляется после worker retries, а не после первой временной
+ошибки.
+
+После `_finalize()` локальная переменная `finalized=True` выставляется до отправки
+Telegram completion card. Ошибка Telegram не вызывает `_fail()`: сохраняется
+transient error, а следующий worker run находит
+`finalized=True, completion_notified=False` через `_load_unnotified_completion()` и
+повторяет только уведомление. Внешняя заявка не создаётся повторно.
+
+### Нужен ли `CompatibilityContext.SUBMISSION_FAILED`
+
+Нужен один отдельный контекст `CompatibilityContext.SUBMISSION_FAILED`, но не два
+параллельных policy-механизма. Внутри него достаточно structured mode:
+
+- известный обычный failure: `stage=SUBMISSION_FAILED` и
+  `pending_submission.failed_stage != dispatch_uncertain`;
+- uncertain: `state.status=dispatch_uncertain` или
+  `pending_submission.failed_stage=dispatch_uncertain`;
+- окончательная защита от crash-gap остаётся в `SubmissionRecord` перед POST.
+
+Policy не должна анализировать `last_error`/exception text. При отсутствии marker в
+session, но наличии `dispatch_started=true/completed=false` только worker может
+доказательно восстановить режим; это архитектурный gap между DB checkpoint и
+session state, который нельзя закрывать regex-правилом.
+
+Предлагаемая матрица будущей policy:
+
+| Mode | Команда | Решение |
+|---|---|---|
+| ordinary failure | `SUBMIT_AS_IS`/retry callback | `CONTINUE` к frozen-snapshot retry |
+| ordinary failure | `BACK`, `SHOW_CART` | `CONTINUE` navigation без enqueue |
+| ordinary failure | status/help/thanks | `INTERRUPT` в обычный routing |
+| ordinary failure | add/edit/remove | `INTERRUPT`, но отдельно решить invalidation snapshot |
+| ordinary failure | unknown/uncertain | `AMBIGUOUS`, повторить failure card |
+| dispatch uncertain | любой submit/retry-like intent | `REJECT`, никогда не enqueue |
+| dispatch uncertain | back/status/help/new order | безопасная navigation без очистки audit |
+| dispatch uncertain | add/edit/remove | `INTERRUPT`, marker/audit не терять |
+
+### Implementation boundary
+
+Минимальный будущий diff может начинаться с `StateCompatibilityPolicy`,
+`ModalRoutingDecision`, `ConversationEngine` и focused tests. Но policy-only fix
+недостаточен для естественных текстовых retry-фраз: текущий deterministic parser
+возвращает «повтори», «отправь ещё раз» и «попробуй снова» как `ADD_ITEMS` с
+псевдотоварами. Такую семантику нельзя безопасно восстановить в policy без raw
+natural-language parsing. Потребуется либо исправление глобального structured
+parser/intent contract, либо безопасный contextual visible-action fallback до
+candidate/item routing.
+
+Отдельно потребуется решить snapshot invariant: после `BACK`/редактирования либо
+замораживать cart от retry, либо явно инвалидировать `PendingSubmission` и строить
+новый snapshot/order number. Нельзя автоматически пересобирать snapshot после
+`catalog_updated=true`, иначе повторится catalog side effect.
+
+### Future regression plan
+
+Добавить только на implementation этапе:
+
+- обычный failure: fresh retry callback, text/voice retry phrases, back, show cart,
+  status, thanks/help, add/edit/remove, new order, clear cart;
+- snapshot: retry без изменений, retry после quantity/edit/remove/add, сохранение
+  order number и rows, invalidation policy;
+- checkpoints: ошибка до catalog update, во время catalog update, после catalog,
+  после recalc, до dispatch, после dispatch completed, finalize и notification;
+- dispatch uncertain: отсутствие retry button, text/voice «повтори», `/submit`,
+  fresh/stale `v2:submit`, отсутствие второго POST;
+- access revoked, Celery retry interaction, completion-notification recovery и
+  audit trail после new/clear.
+
+### Итог анализа
+
+- ordinary `_fail()` и `_mark_dispatch_uncertain()` — два разных state contracts;
+- hard safety после `dispatch_started` уже присутствует в worker и engine;
+- первый подтверждённый unsafe transition — retry frozen snapshot после BACK/edit;
+- один `SUBMISSION_FAILED` context со structured mode достаточен, два contexts не
+  нужны;
+- parser misclassification коротких retry-фраз — доказанный blocker для одного
+  только policy diff;
+- notification failure после finalize не является `SUBMISSION_FAILED`;
+- `SUBMISSION_FAILED` implementation не начиналась.
