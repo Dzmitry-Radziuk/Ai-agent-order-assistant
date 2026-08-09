@@ -295,7 +295,7 @@ class OrderReviewService:
                 chat_id,
                 BotReply(
                     text=(
-                        f"✅ <b>Заявка отправлена</b>\n\nНомер заявки: "
+                        f"<i>Заявка отправлена</i>\n\nНомер заявки: "
                         f"{escape(result.order_number)}\nТоваров: {result.base_rows}"
                     ),
                     edit_message_id=state.ui_message_id,

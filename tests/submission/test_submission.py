@@ -33,7 +33,7 @@ def test_submission_success_card_matches_n8n() -> None:
     """Проверяет, что отправка заявки успех карточка соответствует n8n."""
     reply = submission_success_reply(type("State", (), {"ui_revision": 4})(), "20260722-001")
 
-    assert reply.text == "✅ <b>Заявка отправлена</b>\n\nНомер заявки: 20260722-001"
+    assert reply.text == "<i>Заявка отправлена</i>\n\nНомер заявки: 20260722-001"
     assert [(button.text, button.callback_data) for row in reply.rows for button in row] == [
         ("Проверить статус", "v2:orders:r4"),
         ("Новая заявка", "v2:clear:r4"),
@@ -644,7 +644,7 @@ def test_local_saved_reply_is_explicit_and_has_only_new_order_button() -> None:
     )
 
     assert reply.text == (
-        "✅ <b>Заявка записана</b>\n\n"
+        "<i>Заявка записана</i>\n\n"
         "Товары добавлены в таблицу заказа, расчёты обновлены.\n"
         "Заявку поставщикам отправит ответственный сотрудник."
     )

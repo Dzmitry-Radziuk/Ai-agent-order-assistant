@@ -312,7 +312,7 @@ def test_product_add_success_is_shown_before_a_fresh_draft() -> None:
     confirmation = calls[0].args[1]
     draft = calls[1].args[1]
     assert confirmation.edit_message_id == 55
-    assert confirmation.text == ("<b>Запрос менеджеру отправлен</b>\n\nКреветки королевские")
+    assert confirmation.text == ("<i>Запрос менеджеру отправлен</i>\n\nКреветки королевские")
     assert draft.edit_message_id is None
     assert "<b>Черновик заявки</b>" in draft.text
     assert "Запросы снабженцу: 1" in draft.text

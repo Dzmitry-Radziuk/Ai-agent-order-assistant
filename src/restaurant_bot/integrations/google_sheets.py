@@ -15,7 +15,12 @@ from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_ex
 
 from restaurant_bot.config import Settings
 from restaurant_bot.domain.models import CatalogProduct, DepartmentQuantities
-from restaurant_bot.services.text import clean_text, normalize_text, to_float
+from restaurant_bot.services.text import (
+    clean_text,
+    normalize_department,
+    normalize_text,
+    to_float,
+)
 
 SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
 
@@ -209,7 +214,7 @@ class GoogleSheetsGateway:
         comments: dict[str, str] = {}
         for row in rows:
             product_id = clean_text(row.get("ID товара"))
-            department = clean_text(row.get("_department")) or self.settings.default_department
+            department = normalize_department(row.get("_department")) or self.settings.default_department
             quantity = to_float(row.get("Кол-во", row.get("Количество"))) or 0
             if product_id and quantity:
                 increments[(product_id, department)] += quantity

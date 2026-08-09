@@ -135,10 +135,10 @@ def test_voice_comment_shadow_is_not_created_as_a_separate_product() -> None:
     restored = recover_omitted_explicit_items(payload, "сироп роза холодным 3 штуки")
 
     assert len(restored["items"]) == 1
-    assert restored["items"][0]["product_query"] == "сироп роза"
+    assert restored["items"][0]["product_query"] == "сироп роза холодным"
     assert restored["items"][0]["quantity"] == 3
     assert restored["items"][0]["unit"] == "шт"
-    assert restored["items"][0]["comment"] == "холодным"
+    assert restored["items"][0]["comment"] == ""
 
 
 def test_real_audio_cross_item_shadow_is_removed() -> None:
@@ -220,11 +220,11 @@ def test_global_comment_is_not_duplicated_as_a_product() -> None:
     assert restored["global_comment"] == global_comment
     assert [item["product_query"] for item in restored["items"]] == [
         "сироп роза",
-        "говядина",
+        "говядина без кожи",
     ]
     assert [item["comment"] for item in restored["items"]] == [
         "только охлаждённый",
-        "без кожи",
+        "",
     ]
 
 
@@ -255,10 +255,11 @@ def test_local_comments_are_recovered_when_ai_leaves_them_only_in_source_lines()
     restored = recover_omitted_explicit_items(payload, source)
 
     assert restored["global_comment"] == "желательно на завтра"
-    assert [item["comment"] for item in restored["items"]] == [
-        "в бутылках",
-        "в банках",
+    assert [item["product_query"] for item in restored["items"]] == [
+        "срп трхн в бутылках",
+        "срп роза в банках",
     ]
+    assert [item["comment"] for item in restored["items"]] == ["", ""]
 
 
 def test_shared_source_line_is_not_guessed_as_an_item_comment() -> None:
@@ -314,8 +315,10 @@ def test_packaging_connector_is_not_created_as_a_product() -> None:
 
     restored = recover_omitted_explicit_items(payload, source)
 
-    assert [item["product_query"] for item in restored["items"]] == ["Горчица зернистая"]
-    assert restored["items"][0]["comment"] == "на 170 г"
+    assert [item["product_query"] for item in restored["items"]] == [
+        "Горчица зернистая на 170 г стб россия"
+    ]
+    assert restored["items"][0]["comment"] == ""
 
 
 def test_root_cut_requirement_is_applied_to_the_products_instead_of_becoming_one() -> None:

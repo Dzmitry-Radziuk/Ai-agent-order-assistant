@@ -5,6 +5,8 @@ __pycache__/
 .pytest_cache/
 .pytest-run/
 test-artifacts/
+.test-artifacts/
+test-runtime/
 .tmp/
 .planning/
 .mypy_cache/

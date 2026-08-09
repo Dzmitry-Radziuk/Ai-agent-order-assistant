@@ -197,3 +197,11 @@ def test_item_comment_is_italic_and_rendered_under_product_in_draft_and_final_re
     assert expected in final.text
     assert draft.text.index("Сироп Роза") < draft.text.index(expected)
     assert final.text.index("Сироп Роза") < final.text.index(expected)
+
+
+def test_comment_action_notice_is_italic_without_success_icon() -> None:
+    """Показывает уведомление о комментарии без галочки и лишнего акцента."""
+    reply = cart_reply(ConversationState(), notice="Комментарий добавлен")
+
+    assert "<i>Комментарий добавлен</i>" in reply.text
+    assert "✅" not in reply.text

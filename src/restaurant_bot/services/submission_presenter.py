@@ -16,7 +16,7 @@ def _callback_with_revision(state: Any, callback_data: str) -> str:
 def submission_success_reply(state: Any, order_no: str) -> BotReply:
     """Формирует подтверждение успешной заявки."""
     return BotReply(
-        text=f"✅ <b>Заявка отправлена</b>\n\nНомер заявки: {escape(order_no)}",
+        text=f"<i>Заявка отправлена</i>\n\nНомер заявки: {escape(order_no)}",
         rows=[
             [
                 Button(
@@ -39,7 +39,7 @@ def submission_local_saved_reply(state: Any, order_no: str) -> BotReply:
     del order_no
     return BotReply(
         text=(
-            "✅ <b>Заявка записана</b>\n\n"
+            "<i>Заявка записана</i>\n\n"
             "Товары добавлены в таблицу заказа, расчёты обновлены.\n"
             "Заявку поставщикам отправит ответственный сотрудник."
         ),

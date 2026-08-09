@@ -372,8 +372,8 @@ def test_visible_action_ai_rejects_hidden_or_uncertain_action(
     )
 
 
-def test_ai_item_supplier_comment_is_preserved_as_working_item_comment(settings) -> None:  # type: ignore[no-untyped-def]
-    """Проверяет, что ИИ позиция поставщик комментарий является сохраняется как working позиция комментарий."""
+def test_ai_invented_supplier_comment_is_not_preserved(settings) -> None:  # type: ignore[no-untyped-def]
+    """Не сохраняет комментарий поставщику, которого не было в исходной фразе."""
     parsed = ParsedInputSchema(
         intent=Intent.ADD_ITEMS,
         global_comment="на завтра",
@@ -392,8 +392,8 @@ def test_ai_item_supplier_comment_is_preserved_as_working_item_comment(settings)
     command = service.parse_text("Сироп роза 5 шт. Всё на завтра")
 
     assert command.global_comment == "на завтра"
-    assert command.items[0].comment == "охлаждённым"
-    assert command.items[0].user_comment_to_supplier == "охлаждённым"
+    assert command.items[0].comment == ""
+    assert command.items[0].user_comment_to_supplier == ""
 
 
 def test_ai_global_comment_scope_filler_is_not_saved_as_local_comment(settings) -> None:  # type: ignore[no-untyped-def]
@@ -692,8 +692,8 @@ def test_conversational_product_leadin_is_removed_by_semantic_parser(settings) -
     command = service.parse_text("Мне нужна свежая кукуруза 10 штук.")
 
     assert len(responses.calls) == 1
-    assert command.items[0].product_query == "кукуруза"
-    assert command.items[0].comment == "свежая"
+    assert command.items[0].product_query == "свежая кукуруза"
+    assert command.items[0].comment == ""
 
 
 def test_conversational_product_leadin_is_not_recovered_as_comment(settings) -> None:  # type: ignore[no-untyped-def]
@@ -865,8 +865,8 @@ def test_numeric_range_with_supplier_qualifier_uses_semantic_ai(settings) -> Non
     command = service.parse_text(text)
 
     assert command.items[0].supplier_hint == "Тринца"
-    assert command.items[0].product_query == "Форель филе свежая 0,8-1,2 килограмма"
-    assert command.items[0].comment == "зачищенная"
+    assert command.items[0].product_query == "Форель филе свежая 0,8-1,2 килограмма зачищенная"
+    assert command.items[0].comment == ""
     assert (command.items[0].quantity, command.items[0].unit) == (5, "кг")
 
 

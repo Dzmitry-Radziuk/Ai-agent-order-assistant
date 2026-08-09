@@ -1,5 +1,6 @@
 from restaurant_bot.domain.models import (
     ConversationState,
+    ExtractedItem,
     InputKind,
     Intent,
     ParsedCommand,
@@ -266,3 +267,39 @@ def test_short_sheet_review_voice_transcription_never_selects_a_button() -> None
     )
 
     assert command.intent is Intent.UNKNOWN
+
+
+def test_concrete_product_command_wins_over_visible_action_fallback() -> None:
+    """Не заменяет распознанный товар действием видимой кнопки."""
+
+    class ProductAI:
+        """Возвращает конкретный товар и запрещает fallback-вызов кнопки."""
+
+        def parse_text(self, text: str) -> ParsedCommand:
+            """Возвращает структурированную новую позицию."""
+            return ParsedCommand(
+                intent=Intent.ADD_ITEMS,
+                text=text,
+                items=[ExtractedItem(product_query="пармезан", quantity=3, unit="кг")],
+            )
+
+        def choose_visible_action(
+            self,
+            text: str,
+            screen_text: str,
+            actions: list[dict[str, str]],
+        ) -> str:
+            """Падает, если concrete product был ошибочно заменён кнопкой."""
+            raise AssertionError("visible action fallback must not run for a product")
+
+    orchestrator = UpdateOrchestrator.__new__(UpdateOrchestrator)
+    orchestrator.openai = ProductAI()
+    state = ConversationState(
+        stage=SessionStage.AWAIT_UNIT_QUANTITY,
+        visible_actions=[{"label": "Добавить ещё товары", "action_id": "v2:add"}],
+    )
+
+    command = orchestrator._parse_text_in_context("пармезан 3 кг", state)
+
+    assert command.intent is Intent.ADD_ITEMS
+    assert command.items[0].product_query == "пармезан"

@@ -2,16 +2,27 @@ from __future__ import annotations
 
 import re
 
-from restaurant_bot.domain.models import ExtractedItem, Intent, ParsedCommand
+from restaurant_bot.domain.models import Intent, ParsedCommand
+from restaurant_bot.services.product_parser import _extract_global_comment
+from restaurant_bot.services.product_parser import (
+    has_explicit_global_comment_scope as _has_explicit_global_comment_scope,
+)
+from restaurant_bot.services.product_parser import (
+    parse_product_lines as _parse_product_lines,
+)
+from restaurant_bot.services.product_parser import (
+    parse_quantity_unit as _parse_quantity_unit,
+)
 from restaurant_bot.services.text import (
     NUMBER_WORDS,
     UNIT_ALIASES,
     clean_text,
     normalize_text,
-    normalize_unit,
-    numeric_range_spans,
-    parse_number_words,
 )
+
+has_explicit_global_comment_scope = _has_explicit_global_comment_scope
+parse_product_lines = _parse_product_lines
+parse_quantity_unit = _parse_quantity_unit
 
 _COMMANDS: list[tuple[Intent, re.Pattern[str]]] = [
     (
@@ -946,6 +957,161 @@ def _parse_edit_quantity(text: str) -> ParsedCommand | None:
     return None
 
 
+_COMMENT_NOUN_RE = r"(?:комментар\w*|примечан\w*)"
+_COMMENT_ACTION_RE = r"(?:добав\w*|внес\w*|запиш\w*|укаж\w*|измени\w*|поправ\w*)"
+_COMMENT_REMOVE_ACTION_RE = r"(?:убер\w*|удал\w*|сотр\w*|очист\w*)"
+_COMMENT_GLOBAL_SCOPE_RE = (
+    r"(?:для\s+всех\s+(?:товар\w*|позици\w*)|"
+    r"всем\s+(?:товар\w*|позици\w*)|"
+    r"ко?\s+всем\s+(?:товар\w*|позици\w*)|"
+    r"у\s+всех\s+(?:товар\w*|позици\w*)|"
+    r"для\s+всей\s+(?:заявк\w*|заказ\w*)|"
+    r"ко?\s+всей\s+(?:заявк\w*|заказ\w*))"
+)
+_COMMENT_WISH_RE = re.compile(
+    r"\b(?:желательн\w*|нужн\w*|обязательн\w*|только|именно|"
+    r"пожалуйста|просьб\w*|привез\w*|достав\w*|полож\w*|упаков\w*|"
+    r"не\s+(?:замен\w*|смешива\w*|размораж\w*))\b",
+    re.I,
+)
+
+
+def _build_edit_comment(
+    target: str,
+    comment: str,
+    source: str,
+    *,
+    action: str = "add",
+    scope: str = "item",
+    require_wish: bool = True,
+) -> ParsedCommand | None:
+    """Создаёт команду изменения комментария только с явным товаром и пожеланием."""
+    target = clean_command_target(target)
+    comment = clean_text(comment).strip(" ,;:-—–.!?")
+    if scope == "item" and not target:
+        return None
+    if action == "add" and (
+        not comment or (require_wish and not _COMMENT_WISH_RE.search(comment))
+    ):
+        return None
+    if action == "remove":
+        comment = ""
+    if scope not in {"item", "order"} or action not in {"add", "remove"}:
+        return None
+    return ParsedCommand(
+        intent=Intent.EDIT_COMMENT,
+        text=source,
+        comment_target_query=target,
+        comment_text=comment,
+        comment_action=action,
+        comment_scope=scope,
+    )
+
+
+def _parse_edit_comment(text: str) -> ParsedCommand | None:
+    """Распознаёт изменение комментария существующего товара без создания позиции."""
+    source = clean_text(text)
+    normalized = normalize_command_text(source)
+    if not normalized:
+        return None
+
+    remove_action = rf"{_COMMENT_REMOVE_ACTION_RE}\s+"
+    noun = rf"{_COMMENT_NOUN_RE}\s*"
+    global_scope = rf"{_COMMENT_GLOBAL_SCOPE_RE}"
+
+    # Явное удаление общего комментария не должно становиться товаром.
+    if re.fullmatch(
+        rf"(?:{remove_action}общ\w*\s+{noun}(?:{global_scope})?|"
+        rf"{remove_action}{noun}{global_scope})",
+        normalized,
+        re.I,
+    ):
+        return _build_edit_comment("", "", source, action="remove", scope="order")
+
+    # Явное удаление комментария конкретной позиции.
+    remove_patterns = (
+        re.compile(
+            rf"^{remove_action}{noun}(?:у|к|для)\s+(?P<target>.+)$",
+            re.I,
+        ),
+        re.compile(
+            rf"^{remove_action}(?:у|к|для)\s+(?P<target>.+?)\s+{noun}$",
+            re.I,
+        ),
+    )
+    for pattern in remove_patterns:
+        match = pattern.fullmatch(normalized)
+        if match is not None:
+            return _build_edit_comment(
+                match.group("target"), "", source, action="remove", scope="item"
+            )
+
+    # Явный общий комментарий: только при словах общего охвата.
+    global_patterns = (
+        re.compile(
+            rf"^(?:{_COMMENT_ACTION_RE}\s+)?{noun}{global_scope}\s+(?P<comment>.+)$",
+            re.I,
+        ),
+        re.compile(
+            rf"^{_COMMENT_ACTION_RE}\s+общ\w*\s+{noun}(?::\s*|\s+)(?P<comment>.+)$",
+            re.I,
+        ),
+    )
+    for pattern in global_patterns:
+        match = pattern.fullmatch(normalized)
+        if match is not None:
+            return _build_edit_comment(
+                "", match.group("comment"), source, scope="order", require_wish=False
+            )
+
+    # Голос часто опускает слово «комментарий»: явная конструкция «к/для
+    # товара + пожелание» всё равно безопасна, потому что ищет только черновик.
+    wish_match = _COMMENT_WISH_RE.search(normalized)
+    if wish_match is not None and not re.search(_COMMENT_NOUN_RE, normalized, re.I):
+        prefix = normalized[: wish_match.start()].strip(" ,;:-—–")
+        comment = normalized[wish_match.start() :]
+        match = re.match(
+            rf"^(?:{_COMMENT_ACTION_RE}\s+)?(?:к|для)\s+(?P<target>.+)$",
+            prefix,
+            re.I,
+        )
+        if match is not None:
+            return _build_edit_comment(match.group("target"), comment, source)
+        return None
+    if not re.search(_COMMENT_NOUN_RE, normalized, re.I):
+        return None
+
+    action = rf"{_COMMENT_ACTION_RE}\s+"
+    patterns = (
+        re.compile(
+            rf"^{action}{noun}(?:к|для)\s+(?P<target>.+?)(?:\s*[,;:—–-]\s*|\s+)(?P<comment>.+)$",
+            re.I,
+        ),
+        re.compile(
+            rf"^{action}(?:к|для)\s+(?P<target>.+?)\s+{noun}(?:[:—–-]\s*|\s+)(?P<comment>.+)$",
+            re.I,
+        ),
+        re.compile(
+            rf"^(?:к|для)\s+(?P<target>.+?)\s+{noun}(?:[:—–-]\s*|\s+)(?P<comment>.+)$",
+            re.I,
+        ),
+    )
+    for pattern in patterns:
+        match = pattern.fullmatch(normalized)
+        if match is not None:
+            result = _build_edit_comment(
+                match.group("target"),
+                match.group("comment"),
+                source,
+                require_wish=False,
+            )
+            if result is not None:
+                return result
+    # Явный маркер комментария без понятной цели — это не удаление товара и
+    # не новая товарная позиция. Оставляем команду безопасно нераспознанной.
+    return ParsedCommand(intent=Intent.UNKNOWN, text=source)
+
+
 def is_product_add_request_phrase(text: str) -> bool:
     """Распознаёт команду отправки товара снабжению."""
     words = normalize_text(text).split()
@@ -1012,6 +1178,9 @@ def infer_intent(text: str, callback_data: str = "") -> ParsedCommand:
 
     if edit_command := _parse_edit_quantity(normalized):
         return edit_command.model_copy(update={"text": text})
+
+    if comment_command := _parse_edit_comment(text):
+        return comment_command
 
     if match := _REMOVE_RE.match(normalized):
         target = clean_command_target(match.group(1))
@@ -1334,393 +1503,3 @@ def parse_callback(data: str) -> ParsedCommand:
         callback_revision=revision,
         callback_target=rest[0] if rest else "",
     )
-
-
-def _is_standalone_quantity(value: str) -> bool:
-    """Проверяет, что фрагмент содержит только количество и единицу."""
-    tokens = [
-        token.strip(" .,:;—–-")
-        for token in normalize_text(value).split()
-        if token.strip(" .,:;—–-")
-    ]
-    parsed = parse_number_words(tokens, 0)
-    if parsed is None:
-        return False
-    _, end = parsed
-    if end < len(tokens) and tokens[end] in UNIT_ALIASES:
-        end += 1
-    return end == len(tokens)
-
-
-def _extract_global_comment(text: str) -> tuple[str, str]:
-    """Отделяет явно помеченный общий комментарий от списка товаров."""
-    original = str(text or "")
-    source = clean_text(original)
-    match = re.fullmatch(
-        r"(?P<products>.+?)"
-        r"(?:[.!?;]\s*|\s*,?\s+(?:и|а)\s+)"
-        r"(?:(?:все|всё|всем|для всех)"
-        r"(?:\s+(?:товар\w*|позици\w*|это(?:\s+дело)?))?|"
-        r"общ(?:ий|его)\s+комментар(?:ий|ия))"
-        r"(?:\s*[,;:—–-]\s*|\s+)"
-        r"(?P<comment>.+?)\s*[.!?]*",
-        source,
-        flags=re.I,
-    )
-    if match is None:
-        return original, ""
-    products = clean_text(match.group("products")).strip(" ,;:.!?—–-")
-    comment = clean_text(match.group("comment")).strip(" ,;:.!?—–-")
-    if not products or not comment:
-        return original, ""
-    return products, comment
-
-
-def has_explicit_global_comment_scope(text: str) -> bool:
-    """Проверяет, что пользователь явно распространил комментарий на всю заявку."""
-    normalized = normalize_text(text)
-    if not normalized:
-        return False
-    if re.search(
-        r"(?:^|\s)(?:все|всё|всем|для всех)"
-        r"(?:\s+(?:товаров|товары|позиций|позиции))?(?:\s|$)",
-        normalized,
-        flags=re.I,
-    ):
-        return True
-    if re.search(
-        r"(?:для|ко|к|на)\s+(?:всей|всю|всего|весь)\s+(?:заявк\w*|заказ\w*)",
-        normalized,
-        flags=re.I,
-    ):
-        return True
-    return "общ" in normalized and "комментар" in normalized
-
-
-def parse_product_lines(text: str) -> list[ExtractedItem]:
-    """Разбирает список товаров из текста."""
-    source = str(text or "").replace(";", "\n").strip()
-    if not source:
-        return []
-    lines = [clean_text(line) for line in re.split(r"\n+", source) if clean_text(line)]
-    if len(lines) == 1 and source.count(",") >= 2 and not re.search(r"[.!?]", source):
-        comma_parts = [
-            clean_text(line) for line in re.split(r"(?<!\d),(?!\d)", source) if clean_text(line)
-        ]
-        if not any(_is_standalone_quantity(part) for part in comma_parts):
-            lines = comma_parts
-
-    items: list[ExtractedItem] = []
-    unit_pattern = "|".join(sorted((re.escape(key) for key in UNIT_ALIASES), key=len, reverse=True))
-    trailing = re.compile(
-        rf"^(.*?)(?:(?:\s+|[-—–:])(?P<qty>\d+(?:[,.]\d+)?)\s*(?P<unit>{unit_pattern})|"
-        rf"[-—–:]\s*(?P<bare_qty>\d+(?:[,.]\d+)?))\s*$",
-        re.I,
-    )
-    leading = re.compile(
-        rf"^(?P<qty>\d+(?:[,.]\d+)?)\s*(?P<unit>{unit_pattern})?\s+(.*)$",
-        re.I,
-    )
-    packaging = re.compile(
-        rf"(?:"
-        rf"\d+(?:[,.]\d+)?\s*(?:{unit_pattern})\s*[*xх×]\s*\d+(?:[,.]\d+)?"
-        rf"(?:\s*\(\s*~?\s*\d+(?:[,.]\d+)?\s*(?:{unit_pattern})\s*\))?"
-        rf"|"
-        rf"\d+(?:[,.]\d+)?\s*[*xх×]\s*\d+(?:[,.]\d+)?\s*(?:{unit_pattern})"
-        rf")",
-        re.I,
-    )
-    alternative_packaging = re.compile(
-        rf"\d+(?:[,.]\d+)?\s*(?:{unit_pattern})\s+"
-        rf"(?:или|либо)\s+\d+(?:[,.]\d+)?\s*(?:{unit_pattern})\b",
-        re.I,
-    )
-    number_words_pattern = "|".join(
-        sorted((re.escape(word) for word in NUMBER_WORDS), key=len, reverse=True)
-    )
-    trailing_word_quantity = re.compile(
-        rf"(?P<quantity>(?:{number_words_pattern})(?:\s+(?:{number_words_pattern}))*)\s+"
-        rf"(?P<unit>{unit_pattern})\s*[.!?]*$",
-        re.I,
-    )
-
-    for line in lines:
-        stripped = re.sub(
-            r"^(?:добавь|добавить|закажи|заказать|нужно|надо)\s+", "", line, flags=re.I
-        )
-        if _is_standalone_quantity(stripped):
-            continue
-        packaging_spans = [match.span() for match in packaging.finditer(stripped)]
-        alternative_packaging_spans = [
-            match.span() for match in alternative_packaging.finditer(stripped)
-        ]
-        reference_range_spans = numeric_range_spans(stripped)
-        quantity_marks = [
-            mark
-            for mark in re.finditer(
-                rf"(\d+(?:[,.]\d+)?)\s*(?P<unit>{unit_pattern})\b",
-                stripped,
-                flags=re.I,
-            )
-            if not any(start <= mark.start() < end for start, end in packaging_spans)
-            and not any(
-                start < mark.end() and mark.start() < end for start, end in reference_range_spans
-            )
-            and not any(
-                start < mark.end() and mark.start() < end
-                for start, end in alternative_packaging_spans
-            )
-        ]
-        has_explicit_bare_quantity = bool(
-            re.search(r"(?:^|\s)[-—–:]\s*\d+(?:[,.]\d+)?\s*$", stripped)
-        )
-        # Recover several products spoken in one segment by using each
-        # explicit quantity as the boundary of the preceding product.
-        if len(quantity_marks) >= 2 and not re.search(r"[—–-]\s*\d", stripped):
-            recovered: list[ExtractedItem] = []
-            start = 0
-            for index, mark in enumerate(quantity_marks):
-                name = re.sub(
-                    r"^(?:и|а также|а)\s+",
-                    "",
-                    stripped[start : mark.start()].strip(),
-                    flags=re.I,
-                ).strip(" .,;:!?-—–")
-                if not name:
-                    continue
-                comment = ""
-                if index + 1 < len(quantity_marks):
-                    between = stripped[mark.end() : quantity_marks[index + 1].start()]
-                    separators = list(
-                        re.finditer(
-                            r"(?:\s+(?:и|а также|а)\s+|[,.;!?]\s*)",
-                            between,
-                            flags=re.I,
-                        )
-                    )
-                    if separators:
-                        strong_separators = [
-                            separator
-                            for separator in separators
-                            if re.match(r"\s*[.;!?]", separator.group())
-                        ]
-                        separator = strong_separators[-1] if strong_separators else separators[-1]
-                        comment = clean_text(between[: separator.start()]).strip(" .,;:!?-—–")
-                        start = mark.end() + separator.end()
-                    else:
-                        start = mark.end()
-                else:
-                    comment = clean_text(stripped[mark.end() :]).strip(" .,;:!?-—–")
-                recovered.append(
-                    ExtractedItem(
-                        product_query=name,
-                        quantity=float(mark.group(1).replace(",", ".")),
-                        unit=normalize_unit(mark.group("unit") or ""),
-                        comment=comment,
-                        user_comment_to_supplier=comment,
-                        source_line=line,
-                    )
-                )
-            if recovered:
-                items.extend(recovered)
-                continue
-        if len(quantity_marks) == 1:
-            mark = quantity_marks[0]
-            # A voice phrase can enumerate products and give a quantity only
-            # for the last one: "сироп и говядина 10 кг".  The first product
-            # must remain in the draft (with an unanswered quantity), rather
-            # than being silently swallowed into a single synthetic name.
-            prefix = clean_text(stripped[: mark.start()]).strip(" ,;:-—–")
-            enumerated_names = [
-                clean_text(part).strip(" ,;:-—–")
-                for part in re.split(r"\s+(?:и|а также)\s+", prefix, flags=re.I)
-            ]
-            if len(enumerated_names) > 1 and all(enumerated_names):
-                items.extend(
-                    ExtractedItem(product_query=name, source_line=line)
-                    for name in enumerated_names[:-1]
-                )
-                items.append(
-                    ExtractedItem(
-                        product_query=enumerated_names[-1],
-                        quantity=float(mark.group(1).replace(",", ".")),
-                        unit=normalize_unit(mark.group("unit") or ""),
-                        source_line=line,
-                    )
-                )
-                continue
-            name = clean_text(stripped[: mark.start()]).strip(" ,;:-—–")
-            comment = clean_text(stripped[mark.end() :]).strip(" .,!?:;-—–")
-            if name and not comment:
-                items.append(
-                    ExtractedItem(
-                        product_query=name,
-                        quantity=float(mark.group(1).replace(",", ".")),
-                        unit=normalize_unit(mark.group("unit") or ""),
-                        source_line=line,
-                    )
-                )
-                continue
-            # "Сироп Роза 1 л — 12" contains product packaging followed by
-            # the ordered quantity.  A number after punctuation is never a
-            # supplier comment, so leave this form to the trailing-quantity
-            # parser below.
-            if name and comment and not re.match(r"^\s*[,;:\-—–]*\s*\d", stripped[mark.end() :]):
-                items.append(
-                    ExtractedItem(
-                        product_query=name,
-                        quantity=float(mark.group(1).replace(",", ".")),
-                        unit=normalize_unit(mark.group("unit") or ""),
-                        comment=comment,
-                        user_comment_to_supplier=comment,
-                        source_line=line,
-                    )
-                )
-                continue
-        if packaging_spans and not quantity_marks:
-            items.append(ExtractedItem(product_query=stripped, source_line=line))
-            continue
-        if reference_range_spans and not quantity_marks and not has_explicit_bare_quantity:
-            # Без отдельного маркера диапазон не может быть заказанным
-            # Do not pass a range endpoint to the fallback quantity parser.
-            items.append(ExtractedItem(product_query=stripped, source_line=line))
-            continue
-        if alternative_packaging_spans:
-            # Alternative package sizes belong to one product. If a spoken
-            # order quantity follows them, split only that final quantity.
-            word_quantity = trailing_word_quantity.search(stripped)
-            if word_quantity:
-                quantity_tokens = normalize_text(word_quantity.group("quantity")).split()
-                parsed_quantity = parse_number_words(quantity_tokens, 0)
-                if parsed_quantity is not None and parsed_quantity[1] == len(quantity_tokens):
-                    name = clean_text(stripped[: word_quantity.start()]).strip(" ,;:-—–")
-                    if name:
-                        items.append(
-                            ExtractedItem(
-                                product_query=name,
-                                quantity=parsed_quantity[0],
-                                unit=normalize_unit(word_quantity.group("unit")),
-                                source_line=line,
-                            )
-                        )
-                        continue
-        match = trailing.match(stripped)
-        if match:
-            quantity_span = match.span("qty") if match.group("qty") else match.span("bare_qty")
-            if any(
-                start < quantity_span[1] and quantity_span[0] < end
-                for start, end in reference_range_spans
-            ):
-                match = None
-        if match:
-            name = clean_text(match.group(1)).strip(" -:—–")
-            if name:
-                items.append(
-                    ExtractedItem(
-                        product_query=name,
-                        quantity=float(
-                            (match.group("qty") or match.group("bare_qty")).replace(",", ".")
-                        ),
-                        unit=normalize_unit(match.group("unit") or ""),
-                        source_line=line,
-                    )
-                )
-                continue
-        match = leading.match(stripped)
-        if match:
-            name = clean_text(match.group(3)).strip(" -:")
-            if name:
-                items.append(
-                    ExtractedItem(
-                        product_query=name,
-                        quantity=float(match.group("qty").replace(",", ".")),
-                        unit=normalize_unit(match.group("unit") or ""),
-                        source_line=line,
-                    )
-                )
-                continue
-
-        tokens = [
-            token.strip(" .,:;—–-")
-            for token in normalize_text(stripped).split()
-            if token.strip(" .,:;—–-")
-        ]
-        for index in range(len(tokens)):
-            parsed = parse_number_words(tokens, index)
-            if not parsed:
-                continue
-            quantity, end = parsed
-            unit = (
-                normalize_unit(tokens[end])
-                if end < len(tokens) and tokens[end] in UNIT_ALIASES
-                else ""
-            )
-            if not unit and not has_explicit_bare_quantity:
-                continue
-            if end < len(tokens) and unit:
-                end += 1
-            if index == 0:
-                name = " ".join(tokens[end:])
-            elif end == len(tokens):
-                name = " ".join(tokens[:index])
-            else:
-                name = " ".join(tokens[:index])
-                comment = " ".join(tokens[end:])
-                if name:
-                    items.append(
-                        ExtractedItem(
-                            product_query=name,
-                            quantity=quantity,
-                            unit=unit,
-                            comment=comment,
-                            user_comment_to_supplier=comment,
-                            source_line=line,
-                        )
-                    )
-                    break
-                continue
-            if name:
-                items.append(
-                    ExtractedItem(
-                        product_query=name,
-                        quantity=quantity,
-                        unit=unit,
-                        source_line=line,
-                    )
-                )
-                break
-        else:
-            if (len(lines) > 1 or len(stripped.split()) <= 8) and re.search(
-                r"[a-zа-яё]", stripped, re.I
-            ):
-                items.append(ExtractedItem(product_query=stripped, source_line=line))
-    return items
-
-
-def parse_quantity_unit(text: str) -> tuple[float | None, str]:
-    """Разбирает короткий ответ с количеством и единицей."""
-    normalized = normalize_text(text)
-    if not normalized:
-        return None, ""
-    tokens = [
-        cleaned
-        for token in normalized.replace(",", ".").split()
-        if (cleaned := re.sub(r"\.+$", "", token))
-    ]
-    if len(tokens) >= 1:
-        try:
-            quantity = float(tokens[0])
-            unit = (
-                normalize_unit(tokens[1]) if len(tokens) > 1 and tokens[1] in UNIT_ALIASES else ""
-            )
-            return quantity, unit
-        except ValueError:
-            pass
-    parsed = parse_number_words(tokens, 0)
-    if parsed:
-        quantity, end = parsed
-        unit = (
-            normalize_unit(tokens[end]) if end < len(tokens) and tokens[end] in UNIT_ALIASES else ""
-        )
-        return quantity, unit
-    return None, ""

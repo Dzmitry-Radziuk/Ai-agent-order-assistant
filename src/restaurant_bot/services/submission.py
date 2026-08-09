@@ -592,7 +592,7 @@ class SubmissionService:
     ) -> None:
         """Показывает успешную запись запроса на новый товар."""
         confirmation = BotReply(
-            text=f"<b>Запрос менеджеру отправлен</b>\n\n{escape(request['description'])}",
+            text=f"<i>Запрос менеджеру отправлен</i>\n\n{escape(request['description'])}",
             edit_message_id=state.ui_message_id or None,
         )
         self.telegram.send_reply(chat_id, confirmation)

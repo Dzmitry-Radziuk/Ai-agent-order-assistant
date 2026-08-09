@@ -656,7 +656,7 @@ class VenueRegistrationService:
             f"Вы уже подключены к заведению:\n«{escape(venue.name)}»"
             if already_same
             else (
-                "✅ Вы подключены к заведению:\n"
+                "<i>Вы подключены к заведению:</i>\n"
                 f"«{escape(venue.name)}»\n\nТеперь Вы можете создавать заявки в этом чате."
             )
         )

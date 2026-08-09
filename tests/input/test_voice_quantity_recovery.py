@@ -18,6 +18,60 @@ def test_voice_recovery_restores_quantity_and_unit_from_shared_source_line() -> 
     assert [(item["quantity"], item["unit"]) for item in restored] == [(10.0, "шт"), (5.0, "кг")]
 
 
+def test_packaging_and_order_sentence_collapses_ai_shadow_items() -> None:
+    """Схлопывает фасовку и заказное количество одной голосовой позиции."""
+    source = (
+        "Марципановые конфеты на шоколадной подложке, кенигсбергский стиль, "
+        "90 грамм. Желательно привезти завтра. Нужно 5 килограмм."
+    )
+    restored = recover_omitted_explicit_items(
+        {
+            "intent": Intent.ADD_ITEMS,
+            "items": [
+                {
+                    "product_query": "Марципановые конфеты на шоколадной подложке, кенигсбергский стиль, 90 грамм",
+                    "quantity": 90,
+                    "unit": "г",
+                    "source_line": source,
+                },
+                {"product_query": "Нужно", "quantity": 5, "unit": "кг", "source_line": source},
+            ],
+        },
+        source,
+    )
+
+    assert len(restored["items"]) == 1
+    assert (restored["items"][0]["quantity"], restored["items"][0]["unit"]) == (5.0, "кг")
+
+
+def test_packaging_connector_and_order_collapses_ai_shadow_items() -> None:
+    """Схлопывает упаковочную связку и финальное количество одного товара."""
+    source = "Тесто для спринг-роллов 550 грамм на 20 штук Екимал 5 штук"
+    restored = recover_omitted_explicit_items(
+        {
+            "intent": Intent.ADD_ITEMS,
+            "items": [
+                {
+                    "product_query": "Тесто для спринг-роллов 550 грамм на 20 штук Екимал",
+                    "quantity": 5,
+                    "unit": "шт",
+                    "source_line": source,
+                },
+                {
+                    "product_query": "тесто для спринг-роллов на 20 штук екимал 5 штук",
+                    "quantity": 550,
+                    "unit": "г",
+                    "source_line": source,
+                },
+            ],
+        },
+        source,
+    )
+
+    assert len(restored["items"]) == 1
+    assert (restored["items"][0]["quantity"], restored["items"][0]["unit"]) == (5.0, "шт")
+
+
 def test_voice_recovery_never_replaces_the_model_product_name() -> None:
     """Проверяет, что голос восстановление никогда не replaces модель товар название."""
     source = "Сыропроза 10 штук"
@@ -122,6 +176,121 @@ def test_voice_range_line_keeps_explicit_bare_order_quantity() -> None:
     assert (restored[0]["quantity"], restored[0]["unit"]) == (2.0, "")
 
 
+def test_voice_ambiguous_weight_pair_clears_model_quantity() -> None:
+    """Не доверяет выбранному моделью весу из неоднозначной голосовой пары."""
+    source = "Грудинка говяжья ССВУ, 5,5 килограмм, 16,5 килограмм, Блэк Ангус, МирВаторг, Брянск"
+    restored = recover_omitted_explicit_items(
+        {
+            "intent": Intent.ADD_ITEMS,
+            "items": [
+                {
+                    "product_query": "Грудинка говяжья ССВУ",
+                    "quantity": 5.5,
+                    "unit": "кг",
+                    "comment": "Блэк Ангус, МирВаторг, Брянск",
+                    "source_line": source,
+                }
+            ],
+        },
+        source,
+    )
+
+    assert len(restored["items"]) == 1
+    item = restored["items"][0]
+    assert item["product_query"] == source
+    assert item["quantity"] is None
+    assert item["unit"] == ""
+    assert item["comment"] == ""
+    assert item["packaging_role"] == "ambiguous"
+    assert item["packaging_confidence"] < 0.85
+
+
+def test_voice_from_to_range_clears_model_quantity() -> None:
+    """Не принимает границу голосового диапазона за количество заказа."""
+    source = "грудинка от 5,5 до 16,5 кг, блэк ангус"
+    restored = recover_omitted_explicit_items(
+        {
+            "intent": Intent.ADD_ITEMS,
+            "items": [
+                {
+                    "product_query": "грудинка",
+                    "quantity": 16.5,
+                    "unit": "кг",
+                    "comment": "блэк ангус",
+                    "source_line": source,
+                }
+            ],
+        },
+        source,
+    )
+
+    item = restored["items"][0]
+    assert item["product_query"] == source
+    assert item["quantity"] is None
+    assert item["unit"] == ""
+    assert item["comment"] == ""
+    assert item["packaging_role"] == "catalog_attribute"
+    assert item["packaging_confidence"] >= 0.85
+
+
+def test_voice_unbound_product_fact_is_restored_to_query() -> None:
+    """Не доверяет комментарию ИИ без семантической привязки."""
+    source = "грудинка 5 кг Блэк Ангус"
+    restored = recover_omitted_explicit_items(
+        {
+            "intent": Intent.ADD_ITEMS,
+            "items": [
+                {
+                    "product_query": "грудинка",
+                    "quantity": 5,
+                    "unit": "кг",
+                    "comment": "Блэк Ангус",
+                    "source_line": source,
+                }
+            ],
+        },
+        source,
+    )
+
+    item = restored["items"][0]
+    assert item["product_query"] == "грудинка Блэк Ангус"
+    assert item["comment"] == ""
+    assert item["user_comment_to_supplier"] == ""
+    assert item["comment_source"] == "none"
+
+
+def test_voice_semantic_binding_sets_comment_provenance() -> None:
+    """Помечает подтверждённую ИИ-привязку как семантический комментарий."""
+    source = "сироп роза 5 шт, желательно привезти холодным"
+    restored = recover_omitted_explicit_items(
+        {
+            "intent": Intent.ADD_ITEMS,
+            "items": [
+                {
+                    "product_query": "сироп роза",
+                    "quantity": 5,
+                    "unit": "шт",
+                    "comment": "желательно привезти холодным",
+                    "source_line": source,
+                }
+            ],
+            "comment_bindings": [
+                {
+                    "text": "желательно привезти холодным",
+                    "scope": "item",
+                    "target_item_indexes": [0],
+                    "confidence": 0.98,
+                }
+            ],
+        },
+        source,
+    )
+
+    item = restored["items"][0]
+    assert item["comment"] == "желательно привезти холодным"
+    assert item["comment_source"] == "semantic"
+
+
 def test_voice_range_is_restored_to_product_query_not_comment() -> None:
     """Возвращает размер в поиск, даже если AI оставил его вне product_query."""
     source = "Филе форели 0,9-1,3 килограмма зачищенное, Тринца."
@@ -170,7 +339,9 @@ def test_catalog_packaging_role_is_preserved_when_order_quantity_is_separate() -
     assert item["packaging_role"] == "catalog_attribute"
     assert item["packaging_confidence"] >= 0.85
     assert "0,8-1,3 кг" in item["product_query"]
-    assert item["comment"] == "зачищенная"
+    assert "зачищенная" in item["product_query"]
+    assert item["comment"] == ""
+    assert item["comment_source"] == "none"
     assert (item["quantity"], item["unit"]) == (5.0, "кг")
 
 
@@ -220,8 +391,9 @@ def test_ambiguous_packaging_role_is_not_moved_between_fields() -> None:
 
     item = restored["items"][0]
     assert item["packaging_role"] == "ambiguous"
-    assert "0,8-1,3 кг" not in item["product_query"]
-    assert "0,8-1,3 кг" in item["comment"]
+    assert "0,8-1,3 кг" in item["product_query"]
+    assert item["comment"] == ""
+    assert item["comment_source"] == "none"
 
 
 def test_ai_duplicate_items_from_one_voice_line_are_collapsed() -> None:
@@ -252,8 +424,9 @@ def test_ai_duplicate_items_from_one_voice_line_are_collapsed() -> None:
     assert len(restored["items"]) == 1
     item = restored["items"][0]
     assert "0.8-1.3 кг" in item["product_query"]
+    assert "зачищенная тринце" in item["product_query"]
     assert (item["quantity"], item["unit"]) == (10.0, "кг")
-    assert item["comment"] == "зачищенная тринце"
+    assert item["comment"] == ""
 
 
 def test_ai_packaging_alternative_drops_connector_fragment() -> None:
@@ -282,7 +455,8 @@ def test_ai_packaging_alternative_drops_connector_fragment() -> None:
     restored = recover_omitted_explicit_items(payload, source)
 
     assert len(restored["items"]) == 1
-    assert restored["items"][0]["product_query"] == "Капуста квашеная"
+    assert restored["items"][0]["product_query"] == ("Капуста квашеная ведро 5 кг или 4,5 кг")
+    assert restored["items"][0]["comment"] == ""
     assert (restored["items"][0]["quantity"], restored["items"][0]["unit"]) == (2.0, "ведро")
 
 

@@ -166,7 +166,7 @@ def welcome_reply(state: ConversationState) -> BotReply:
         if part
     )
     return BotReply(
-        text=f"🧾 <b>Черновик сохранён</b>\n\n{details}",
+        text=f"🧾 <i>Черновик сохранён</i>\n\n{details}",
         rows=[
             [Button(text="Добавить товары", callback_data="v2:add")],
             [Button(text="Показать черновик", callback_data="v2:back")],
@@ -244,12 +244,12 @@ def thanks_reply(state: ConversationState) -> BotReply:
     """Формирует ответ на благодарность."""
     issues = sum(item.status in ISSUE_STATUSES for item in _active_items(state))
     text = (
-        f"✅ <b>Черновик сохранён</b>\n\nНужно уточнить ещё {issues} товар(а)."
+        f"<i>Черновик сохранён</i>\n\nНужно уточнить ещё {issues} товар(а)."
         if issues
         else (
-            "✅ <b>Черновик сохранён</b>"
+            "<i>Черновик сохранён</i>"
             if _active_items(state)
-            else "✅ <b>Готово</b>\n\nОтправьте товары текстом, голосом или фото."
+            else "<i>Готово</i>\n\nОтправьте товары текстом, голосом или фото."
         )
     )
     rows = (
@@ -294,7 +294,7 @@ def unknown_intent_reply(state: ConversationState) -> BotReply:
         else []
     )
     return BotReply(
-        text="""⚠️ <b>Не удалось понять сообщение</b>
+        text="""⚠️ <b>К сожалению, мне не удалось распознать сообщение</b>
 
 Попробуйте написать или сказать:
 • <code>добавь курицу 5 кг</code>;
@@ -310,7 +310,7 @@ def unrecognized_voice_reply(state: ConversationState) -> BotReply:
     has_draft = _has_draft_content(state)
     return BotReply(
         text=(
-            "⚠️ <b>Не удалось распознать голосовое сообщение</b>\n\n"
+            "⚠️ <b>К сожалению, мне не удалось распознать голосовое сообщение</b>\n\n"
             "Повторите короче или отправьте текстом.\n\n"
             "Пример: <code>сироп роза 3 штуки</code>"
         ),
@@ -354,7 +354,7 @@ def added_items_question_reply(_state: ConversationState, added_count: int) -> B
         if added_count == 1
         else "Товары добавлены в черновик заказа"
     )
-    lines = [f"✅ <b>{title}</b>", "", "Добавить ещё товары?"]
+    lines = [f"<i>{title}</i>", "", "Добавить ещё товары?"]
     return BotReply(
         text="\n".join(lines),
         rows=[
@@ -407,8 +407,8 @@ def no_current_manual_reply() -> BotReply:
     return BotReply(
         text="ℹ️ <b>Нет товара для изменения</b>\n\nОткройте черновик или добавьте новый товар.",
         rows=[
-            [Button(text="📦 Показать черновик", callback_data="v2:back")],
-            [Button(text="➕ Добавить еще товары", callback_data="v2:add")],
+            [Button(text="Показать черновик", callback_data="v2:back")],
+            [Button(text=" Добавить еще товары", callback_data="v2:add")],
         ],
     )
 
@@ -476,7 +476,11 @@ _CART_PAGE_SIZE = 20
 _FINAL_REVIEW_PAGE_SIZE = 20
 
 
-def cart_reply(state: ConversationState, title: str = "Черновик заявки") -> BotReply:
+def cart_reply(
+    state: ConversationState,
+    title: str = "Черновик заявки",
+    notice: str = "",
+) -> BotReply:
     """Формирует карточку черновика заявки."""
     items = _active_items(state)
     issues = [item for item in items if item.status in ISSUE_STATUSES]
@@ -493,6 +497,8 @@ def cart_reply(state: ConversationState, title: str = "Черновик заяв
         page_ready = ready
         page_issues = issues
     lines = [f"🧾 <b>{escape(title)}</b>", ""]
+    if notice:
+        lines.extend([f"<i>{escape(notice)}</i>", ""])
     if paginated:
         lines.extend([f"Страница {page + 1} из {total_pages}", ""])
     if not ready and not issues:
@@ -674,16 +680,16 @@ def issue_reply(item: CartItem, item_index: int | None = None) -> BotReply:
         if not item.quantity:
             return BotReply(
                 text=(
-                    f"⚠️ <b>Товар уже в черновике</b>\n\n{name}\n\n"
+                    f"⚠️ <b>Товар уже есть в черновике</b>\n\n{name}\n"
                     f"В черновике: {format_number(existing_quantity)} {escape(unit)}\n\n"
-                    "<b>Укажите, сколько добавить.</b>"
+                    "Напишите или скажите голосом, сколько добавить. Если повторно добавлять товар не нужно — нажмите на кнопку ниже."
                 ),
                 rows=[[Button(text="Не добавлять повторно", callback_data=f"v2:skip:{index}")]],
             )
         total = existing_quantity + item.quantity
         return BotReply(
             text=(
-                f"⚠️ <b>Товар уже в черновике</b>\n\n{name}\n\n"
+                f"⚠️ <b>Товар уже есть в черновике</b>\n\n{name}\n\n"
                 f"В черновике: {format_number(existing_quantity)} {escape(unit)}\n"
                 f"Вы добавляете: {format_number(item.quantity)} {escape(unit)}\n"
                 f"После добавления будет: {format_number(total)} {escape(unit)}"
@@ -937,7 +943,7 @@ def supplier_warning_details_reply(state: ConversationState) -> BotReply:
     warnings = _supplier_warnings(state)
     if not warnings:
         return BotReply(
-            text="✅ <b>Минимальная сумма набрана</b>",
+            text="<i>Минимальная сумма набрана</i>",
             rows=[[Button(text="К финальной проверке", callback_data="v2:cart")]],
         )
     lines = ["⚠️ <b>Минимальная сумма не набрана</b>"]
@@ -969,7 +975,7 @@ def supplier_warning_choose_reply(state: ConversationState) -> BotReply:
     warnings = _supplier_warnings(state)
     if not warnings:
         return BotReply(
-            text="✅ <b>Минимальная сумма набрана</b>\n\nДополнительная проверка не требуется.",
+            text="<i>Минимальная сумма набрана</i>\n\nДополнительная проверка не требуется.",
             rows=[[Button(text="К финальной проверке", callback_data="v2:cart")]],
         )
     rows = [

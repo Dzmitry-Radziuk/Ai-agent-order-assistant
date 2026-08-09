@@ -1,5 +1,10 @@
 from restaurant_bot.domain.models import CatalogProduct
-from restaurant_bot.services.matching import can_auto_select, rank_candidates
+from restaurant_bot.services.matching import (
+    can_auto_select,
+    has_catalog_search_evidence,
+    rank_candidates,
+)
+from restaurant_bot.services.text import remove_phrase_overlap
 
 
 def _catalog() -> list[CatalogProduct]:
@@ -122,3 +127,50 @@ def test_typo_search_works_in_a_catalog_with_over_one_thousand_products() -> Non
     candidates = rank_candidates("сироп рза", catalog)
 
     assert candidates[0].product_id == "rose"
+
+
+def test_search_query_removes_only_the_saved_comment_overlap() -> None:
+    """Очищает только временную копию запроса и сохраняет исходные поля."""
+    source_query = "свиная шея без костей без кожи без хрящиков"
+    comment = "без костей без кожи без хрящиков"
+
+    assert remove_phrase_overlap(source_query, comment) == "свиная шея"
+    assert source_query == "свиная шея без костей без кожи без хрящиков"
+    assert comment == "без костей без кожи без хрящиков"
+
+
+def test_constraints_cannot_create_cross_category_candidates() -> None:
+    """Не показывает товар по совпадению только с ограничением или общим признаком."""
+    catalog = [
+        CatalogProduct(product_id="neck", name="Шея свиная, кг"),
+        CatalogProduct(product_id="cherry", name="Вишня без косточки"),
+        CatalogProduct(product_id="tea", name="Чай зеленый"),
+        CatalogProduct(product_id="sauce", name="Соус сливочный"),
+    ]
+
+    search_query = remove_phrase_overlap("свиная шея без костей", "без костей")
+    assert [candidate.product_id for candidate in rank_candidates(search_query, catalog)] == [
+        "neck"
+    ]
+    assert rank_candidates("лук зеленый", catalog) == []
+    assert rank_candidates("сыр сливочный", catalog) == []
+    assert not has_catalog_search_evidence(
+        search_query, catalog[1]
+    )
+
+
+def test_core_candidates_keep_single_word_and_preparation_queries() -> None:
+    """Сохраняет однословные товары и ищет базу до структурного пожелания."""
+    catalog = [
+        CatalogProduct(product_id="parmesan", name="Пармезан"),
+        CatalogProduct(product_id="dill", name="Укроп"),
+        CatalogProduct(product_id="leek", name="Лук порей"),
+        CatalogProduct(product_id="potato", name="Картофель"),
+    ]
+
+    assert [candidate.product_id for candidate in rank_candidates("пармезан", catalog)] == [
+        "parmesan"
+    ]
+    assert [candidate.product_id for candidate in rank_candidates("укроп", catalog)] == ["dill"]
+    assert [candidate.product_id for candidate in rank_candidates("лук порей", catalog)] == ["leek"]
+    assert [candidate.product_id for candidate in rank_candidates("картофель", catalog)] == ["potato"]

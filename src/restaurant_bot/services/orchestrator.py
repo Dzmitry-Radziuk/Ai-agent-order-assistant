@@ -1,9 +1,7 @@
 from __future__ import annotations
 
-import os
 import re
 from collections import Counter
-from contextlib import suppress
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from time import perf_counter
@@ -39,8 +37,13 @@ from restaurant_bot.logging import sanitize_log_value
 from restaurant_bot.repositories.order_events import OrderEventRepository
 from restaurant_bot.repositories.sessions import SessionRepository
 from restaurant_bot.repositories.updates import UpdateRepository
+from restaurant_bot.services.conversation_handlers.comment_scope import comment_scope_items
+from restaurant_bot.services.conversation_handlers.state_compatibility import (
+    CompatibilityContext,
+)
 from restaurant_bot.services.engine import ConversationEngine
 from restaurant_bot.services.input_normalizer import normalize_telegram_update
+from restaurant_bot.services.input_recognition import InputRecognitionService
 from restaurant_bot.services.matching import (
     has_compatible_numeric_characteristics,
     has_conflicting_catalog_qualifiers,
@@ -50,8 +53,8 @@ from restaurant_bot.services.matching import (
     unverified_product_terms,
 )
 from restaurant_bot.services.order_review import OrderReviewService
-from restaurant_bot.services.parser import infer_intent, parse_quantity_unit
-from restaurant_bot.services.text import clean_text, normalize_text, normalize_unit
+from restaurant_bot.services.parser import infer_intent
+from restaurant_bot.services.text import clean_text, normalize_text
 from restaurant_bot.services.venue_registration import (
     RegistrationResult,
     VenueContext,
@@ -98,6 +101,7 @@ class UpdateOrchestrator:
         self.redis = redis
         self.telegram = telegram
         self.openai = openai_service
+        self.input_recognition = InputRecognitionService(telegram, openai_service)
         self.sheets = sheets
         self.catalog = CatalogCache(settings, redis, sheets)
         self.engine = ConversationEngine(settings)
@@ -919,6 +923,10 @@ class UpdateOrchestrator:
             "selection_query": command.selection_query,
             "edit_quantity": command.edit_quantity,
             "edit_unit": command.edit_unit,
+            "comment_target_query": command.comment_target_query,
+            "comment_text": command.comment_text,
+            "comment_action": command.comment_action,
+            "comment_scope": command.comment_scope,
             "global_comment": command.global_comment,
             "item_count": len(command.items),
             "items": [
@@ -1094,98 +1102,21 @@ class UpdateOrchestrator:
         if event.input_type == InputKind.TEXT:
             return self._parse_text_in_context(event.text, state)
         if event.input_type in {InputKind.VOICE, InputKind.PHOTO}:
-            stage_started = perf_counter()
-            downloaded = self.telegram.download_file(event.file_id, event.mime_type)
-            logger.info(
-                "telegram_media_download_finished",
-                input_type=event.input_type.value,
-                duration_ms=round((perf_counter() - stage_started) * 1000),
+            return self._recognizer().recognize_media(
+                event,
+                state,
+                self._parse_text_in_context,
+                processing_message_id,
             )
-            try:
-                if event.input_type == InputKind.VOICE:
-                    stage_started = perf_counter()
-                    try:
-                        transcript = self.openai.transcribe(
-                            downloaded.path,
-                            prompt=self._voice_transcription_prompt(state),
-                        )
-                    except _OPENAI_TRANSIENT_ERRORS as error:
-                        logger.warning(
-                            "voice_transcription_transport_failed",
-                            phase="primary",
-                            error_type=type(error).__name__,
-                        )
-                        return ParsedCommand(intent=Intent.UNKNOWN, text="")
-                    high_accuracy_retry = False
-                    if (
-                        self._requires_high_accuracy_transcription(transcript, state)
-                        and self._has_distinct_transcription_fallback()
-                    ):
-                        high_accuracy_retry = True
-                        primary_transcript = transcript
-                        try:
-                            retry_transcript = self.openai.transcribe(
-                                downloaded.path,
-                                prompt=self._voice_transcription_prompt(state),
-                                high_accuracy=True,
-                            )
-                            transcript = self._select_transcription_result(
-                                primary_transcript,
-                                retry_transcript,
-                            )
-                        except _OPENAI_TRANSIENT_ERRORS as error:
-                            logger.warning(
-                                "voice_transcription_transport_failed",
-                                phase="high_accuracy",
-                                error_type=type(error).__name__,
-                            )
-                            transcript = primary_transcript
-                    logger.info(
-                        "voice_transcription_finished",
-                        duration_ms=round((perf_counter() - stage_started) * 1000),
-                        high_accuracy_retry=high_accuracy_retry,
-                    )
-                    # A Russian voice can occasionally be returned in an
-                    # unrelated script by the transcription API.  Never show
-                    # that hallucinated text as a product name: it is not a
-                    # meaningful draft item and the n8n recovery path is the
-                    # useful next step for a cook.
-                    if not self._has_supported_voice_letters(transcript):
-                        return ParsedCommand(intent=Intent.UNKNOWN, text="")
-                    stage_started = perf_counter()
-                    parsed = self._parse_text_in_context(transcript, state)
-                    logger.info(
-                        "voice_text_parse_finished",
-                        duration_ms=round((perf_counter() - stage_started) * 1000),
-                        intent=parsed.intent.value,
-                        item_count=len(parsed.items),
-                    )
-                    return parsed.model_copy(update={"text": transcript})
-                self._update_processing(
-                    event.chat_id,
-                    processing_message_id,
-                    "🔎 <b>Распознаю товары на фото…</b>\n\n"
-                    "Для большого списка это может занять до нескольких минут.",
-                )
-                stage_started = perf_counter()
-                parsed = self.openai.parse_photo(downloaded.path, downloaded.mime_type, event.text)
-                logger.info(
-                    "photo_parse_finished",
-                    duration_ms=round((perf_counter() - stage_started) * 1000),
-                    item_count=len(parsed.items),
-                )
-                count = len(parsed.items)
-                self._update_processing(
-                    event.chat_id,
-                    processing_message_id,
-                    "📋 <b>Фото распознано</b>\n\n"
-                    f"Найдено позиций: {count}. Сверяю товары с каталогом…",
-                )
-                return parsed
-            finally:
-                with suppress(OSError):
-                    os.unlink(downloaded.path)
         return ParsedCommand(intent=Intent.UNKNOWN, text=event.text)
+
+    def _recognizer(self) -> InputRecognitionService:
+        """Возвращает сервис распознавания, включая облегчённые тестовые экземпляры."""
+        service = getattr(self, "input_recognition", None)
+        if service is None:
+            service = InputRecognitionService(self.telegram, self.openai)
+            self.input_recognition = service
+        return service
 
     def _parse_text_in_context(
         self,
@@ -1204,16 +1135,24 @@ class UpdateOrchestrator:
                 text=text,
                 callback_target=review_match.group(1),
             )
-        if state.pending_comment_items:
-            return self._parse_pending_comment_scope(text, state)
-        callback_data = self._match_visible_action(text, state)
-        if callback_data:
-            return infer_intent("", callback_data).model_copy(update={"text": text})
-
         parsed = self.openai.parse_text(text)
         review_command = self._parse_review_voice_command(text, parsed, state)
         if review_command is not None:
             return review_command
+        if state.pending_comment_items and self.engine.state_compatibility_policy.should_try_contextual_fallback(
+            state,
+            parsed,
+            CompatibilityContext.COMMENT_SCOPE,
+        ):
+            return self._parse_pending_comment_scope(text, state)
+        # Visible buttons are a contextual fallback after global parsing. A
+        # concrete product command must remain an ADD_ITEMS intent.
+        if parsed.intent is Intent.UNKNOWN or (
+            parsed.intent is Intent.ADD_ITEMS and not parsed.items
+        ):
+            callback_data = self._match_visible_action(text, state)
+            if callback_data:
+                return infer_intent("", callback_data).model_copy(update={"text": text})
         if not self._needs_visible_action_ai(text, parsed, state):
             return parsed
         try:
@@ -1307,7 +1246,8 @@ class UpdateOrchestrator:
     ) -> ParsedCommand:
         """Разбирает ответ на вопрос об области ожидающего комментария."""
         callback = clean_text(text).casefold()
-        item_count = len(state.pending_comment_items)
+        scope_items = comment_scope_items(state)
+        item_count = len(scope_items)
         action = ""
         target_indexes: list[int] = []
         confidence = 0.0
@@ -1329,7 +1269,7 @@ class UpdateOrchestrator:
             try:
                 decision = self.openai.resolve_comment_scope(
                     text,
-                    [item.product_query for item in state.pending_comment_items],
+                    [item.product_query for item in scope_items],
                 )
             except _OPENAI_TRANSIENT_ERRORS as error:
                 logger.warning(
@@ -1366,45 +1306,7 @@ class UpdateOrchestrator:
     @staticmethod
     def _match_visible_action(text: str, state: ConversationState) -> str:
         """Находит явно названную кнопку текущего экрана."""
-        phrase = normalize_text(text)
-        if not phrase:
-            return ""
-        filler_stems = (
-            "давай",
-            "давайте",
-            "пожалуй",
-            "можно",
-            "хочу",
-            "хотел",
-            "нужно",
-            "надо",
-            "пойд",
-            "перейд",
-        )
-        phrase_words = [
-            word
-            for word in re.findall(r"[a-zа-яё0-9]+", phrase, flags=re.I)
-            if word not in {"я", "мы", "мне", "нам", "бы", "сейчас"}
-            and not any(word.startswith(stem) for stem in filler_stems)
-        ]
-        compact_phrase = " ".join(phrase_words)
-        phrase_tokens = set(phrase_words)
-        best: tuple[float, str] = (0.0, "")
-        for action in state.visible_actions:
-            label = normalize_text(action.get("label"))
-            callback_data = str(action.get("action_id") or "")
-            if not label or not callback_data:
-                continue
-            label_words = re.findall(r"[a-zа-яё0-9]+", label, flags=re.I)
-            compact_label = " ".join(label_words)
-            if compact_label in (compact_phrase, " ".join(phrase_words)):
-                return callback_data
-            label_tokens = set(label_words)
-            if len(phrase_tokens) >= 2 and phrase_tokens <= label_tokens and label_tokens:
-                score = len(phrase_tokens) / len(label_tokens)
-                if score > best[0]:
-                    best = (score, callback_data)
-        return best[1] if best[0] >= 0.72 else ""
+        return InputRecognitionService.match_visible_action(text, state)
 
     @staticmethod
     def _needs_visible_action_ai(
@@ -1417,9 +1319,7 @@ class UpdateOrchestrator:
             return False
         if not state.visible_actions or parsed.intent not in {Intent.UNKNOWN, Intent.ADD_ITEMS}:
             return False
-        if parsed.intent == Intent.ADD_ITEMS and any(
-            item.quantity is not None for item in parsed.items
-        ):
+        if parsed.intent == Intent.ADD_ITEMS and parsed.items:
             return False
         words = normalize_text(text).split()
         action_stems = (
@@ -1452,136 +1352,26 @@ class UpdateOrchestrator:
     @staticmethod
     def _has_supported_voice_letters(transcript: str) -> bool:
         """Проверяет допустимый алфавит распознанной речи."""
-        return bool(re.search(r"[A-Za-zА-Яа-яЁё]", transcript))
+        return InputRecognitionService.has_supported_voice_letters(transcript)
 
     @staticmethod
     def _voice_transcription_prompt(state: ConversationState) -> str:
         """Формирует контекст для распознавания голоса."""
-        current = state.current_item()
-        if current and current.status == ItemStatus.AMBIGUOUS:
-            names = "; ".join(candidate.name for candidate in current.candidates[:5])
-            return (
-                "Русская речь. Пользователь выбирает один из вариантов товара: "
-                f"{names}. Он может сказать номер, например «первый» или «вариант два», "
-                "либо полное или частичное название. Верни только произнесённый русский текст."
-            )
-        if current and state.stage == SessionStage.AWAIT_UNIT_QUANTITY and current.catalog_unit:
-            expected_unit = normalize_unit(current.catalog_unit)
-            product_name = current.catalog_name or current.source_query
-            return (
-                "Русская речь сотрудника кафе. Пользователь отвечает на просьбу указать "
-                f"количество товара «{product_name}» в {expected_unit}. Точно сохрани "
-                "произнесённое число и полное название единицы измерения. Особенно не "
-                "путай «грамм» и «килограмм». Ничего не заменяй и не придумывай. "
-                "Верни только произнесённый русский текст."
-            )
-        if current and current.status == ItemStatus.MISSING_QTY and current.catalog_unit:
-            expected_unit = normalize_unit(current.catalog_unit)
-            product_name = current.catalog_name or current.source_query
-            return (
-                "Русская речь сотрудника кафе. Пользователь отвечает на просьбу указать "
-                f"количество товара «{product_name}» в {expected_unit}. Он может сказать "
-                "только число («пять», «5») или число с единицей («пять штук», «5 кг»). "
-                "Обязательно сохрани произнесённое число и единицу измерения. Короткий "
-                "ответ с числом — это количество, а не команда «не добавлять». Не заменяй "
-                "число командой и не придумывай текст. Верни только произнесённый русский текст."
-            )
-        visible_actions = getattr(state, "visible_actions", [])
-        visible = "; ".join(
-            action.get("label", "") for action in visible_actions[:10] if action.get("label")
-        )
-        screen_hint = f" На текущем экране есть кнопки: {visible}." if visible else ""
-        return (
-            "Русская речь сотрудника кафе. Верни только произнесённый русский текст, "
-            "ничего не заменяй и не придумывай. Возможные команды: «добавить товары», "
-            "«добавь товары», «покажи черновик», «отправить заявку», «очистить черновик», "
-            "«не добавлять», «не отправлять», «пропускаем», «первый вариант», "
-            "«второй вариант». Сохраняй частицы «не» и «нет» дословно: они меняют "
-            "действие на противоположное. Команда не является названием товара."
-            f"{screen_hint}"
-        )
+        return InputRecognitionService.voice_transcription_prompt(state)
 
     @staticmethod
     def _select_transcription_result(primary: str, retry: str) -> str:
         """Не позволяет повторному распознаванию потерять значимую часть речи."""
-        primary_normalized = normalize_text(primary)
-        retry_normalized = normalize_text(retry)
-        if primary_normalized in {"тестовый товар", "тест товар", "test product"}:
-            return retry
-        if not UpdateOrchestrator._has_supported_voice_letters(retry):
-            return primary
-        if not UpdateOrchestrator._has_supported_voice_letters(primary):
-            return retry
-
-        primary_words = re.findall(r"[a-zа-яё0-9]+", primary_normalized, flags=re.I)
-        retry_words = re.findall(r"[a-zа-яё0-9]+", retry_normalized, flags=re.I)
-        primary_has_list_structure = bool(
-            re.search(r"[,;\n]", primary)
-            or len(re.findall(r"\d+(?:[,.]\d+)?", primary_normalized)) >= 2
-        )
-        if (
-            len(primary_words) >= 6
-            and len(retry_words) * 2 < len(primary_words)
-            and primary_has_list_structure
-        ):
-            return primary
-        return retry
+        return InputRecognitionService.select_transcription_result(primary, retry)
 
     @staticmethod
     def _requires_high_accuracy_transcription(transcript: str, state: ConversationState) -> bool:
         """Проверяет необходимость повторного распознавания речи."""
-        normalized = normalize_text(transcript)
-        if normalized in {"тестовый товар", "тест товар", "test product"}:
-            return True
-        if UpdateOrchestrator._match_visible_action(transcript, state):
-            return False
-        transcript_words = set(re.findall(r"[a-zа-яё0-9]+", normalized, flags=re.I))
-        for action in getattr(state, "visible_actions", []):
-            label_words = set(
-                re.findall(
-                    r"[a-zа-яё0-9]+",
-                    normalize_text(action.get("label")),
-                    flags=re.I,
-                )
-            )
-            if transcript_words & label_words and transcript_words != label_words:
-                return True
-        current = state.current_item()
-        if current and state.stage == SessionStage.AWAIT_UNIT_QUANTITY and current.catalog_unit:
-            quantity, spoken_unit = parse_quantity_unit(re.sub(r"[.!?]+$", "", transcript).strip())
-            if (
-                quantity is not None
-                and spoken_unit
-                and normalize_unit(spoken_unit) != normalize_unit(current.catalog_unit)
-            ):
-                return True
-        if current is None or current.status != ItemStatus.AMBIGUOUS:
-            return False
-        command = infer_intent(transcript)
-        if command.intent not in {Intent.UNKNOWN, Intent.ADD_ITEMS}:
-            return False
-        scores = [
-            ConversationEngine._contains_score(normalized, normalize_text(candidate.name))
-            for candidate in current.candidates
-        ]
-        return max(scores, default=0) < 2
+        return InputRecognitionService.requires_high_accuracy_transcription(transcript, state)
 
     def _has_distinct_transcription_fallback(self) -> bool:
         """Разрешает повтор только при реально отличающейся модели."""
-        settings = getattr(self.openai, "settings", None)
-        primary = getattr(settings, "openai_transcribe_model", None)
-        fallback = getattr(settings, "openai_transcribe_fallback_model", None)
-        if not isinstance(primary, str) or not isinstance(fallback, str):
-            # Unit tests and lightweight adapters may not expose Settings;
-            # preserve their explicit retry contract.
-            return True
-        primary_name = primary.strip().casefold()
-        fallback_name = fallback.strip().casefold()
-        if not primary_name or not fallback_name or primary_name == fallback_name:
-            return False
-        # A cheaper ``mini`` model is a failure fallback, not a quality retry:
-        # replacing a good primary transcript with it would reduce accuracy.
-        return not ("mini" in fallback_name and "mini" not in primary_name)
+        return InputRecognitionService.has_distinct_models(self.openai)
 
     @staticmethod
     def _attach_ui_revision(reply: BotReply, revision: int) -> None:
@@ -1628,15 +1418,7 @@ class UpdateOrchestrator:
         text: str,
     ) -> None:
         """Обновляет временную карточку этапа без остановки обработки."""
-        if not message_id:
-            return
-        try:
-            self.telegram.send_reply(
-                chat_id,
-                BotReply(text=text, edit_message_id=message_id),
-            )
-        except Exception:
-            logger.warning("telegram_processing_update_failed", exc_info=True)
+        self._recognizer().update_processing(chat_id, message_id, text)
 
     @staticmethod
     def _text_processing_reply() -> BotReply:

@@ -5,7 +5,11 @@ import re
 from difflib import SequenceMatcher
 
 from restaurant_bot.domain.models import Candidate, CatalogProduct
-from restaurant_bot.services.text import UNIT_ALIASES, normalize_text, normalize_unit
+from restaurant_bot.services.text import (
+    UNIT_ALIASES,
+    normalize_text,
+    normalize_unit,
+)
 
 _STOP_WORDS = {
     "и",
@@ -145,6 +149,18 @@ def _product_identity_tokens(value: str) -> set[str]:
     }
 
 
+def _product_identity_tokens_in_order(value: str) -> list[str]:
+    """Возвращает значимые слова товара в исходном порядке."""
+    return [
+        token
+        for token in re.findall(r"[a-zа-яё0-9]+", normalize_text(value), flags=re.I)
+        if len(token) > 1
+        and token not in _STOP_WORDS
+        and token not in UNIT_ALIASES
+        and not any(char.isdigit() for char in token)
+    ]
+
+
 def _qualifier_tokens(value: str) -> list[str]:
     """Возвращает значимые слова запроса для проверки свойств товара."""
     return [
@@ -255,11 +271,30 @@ def has_catalog_search_evidence(query: str, product: CatalogProduct) -> bool:
     product_tokens = _product_identity_tokens(product.name)
     if not query_tokens or not product_tokens:
         return False
-    if any(
-        _token_matches(query_token, product_token)
-        for query_token in query_tokens
-        for product_token in product_tokens
+
+    query_ordered = _product_identity_tokens_in_order(query)
+    product_ordered = _product_identity_tokens_in_order(product.name)
+    matched_pairs = [
+        (query_token, product_token)
+        for query_token in query_ordered
+        for product_token in product_ordered
+        if _token_matches(query_token, product_token)
+    ]
+    matched_query_tokens = {query_token for query_token, _ in matched_pairs}
+    if len(query_ordered) == 1 and matched_query_tokens:
+        return True
+    if len(matched_query_tokens) >= 2:
+        return True
+    if (
+        len(matched_query_tokens) == 1
+        and query_ordered
+        and query_ordered[0] in matched_query_tokens
+        and product_ordered
+        and any(_token_matches(query_ordered[0], product_token) for product_token in product_ordered)
     ):
+        # One unmatched trailing word may be an unknown product variant. A
+        # leading base product is sufficient for a clarification candidate;
+        # a shared adjective in the middle or at the end is not.
         return True
 
     # Telegram voice recognition sometimes joins adjacent product words:
@@ -269,7 +304,9 @@ def has_catalog_search_evidence(query: str, product: CatalogProduct) -> bool:
     compact_query = _compact_voice_name(query)
     compact_name = _compact_voice_name(product.name)
     return (
-        len(compact_query) >= 6
+        " " not in normalize_text(query)
+        and " " in normalize_text(product.name)
+        and len(compact_query) >= 6
         and len(compact_name) >= 6
         and compact_query[0] == compact_name[0]
         and SequenceMatcher(None, compact_query, compact_name).ratio() >= 0.77

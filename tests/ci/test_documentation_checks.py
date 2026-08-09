@@ -56,9 +56,13 @@ def test_markdown_check_ignores_test_artifacts(tmp_path: Path) -> None:
     """Не проверяет Markdown-файлы, созданные внутри тестовых артефактов."""
     readme = tmp_path / "README.md"
     readme.write_text("# Проект\n", encoding="utf-8")
-    artifact_dir = tmp_path / "test-artifacts" / "pytest"
-    artifact_dir.mkdir(parents=True)
-    (artifact_dir / "README.md").write_text("[Missing](docs/missing.md)\n", encoding="utf-8")
+    for directory in ("test-artifacts", ".test-artifacts", "test-runtime"):
+        artifact_dir = tmp_path / directory / "pytest"
+        artifact_dir.mkdir(parents=True)
+        (artifact_dir / "README.md").write_text(
+            "[Missing](docs/missing.md)\n",
+            encoding="utf-8",
+        )
 
     assert markdown_files(tmp_path) == [readme]
     assert broken_links(tmp_path) == []

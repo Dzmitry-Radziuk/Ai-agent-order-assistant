@@ -1,4 +1,7 @@
+import pytest
+
 from restaurant_bot.domain.models import (
+    CartItem,
     CatalogProduct,
     ConversationState,
     ExtractedItem,
@@ -28,7 +31,7 @@ def test_catalog_and_user_comments_are_joined_once_in_source_order(settings) -> 
 
 
 def test_comment_is_not_part_of_product_name_and_reaches_submission_row(settings) -> None:  # type: ignore[no-untyped-def]
-    """Проверяет, что комментарий является не part для товар название и reaches отправка заявки строка."""
+    """Передаёт поставщику пожелание пользователя без примечания каталога."""
     engine = ConversationEngine(settings)
     catalog = [
         CatalogProduct(
@@ -55,10 +58,12 @@ def test_comment_is_not_part_of_product_name_and_reaches_submission_row(settings
     )
 
     assert added.state.cart[0].catalog_name == "Сироп Роза"
-    assert added.state.cart[0].comment == "доставка утром; охлаждённым"
+    assert added.state.cart[0].catalog_comment == "доставка утром"
+    assert added.state.cart[0].catalog_comment_source == "catalog"
+    assert added.state.cart[0].comment == "охлаждённым"
     pending = engine._prepare_submission(_event(), added.state)
     assert pending.state.pending_submission is not None
-    assert pending.state.pending_submission.rows[0]["Комментарий"] == "доставка утром; охлаждённым"
+    assert pending.state.pending_submission.rows[0]["Комментарий"] == "охлаждённым"
 
 
 def test_global_comment_is_appended_to_every_item_comment_and_order_row(settings) -> None:  # type: ignore[no-untyped-def]
@@ -100,10 +105,10 @@ def test_global_comment_is_appended_to_every_item_comment_and_order_row(settings
     ]
 
 
-def test_global_comment_filler_is_removed_but_catalog_comments_are_preserved(
+def test_global_comment_is_separate_from_catalog_reference(
     settings,
 ) -> None:  # type: ignore[no-untyped-def]
-    """Сохраняет дневные комментарии и не записывает разговорную связку общего пожелания."""
+    """Хранит примечание каталога отдельно от комментария новой заявки."""
     engine = ConversationEngine(settings)
     catalog = [
         CatalogProduct(
@@ -145,9 +150,13 @@ def test_global_comment_filler_is_removed_but_catalog_comments_are_preserved(
         catalog,
     )
 
-    assert [item.comment for item in result.state.cart] == [
-        "в банках; на завтра; на завтра или послезавтра; главное быстро",
+    assert [item.catalog_comment for item in result.state.cart] == [
+        "в банках; на завтра; на завтра или послезавтра",
         "в ведрах; на завтра; в вагонах",
+    ]
+    assert [item.comment for item in result.state.cart] == [
+        "главное быстро; на завтра",
+        "на завтра",
     ]
 
 
@@ -193,12 +202,13 @@ def test_late_global_comment_applies_to_existing_and_new_items_without_overlap(
 
     assert result.state.cart[0].comment == ""
     assert result.state.cart[1].comment == "желательно на завтра"
-    assert result.state.cart[2].comment == "тест; в банках; желательно на завтра"
+    assert result.state.cart[2].catalog_comment == "тест"
+    assert result.state.cart[2].comment == "в банках; желательно на завтра"
     pending = engine._prepare_submission(_event(), result.state)
     assert pending.state.pending_submission is not None
     assert [row["Комментарий"] for row in pending.state.pending_submission.rows] == [
         "желательно на завтра",
-        "тест; в банках; желательно на завтра",
+        "в банках; желательно на завтра",
     ]
 
 
@@ -295,15 +305,139 @@ def test_standalone_global_comment_updates_active_draft_once(settings) -> None: 
     assert "Применён ко всем товарам: 2" in repeated.reply.text
 
 
-def test_parser_keeps_trailing_comment_after_quantity_out_of_product_name() -> None:
-    """Проверяет, что парсер сохраняет после количества комментарий after количество исключено для товар название."""
+def test_parser_keeps_unmarked_tail_in_product_name() -> None:
+    """Оставляет неоднозначное слово после количества в названии товара."""
     items = parse_product_lines("сироп роза 10 штук охлаждённым")
 
     assert len(items) == 1
-    assert items[0].product_query == "сироп роза"
+    assert items[0].product_query == "сироп роза охлаждённым"
     assert items[0].quantity == 10
     assert items[0].unit == "шт"
-    assert items[0].comment == "охлаждённым"
+    assert items[0].comment == ""
+    assert items[0].comment_source == "none"
+
+
+@pytest.mark.parametrize(
+    ("source", "expected_query"),
+    [
+        ("грудинка 5 кг Блэк Ангус", "грудинка Блэк Ангус"),
+        ("томаты 5 кг Турция", "томаты Турция"),
+        ("сироп роза 5 шт холодным", "сироп роза холодным"),
+    ],
+)
+def test_unmarked_tail_stays_in_product_query(
+    source: str,
+    expected_query: str,
+) -> None:
+    """Не отправляет характеристику из остатка фразы как комментарий."""
+    item = parse_product_lines(source)[0]
+
+    assert item.product_query == expected_query
+    assert item.quantity == 5
+    assert item.comment == ""
+    assert item.user_comment_to_supplier == ""
+    assert item.comment_source == "none"
+
+
+@pytest.mark.parametrize(
+    ("source", "expected_comment"),
+    [
+        ("сироп роза 5 шт, комментарий: привезти холодным", "привезти холодным"),
+        ("сироп роза 5 шт желательно охлаждённым", "желательно охлаждённым"),
+        ("сироп роза 5 шт без замены", "без замены"),
+    ],
+)
+def test_explicit_comment_marker_sets_provenance(
+    source: str,
+    expected_comment: str,
+) -> None:
+    """Сохраняет только явно обозначенное пожелание поставщику."""
+    item = parse_product_lines(source)[0]
+
+    assert item.product_query == "сироп роза"
+    assert item.quantity == 5
+    assert item.comment == expected_comment
+    assert item.comment_source == "explicit_marker"
+
+
+def test_catalog_comment_is_reference_only_and_not_submitted(settings) -> None:  # type: ignore[no-untyped-def]
+    """Не отправляет сохранённый комментарий каталога в новую заявку."""
+    engine = ConversationEngine(settings)
+    catalog = [
+        CatalogProduct(
+            product_id="rose",
+            name="Сироп Роза",
+            supplier="Сиропы",
+            unit="шт",
+            price=100,
+            comment="старое примечание каталога",
+        )
+    ]
+
+    added = engine.handle(
+        _event(),
+        ParsedCommand(
+            intent=Intent.ADD_ITEMS,
+            items=[
+                ExtractedItem(
+                    product_query="Сироп Роза",
+                    quantity=5,
+                    unit="шт",
+                    comment="привезти холодным",
+                )
+            ],
+        ),
+        ConversationState(restaurant="Кафе"),
+        catalog,
+    )
+
+    item = added.state.cart[0]
+    assert item.catalog_comment == "старое примечание каталога"
+    assert item.catalog_comment_source == "catalog"
+    assert item.comment == "привезти холодным"
+    assert item.comment_source == "semantic"
+    pending = engine._prepare_submission(_event(), added.state)
+    assert pending.state.pending_submission is not None
+    assert pending.state.pending_submission.rows[0]["Комментарий"] == "привезти холодным"
+
+
+def test_legacy_merged_catalog_comment_is_split_before_submission(settings) -> None:  # type: ignore[no-untyped-def]
+    """Очищает старый черновик, где примечание каталога смешано с пожеланием."""
+    engine = ConversationEngine(settings)
+    product = CatalogProduct(
+        product_id="rose",
+        name="Сироп Роза",
+        supplier="Сиропы",
+        unit="шт",
+        price=100,
+        comment="старое примечание каталога",
+    )
+    state = ConversationState(
+        restaurant="Кафе",
+        cart=[
+            CartItem(
+                id="legacy",
+                source_query="Сироп Роза",
+                quantity=5,
+                unit="шт",
+                comment="старое примечание каталога; привезти холодным",
+                status=ItemStatus.MATCHED,
+                catalog_product_id="rose",
+                catalog_name="Сироп Роза",
+                supplier="Сиропы",
+                catalog_unit="шт",
+                price=100,
+            )
+        ],
+    )
+
+    engine._refresh_cart_order_values(state, [product])
+
+    assert state.cart[0].catalog_comment == "старое примечание каталога"
+    assert state.cart[0].comment == "привезти холодным"
+    pending = engine._prepare_submission(_event(), state)
+    assert pending.state.pending_submission is not None
+    assert pending.state.pending_submission.rows[0]["Комментарий"] == "привезти холодным"
 
 
 def test_parser_keeps_multiword_delivery_preferences_as_a_single_comment() -> None:
@@ -332,8 +466,8 @@ def test_parser_keeps_multiword_delivery_preferences_as_a_single_comment() -> No
         assert items[0].user_comment_to_supplier == expected_comment, text
 
 
-def test_comment_before_quantity_is_recovered_after_catalog_match(settings) -> None:  # type: ignore[no-untyped-def]
-    """Проверяет, что комментарий до количество является recovered after каталог сопоставление."""
+def test_unmarked_attribute_before_quantity_requires_catalog_clarification(settings) -> None:  # type: ignore[no-untyped-def]
+    """Не превращает неподтверждённую характеристику в пожелание поставщику."""
     engine = ConversationEngine(settings)
     catalog = [
         CatalogProduct(
@@ -358,15 +492,14 @@ def test_comment_before_quantity_is_recovered_after_catalog_match(settings) -> N
         catalog,
     )
 
-    assert result.state.cart[0].catalog_name == "Сироп Роза, 1л"
-    assert result.state.cart[0].comment == "холодным"
-    pending = engine._prepare_submission(_event(), result.state)
-    assert pending.state.pending_submission is not None
-    assert pending.state.pending_submission.rows[0]["Комментарий"] == "холодным"
+    assert result.state.cart[0].status is ItemStatus.AMBIGUOUS
+    assert result.state.cart[0].source_query == "сироп роза холодным"
+    assert result.state.cart[0].catalog_name == ""
+    assert result.state.cart[0].comment == ""
 
 
-def test_arbitrary_item_comment_survives_ambiguous_choice_and_submission(settings) -> None:  # type: ignore[no-untyped-def]
-    """Проверяет, что произвольный позиция комментарий survives неоднозначный выбор и отправка заявки."""
+def test_unmarked_variant_survives_ambiguous_choice_without_becoming_comment(settings) -> None:  # type: ignore[no-untyped-def]
+    """Сохраняет вариант товара до ручного выбора и не отправляет его комментарием."""
     engine = ConversationEngine(settings)
     catalog = [
         CatalogProduct(
@@ -402,8 +535,8 @@ def test_arbitrary_item_comment_survives_ambiguous_choice_and_submission(setting
 
     item = added.state.cart[0]
     assert item.status is ItemStatus.AMBIGUOUS
-    assert item.source_query == "говядина мраморная"
-    assert item.comment == "без кожи"
+    assert item.source_query == "говядина мраморная без кожи"
+    assert item.comment == ""
 
     selected = engine.handle(
         _event(),
@@ -413,10 +546,10 @@ def test_arbitrary_item_comment_survives_ambiguous_choice_and_submission(setting
     )
 
     assert selected.state.cart[0].status is ItemStatus.MATCHED
-    assert selected.state.cart[0].comment == "без кожи"
+    assert selected.state.cart[0].comment == ""
     pending = engine._prepare_submission(_event(), selected.state)
     assert pending.state.pending_submission is not None
-    assert pending.state.pending_submission.rows[0]["Комментарий"] == "без кожи"
+    assert pending.state.pending_submission.rows[0]["Комментарий"] == ""
 
 
 def test_typo_resolution_preserves_item_and_global_comments(settings) -> None:  # type: ignore[no-untyped-def]
@@ -490,9 +623,9 @@ def test_catalog_evidence_separates_many_product_typos_from_free_comments(
                 CatalogProduct(product_id="rose", name="Сироп Роза, 1л", unit="шт"),
                 CatalogProduct(product_id="tarhun", name="Сироп Тархун, 1л", unit="шт"),
             ],
-            "сироп рза",
-            "холодным",
-            "rose",
+            "сироп рза холодным",
+            "",
+            "",
         ),
         (
             "кордиал апелсин без льда",
@@ -504,9 +637,9 @@ def test_catalog_evidence_separates_many_product_typos_from_free_comments(
                 ),
                 CatalogProduct(product_id="cherry", name="Кордиал Вишня, 1л", unit="шт"),
             ],
-            "кордиал апелсин",
-            "без льда",
-            "orange",
+            "кордиал апелсин без льда",
+            "",
+            "",
         ),
         (
             "сыр пармезн натереть мелко",
@@ -516,7 +649,7 @@ def test_catalog_evidence_separates_many_product_typos_from_free_comments(
             ],
             "сыр пармезн",
             "натереть мелко",
-            "parmesan",
+            "",
         ),
     ]
 
@@ -526,7 +659,8 @@ def test_catalog_evidence_separates_many_product_typos_from_free_comments(
 
         assert item.source_query == expected_query
         assert item.comment == expected_comment
-        assert item.candidates[0].product_id == product_id
+        assert item.candidates[0].product_id == catalog[0].product_id
+        assert item.catalog_product_id == product_id
 
 
 def test_existing_comment_shadow_is_removed_from_persisted_draft(settings) -> None:  # type: ignore[no-untyped-def]

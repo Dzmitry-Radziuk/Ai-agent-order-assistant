@@ -4,7 +4,7 @@ from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 class InputKind(StrEnum):
@@ -32,6 +32,7 @@ class Intent(StrEnum):
     SHOW_CART = "show_cart"
     SUBMIT_REQUEST = "submit_request"
     EDIT_QUANTITY = "edit_quantity"
+    EDIT_COMMENT = "edit_comment"
     SELECT_CANDIDATE = "select_candidate"
     ADD_MORE = "add_more"
     GREETING = "greeting"
@@ -67,6 +68,15 @@ class Intent(StrEnum):
     UNIT_OK = "unit_ok"
     MERGE_DUPLICATE = "merge_duplicate"
     UNKNOWN = "unknown"
+
+
+class CommentSource(StrEnum):
+    """Показывает подтверждённое происхождение комментария пользователя."""
+
+    NONE = "none"
+    SEMANTIC = "semantic"
+    EXPLICIT_MARKER = "explicit_marker"
+    CATALOG = "catalog"
 
 
 class SearchScope(StrEnum):
@@ -162,6 +172,7 @@ class ExtractedItem(BaseModel):
     supplier_hint: str = ""
     comment: str = ""
     user_comment_to_supplier: str = ""
+    comment_source: CommentSource = CommentSource.NONE
     source_line: str = ""
     source_department: str = ""
     department_quantities: DepartmentQuantities = Field(default_factory=DepartmentQuantities)
@@ -198,6 +209,15 @@ class ExtractedItem(BaseModel):
         """Обрезает пробелы во всех строковых полях."""
         return " ".join(value.split()).strip()
 
+    @model_validator(mode="after")
+    def infer_semantic_comment_source(self) -> ExtractedItem:
+        """Помечает старый payload с комментарием как семантический."""
+        if self.comment_source is CommentSource.NONE and (
+            self.comment or self.user_comment_to_supplier
+        ):
+            self.comment_source = CommentSource.SEMANTIC
+        return self
+
 
 class ParsedCommand(BaseModel):
     """Описывает нормализованную команду пользователя."""
@@ -212,6 +232,10 @@ class ParsedCommand(BaseModel):
     edit_quantity: float | None = None
     edit_unit: str = ""
     global_comment: str = ""
+    comment_target_query: str = ""
+    comment_text: str = ""
+    comment_action: Literal["add", "remove"] = "add"
+    comment_scope: Literal["item", "order"] = "item"
     comment_clarification: str = ""
     comment_scope_action: str = ""
     comment_target_indexes: list[int] = Field(default_factory=list)
@@ -276,6 +300,9 @@ class CartItem(BaseModel):
     supplier_search_locked: bool = False
     rename_attempted: bool = False
     comment: str = ""
+    comment_source: CommentSource = CommentSource.NONE
+    catalog_comment: str = ""
+    catalog_comment_source: CommentSource = CommentSource.NONE
     status: ItemStatus = ItemStatus.NEW
     catalog_product_id: str = ""
     catalog_name: str = ""
@@ -294,11 +321,24 @@ class CartItem(BaseModel):
     duplicate_existing_unit: str = ""
     product_add_request_id: str = ""
 
-    @field_validator("source_query", "source_line", "quantity_source", "order_entry_type")
+    @field_validator(
+        "source_query",
+        "source_line",
+        "quantity_source",
+        "order_entry_type",
+        "catalog_comment",
+    )
     @classmethod
     def strip_source_text(cls, value: str) -> str:
         """Обрезает пробелы в исходном названии товара."""
         return " ".join(value.split()).strip()
+
+    @model_validator(mode="after")
+    def infer_semantic_comment_source(self) -> CartItem:
+        """Поддерживает черновики до появления provenance комментария."""
+        if self.comment_source is CommentSource.NONE and self.comment:
+            self.comment_source = CommentSource.SEMANTIC
+        return self
 
     @property
     def amount(self) -> float:
@@ -363,6 +403,7 @@ class ConversationState(BaseModel):
     edit_multiple_index: int | None = None
     pending_added_items_count: int = 0
     pending_comment_items: list[ExtractedItem] = Field(default_factory=list)
+    pending_comment_existing_item_ids: list[str] = Field(default_factory=list)
     pending_comment_text: str = ""
     pending_comment_global_comment: str = ""
     pending_new_order_confirmation: bool = False

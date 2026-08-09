@@ -83,6 +83,24 @@ UNIT_ALIASES: dict[str, str] = {
     "вёдер": "ведро",
 }
 
+DEPARTMENT_ALIASES: dict[str, str] = {
+    "зал": "Зал",
+    "зала": "Зал",
+    "залу": "Зал",
+    "зале": "Зал",
+    "бар": "Бар",
+    "бара": "Бар",
+    "бару": "Бар",
+    "баре": "Бар",
+    "кухня": "Кухня",
+    "кухни": "Кухня",
+    "кухню": "Кухня",
+    "кухне": "Кухня",
+    "hall": "Зал",
+    "bar": "Бар",
+    "kitchen": "Кухня",
+}
+
 NUMBER_WORDS: dict[str, float] = {
     "ноль": 0,
     "один": 1,
@@ -172,10 +190,37 @@ def remove_global_comment_overlap(item_comment: str, global_comment: str) -> str
     return remaining.strip(" .,;:-—–")
 
 
+def remove_phrase_overlap(source_text: str, phrase: str) -> str:
+    """Убирает подтверждённую фразу из поисковой копии, не меняя исходные данные."""
+    source = clean_text(source_text)
+    phrase_tokens = [
+        normalize_text(token)
+        for token in re.findall(r"[a-zа-яё0-9%]+", normalize_text(phrase), flags=re.I)
+    ]
+    source_matches = list(re.finditer(r"[a-zа-яё0-9%]+", source, flags=re.I))
+    source_tokens = [normalize_text(match.group()) for match in source_matches]
+    if not source_tokens or not phrase_tokens or len(phrase_tokens) > len(source_tokens):
+        return source
+    for start in range(len(source_tokens) - len(phrase_tokens) + 1):
+        if source_tokens[start : start + len(phrase_tokens)] != phrase_tokens:
+            continue
+        left = source[: source_matches[start].start()].strip()
+        right = source[source_matches[start + len(phrase_tokens) - 1].end() :].strip()
+        replacement = clean_text(f"{left} {right}")
+        return replacement or source
+    return source
+
+
 def normalize_unit(value: Any) -> str:
     """Нормализует единицу измерения."""
     text = normalize_text(value)
     return UNIT_ALIASES.get(text, clean_text(value))
+
+
+def normalize_department(value: Any) -> str:
+    """Приводит название отдела к заголовку листа заявки."""
+    text = normalize_text(value)
+    return DEPARTMENT_ALIASES.get(text, clean_text(value))
 
 
 def numeric_range_spans(value: Any) -> list[tuple[int, int]]:

@@ -18,7 +18,9 @@ IGNORED_DIRECTORIES = {
     ".ruff_cache",
     ".tmp",
     ".venv",
+    ".test-artifacts",
     "test-artifacts",
+    "test-runtime",
 }
 
 
