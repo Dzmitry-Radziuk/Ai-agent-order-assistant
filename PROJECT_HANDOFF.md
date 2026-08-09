@@ -3471,3 +3471,26 @@ policy, parser normalization, engine routing и focused regression tests.
 Block C завершён и остановлен на границе source provenance. Следующий этап
 может отдельно рассматривать catalog-dependent quantity/title sanitization;
 не смешивать его с Block C и не начинать автоматически.
+
+## BLOCK D PLAN — READY / IMPLEMENTATION PENDING
+
+- План: [docs/DATA_INTEGRITY_BLOCK_D_PLAN.md](docs/DATA_INTEGRITY_BLOCK_D_PLAN.md).
+- Owner: catalog boundary in `ConversationEngine` — `_match_item()` pre-decision
+  reconciliation and `_apply_catalog()` post-selection application. `CatalogResolver`
+  remains read-only; `matching.py` remains Block E.
+- MUST FIX count: 5. Four failures are in
+  `tests/catalog/test_product_matching.py`; the supplier-named failure is also a
+  catalog comment-boundary failure after successful selection.
+- First bad transitions: the existing catalog-fact sanitizer is defined but not wired
+  before `CatalogResolver.decide()`; `_reconcile_quantity_with_catalog_name()` then
+  rewrites `source_query` and can treat catalog-title measurements as order quantity.
+- Planned helpers: an ownership-aware pre-decision reconciliation using the existing
+  sanitizer boundary, provenance-safe quantity/title reconciliation, and an idempotent
+  post-selection catalog apply. No new policy module or model field is planned.
+- Core invariant: catalog metadata may populate `catalog_*` fields, but it cannot rewrite
+  `source_query/source_line`, explicit quantity/unit, or user comments. Catalog comments
+  remain separate from supplier comments.
+- Block E boundary: no changes to candidate ranking, fuzzy/morphological matching,
+  `has_catalog_search_evidence()`, thresholds, or AI matcher contract.
+- Next action: review and explicitly approve this plan before implementation. The current
+  application and tests remain unchanged by the planning stage.
