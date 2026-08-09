@@ -1687,3 +1687,214 @@ TEXT и VOICE используют один global parse → policy → engine �
 - `git diff --check` — passed.
 
 `NEXT FUNCTIONAL STEP`: **AWAIT_PRODUCT_ADD_DETAILS**.
+
+## 31. AWAIT_PRODUCT_ADD_DETAILS — analysis complete / implementation pending
+
+Этап **AWAIT_PRODUCT_ADD_DETAILS** проанализирован. В этом этапе код приложения не менялся.
+Следующая функциональная задача остаётся `AWAIT_PRODUCT_ADD_DETAILS`.
+
+### Реальный flow
+
+1. Для `NOT_FOUND` или `AMBIGUOUS` позиции кнопка `v2:addreq:<index>` разбирается в
+   `Intent.PRODUCT_ADD` (`services/parser.py`).
+2. `ConversationEngine.handle()` (`services/engine.py:429-446`) проверяет текущий item,
+   создаёт/сохраняет `CartItem.product_add_request_id`, заполняет
+   `pending_product_add_item_index` и `pending_product_add_request_id`, переводит state в
+   `SessionStage.AWAIT_PRODUCT_ADD_DETAILS` и показывает `product_add_prompt()`.
+3. Prompt просит одним сообщением передать название, бренд, фасовку/объём и другие детали;
+   существующие примеры — «Мисо-паста Genzo, 1 кг» и «Краб камчатский М/Л, 6 кг».
+   Поэтому название + quantity/unit в этом состоянии может быть корректным описанием
+   текущего товара, а не новой строкой заявки.
+4. После ответа `engine.py:632-684` создаёт запись в `product_add_requests` с
+   `source_item_id`, `original_query`, полным `description`, `description_event_key` и
+   метаданными Telegram; исходный item получает `SKIPPED`, очищается
+   `current_issue_item_id`, state становится `REVIEW`, а результат ставит
+   `enqueue_product_add=True`.
+5. Orchestrator ставит `submit_product_add` в Celery (`orchestrator.py:1753-1756`).
+   `SubmissionService.submit_product_add()` (`submission.py:510-568`) повторно блокирует
+   сессию, находит request по `pending_product_add_request_id`, пишет только description в
+   лист добавления товара и сохраняет статус `submitted`, `write_failed` или
+   `write_uncertain`. При применении результата очищаются
+   `pending_product_add_request_id` и `product_add_write_in_progress`; завершённый request
+   остаётся в `product_add_requests`, а итоговое подтверждение и свежий draft строятся
+   отдельно.
+
+### Состояние и идентификаторы
+
+- `ConversationState.pending_product_add_item_index` — индекс исходного unresolved item.
+- `ConversationState.pending_product_add_request_id` — request, ожидающий записи.
+- `ConversationState.product_add_write_in_progress` — флаг отложенной записи.
+- `ConversationState.product_add_requests` — отдельная история запросов снабженцу.
+- `CartItem.product_add_request_id` — стабильная связь item с request.
+- `current_issue_item_id/current_issue_kind` — текущая issue-ссылка; при успешном описании
+  `current_issue_item_id` очищается, а `current_issue_kind` явно не сбрасывается этим блоком.
+
+`new_product_add_request_id()` формирует устойчивый request ID из времени, очищенного item ID
+и случайного суффикса. `clear_product_add_pending()` сбрасывает только три временных поля
+(`pending_product_add_item_index`, `pending_product_add_request_id`,
+`product_add_write_in_progress`) и не удаляет `product_add_requests`.
+
+### Первый unsafe transition
+
+Первое неверное решение находится не в parser, а в `ConversationEngine.handle()` на
+`engine.py:632`. Блок
+
+```python
+if state.stage == SessionStage.AWAIT_PRODUCT_ADD_DETAILS:
+    description = (command.text or event.text).strip()
+```
+
+срабатывает после общих passive/navigation/final handlers, но до обычной ветки
+`Intent.ADD_ITEMS` (`engine.py:688+`). Если строка непустая, она без дополнительного
+решения считается описанием и сразу создаёт product-add request. Поэтому `ADD_ITEMS` и
+`UNKNOWN` с текстом не доходят до обычного добавления товара и могут изменить исходный
+unresolved item на `SKIPPED`.
+
+Уже распознанные независимые intents чаще всего не доходят до этого блока:
+
+| ParsedCommand intent | Текущий путь до generic product-add block | Изменение product-add request |
+|---|---|---|
+| `GREETING`, `HELP`, `THANKS`, `SMALL_TALK` | `PassiveIntentHandler` | не создаётся; state/pending обычно сохраняются |
+| `SHOW_CART`, `START_NEW_ORDER`, `CLEAR_CART` | обычная navigation ветка | `SHOW_CART` сохраняет pending; `START_NEW_ORDER` открывает подтверждение; `CLEAR_CART` очищает draft и transient product-add refs |
+| `ORDER_STATUS` | `OrderStatusHandler` | не создаётся; ставится status-task, pending сохраняется |
+| `PRODUCT_ADD_LIST` | список запросов снабженцу | не создаётся; pending сохраняется |
+| `BACK` | `_clear_transient_dialog_state()` | pending очищается, draft показывается |
+| `CANCEL` | `_contextual_negative_command()` переписывает в `PRODUCT_ADD_SKIP` | исходный item пропускается, pending очищается |
+| `REMOVE_ITEM`, `EDIT_QUANTITY`, `MANUAL_CURRENT` | соответствующие handlers | generic block не достигается; результат зависит от target/current item |
+| `SUBMIT_REQUEST`, `SHOW_FINAL_REVIEW` | `FinalReviewHandler` | при unresolved item показывается issue, request не создаётся |
+| `UNKNOWN` с непустым текстом | generic product-add block | текст записывается как description, item становится `SKIPPED`, enqueue включается |
+| `ADD_ITEMS` с непустым `command.text` | generic product-add block | текст записывается как description вместо создания нового `CartItem` |
+
+Это фактический порядок ветвей текущего engine, а не новое правило поведения.
+
+### ADD_ITEMS: description против независимого товара
+
+Существующий `ParsedCommand` содержит `intent`, `text`, `items`, quantity/unit внутри
+`ExtractedItem`, но не содержит отдельного признака «это ответ на product-add prompt» или
+«это новая строка текущей заявки».
+
+- Для валидного ответа «Мисо-паста Genzo, 1 кг» текст может быть `UNKNOWN` с непустым
+  `command.text` либо `ADD_ITEMS` с одним item; текущий generic block сохраняет весь исходный
+  текст как description.
+- Для голосового ответа существующий regression fixture передаёт `ADD_ITEMS`, полный
+  transcript в `command.text` и один `ExtractedItem`; фактический путь тот же, что для TEXT.
+- Для явного независимого «добавь пармезан 3 кг» глобальный parser должен вернуть
+  `ADD_ITEMS` с item и текстом, но текущий engine не имеет поля, отличающего его от
+  допустимого product-add description «пармезан 3 кг». При текущем порядке оба попадают в
+  generic block.
+
+Следовательно, `StateCompatibilityPolicy` не может надёжно решить эту пару только по
+текущему `ParsedCommand` без разбора natural language: структуры команд совпадают. Это
+зафиксированный semantic gap, а не основание добавлять regex/blacklist в policy.
+
+### Два engine-блока и их reachability
+
+Блок A (`engine.py:632-684`) принимает `(command.text or event.text)` и является обычным
+TEXT/VOICE путём. Он перехватывает любой непустой ответ до нормального `ADD_ITEMS`.
+
+Блок B (`engine.py:706-756`) находится внутри `if command.intent == Intent.ADD_ITEMS`. Он
+использует `command.text.strip()` или объединяет `item.source_line/item.product_query`.
+При непустом `command.text` для TEXT/VOICE блок A возвращает раньше, поэтому B для этого
+случая недостижим. B достижим, когда A не получил текст (прежде всего структурированный
+PHOTO/ParsedCommand без caption): тогда он восстанавливает description из распознанных
+items. Поля request, мутация source item, pending refs, stage и enqueue в A и B одинаковы;
+различается только источник строки description. Это дублирование одной бизнес-операции,
+которое следует устранять только в implementation diff после фиксации семантики.
+
+### TEXT / VOICE / PHOTO и callbacks
+
+- TEXT: `UpdateOrchestrator._parse_text_in_context()` сначала вызывает global
+  `openai.parse_text()`, затем передаёт результат в `ConversationEngine.handle()`.
+- VOICE: `InputRecognitionService._recognize_voice()` сначала транскрибирует, затем
+  вызывает тот же callback `_parse_text_in_context()`; отдельного product-add voice bypass
+  нет. После этого engine получает тот же тип `ParsedCommand`, что и для TEXT.
+- PHOTO: `_recognize_photo()` вызывает `openai.parse_photo()`. При пустом `command.text` и
+  отсутствии caption возможен блок B с `source_line/product_query` extracted items; фото
+  не имеет отдельного product-add semantics.
+- Callbacks остаются явным UI-путём: `v2:addreq:<index>`, `v2:addreqskip:<index>`,
+  `v2:addreqretry:<request_id>`, `v2:back`, `v2:cancel`. Их нельзя смешивать с natural-language
+  policy. `PRODUCT_ADD_RETRY` повторно использует request ID, а `PRODUCT_ADD_SKIP` помечает
+  исходный item `SKIPPED` и очищает pending.
+
+### Idempotency и cleanup
+
+До product-add обработки engine проверяет `description_event_key == event.update_id`
+(`engine.py:365-369`). Повтор Telegram update возвращает draft без повторного request и
+enqueue; этот механизм нельзя менять при routing refactor.
+
+`BACK`, `CANCEL`/`PRODUCT_ADD_SKIP`, `CLEAR_CART` и `_clear_transient_dialog_state()` очищают
+временные product-add refs. `START_NEW_ORDER` сохраняет старые completed requests и при
+активном draft сначала открывает подтверждение. Worker после submitted/failed/uncertain
+очищает pending request ID и write flag, сохраняя request status. Отдельного
+`suspended_interaction` по результатам аудита не требуется: исходный item и request refs уже
+персистируются в `ConversationState`; необходимость отдельного resume-контекста пока не
+доказана.
+
+### Нужен ли новый CompatibilityContext
+
+Да, для implementation нужен `CompatibilityContext.PRODUCT_ADD_DETAILS`: stage является
+семантическим modal prompt, но `context_for()` сейчас видит только статусный
+`CANDIDATE_SELECTION` или `NOT_FOUND` и не может выразить приоритет product-add prompt.
+Новый context должен проверяться после `COMMENT_SCOPE`/`MANUAL_DETAILS` и до
+status-based candidate/not-found contexts, только при валидных pending item/request refs.
+
+Предлагаемая ответственность policy:
+
+| ParsedCommand semantics | PRODUCT_ADD_DETAILS decision |
+|---|---|
+| Валидное описание текущего товара, включая название + quantity/unit | `CONTINUE` |
+| Явно распознанный независимый `SHOW_CART`, `REMOVE_ITEM`, `THANKS`, `START_NEW_ORDER`, `CLEAR_CART`, `ORDER_STATUS`, `BACK` и т.п. | `INTERRUPT` |
+| Команда, для которой global parser не дал достаточной семантики и product-add UI требует уточнения | `AMBIGUOUS` без мутации |
+| Явный skip/cancel текущего product-add запроса или невалидный callback | существующий safe `REJECT`/skip path |
+
+Критическое ограничение: `ADD_ITEMS + quantity` нельзя автоматически считать `INTERRUPT`,
+потому что тот же набор полей является валидным подробным описанием из текущего prompt.
+Для реализации сначала нужен семантический признак от global parser (например, роль
+сообщения «ответ на текущий prompt» против «новая позиция»); policy должна только принять
+решение по уже готовому ParsedCommand и не искать слова «добавь», «потом» или другие признаки
+в raw text.
+
+### Поведение случайных фраз
+
+Текущий UI действительно ожидает свободное непустое описание. Поэтому `UNKNOWN` с текстом
+«ну потом», «не знаю», «как-нибудь» или «ладно» сегодня технически становится description;
+это наблюдаемое поведение generic block, а не доказательство того, что такие фразы являются
+валидными товарными данными. `THANKS`, если global parser распознал его как `THANKS`,
+обрабатывается passive handler и не создаёт request. Перед implementation нужно выбрать
+источник истины для weak/unknown input: принимать любую непустую фразу как описание либо
+возвращать безопасное уточнение. Новые blacklist/regex для этого этапа не предлагаются.
+
+### Предлагаемая граница implementation (не выполнена)
+
+1. Сначала зафиксировать global-parser contract, который различает ответ на product-add
+   prompt и независимый `ADD_ITEMS`; не менять это различие внутри policy по словам.
+2. Добавить `PRODUCT_ADD_DETAILS` в общую `StateCompatibilityPolicy`/`ModalRoutingDecision`.
+3. Подключить один policy gate непосредственно перед product-add обработкой в engine.
+4. Оставить существующие request fields, source-item mutation, Celery enqueue, worker
+   idempotency, callbacks, `_advance()` и `_find_cart_item()` без изменений.
+5. После подтверждения семантики механически объединить A/B в одну операцию создания
+   request, сохранив для PHOTO fallback только источник description.
+
+### Regression plan (только план, тесты не добавлялись)
+
+- valid free-text description без quantity;
+- description с quantity/unit (оба UI-примера);
+- `ADD_ITEMS` как явно независимый новый товар — новый `CartItem`, старый product-add
+  context не попадает в него;
+- `SHOW_CART`, `THANKS`, `GREETING`, `HELP`, `SMALL_TALK`, `ORDER_STATUS`, `REMOVE_ITEM`,
+  `EDIT_QUANTITY`, `MANUAL_CURRENT`, `START_NEW_ORDER`, `CLEAR_CART`, `BACK`, `CANCEL`;
+- weak/random input с выбранным после обсуждения контрактом;
+- одинаковые сценарии TEXT и VOICE после transcription;
+- PHOTO без caption и с extracted `source_line/product_query` fallback;
+- PRODUCT_ADD/RETRY/SKIP callbacks и stale callback revision;
+- до/после valid description: source item, status, issue refs, pending refs, request fields,
+  `product_add_write_in_progress`, stage и enqueue;
+- повтор одного `update_id` не создаёт второй request и не ставит вторую задачу;
+- cleanup после BACK/CANCEL/REMOVE/START_NEW_ORDER/CLEAR_CART и worker success/failure;
+- сохранение существующих product-add, modal routing и baseline tests.
+
+### Ограничения этапа
+
+В рамках анализа не изменялись parser, prompts, OpenAI schemas, matching, submission,
+persistence, `_advance()`, `_find_cart_item()`, другие modal states, UX или callback contract.
+Сделан только этот handoff-документ.
