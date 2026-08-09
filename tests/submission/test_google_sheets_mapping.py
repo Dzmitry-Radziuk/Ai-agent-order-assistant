@@ -342,6 +342,88 @@ def test_catalog_update_writes_quantity_and_merged_comment(settings) -> None:  #
     ]
 
 
+def test_catalog_mutation_plan_contains_all_writes_and_is_deterministic(settings) -> None:  # type: ignore[no-untyped-def]
+    """Сохраняет quantity и comment mutations с before/expected-after."""
+    gateway = GoogleSheetsGateway(settings)
+    gateway.service = MagicMock()
+    gateway.load_catalog = MagicMock(  # type: ignore[method-assign]
+        return_value=[
+            CatalogProduct(
+                product_id="rose",
+                name="Сироп Роза",
+                unit="шт",
+                comment="хранить в холоде",
+                department_quantities=DepartmentQuantities(kitchen=10),
+                row_number=7,
+            )
+        ]
+    )
+    gateway._get_values = MagicMock(  # type: ignore[method-assign]
+        return_value=[
+            [
+                "ID товара",
+                "Зал",
+                "Бар",
+                "Кухня",
+                "Комментарий",
+            ]
+        ]
+    )
+    rows = [
+        {
+            "ID товара": "rose",
+            "Кол-во": 5,
+            "_department": "Кухня",
+            "Комментарий": "без замены",
+        }
+    ]
+
+    plan = gateway.prepare_catalog_mutation(
+        rows,
+        VENUE_SPREADSHEET_ID,
+        operation_id="catalog:ORDER-1",
+        order_no="ORDER-1",
+    )
+    same_plan = gateway.prepare_catalog_mutation(
+        rows,
+        VENUE_SPREADSHEET_ID,
+        operation_id="catalog:ORDER-1",
+        order_no="ORDER-1",
+    )
+
+    assert plan == same_plan
+    assert plan["mutations"] == [
+        {
+            "kind": "quantity",
+            "range": f"'{settings.google_catalog_sheet}'!D7",
+            "product_id": "rose",
+            "department": "Кухня",
+            "before": 10,
+            "increment": 5.0,
+            "expected_after": 15.0,
+        },
+        {
+            "kind": "comment",
+            "range": f"'{settings.google_catalog_sheet}'!E7",
+            "product_id": "rose",
+            "before": "хранить в холоде",
+            "expected_after": "хранить в холоде; без замены",
+        },
+    ]
+
+    gateway.apply_catalog_mutation(plan)
+    call = gateway.service.spreadsheets.return_value.values.return_value.batchUpdate.call_args
+    assert call.kwargs["body"]["data"] == [
+        {"range": f"'{settings.google_catalog_sheet}'!D7", "values": [[15.0]]},
+        {
+            "range": f"'{settings.google_catalog_sheet}'!E7",
+            "values": [
+                ["хранить в холоде; без замены"],
+            ],
+        },
+    ]
+
+
 def test_order_submission_is_prepared_from_venue_spreadsheet(settings) -> None:  # type: ignore[no-untyped-def]
     """Готовит контракт Web App по метаданным таблицы заведения."""
     gateway = GoogleSheetsGateway(settings)

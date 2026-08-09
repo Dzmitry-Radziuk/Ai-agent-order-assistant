@@ -67,6 +67,15 @@ class SubmissionRecord(Base):
     payload: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
     history_written: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     catalog_updated: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    catalog_update_status: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="pending"
+    )
+    catalog_update_plan: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
+    catalog_update_operation_id: Mapped[str] = mapped_column(
+        String(128), nullable=False, default=""
+    )
+    catalog_update_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    catalog_update_completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     recalc_done: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     dispatch_started: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     dispatch_completed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)

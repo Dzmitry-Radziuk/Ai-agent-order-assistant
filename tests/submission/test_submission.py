@@ -277,6 +277,11 @@ def _record(**overrides: object) -> SimpleNamespace:
     """Создаёт тестовую запись этапов отправки."""
     values = {
         "catalog_updated": False,
+        "catalog_update_status": "pending",
+        "catalog_update_plan": {},
+        "catalog_update_operation_id": "",
+        "catalog_update_started_at": None,
+        "catalog_update_completed_at": None,
         "recalc_done": False,
         "dispatch_started": False,
         "dispatch_completed": False,
@@ -285,6 +290,8 @@ def _record(**overrides: object) -> SimpleNamespace:
         "last_error": None,
     }
     values.update(overrides)
+    if "catalog_update_status" not in overrides:
+        values["catalog_update_status"] = "completed" if values["catalog_updated"] else "pending"
     return SimpleNamespace(**values)
 
 
@@ -295,6 +302,123 @@ def _prepared_request(order_no: str = "ORDER-1") -> PreparedOrderSubmission:
         payload={"clientRequestId": order_no},
         timeout_seconds=60,
     )
+
+
+def _catalog_plan(
+    order_no: str = "ORDER-1", mutations: list[dict[str, object]] | None = None
+) -> dict[str, object]:
+    """Создаёт сериализуемый тестовый catalog mutation plan."""
+    return {
+        "schema_version": 1,
+        "operation_id": f"catalog:{order_no}",
+        "order_no": order_no,
+        "spreadsheet_id": "venue-sheet",
+        "mutations": mutations
+        if mutations is not None
+        else [{"kind": "quantity", "range": "'Заявка'!B7", "expected_after": 15}],
+    }
+
+
+def test_catalog_write_timeout_becomes_uncertain_and_is_not_reapplied() -> None:
+    """Останавливает повтор после неизвестного результата batchUpdate."""
+    service = object.__new__(SubmissionService)
+    service.sheets = MagicMock()
+    service.sheets.prepare_catalog_mutation.return_value = _catalog_plan()
+    service.sheets.apply_catalog_mutation.side_effect = TimeoutError("write timeout")
+    service._persist_catalog_started = MagicMock()  # type: ignore[method-assign]
+    service._mark_catalog_uncertain = MagicMock()  # type: ignore[method-assign]
+    service._send_catalog_uncertain_reply = MagicMock()  # type: ignore[method-assign]
+    pending = PendingSubmission(order_no="ORDER-1", spreadsheet_id="venue-sheet", rows=[])
+
+    assert service._run_catalog_update("chat-1", pending, _record()) is False
+    service.sheets.apply_catalog_mutation.assert_called_once()
+    service._mark_catalog_uncertain.assert_called_once_with("chat-1", "ORDER-1", "write timeout")
+
+    uncertain = _record(catalog_update_status="uncertain", last_error="write timeout")
+    assert service._run_catalog_update("chat-1", pending, uncertain) is False
+    service.sheets.apply_catalog_mutation.assert_called_once()
+    service.sheets.prepare_catalog_mutation.assert_called_once()
+
+
+def test_catalog_success_marks_completed_after_one_exact_plan_apply() -> None:
+    """Применяет persisted plan один раз и отмечает completed."""
+    service = object.__new__(SubmissionService)
+    service.sheets = MagicMock()
+    plan = _catalog_plan()
+    service.sheets.prepare_catalog_mutation.return_value = plan
+    service._persist_catalog_started = MagicMock()  # type: ignore[method-assign]
+    service._checkpoint = MagicMock()  # type: ignore[method-assign]
+    pending = PendingSubmission(order_no="ORDER-1", spreadsheet_id="venue-sheet", rows=[])
+
+    assert service._run_catalog_update("chat-1", pending, _record()) is True
+    service._persist_catalog_started.assert_called_once_with("ORDER-1", plan)
+    service.sheets.apply_catalog_mutation.assert_called_once_with(plan)
+    service._checkpoint.assert_called_once_with("ORDER-1", "catalog_updated")
+
+
+def test_empty_catalog_plan_completes_without_external_write() -> None:
+    """Завершает пустой plan без вызова Google Sheets."""
+    service = object.__new__(SubmissionService)
+    service.sheets = MagicMock()
+    plan = _catalog_plan(mutations=[])
+    service.sheets.prepare_catalog_mutation.return_value = plan
+    service._persist_catalog_completed = MagicMock()  # type: ignore[method-assign]
+    pending = PendingSubmission(order_no="ORDER-1", spreadsheet_id="venue-sheet", rows=[])
+
+    assert service._run_catalog_update("chat-1", pending, _record()) is True
+    service._persist_catalog_completed.assert_called_once_with("ORDER-1", plan)
+    service.sheets.apply_catalog_mutation.assert_not_called()
+
+
+def test_catalog_checkpoint_failure_keeps_started_gate_for_next_retry() -> None:
+    """После сбоя checkpoint следующий retry не повторяет внешний write."""
+    service = object.__new__(SubmissionService)
+    service.sheets = MagicMock()
+    service.sheets.prepare_catalog_mutation.return_value = _catalog_plan()
+    service._persist_catalog_started = MagicMock()  # type: ignore[method-assign]
+    service._checkpoint = MagicMock(side_effect=RuntimeError("database unavailable"))  # type: ignore[method-assign]
+    pending = PendingSubmission(order_no="ORDER-1", spreadsheet_id="venue-sheet", rows=[])
+
+    with pytest.raises(RuntimeError, match="database unavailable"):
+        service._run_catalog_update("chat-1", pending, _record())
+
+    service._mark_catalog_uncertain = MagicMock()  # type: ignore[method-assign]
+    service._send_catalog_uncertain_reply = MagicMock()  # type: ignore[method-assign]
+    started = _record(catalog_update_status="started", last_error="database unavailable")
+    assert service._run_catalog_update("chat-1", pending, started) is False
+    service.sheets.apply_catalog_mutation.assert_called_once()
+
+
+def test_completed_catalog_checkpoint_skips_mutation() -> None:
+    """Не вызывает Google Sheets для уже завершённого catalog stage."""
+    service = object.__new__(SubmissionService)
+    service.sheets = MagicMock()
+    pending = PendingSubmission(order_no="ORDER-1", spreadsheet_id="venue-sheet", rows=[])
+
+    assert service._run_catalog_update("chat-1", pending, _record(catalog_updated=True)) is True
+    service.sheets.prepare_catalog_mutation.assert_not_called()
+    service.sheets.apply_catalog_mutation.assert_not_called()
+
+
+def test_catalog_cache_failure_after_completion_does_not_reapply() -> None:
+    """Не повторяет catalog write, если сбой произошёл после checkpoint при очистке cache."""
+    service = object.__new__(SubmissionService)
+    service.sheets = MagicMock()
+    plan = _catalog_plan()
+    service.sheets.prepare_catalog_mutation.return_value = plan
+    service._persist_catalog_started = MagicMock()  # type: ignore[method-assign]
+    service._checkpoint = MagicMock()  # type: ignore[method-assign]
+    service.catalog_cache = MagicMock()
+    pending = PendingSubmission(order_no="ORDER-1", spreadsheet_id="venue-sheet", rows=[])
+
+    assert service._run_catalog_update("chat-1", pending, _record()) is True
+    service.catalog_cache.invalidate.side_effect = RuntimeError("cache unavailable")
+    with pytest.raises(RuntimeError, match="cache unavailable"):
+        service.catalog_cache.invalidate("venue-sheet")
+
+    completed = _record(catalog_updated=True)
+    assert service._run_catalog_update("chat-1", pending, completed) is True
+    service.sheets.apply_catalog_mutation.assert_called_once_with(plan)
 
 
 def test_google_submission_lock_is_isolated_by_venue_spreadsheet() -> None:
@@ -308,17 +432,17 @@ def test_google_submission_lock_is_isolated_by_venue_spreadsheet() -> None:
     assert "venue-sheet-1" not in first_key
 
 
-def test_transient_pre_dispatch_error_can_be_retried_safely(
+def test_catalog_prepare_failure_before_apply_can_be_retried(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Разрешает повтор до начала необратимого вызова центрального скрипта."""
+    """Разрешает повтор ошибки чтения каталога до внешней мутации."""
     service = object.__new__(SubmissionService)
     service.redis = MagicMock()
     service.redis.lock.return_value = nullcontext()
     service.telegram = MagicMock()
     service.sheets = MagicMock()
     service.catalog_cache = MagicMock()
-    service.sheets.increment_catalog_quantities.side_effect = TimeoutError("temporary timeout")
+    service.sheets.prepare_catalog_mutation.side_effect = TimeoutError("catalog read failed")
     pending = PendingSubmission(order_no="ORDER-RETRY", spreadsheet_id="venue-sheet", rows=[])
     service._load_pending = MagicMock(return_value=pending)  # type: ignore[method-assign]
     service._record = MagicMock(return_value=_record())  # type: ignore[method-assign]
@@ -327,13 +451,21 @@ def test_transient_pre_dispatch_error_can_be_retried_safely(
     service._fail = MagicMock()  # type: ignore[method-assign]
     monkeypatch.setattr(submission_module, "chat_lock", lambda *_args, **_kwargs: nullcontext())
 
-    with pytest.raises(TimeoutError, match="temporary timeout"):
+    with pytest.raises(TimeoutError, match="catalog read failed"):
         service.submit("123", report_failure=False)
 
-    service._remember_transient_error.assert_called_once_with("ORDER-RETRY", "temporary timeout")
+    service._remember_transient_error.assert_called_once_with("ORDER-RETRY", "catalog read failed")
     service._fail.assert_not_called()
+    service.sheets.apply_catalog_mutation.assert_not_called()
     service.sheets.prepare_order_submission.assert_not_called()
     service.sheets.send_order_submission.assert_not_called()
+
+
+def test_transient_pre_dispatch_error_can_be_retried_safely(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Сохраняет старый scenario id только для definitely-before-apply ошибки."""
+    test_catalog_prepare_failure_before_apply_can_be_retried(monkeypatch)
 
 
 def test_retry_delivers_success_card_after_order_was_already_finalized(
@@ -419,6 +551,20 @@ def test_submission_runs_all_external_stages_and_uses_external_order_number(
         request_rows=1,
         notifications={"telegram": {"sent": True}},
     )
+    catalog_plan = {
+        "schema_version": 1,
+        "operation_id": "catalog:ORDER-1",
+        "order_no": "ORDER-1",
+        "spreadsheet_id": "venue-sheet",
+        "mutations": [
+            {
+                "kind": "quantity",
+                "range": "'Заявка'!B7",
+                "expected_after": 5,
+            }
+        ],
+    }
+    service.sheets.prepare_catalog_mutation.return_value = catalog_plan
     service.sheets.prepare_order_submission.return_value = _prepared_request()
     service.sheets.send_order_submission.return_value = result
     service._load_pending = MagicMock(return_value=pending)  # type: ignore[method-assign]
@@ -431,6 +577,7 @@ def test_submission_runs_all_external_stages_and_uses_external_order_number(
         ]
     )
     service._checkpoint = MagicMock()  # type: ignore[method-assign]
+    service._persist_catalog_started = MagicMock()  # type: ignore[method-assign]
     service._mark_dispatch_started = MagicMock()  # type: ignore[method-assign]
     service._mark_dispatch_completed = MagicMock()  # type: ignore[method-assign]
     final_state = ConversationState(last_order_no=result.order_number, status="submitted")
@@ -440,10 +587,14 @@ def test_submission_runs_all_external_stages_and_uses_external_order_number(
 
     service.submit("chat-1")
 
-    service.sheets.increment_catalog_quantities.assert_called_once_with(
+    service.sheets.prepare_catalog_mutation.assert_called_once_with(
         pending.rows,
         "venue-sheet",
+        operation_id="catalog:ORDER-1",
+        order_no="ORDER-1",
     )
+    service.sheets.apply_catalog_mutation.assert_called_once_with(catalog_plan)
+    service._persist_catalog_started.assert_called_once_with("ORDER-1", catalog_plan)
     service.sheets.trigger_recalculation.assert_called_once_with("ORDER-1", "venue-sheet")
     service.sheets.prepare_order_submission.assert_called_once_with("venue-sheet", "ORDER-1")
     service._mark_dispatch_started.assert_called_once_with("ORDER-1")
@@ -566,7 +717,7 @@ def test_submission_failure_is_reported_before_dispatch_starts(
     service.telegram = MagicMock()
     service.sheets = MagicMock()
     service.catalog_cache = MagicMock()
-    service.sheets.increment_catalog_quantities.side_effect = RuntimeError("Google unavailable")
+    service.sheets.prepare_catalog_mutation.side_effect = RuntimeError("Google unavailable")
     pending = PendingSubmission(order_no="ORDER-4", spreadsheet_id="venue-sheet", rows=[])
     service._load_pending = MagicMock(return_value=pending)  # type: ignore[method-assign]
     service._record = MagicMock(return_value=_record())  # type: ignore[method-assign]
@@ -684,7 +835,8 @@ def test_revoked_access_stops_submission_before_google_write(
         "chat-1",
         force_refresh=True,
     )
-    service.sheets.increment_catalog_quantities.assert_not_called()
+    service.sheets.prepare_catalog_mutation.assert_not_called()
+    service.sheets.apply_catalog_mutation.assert_not_called()
     service.sheets.trigger_recalculation.assert_not_called()
     service.sheets.send_order_submission.assert_not_called()
     reply = service.telegram.send_reply.call_args.args[1]
@@ -702,6 +854,13 @@ def test_disabled_dispatch_writes_and_recalculates_but_never_calls_submission_sc
     service.telegram = MagicMock()
     service.sheets = MagicMock()
     service.catalog_cache = MagicMock()
+    service.sheets.prepare_catalog_mutation.return_value = {
+        "schema_version": 1,
+        "operation_id": "catalog:ORDER-LOCAL",
+        "order_no": "ORDER-LOCAL",
+        "spreadsheet_id": "venue-sheet",
+        "mutations": [{"kind": "quantity", "range": "'Заявка'!B7", "expected_after": 5}],
+    }
     pending = PendingSubmission(
         order_no="ORDER-LOCAL",
         spreadsheet_id="venue-sheet",
@@ -717,6 +876,7 @@ def test_disabled_dispatch_writes_and_recalculates_but_never_calls_submission_sc
         ]
     )
     service._checkpoint = MagicMock()  # type: ignore[method-assign]
+    service._persist_catalog_started = MagicMock()  # type: ignore[method-assign]
     final_state = ConversationState(last_order_no="ORDER-LOCAL", status="saved_locally")
     service._finalize = MagicMock(return_value=final_state)  # type: ignore[method-assign]
     service._send_local_completion = MagicMock()  # type: ignore[method-assign]
@@ -724,10 +884,8 @@ def test_disabled_dispatch_writes_and_recalculates_but_never_calls_submission_sc
 
     service.submit("chat-local")
 
-    service.sheets.increment_catalog_quantities.assert_called_once_with(
-        pending.rows,
-        "venue-sheet",
-    )
+    service.sheets.prepare_catalog_mutation.assert_called_once()
+    service.sheets.apply_catalog_mutation.assert_called_once()
     service.sheets.trigger_recalculation.assert_called_once_with(
         "ORDER-LOCAL",
         "venue-sheet",

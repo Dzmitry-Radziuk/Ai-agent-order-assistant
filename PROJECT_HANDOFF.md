@@ -775,24 +775,33 @@ State является контекстом уже понятого сообще
 
 ## NEXT FUNCTIONAL STEP
 
-> Актуальный источник истины: следующий функциональный этап — `NOT_FOUND`; этап `AMBIGUOUS / candidate selection` уже завершён.
+### BLOCK H1 STATUS
 
-Следующая и только одна функциональная задача: распространить
-`StateCompatibilityPolicy` на `AMBIGUOUS / candidate selection`.
+- H1 implementation is complete on `decompose_bot`: catalog mutation uses a persisted
+  deterministic plan and an explicit `pending -> started -> completed` lifecycle.
+- Migration `0006` adds `catalog_update_status`, `catalog_update_plan`,
+  `catalog_update_operation_id`, `catalog_update_started_at`, and
+  `catalog_update_completed_at`. Existing `catalog_updated=true` rows are backfilled to
+  `completed`; other rows remain `pending`.
+- The plan stores `schema_version`, stable `operation_id=catalog:<order_no>`, `order_no`,
+  `spreadsheet_id`, and quantity/comment mutations with ranges and before/expected-after
+  values. Prepare is read-only; apply uses only the persisted ranges/values.
+- The sequence is persisted plan + `started`, one `batchUpdate`, then `completed` checkpoint.
+  Unknown write or checkpoint results stop recalc/dispatch/finalize. Retries for `started` or
+  `uncertain` do not issue another Sheets write. Empty plans complete without external writes.
+- Cache invalidation failures cannot cause a second catalog write because completion is
+  checkpointed before invalidation. Existing dispatch safety is unchanged. H2 read-back,
+  ledger/compensation, decomposition, and MAX are not started.
+- H1 focused submission/mapping tests: **68 passed**. Fresh full suite: **1262 collected /
+  1248 passed / 14 failed / 0 skipped / 0 xfailed / 0 errors** in **15.23s**; all 14 failures
+  are the pre-H1 baseline and no new failure nodeids appeared.
+- Ruff, mypy, migration heads (`0006`), and `git diff --check` pass. `alembic check` was not
+  run against an unknown database because `.env` was not read; use a safe test database for it.
 
-Граница этапа:
+The next functional step is `BLOCK H2 — catalog read-back verification and uncertain recovery`.
 
-```text
-global ParsedCommand
-  → policy для открытого выбора кандидата
-  → CONTINUE: выбор кандидата
-  → INTERRUPT: обычный независимый intent
-  → AMBIGUOUS/REJECT: сохранить карточку и pending context
-```
-
-До изменения нужно отдельно проверить text и voice, сохранение pending
-кандидата при interrupt и отсутствие переноса данных в новый товар. Состояния
-`NOT_FOUND` и последующие этапы в этот шаг не входят.
+> Актуальный источник истины: H1 завершён; следующий функциональный этап —
+> `BLOCK H2 — catalog read-back verification and uncertain recovery`.
 
 ## ARCHITECTURAL REFACTOR STATUS
 
@@ -3692,6 +3701,7 @@ schema и migrations не менялись.
 
 ## NEXT FUNCTIONAL STEP
 
-`BLOCK H IMPLEMENTATION — catalog mutation uncertainty safety (H1)` после
-отдельного подтверждения. Block H остаётся docs-only до этого подтверждения;
-decomposition и MAX не начинаются.
+`BLOCK H2 — catalog read-back verification and uncertain recovery` — только после
+отдельного подтверждения. H1 safety gate остаётся обязательным; prompts, parser,
+matching, engine, state compatibility, decomposition и MAX не входят в следующий
+патч автоматически.

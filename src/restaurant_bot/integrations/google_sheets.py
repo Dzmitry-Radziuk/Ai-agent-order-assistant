@@ -205,8 +205,15 @@ class GoogleSheetsGateway:
             )
         return result
 
-    def increment_catalog_quantities(self, rows: list[dict[str, Any]], spreadsheet_id: str) -> None:
-        """Обновляет количества товаров в каталоге."""
+    def prepare_catalog_mutation(
+        self,
+        rows: list[dict[str, Any]],
+        spreadsheet_id: str,
+        *,
+        operation_id: str,
+        order_no: str,
+    ) -> dict[str, Any]:
+        """Строит детерминированный план записи каталога без внешнего write."""
         target_id = self._require_spreadsheet_id(spreadsheet_id)
         catalog = self.load_catalog(target_id)
         by_id = {product.product_id: product for product in catalog}
@@ -214,7 +221,9 @@ class GoogleSheetsGateway:
         comments: dict[str, str] = {}
         for row in rows:
             product_id = clean_text(row.get("ID товара"))
-            department = normalize_department(row.get("_department")) or self.settings.default_department
+            department = (
+                normalize_department(row.get("_department")) or self.settings.default_department
+            )
             quantity = to_float(row.get("Кол-во", row.get("Количество"))) or 0
             if product_id and quantity:
                 increments[(product_id, department)] += quantity
@@ -225,11 +234,17 @@ class GoogleSheetsGateway:
                 )
 
         if not increments:
-            return
+            return {
+                "schema_version": 1,
+                "operation_id": operation_id,
+                "order_no": order_no,
+                "spreadsheet_id": target_id,
+                "mutations": [],
+            }
         headers_values = self._get_values(f"'{self.settings.google_catalog_sheet}'!1:1", target_id)
         headers = [clean_text(value) for value in (headers_values[0] if headers_values else [])]
         header_index = {header: index + 1 for index, header in enumerate(headers)}
-        data: list[dict[str, Any]] = []
+        mutations: list[dict[str, Any]] = []
         for (product_id, department), increment in increments.items():
             product = by_id.get(product_id)
             column = header_index.get(department)
@@ -237,7 +252,17 @@ class GoogleSheetsGateway:
                 continue
             old = product.department_quantities.for_department(department) or 0
             cell = f"'{self.settings.google_catalog_sheet}'!{self._column_letter(column)}{product.row_number}"
-            data.append({"range": cell, "values": [[old + increment]]})
+            mutations.append(
+                {
+                    "kind": "quantity",
+                    "range": cell,
+                    "product_id": product_id,
+                    "department": department,
+                    "before": old,
+                    "increment": increment,
+                    "expected_after": old + increment,
+                }
+            )
         comment_column = header_index.get("Комментарий")
         if comment_column:
             for product_id, comment in comments.items():
@@ -248,17 +273,52 @@ class GoogleSheetsGateway:
                     f"'{self.settings.google_catalog_sheet}'!"
                     f"{self._column_letter(comment_column)}{product.row_number}"
                 )
-                data.append({"range": cell, "values": [[comment]]})
-        if data:
-            (
-                self.service.spreadsheets()
-                .values()
-                .batchUpdate(
-                    spreadsheetId=target_id,
-                    body={"valueInputOption": "USER_ENTERED", "data": data},
+                mutations.append(
+                    {
+                        "kind": "comment",
+                        "range": cell,
+                        "product_id": product_id,
+                        "before": product.comment,
+                        "expected_after": comment,
+                    }
                 )
-                .execute()
+        return {
+            "schema_version": 1,
+            "operation_id": operation_id,
+            "order_no": order_no,
+            "spreadsheet_id": target_id,
+            "mutations": mutations,
+        }
+
+    def apply_catalog_mutation(self, plan: dict[str, Any]) -> None:
+        """Применяет только сохранённые значения плана без повторного чтения каталога."""
+        target_id = self._require_spreadsheet_id(clean_text(plan.get("spreadsheet_id")))
+        mutations = plan.get("mutations") or []
+        if not mutations:
+            return
+        data = [
+            {"range": mutation["range"], "values": [[mutation["expected_after"]]]}
+            for mutation in mutations
+        ]
+        (
+            self.service.spreadsheets()
+            .values()
+            .batchUpdate(
+                spreadsheetId=target_id,
+                body={"valueInputOption": "USER_ENTERED", "data": data},
             )
+            .execute()
+        )
+
+    def increment_catalog_quantities(self, rows: list[dict[str, Any]], spreadsheet_id: str) -> None:
+        """Совместимо обновляет каталог через одноразовый plan/apply путь."""
+        plan = self.prepare_catalog_mutation(
+            rows,
+            spreadsheet_id,
+            operation_id="legacy-catalog-mutation",
+            order_no="legacy",
+        )
+        self.apply_catalog_mutation(plan)
 
     def append_product_request(self, row: dict[str, Any], spreadsheet_id: str) -> None:
         """Записывает запрос на новый товар."""

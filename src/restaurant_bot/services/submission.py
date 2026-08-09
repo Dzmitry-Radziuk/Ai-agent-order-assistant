@@ -128,20 +128,18 @@ class SubmissionService:
                             dispatch_uncertain,
                         )
                     else:
-                        if not record.catalog_updated:
-                            stage_started = perf_counter()
-                            self.sheets.increment_catalog_quantities(
-                                pending.rows,
-                                spreadsheet_id,
-                            )
-                            self._checkpoint(pending.order_no, "catalog_updated")
+                        stage_started = perf_counter()
+                        catalog_was_completed = self._catalog_status(record) == "completed"
+                        if not self._run_catalog_update(chat_id, pending, record):
+                            return
+                        if not catalog_was_completed:
                             self.catalog_cache.invalidate(spreadsheet_id)
-                            logger.info(
-                                "submission_catalog_updated",
-                                chat_id=chat_id,
-                                order_no=pending.order_no,
-                                duration_ms=round((perf_counter() - stage_started) * 1000),
-                            )
+                        logger.info(
+                            "submission_catalog_updated",
+                            chat_id=chat_id,
+                            order_no=pending.order_no,
+                            duration_ms=round((perf_counter() - stage_started) * 1000),
+                        )
                         record = self._get_record(pending.order_no)
                         if not record.recalc_done:
                             stage_started = perf_counter()
@@ -745,6 +743,155 @@ class SubmissionService:
             db.expunge(record)
             return record
 
+    @staticmethod
+    def _catalog_status(record: SubmissionRecord) -> str:
+        """Возвращает canonical lifecycle каталожной мутации."""
+        status = getattr(record, "catalog_update_status", "")
+        if status in {"pending", "started", "uncertain", "completed", "conflict"}:
+            if status == "pending" and getattr(record, "catalog_updated", False):
+                return "completed"
+            return status
+        return "completed" if getattr(record, "catalog_updated", False) else "pending"
+
+    def _run_catalog_update(
+        self,
+        chat_id: str,
+        pending: PendingSubmission,
+        record: SubmissionRecord,
+    ) -> bool:
+        """Выполняет catalog plan с H1 stop-gate для неизвестного результата."""
+        status = self._catalog_status(record)
+        if status == "completed":
+            return True
+        if status in {"started", "uncertain", "conflict"}:
+            error = record.last_error or "Предыдущая запись каталога не подтверждена."
+            self._mark_catalog_uncertain(chat_id, pending.order_no, error)
+            self._send_catalog_uncertain_reply(chat_id, pending.order_no)
+            return False
+
+        operation_id = f"catalog:{pending.order_no}"
+        plan = self.sheets.prepare_catalog_mutation(
+            pending.rows,
+            pending.spreadsheet_id,
+            operation_id=operation_id,
+            order_no=pending.order_no,
+        )
+        if not plan.get("mutations"):
+            self._persist_catalog_completed(pending.order_no, plan)
+            return True
+
+        self._persist_catalog_started(pending.order_no, plan)
+        try:
+            self.sheets.apply_catalog_mutation(plan)
+        except Exception as exc:
+            error = str(exc) or type(exc).__name__
+            self._mark_catalog_uncertain(chat_id, pending.order_no, error)
+            self._send_catalog_uncertain_reply(chat_id, pending.order_no)
+            logger.exception(
+                "submission_catalog_update_uncertain",
+                chat_id=chat_id,
+                order_no=pending.order_no,
+            )
+            return False
+
+        self._checkpoint(pending.order_no, "catalog_updated")
+        return True
+
+    def _persist_catalog_started(self, order_no: str, plan: dict[str, Any]) -> None:
+        """Сохраняет immutable plan и STARTED до вызова Google Sheets."""
+        from sqlalchemy import select
+
+        with SessionLocal.begin() as db:
+            record = db.scalar(
+                select(SubmissionRecord)
+                .where(SubmissionRecord.order_no == order_no)
+                .with_for_update()
+            )
+            if record is None:
+                raise RuntimeError(f"Submission record {order_no} not found")
+            record.catalog_update_plan = plan
+            record.catalog_update_operation_id = plan["operation_id"]
+            record.catalog_update_status = "started"
+            record.catalog_update_started_at = datetime.now(UTC)
+            record.catalog_update_completed_at = None
+            record.catalog_updated = False
+            record.last_error = None
+            pending = PendingSubmission.model_validate(record.payload)
+            self._append_submission_event(
+                OrderEventRepository(db),
+                pending,
+                event_type="submission_catalog_update_started",
+                idempotency_key=f"order:{order_no}:catalog-update-started",
+            )
+
+    def _persist_catalog_completed(self, order_no: str, plan: dict[str, Any]) -> None:
+        """Фиксирует пустой plan как completed без внешней записи."""
+        from sqlalchemy import select
+
+        with SessionLocal.begin() as db:
+            record = db.scalar(
+                select(SubmissionRecord)
+                .where(SubmissionRecord.order_no == order_no)
+                .with_for_update()
+            )
+            if record is None:
+                raise RuntimeError(f"Submission record {order_no} not found")
+            record.catalog_update_plan = plan
+            record.catalog_update_operation_id = plan["operation_id"]
+            record.catalog_update_status = "completed"
+            record.catalog_updated = True
+            record.catalog_update_completed_at = datetime.now(UTC)
+            record.last_error = None
+            pending = PendingSubmission.model_validate(record.payload)
+            self._append_submission_event(
+                OrderEventRepository(db),
+                pending,
+                event_type="submission_catalog_updated",
+                idempotency_key=f"order:{order_no}:catalog_updated",
+            )
+
+    def _mark_catalog_uncertain(self, chat_id: str, order_no: str, error: str) -> None:
+        """Фиксирует неизвестный результат и запрещает повторный Sheets write."""
+        from sqlalchemy import select
+
+        with SessionLocal.begin() as db:
+            sessions = SessionRepository(db)
+            row, state = sessions.get_for_update(chat_id)
+            state.stage = SessionStage.SUBMISSION_FAILED
+            state.status = "catalog_update_uncertain"
+            if state.pending_submission:
+                state.pending_submission.failed_stage = "catalog_update_uncertain"
+                state.pending_submission.last_error = error[:1000]
+            sessions.save(chat_id, state, row)
+            record = db.scalar(
+                select(SubmissionRecord)
+                .where(SubmissionRecord.order_no == order_no)
+                .with_for_update()
+            )
+            if record is None:
+                raise RuntimeError(f"Submission record {order_no} not found")
+            record.catalog_update_status = "uncertain"
+            record.catalog_updated = False
+            record.last_error = error[:4000]
+            pending = PendingSubmission.model_validate(record.payload)
+            self._append_submission_event(
+                OrderEventRepository(db),
+                pending,
+                event_type="submission_catalog_update_uncertain",
+                idempotency_key=f"order:{order_no}:catalog-update-uncertain",
+                status="uncertain",
+                details={"error": error},
+            )
+
+    def _send_catalog_uncertain_reply(self, chat_id: str, order_no: str) -> None:
+        """Показывает безопасное временное сообщение без второго write."""
+        with SessionLocal() as db:
+            _, state = SessionRepository(db).get_for_update(chat_id)
+        self.telegram.send_reply(
+            chat_id,
+            submission_failure_reply(state, order_no),
+        )
+
     def _checkpoint(self, order_no: str, field: str) -> None:
         """Отмечает завершение этапа отправки заявки."""
         from sqlalchemy import select
@@ -758,6 +905,9 @@ class SubmissionService:
             if record is None:
                 raise RuntimeError(f"Submission record {order_no} not found")
             setattr(record, field, True)
+            if field == "catalog_updated":
+                record.catalog_update_status = "completed"
+                record.catalog_update_completed_at = datetime.now(UTC)
             record.last_error = None
             pending = PendingSubmission.model_validate(record.payload)
             event_types = {
