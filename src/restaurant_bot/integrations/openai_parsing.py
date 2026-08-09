@@ -921,7 +921,12 @@ def _discard_unverified_item_comments(
         product_facts: list[str] = []
         semantic_found = False
         explicit_found = False
+        query = clean_text(item.get("product_query"))
+        normalized_query = normalize_text(query)
         for fragment in (part.strip(" .,;:-—–") for part in existing.split(";")):
+            if not fragment:
+                continue
+            fragment = remove_global_comment_overlap(fragment, global_comment)
             if not fragment:
                 continue
             normalized_fragment = normalize_text(fragment).strip(" .,;:-—–")
@@ -929,7 +934,16 @@ def _discard_unverified_item_comments(
                 normalized_fragment == normalized_global or normalized_fragment in normalized_global
             ):
                 continue
-            if normalized_fragment in bound_comments or verified_semantic:
+            source_supported = normalized_fragment in normalized_context
+            if source_supported and normalized_fragment in normalized_query:
+                kept.append(fragment)
+                semantic_found = True
+                continue
+            if normalized_fragment in bound_comments and source_supported:
+                kept.append(fragment)
+                semantic_found = True
+                continue
+            if verified_semantic and source_supported:
                 kept.append(fragment)
                 semantic_found = True
                 continue
@@ -947,8 +961,6 @@ def _discard_unverified_item_comments(
             elif normalized_fragment in normalized_context:
                 product_facts.append(fragment)
         value = "; ".join(kept)
-        query = clean_text(item.get("product_query"))
-        normalized_query = normalize_text(query)
         if normalized_query in connectors and product_facts:
             source = normalize_text(item.get("source_line")).strip(" .,;:-—–")
             owner = next(
@@ -1347,6 +1359,7 @@ def recover_omitted_explicit_items(payload: dict[str, Any], source_text: str) ->
         payload["items"] = []
         return payload
 
+    deterministic = parse_product_lines(source_text)
     global_comment = _strip_global_comment_scope(clean_text(payload.get("global_comment")))
     items = _apply_semantic_comment_bindings(payload, items, bindings, source_text)
     global_comment = _strip_global_comment_scope(clean_text(payload.get("global_comment")))
@@ -1370,14 +1383,15 @@ def recover_omitted_explicit_items(payload: dict[str, Any], source_text: str) ->
     # Fallback нужен только когда ИИ действительно не вернул ни одной позиции.
     # Нельзя повторно разбирать исходную фразу поверх уже распознанных товаров:
     # это создаёт дубликаты и затирает комментарии.
-    if not items:
-        deterministic = parse_product_lines(source_text)
-        if deterministic:
-            payload["intent"] = Intent.ADD_ITEMS
-            payload["items"] = [item.model_dump() for item in deterministic]
-            payload["global_comment"] = global_comment
-            return payload
+    if not items and deterministic:
+        payload["intent"] = Intent.ADD_ITEMS
+        payload["items"] = [item.model_dump() for item in deterministic]
+        payload["global_comment"] = global_comment
+        return payload
 
+    restore_explicit_order_terms(items, source_text)
+    _discard_unverified_item_comments(items, bindings, source_text, global_comment)
+    _restore_dropped_unclassified_terms(items, deterministic, global_comment)
     for item in items:
         if item.get("comment") and not item.get("user_comment_to_supplier"):
             item["user_comment_to_supplier"] = item["comment"]

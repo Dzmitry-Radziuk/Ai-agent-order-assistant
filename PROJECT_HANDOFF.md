@@ -3315,9 +3315,8 @@ credentials, authorization tokens) не логировать. В текущем 
 
 ## NEXT FUNCTIONAL STEP
 
-`Block A — AI source-evidence/provenance reconciliation` после завершённого
-analysis-only аудита. Сначала подтвердить план и regression matrix, затем менять
-только recovery/provenance boundary.
+`Block B — shadow item collapse` после отдельного утверждения плана. Block A
+завершён; до следующего подтверждения код, каталог и state machine не менять.
 
 ## FULL REGRESSION AUDIT — COMPLETE / FIXES PENDING
 
@@ -3340,16 +3339,29 @@ analysis-only аудита. Сначала подтвердить план и re
 - Не изменялись prompts, parser, matching, state-machine, MAX/submission
   idempotency, logging и decomposition.
 
-## BLOCK A PLAN — READY / IMPLEMENTATION PENDING
+## BLOCK A — DONE
 
-- Owner: recover_omitted_explicit_items() в integrations/openai_parsing.py.
-- Target: 7 MUST FIX data-integrity tests; дополнительные случаи отмечены как
-  LIKELY FIX или OUT OF SCOPE по отдельным Block B–G.
-- Boundary: structured AI result + raw text/transcript → source-evidence
-  reconciliation → ParsedCommand; catalog и state machine не затрагиваются.
-- Expected files: openai_parsing.py и focused AI/voice recovery tests.
-- План: [docs/DATA_INTEGRITY_BLOCK_A_PLAN.md](docs/DATA_INTEGRITY_BLOCK_A_PLAN.md).
-- Следующий шаг: отдельная реализация только Block A после утверждения плана.
+- Owner: `recover_omitted_explicit_items()` в `src/restaurant_bot/integrations/openai_parsing.py`.
+- Boundary: structured AI result + raw TEXT/VOICE source → source-evidence
+  reconciliation → `ParsedCommand`; prompts, PHOTO, catalog, matching, engine
+  semantics и state machine не изменялись.
+- Порядок: unknown-placeholder cleanup → deterministic source reference →
+  semantic bindings/global scope → explicit quantity/unit restoration →
+  source-evidence comment validation → source-supported product terms →
+  final comment/user-comment mirroring.
+- Активированы `restore_explicit_order_terms`,
+  `_discard_unverified_item_comments` и `_restore_dropped_unclassified_terms`.
+  Shadow-item collapse, packaging/range helpers и catalog sanitizers намеренно
+  не активировались (следующие блоки).
+- MUST FIX suite: 17 focused cases passed (включая 4 parametrized quantity
+  cases); добавлены idempotency и реальный `_parse_text_once` integration tests.
+- Full suite после изменений: 1240 collected, 1201 passed, 39 failed.
+  До Block A было 1185/52; 13 прежних падений стали зелёными, новых падений
+  относительно baseline не обнаружено. Оставшиеся 39 относятся к ранее
+  зафиксированным out-of-scope baseline/stale SUB-08, PHOTO, visible actions,
+  shadow-item/packaging, catalog, quantity, supplier и docs-контрактам.
+- `product_query`/`source_line` не перезаписываются временными search-данными;
+  source-supported comment сохраняется даже при дублировании фактов в query.
 ## ARCHITECTURAL REFACTOR STATUS
 
 Декомпозиция не продолжалась. Изменения ограничены существующими границами

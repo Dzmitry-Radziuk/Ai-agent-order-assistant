@@ -63,11 +63,49 @@ def test_absent_comment_is_not_invented_by_postprocessing() -> None:
     """Не добавляет комментарий, если raw AI output его не содержит."""
     source = "свиная шея 5 кг"
     payload = _item_payload(source, "свиная шея")
-    restored = recover_omitted_explicit_items(
-        payload, source
-    )
+    restored = recover_omitted_explicit_items(payload, source)
 
     assert restored["items"][0]["comment"] == ""
+
+
+def test_source_evidence_reconciliation_is_idempotent() -> None:
+    """Повторная сверка не дублирует комментарий или количество."""
+    source = "свиная шея 5 кг без костей без кожи"
+    payload = _item_payload(
+        source,
+        "свиная шея без костей без кожи",
+        "без костей без кожи",
+    )
+
+    once = recover_omitted_explicit_items(payload, source)
+    twice = recover_omitted_explicit_items(once, source)
+
+    assert twice["items"] == once["items"]
+    assert twice["items"][0]["quantity"] == 5
+    assert twice["items"][0]["comment"] == "без костей без кожи"
+
+
+def test_source_evidence_idempotency_covers_comment_and_quantity_contracts() -> None:
+    """Проверяет идемпотентность валидного, выдуманного комментария и quantity."""
+    valid_comment = _item_payload("курица охлаждённая 5 кг", "курица охлаждённая", "охлаждённая")
+    invented_comment = _item_payload("курица 5 кг", "курица", "охлаждённая")
+    spoken_quantity = _item_payload("пармезан пять штук", "пармезан")
+    spoken_quantity["items"][0]["quantity"] = None
+    spoken_quantity["items"][0]["unit"] = ""
+
+    for payload, expected_comment in (
+        (valid_comment, "охлаждённая"),
+        (invented_comment, ""),
+        (spoken_quantity, ""),
+    ):
+        once = recover_omitted_explicit_items(payload, payload["items"][0]["source_line"])
+        twice = recover_omitted_explicit_items(once, once["items"][0]["source_line"])
+
+        assert twice == once
+        assert twice["items"][0]["comment"] == expected_comment
+
+    assert spoken_quantity["items"][0]["quantity"] == 5
+    assert spoken_quantity["items"][0]["unit"] == "шт"
 
 
 def test_ai_item_and_comment_binding_are_not_reparsed() -> None:

@@ -396,6 +396,29 @@ def test_ai_invented_supplier_comment_is_not_preserved(settings) -> None:  # typ
     assert command.items[0].user_comment_to_supplier == ""
 
 
+def test_parse_text_runtime_reconciles_ai_comment_with_source(settings) -> None:  # type: ignore[no-untyped-def]
+    """Проверяет provenance reconciliation через runtime boundary."""
+    parsed = ParsedInputSchema(
+        intent=Intent.ADD_ITEMS,
+        items=[
+            ExtractedItem(
+                product_query="курица",
+                quantity=5,
+                unit="кг",
+                comment="охлаждённая",
+                source_line="",
+            )
+        ],
+    )
+    service = _service(settings, SimpleNamespace(responses=_Responses(parsed)))
+
+    command = service._parse_text_once("курица 5 кг")
+
+    assert command.items[0].comment == ""
+    assert command.items[0].quantity == 5
+    assert command.items[0].unit == "кг"
+
+
 def test_ai_global_comment_scope_filler_is_not_saved_as_local_comment(settings) -> None:  # type: ignore[no-untyped-def]
     """Удаляет разговорную связку общего комментария из комментария последнего товара."""
     source = "Сироп роза 5 штук, главное быстро, и сироп тархун — всё это дело на завтра."
