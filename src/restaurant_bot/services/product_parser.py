@@ -17,7 +17,7 @@ from restaurant_bot.services.text import (
 )
 
 _PACKAGING_REFERENCE_PREFIX_RE = re.compile(
-    r"(?:\b(?:в|на)\s+)?(?:упаковк\w*|фасовк\w*|бутылк\w*)\s*$",
+    r"(?:\b(?:в|на)\s+)?(?:упаковк\w*|фасовк\w*|бутылк(?:а|е|у|ой))\s*$",
     flags=re.I,
 )
 

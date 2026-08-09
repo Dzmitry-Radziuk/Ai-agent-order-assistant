@@ -3450,6 +3450,14 @@ policy, parser normalization, engine routing и focused regression tests.
   Поэтому арифметика: 31 − 5 + 2 = 28. Остальные падения относятся к прежним
   PHOTO, catalog/matching, visible-action, comment/UX, shadow-count,
   omitted-conjoined-item, supplier и stale docs-contract сценариям.
+- Block C local-comment correction выполнен в
+  `src/restaurant_bot/services/product_parser.py`: prefix detection больше не
+  считает обычное `в бутылках` packaging reference без отдельной фасовочной
+  связи. Оба regression nodeid теперь green; тесты и prompts не менялись.
+- Full pytest после correction: 1252 collected / 1226 passed / 26 failed /
+  0 skipped / 0 xfailed / 0 errors, duration 15.23s. Два новых Block C
+  regressions устранены без появления новых failures; оставшиеся 26 — прежний
+  out-of-scope набор.
 - Block A и Block B сохранены; PHOTO prompts/normalizer, catalog, matching,
   state machine, submission, logging и decomposition не менялись.
 - Проверки: Ruff check passed; изменённые Block C файлы проходят Ruff format;
