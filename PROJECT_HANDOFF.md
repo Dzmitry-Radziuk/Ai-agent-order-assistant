@@ -3315,9 +3315,9 @@ credentials, authorization tokens) не логировать. В текущем 
 
 ## NEXT FUNCTIONAL STEP
 
-`Block C — packaging/quantity boundary` после отдельного утверждения плана.
-Block B завершён; до следующего подтверждения код, каталог и state machine не
-менять.
+`Block C implementation — order quantity / packaging / range provenance` после
+отдельного утверждения плана. До подтверждения код, tests, prompts, каталог и
+state machine не менять.
 
 ## FULL REGRESSION AUDIT — COMPLETE / FIXES PENDING
 
@@ -3399,3 +3399,22 @@ policy, parser normalization, engine routing и focused regression tests.
   доказательства отдельной occurrence. Packaging quantity semantics также
   оставлены для Block C.
 - План: [docs/DATA_INTEGRITY_BLOCK_B_PLAN.md](docs/DATA_INTEGRITY_BLOCK_B_PLAN.md).
+
+## BLOCK C PLAN — READY / IMPLEMENTATION PENDING
+
+- Baseline: 1245 collected / 1214 passed / 31 failed.
+- Основной текущий owner: `recover_omitted_explicit_items()` в
+  `src/restaurant_bot/integrations/openai_parsing.py`; существующие
+  `_restore_reference_ranges_in_queries()` и
+  `_restore_unordered_measurement_pair()` определены, но сейчас не вызываются.
+- План различает доказанное order quantity, packaging/product fact,
+  range/ambiguous measurement и user packaging preference без новых model fields,
+  большого словаря или catalog-based classifier.
+- MUST FIX для Block C: 5 текущих quantity/packaging/range тестов. Два оставшихся
+  packaging+order shadow-count теста остаются зависимостью Block B и не будут
+  исправляться повторной shadow-логикой.
+- PHOTO normalizer/prompt, catalog/matching, state machine, submission, logging и
+  decomposition — вне этого этапа.
+- План: [docs/DATA_INTEGRITY_BLOCK_C_PLAN.md](docs/DATA_INTEGRITY_BLOCK_C_PLAN.md).
+- Следующий шаг: отдельное утверждение плана, затем один focused implementation
+  diff и полный regression delta.
