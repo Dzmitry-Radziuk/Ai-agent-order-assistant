@@ -792,7 +792,7 @@ State является контекстом уже понятого сообще
 - Cache invalidation failures cannot cause a second catalog write because completion is
   checkpointed before invalidation. Existing dispatch safety is unchanged. H2 read-back,
   ledger/compensation, decomposition, and MAX are not started.
-- H1 focused submission/mapping tests: **68 passed**. Fresh full suite: **1262 collected /
+- H1 focused submission/mapping tests: **69 passed**. Fresh full suite: **1262 collected /
   1248 passed / 14 failed / 0 skipped / 0 xfailed / 0 errors** in **15.23s**; all 14 failures
   are the pre-H1 baseline and no new failure nodeids appeared.
 - Ruff, mypy, migration heads (`0006`), and `git diff --check` pass. `alembic check` was not
