@@ -3315,8 +3315,19 @@ credentials, authorization tokens) не логировать. В текущем 
 
 ## NEXT FUNCTIONAL STEP
 
-`FULL REGRESSION / BEHAVIOR AUDIT` по каналам TEXT, VOICE, PHOTO и CALLBACK.
-Аудит не начинать в рамках текущего commit.
+`FIX CONFIRMED REGRESSIONS` после завершённого full regression audit.
+
+## FULL REGRESSION AUDIT — COMPLETE / FIXES PENDING
+
+- 1237 тестов: 1185 passed, 52 failed, skipped/xfailed/errors: 0.
+- Подтверждённых REAL BUG, внесённых 13-block refactor: 0.
+- 45 падений — ранее зафиксированный old baseline; 7 — stale `SUB-08` scenario
+  references после переименования теста.
+- High-risk follow-up: повторный `increment_catalog_quantities()` при падении
+  между внешней записью и checkpoint `catalog_updated`.
+- Полная карта аудита: [docs/FULL_REGRESSION_AUDIT.md](docs/FULL_REGRESSION_AUDIT.md).
+- Следующий функциональный этап: исправить подтверждённые baseline/data-integrity
+  проблемы и вернуть стабильный regression baseline.
 
 ## ARCHITECTURAL REFACTOR STATUS
 
