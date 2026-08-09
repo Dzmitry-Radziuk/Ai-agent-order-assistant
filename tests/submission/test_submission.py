@@ -12,6 +12,7 @@ from restaurant_bot.domain.models import (
 )
 from restaurant_bot.integrations.cache import google_submission_lock_key
 from restaurant_bot.integrations.google_sheets import (
+    CatalogMutationVerification,
     GoogleSheetsError,
     OrderSubmissionResult,
     PreparedOrderSubmission,
@@ -21,6 +22,8 @@ from restaurant_bot.services.replies import cart_reply
 from restaurant_bot.services.submission import (
     SubmissionService,
     build_order_status_text,
+    submission_catalog_conflict_reply,
+    submission_catalog_uncertain_reply,
     submission_dispatch_uncertain_reply,
     submission_failure_reply,
     submission_local_saved_reply,
@@ -102,6 +105,20 @@ def test_submission_failure_card_matches_n8n() -> None:
         ("Повторить отправку", "v2:submit:r4"),
         ("К черновику", "v2:back:r4"),
     ]
+
+
+def test_catalog_recovery_replies_are_clear_and_have_no_retry_button() -> None:
+    """Показывает понятное сообщение о сохранённой заявке без технических слов."""
+    state = type("State", (), {"ui_revision": 4})()
+    technical_words = ("checkpoint", "batchupdate", "read-back", "payload", "mutation", "state")
+
+    for reply in (
+        submission_catalog_uncertain_reply(state, "ORDER-1"),
+        submission_catalog_conflict_reply(state, "ORDER-1"),
+    ):
+        text = reply.text.lower()
+        assert not any(word in text for word in technical_words)
+        assert all(button.text != "Повторить отправку" for row in reply.rows for button in row)
 
 
 def test_order_status_renderer_groups_rows_by_order_number() -> None:
@@ -276,6 +293,7 @@ def test_order_status_limits_to_ten_tracked_orders_and_formats_delivery_date() -
 def _record(**overrides: object) -> SimpleNamespace:
     """Создаёт тестовую запись этапов отправки."""
     values = {
+        "order_no": "ORDER-1",
         "catalog_updated": False,
         "catalog_update_status": "pending",
         "catalog_update_plan": {},
@@ -307,7 +325,7 @@ def _prepared_request(order_no: str = "ORDER-1") -> PreparedOrderSubmission:
 def _catalog_plan(
     order_no: str = "ORDER-1", mutations: list[dict[str, object]] | None = None
 ) -> dict[str, object]:
-    """Создаёт сериализуемый тестовый catalog mutation plan."""
+    """Создаёт сериализуемый тестовый план изменения каталога."""
     return {
         "schema_version": 1,
         "operation_id": f"catalog:{order_no}",
@@ -315,16 +333,27 @@ def _catalog_plan(
         "spreadsheet_id": "venue-sheet",
         "mutations": mutations
         if mutations is not None
-        else [{"kind": "quantity", "range": "'Заявка'!B7", "expected_after": 15}],
+        else [
+            {
+                "kind": "quantity",
+                "range": "'Заявка'!B7",
+                "product_id": "rose",
+                "department": "Кухня",
+                "before": 10,
+                "increment": 5,
+                "expected_after": 15,
+            }
+        ],
     }
 
 
 def test_catalog_write_timeout_becomes_uncertain_and_is_not_reapplied() -> None:
-    """Останавливает повтор после неизвестного результата batchUpdate."""
+    """После недоступной проверки не повторяет внешнюю запись вслепую."""
     service = object.__new__(SubmissionService)
     service.sheets = MagicMock()
     service.sheets.prepare_catalog_mutation.return_value = _catalog_plan()
     service.sheets.apply_catalog_mutation.side_effect = TimeoutError("write timeout")
+    service.sheets.verify_catalog_mutation.return_value = CatalogMutationVerification.UNAVAILABLE
     service._persist_catalog_started = MagicMock()  # type: ignore[method-assign]
     service._mark_catalog_uncertain = MagicMock()  # type: ignore[method-assign]
     service._send_catalog_uncertain_reply = MagicMock()  # type: ignore[method-assign]
@@ -334,18 +363,24 @@ def test_catalog_write_timeout_becomes_uncertain_and_is_not_reapplied() -> None:
     service.sheets.apply_catalog_mutation.assert_called_once()
     service._mark_catalog_uncertain.assert_called_once_with("chat-1", "ORDER-1", "write timeout")
 
-    uncertain = _record(catalog_update_status="uncertain", last_error="write timeout")
+    uncertain = _record(
+        catalog_update_status="uncertain",
+        catalog_update_plan=_catalog_plan(),
+        catalog_update_operation_id="catalog:ORDER-1",
+        last_error="write timeout",
+    )
     assert service._run_catalog_update("chat-1", pending, uncertain) is False
     service.sheets.apply_catalog_mutation.assert_called_once()
     service.sheets.prepare_catalog_mutation.assert_called_once()
 
 
 def test_catalog_success_marks_completed_after_one_exact_plan_apply() -> None:
-    """Применяет persisted plan один раз и отмечает completed."""
+    """Применяет сохранённый план и отмечает completed после проверки ячеек."""
     service = object.__new__(SubmissionService)
     service.sheets = MagicMock()
     plan = _catalog_plan()
     service.sheets.prepare_catalog_mutation.return_value = plan
+    service.sheets.verify_catalog_mutation.return_value = CatalogMutationVerification.APPLIED
     service._persist_catalog_started = MagicMock()  # type: ignore[method-assign]
     service._checkpoint = MagicMock()  # type: ignore[method-assign]
     pending = PendingSubmission(order_no="ORDER-1", spreadsheet_id="venue-sheet", rows=[])
@@ -357,7 +392,7 @@ def test_catalog_success_marks_completed_after_one_exact_plan_apply() -> None:
 
 
 def test_empty_catalog_plan_completes_without_external_write() -> None:
-    """Завершает пустой plan без вызова Google Sheets."""
+    """Завершает пустой план без вызова Google Sheets."""
     service = object.__new__(SubmissionService)
     service.sheets = MagicMock()
     plan = _catalog_plan(mutations=[])
@@ -375,6 +410,7 @@ def test_catalog_checkpoint_failure_keeps_started_gate_for_next_retry() -> None:
     service = object.__new__(SubmissionService)
     service.sheets = MagicMock()
     service.sheets.prepare_catalog_mutation.return_value = _catalog_plan()
+    service.sheets.verify_catalog_mutation.return_value = CatalogMutationVerification.APPLIED
     service._persist_catalog_started = MagicMock()  # type: ignore[method-assign]
     service._checkpoint = MagicMock(side_effect=RuntimeError("database unavailable"))  # type: ignore[method-assign]
     pending = PendingSubmission(order_no="ORDER-1", spreadsheet_id="venue-sheet", rows=[])
@@ -382,10 +418,14 @@ def test_catalog_checkpoint_failure_keeps_started_gate_for_next_retry() -> None:
     with pytest.raises(RuntimeError, match="database unavailable"):
         service._run_catalog_update("chat-1", pending, _record())
 
-    service._mark_catalog_uncertain = MagicMock()  # type: ignore[method-assign]
-    service._send_catalog_uncertain_reply = MagicMock()  # type: ignore[method-assign]
-    started = _record(catalog_update_status="started", last_error="database unavailable")
-    assert service._run_catalog_update("chat-1", pending, started) is False
+    service._checkpoint = MagicMock()  # type: ignore[method-assign]
+    started = _record(
+        catalog_update_status="started",
+        catalog_update_plan=_catalog_plan(),
+        catalog_update_operation_id="catalog:ORDER-1",
+        last_error="database unavailable",
+    )
+    assert service._run_catalog_update("chat-1", pending, started) is True
     service.sheets.apply_catalog_mutation.assert_called_once()
 
 
@@ -401,11 +441,12 @@ def test_completed_catalog_checkpoint_skips_mutation() -> None:
 
 
 def test_catalog_cache_failure_after_completion_does_not_reapply() -> None:
-    """Не повторяет catalog write, если сбой произошёл после checkpoint при очистке cache."""
+    """Не повторяет запись, если сбой произошёл после checkpoint при очистке кэша."""
     service = object.__new__(SubmissionService)
     service.sheets = MagicMock()
     plan = _catalog_plan()
     service.sheets.prepare_catalog_mutation.return_value = plan
+    service.sheets.verify_catalog_mutation.return_value = CatalogMutationVerification.APPLIED
     service._persist_catalog_started = MagicMock()  # type: ignore[method-assign]
     service._checkpoint = MagicMock()  # type: ignore[method-assign]
     service.catalog_cache = MagicMock()
@@ -419,6 +460,189 @@ def test_catalog_cache_failure_after_completion_does_not_reapply() -> None:
     completed = _record(catalog_updated=True)
     assert service._run_catalog_update("chat-1", pending, completed) is True
     service.sheets.apply_catalog_mutation.assert_called_once_with(plan)
+
+
+def _recovery_service(*verifications: CatalogMutationVerification) -> SubmissionService:
+    """Создаёт сервис с контролируемым ответом проверки каталога."""
+    service = object.__new__(SubmissionService)
+    service.sheets = MagicMock()
+    service.sheets.verify_catalog_mutation.side_effect = list(verifications)
+    service._checkpoint = MagicMock()  # type: ignore[method-assign]
+    service._mark_catalog_uncertain = MagicMock()  # type: ignore[method-assign]
+    service._send_catalog_uncertain_reply = MagicMock()  # type: ignore[method-assign]
+    service._mark_catalog_conflict = MagicMock()  # type: ignore[method-assign]
+    service._send_catalog_conflict_reply = MagicMock()  # type: ignore[method-assign]
+    return service
+
+
+def _started_record(
+    plan: dict[str, object],
+    status: str = "started",
+) -> SimpleNamespace:
+    """Создаёт запись с уже сохранённым планом каталога."""
+    return _record(
+        order_no="ORDER-1",
+        catalog_update_status=status,
+        catalog_update_plan=plan,
+        catalog_update_operation_id="catalog:ORDER-1",
+    )
+
+
+def test_started_applied_completes_without_catalog_write() -> None:
+    """Переводит started в completed после подтверждения expected_after без записи."""
+    plan = _catalog_plan()
+    service = _recovery_service(CatalogMutationVerification.APPLIED)
+    pending = PendingSubmission(order_no="ORDER-1", spreadsheet_id="venue-sheet", rows=[])
+
+    assert service._run_catalog_update("chat-1", pending, _started_record(plan)) is True
+    service.sheets.apply_catalog_mutation.assert_not_called()
+    service._checkpoint.assert_called_once_with("ORDER-1", "catalog_updated")
+
+
+def test_uncertain_applied_completes_without_catalog_write() -> None:
+    """Восстанавливает uncertain по фактическому expected_after без записи."""
+    plan = _catalog_plan()
+    service = _recovery_service(CatalogMutationVerification.APPLIED)
+    pending = PendingSubmission(order_no="ORDER-1", spreadsheet_id="venue-sheet", rows=[])
+
+    assert (
+        service._run_catalog_update("chat-1", pending, _started_record(plan, "uncertain")) is True
+    )
+    service.sheets.apply_catalog_mutation.assert_not_called()
+
+
+def test_started_before_allows_one_controlled_write_then_completes() -> None:
+    """Разрешает одну запись после before и подтверждает её expected_after."""
+    plan = _catalog_plan()
+    service = _recovery_service(
+        CatalogMutationVerification.NOT_APPLIED,
+        CatalogMutationVerification.APPLIED,
+    )
+    pending = PendingSubmission(order_no="ORDER-1", spreadsheet_id="venue-sheet", rows=[])
+
+    assert service._run_catalog_update("chat-1", pending, _started_record(plan)) is True
+    service.sheets.apply_catalog_mutation.assert_called_once_with(plan)
+
+
+def test_uncertain_before_allows_one_controlled_write_then_completes() -> None:
+    """Применяет тот же controlled recovery для статуса uncertain."""
+    plan = _catalog_plan()
+    service = _recovery_service(
+        CatalogMutationVerification.NOT_APPLIED,
+        CatalogMutationVerification.APPLIED,
+    )
+    pending = PendingSubmission(order_no="ORDER-1", spreadsheet_id="venue-sheet", rows=[])
+
+    assert (
+        service._run_catalog_update("chat-1", pending, _started_record(plan, "uncertain")) is True
+    )
+    service.sheets.apply_catalog_mutation.assert_called_once_with(plan)
+
+
+def test_controlled_write_exception_recovers_when_readback_is_applied() -> None:
+    """Считает операцию успешной после сбоя ответа и подтверждённого read-back."""
+    plan = _catalog_plan()
+    service = _recovery_service(
+        CatalogMutationVerification.NOT_APPLIED,
+        CatalogMutationVerification.APPLIED,
+    )
+    service.sheets.apply_catalog_mutation.side_effect = TimeoutError("write timeout")
+    pending = PendingSubmission(order_no="ORDER-1", spreadsheet_id="venue-sheet", rows=[])
+
+    assert service._run_catalog_update("chat-1", pending, _started_record(plan)) is True
+    service.sheets.apply_catalog_mutation.assert_called_once_with(plan)
+
+
+def test_controlled_write_exception_without_readback_stays_uncertain() -> None:
+    """Оставляет uncertain, если controlled recovery нельзя проверить."""
+    plan = _catalog_plan()
+    service = _recovery_service(
+        CatalogMutationVerification.NOT_APPLIED,
+        CatalogMutationVerification.UNAVAILABLE,
+    )
+    service.sheets.apply_catalog_mutation.side_effect = TimeoutError("write timeout")
+    pending = PendingSubmission(order_no="ORDER-1", spreadsheet_id="venue-sheet", rows=[])
+
+    assert service._run_catalog_update("chat-1", pending, _started_record(plan)) is False
+    service._mark_catalog_uncertain.assert_called_once()
+    service.sheets.apply_catalog_mutation.assert_called_once_with(plan)
+
+
+def test_conflict_stops_without_write_recalculation_or_dispatch() -> None:
+    """Останавливает конфликт до записи, пересчёта и отправки заявки."""
+    plan = _catalog_plan()
+    service = _recovery_service(CatalogMutationVerification.CONFLICT)
+    pending = PendingSubmission(order_no="ORDER-1", spreadsheet_id="venue-sheet", rows=[])
+
+    assert service._run_catalog_update("chat-1", pending, _started_record(plan)) is False
+    service.sheets.apply_catalog_mutation.assert_not_called()
+    service._mark_catalog_conflict.assert_called_once()
+
+
+def test_mixed_values_stop_without_write() -> None:
+    """Не перезаписывает каталог при смешанном состоянии ячеек."""
+    plan = _catalog_plan()
+    service = _recovery_service(CatalogMutationVerification.CONFLICT)
+    pending = PendingSubmission(order_no="ORDER-1", spreadsheet_id="venue-sheet", rows=[])
+
+    assert service._run_catalog_update("chat-1", pending, _started_record(plan)) is False
+    service.sheets.apply_catalog_mutation.assert_not_called()
+
+
+def test_verification_unavailable_stops_without_write() -> None:
+    """Останавливает восстановление без записи при недоступном чтении."""
+    plan = _catalog_plan()
+    service = _recovery_service(CatalogMutationVerification.UNAVAILABLE)
+    pending = PendingSubmission(order_no="ORDER-1", spreadsheet_id="venue-sheet", rows=[])
+
+    assert service._run_catalog_update("chat-1", pending, _started_record(plan)) is False
+    service.sheets.apply_catalog_mutation.assert_not_called()
+    service._mark_catalog_uncertain.assert_called_once()
+
+
+def test_initial_apply_is_verified_before_completion() -> None:
+    """Завершает первый путь только после подтверждения expected_after."""
+    plan = _catalog_plan()
+    service = _recovery_service(CatalogMutationVerification.APPLIED)
+    service.sheets.prepare_catalog_mutation.return_value = plan
+    service._persist_catalog_started = MagicMock()  # type: ignore[method-assign]
+    pending = PendingSubmission(order_no="ORDER-1", spreadsheet_id="venue-sheet", rows=[])
+
+    assert service._run_catalog_update("chat-1", pending, _record()) is True
+    service.sheets.apply_catalog_mutation.assert_called_once_with(plan)
+    service._checkpoint.assert_called_once_with("ORDER-1", "catalog_updated")
+
+
+def test_initial_apply_success_without_readback_does_not_retry() -> None:
+    """Не выполняет второй write, если первый ответ есть, а read-back недоступен."""
+    plan = _catalog_plan()
+    service = _recovery_service(CatalogMutationVerification.UNAVAILABLE)
+    service.sheets.prepare_catalog_mutation.return_value = plan
+    service._persist_catalog_started = MagicMock()  # type: ignore[method-assign]
+    pending = PendingSubmission(order_no="ORDER-1", spreadsheet_id="venue-sheet", rows=[])
+
+    assert service._run_catalog_update("chat-1", pending, _record()) is False
+    service.sheets.apply_catalog_mutation.assert_called_once_with(plan)
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("operation_id", "catalog:OTHER"),
+        ("order_no", "ORDER-OTHER"),
+        ("spreadsheet_id", "other-sheet"),
+    ],
+)
+def test_invalid_persisted_plan_marks_conflict_without_write(field: str, value: str) -> None:
+    """Не применяет план с чужими идентификаторами и фиксирует безопасный конфликт."""
+    plan = _catalog_plan()
+    plan[field] = value
+    service = _recovery_service()
+    pending = PendingSubmission(order_no="ORDER-1", spreadsheet_id="venue-sheet", rows=[])
+
+    assert service._run_catalog_update("chat-1", pending, _started_record(plan)) is False
+    service.sheets.apply_catalog_mutation.assert_not_called()
+    service._mark_catalog_conflict.assert_called_once()
 
 
 def test_google_submission_lock_is_isolated_by_venue_spreadsheet() -> None:
@@ -445,7 +669,7 @@ def test_catalog_prepare_failure_before_apply_can_be_retried(
     service.sheets.prepare_catalog_mutation.side_effect = TimeoutError("catalog read failed")
     pending = PendingSubmission(order_no="ORDER-RETRY", spreadsheet_id="venue-sheet", rows=[])
     service._load_pending = MagicMock(return_value=pending)  # type: ignore[method-assign]
-    service._record = MagicMock(return_value=_record())  # type: ignore[method-assign]
+    service._record = MagicMock(return_value=_record(order_no="ORDER-LOCAL"))  # type: ignore[method-assign]
     service._get_record = MagicMock(return_value=_record())  # type: ignore[method-assign]
     service._remember_transient_error = MagicMock()  # type: ignore[method-assign]
     service._fail = MagicMock()  # type: ignore[method-assign]
@@ -560,11 +784,16 @@ def test_submission_runs_all_external_stages_and_uses_external_order_number(
             {
                 "kind": "quantity",
                 "range": "'Заявка'!B7",
+                "product_id": "rose",
+                "department": "Кухня",
+                "before": 0,
+                "increment": 5,
                 "expected_after": 5,
             }
         ],
     }
     service.sheets.prepare_catalog_mutation.return_value = catalog_plan
+    service.sheets.verify_catalog_mutation.return_value = CatalogMutationVerification.APPLIED
     service.sheets.prepare_order_submission.return_value = _prepared_request()
     service.sheets.send_order_submission.return_value = result
     service._load_pending = MagicMock(return_value=pending)  # type: ignore[method-assign]
@@ -859,20 +1088,31 @@ def test_disabled_dispatch_writes_and_recalculates_but_never_calls_submission_sc
         "operation_id": "catalog:ORDER-LOCAL",
         "order_no": "ORDER-LOCAL",
         "spreadsheet_id": "venue-sheet",
-        "mutations": [{"kind": "quantity", "range": "'Заявка'!B7", "expected_after": 5}],
+        "mutations": [
+            {
+                "kind": "quantity",
+                "range": "'Заявка'!B7",
+                "product_id": "rose",
+                "department": "Кухня",
+                "before": 0,
+                "increment": 5,
+                "expected_after": 5,
+            }
+        ],
     }
+    service.sheets.verify_catalog_mutation.return_value = CatalogMutationVerification.APPLIED
     pending = PendingSubmission(
         order_no="ORDER-LOCAL",
         spreadsheet_id="venue-sheet",
         rows=[{"ID товара": "rose", "Кол-во": 5}],
     )
     service._load_pending = MagicMock(return_value=pending)  # type: ignore[method-assign]
-    service._record = MagicMock(return_value=_record())  # type: ignore[method-assign]
+    service._record = MagicMock(return_value=_record(order_no="ORDER-LOCAL"))  # type: ignore[method-assign]
     service._get_record = MagicMock(  # type: ignore[method-assign]
         side_effect=[
-            _record(),
-            _record(catalog_updated=True),
-            _record(catalog_updated=True, recalc_done=True),
+            _record(order_no="ORDER-LOCAL"),
+            _record(order_no="ORDER-LOCAL", catalog_updated=True),
+            _record(order_no="ORDER-LOCAL", catalog_updated=True, recalc_done=True),
         ]
     )
     service._checkpoint = MagicMock()  # type: ignore[method-assign]

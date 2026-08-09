@@ -19,6 +19,7 @@ from restaurant_bot.domain.models import (
 )
 from restaurant_bot.integrations.cache import CatalogCache, chat_lock, google_submission_lock_key
 from restaurant_bot.integrations.google_sheets import (
+    CatalogMutationVerification,
     GoogleSheetsError,
     GoogleSheetsGateway,
     OrderSubmissionResult,
@@ -35,6 +36,8 @@ from restaurant_bot.services.submission_presenter import (
     build_order_status_text,
     group_order_status_rows,
     order_status_detail_page_count,
+    submission_catalog_conflict_reply,
+    submission_catalog_uncertain_reply,
     submission_dispatch_uncertain_reply,
     submission_failure_reply,
     submission_local_saved_reply,
@@ -745,7 +748,7 @@ class SubmissionService:
 
     @staticmethod
     def _catalog_status(record: SubmissionRecord) -> str:
-        """Возвращает canonical lifecycle каталожной мутации."""
+        """Возвращает канонический жизненный цикл изменения каталога."""
         status = getattr(record, "catalog_update_status", "")
         if status in {"pending", "started", "uncertain", "completed", "conflict"}:
             if status == "pending" and getattr(record, "catalog_updated", False):
@@ -759,46 +762,157 @@ class SubmissionService:
         pending: PendingSubmission,
         record: SubmissionRecord,
     ) -> bool:
-        """Выполняет catalog plan с H1 stop-gate для неизвестного результата."""
+        """Выполняет план каталога с проверкой ячеек перед безопасным восстановлением."""
         status = self._catalog_status(record)
         if status == "completed":
             return True
-        if status in {"started", "uncertain", "conflict"}:
-            error = record.last_error or "Предыдущая запись каталога не подтверждена."
-            self._mark_catalog_uncertain(chat_id, pending.order_no, error)
-            self._send_catalog_uncertain_reply(chat_id, pending.order_no)
+        if status == "conflict":
+            self._send_catalog_conflict_reply(chat_id, pending.order_no)
             return False
+        if status == "pending":
+            operation_id = f"catalog:{pending.order_no}"
+            plan = self.sheets.prepare_catalog_mutation(
+                pending.rows,
+                pending.spreadsheet_id,
+                operation_id=operation_id,
+                order_no=pending.order_no,
+            )
+            validation_error = self._catalog_plan_validation_error(plan, pending, record)
+            if validation_error:
+                self._mark_catalog_conflict(chat_id, pending.order_no, validation_error)
+                self._send_catalog_conflict_reply(chat_id, pending.order_no)
+                return False
+            if not plan["mutations"]:
+                self._persist_catalog_completed(pending.order_no, plan)
+                return True
+            self._persist_catalog_started(pending.order_no, plan)
+            return self._apply_initial_catalog_plan(chat_id, pending.order_no, plan)
 
-        operation_id = f"catalog:{pending.order_no}"
-        plan = self.sheets.prepare_catalog_mutation(
-            pending.rows,
-            pending.spreadsheet_id,
-            operation_id=operation_id,
-            order_no=pending.order_no,
-        )
-        if not plan.get("mutations"):
-            self._persist_catalog_completed(pending.order_no, plan)
+        plan = record.catalog_update_plan
+        validation_error = self._catalog_plan_validation_error(plan, pending, record)
+        if validation_error:
+            self._mark_catalog_conflict(chat_id, pending.order_no, validation_error)
+            self._send_catalog_conflict_reply(chat_id, pending.order_no)
+            return False
+        verification = self.sheets.verify_catalog_mutation(plan)
+        if verification is CatalogMutationVerification.APPLIED:
+            self._checkpoint(pending.order_no, "catalog_updated")
             return True
+        if verification is CatalogMutationVerification.NOT_APPLIED:
+            return self._controlled_catalog_apply(chat_id, pending.order_no, plan)
+        if verification is CatalogMutationVerification.CONFLICT:
+            self._mark_catalog_conflict(chat_id, pending.order_no, "Значения каталога изменились.")
+            self._send_catalog_conflict_reply(chat_id, pending.order_no)
+            return False
+        self._mark_catalog_uncertain(
+            chat_id,
+            pending.order_no,
+            record.last_error or "Не удалось прочитать каталог.",
+        )
+        self._send_catalog_uncertain_reply(chat_id, pending.order_no)
+        return False
 
-        self._persist_catalog_started(pending.order_no, plan)
+    def _apply_initial_catalog_plan(
+        self,
+        chat_id: str,
+        order_no: str,
+        plan: dict[str, Any],
+    ) -> bool:
+        """Применяет первый план и запускает ограниченное восстановление по read-back."""
         try:
             self.sheets.apply_catalog_mutation(plan)
         except Exception as exc:
-            error = str(exc) or type(exc).__name__
-            self._mark_catalog_uncertain(chat_id, pending.order_no, error)
-            self._send_catalog_uncertain_reply(chat_id, pending.order_no)
-            logger.exception(
-                "submission_catalog_update_uncertain",
-                chat_id=chat_id,
-                order_no=pending.order_no,
-            )
+            verification = self.sheets.verify_catalog_mutation(plan)
+            if verification is CatalogMutationVerification.APPLIED:
+                self._checkpoint(order_no, "catalog_updated")
+                return True
+            if verification is CatalogMutationVerification.NOT_APPLIED:
+                return self._controlled_catalog_apply(chat_id, order_no, plan)
+            if verification is CatalogMutationVerification.CONFLICT:
+                self._mark_catalog_conflict(chat_id, order_no, str(exc) or type(exc).__name__)
+                self._send_catalog_conflict_reply(chat_id, order_no)
+                return False
+            self._mark_catalog_uncertain(chat_id, order_no, str(exc) or type(exc).__name__)
+            self._send_catalog_uncertain_reply(chat_id, order_no)
             return False
 
-        self._checkpoint(pending.order_no, "catalog_updated")
-        return True
+        verification = self.sheets.verify_catalog_mutation(plan)
+        if verification is CatalogMutationVerification.APPLIED:
+            self._checkpoint(order_no, "catalog_updated")
+            return True
+        if verification is CatalogMutationVerification.NOT_APPLIED:
+            return self._controlled_catalog_apply(chat_id, order_no, plan)
+        if verification is CatalogMutationVerification.CONFLICT:
+            self._mark_catalog_conflict(chat_id, order_no, "Значения каталога изменились.")
+            self._send_catalog_conflict_reply(chat_id, order_no)
+            return False
+        self._mark_catalog_uncertain(
+            chat_id, order_no, "Не удалось проверить результат записи каталога."
+        )
+        self._send_catalog_uncertain_reply(chat_id, order_no)
+        return False
+
+    def _controlled_catalog_apply(
+        self,
+        chat_id: str,
+        order_no: str,
+        plan: dict[str, Any],
+    ) -> bool:
+        """Разрешает одну запись только после подтверждения состояния before."""
+        try:
+            self.sheets.apply_catalog_mutation(plan)
+        except Exception as exc:
+            verification = self.sheets.verify_catalog_mutation(plan)
+            if verification is CatalogMutationVerification.APPLIED:
+                self._checkpoint(order_no, "catalog_updated")
+                return True
+            if verification is CatalogMutationVerification.CONFLICT:
+                self._mark_catalog_conflict(chat_id, order_no, str(exc) or type(exc).__name__)
+                self._send_catalog_conflict_reply(chat_id, order_no)
+                return False
+            self._mark_catalog_uncertain(chat_id, order_no, str(exc) or type(exc).__name__)
+            self._send_catalog_uncertain_reply(chat_id, order_no)
+            return False
+
+        verification = self.sheets.verify_catalog_mutation(plan)
+        if verification is CatalogMutationVerification.APPLIED:
+            self._checkpoint(order_no, "catalog_updated")
+            return True
+        if verification is CatalogMutationVerification.CONFLICT:
+            self._mark_catalog_conflict(chat_id, order_no, "Значения каталога изменились.")
+            self._send_catalog_conflict_reply(chat_id, order_no)
+            return False
+        self._mark_catalog_uncertain(
+            chat_id, order_no, "Не удалось подтвердить повторную запись каталога."
+        )
+        self._send_catalog_uncertain_reply(chat_id, order_no)
+        return False
+
+    @staticmethod
+    def _catalog_plan_validation_error(
+        plan: Any,
+        pending: PendingSubmission,
+        record: SubmissionRecord,
+    ) -> str:
+        """Проверяет связи плана с заявкой до чтения или изменения таблицы."""
+        if not GoogleSheetsGateway._valid_catalog_mutation_plan(plan):
+            return "Сохранённый план изменения каталога повреждён."
+        expected_operation_id = f"catalog:{pending.order_no}"
+        if plan["operation_id"] != expected_operation_id:
+            return "Идентификатор операции каталога не совпадает с заявкой."
+        if (
+            record.catalog_update_operation_id
+            and plan["operation_id"] != record.catalog_update_operation_id
+        ):
+            return "Идентификатор сохранённого плана не совпадает с контрольной точкой."
+        if plan["order_no"] != pending.order_no or plan["order_no"] != record.order_no:
+            return "Номер заявки в плане каталога не совпадает с заявкой."
+        if plan["spreadsheet_id"] != pending.spreadsheet_id:
+            return "Таблица в плане каталога не совпадает с таблицей заведения."
+        return ""
 
     def _persist_catalog_started(self, order_no: str, plan: dict[str, Any]) -> None:
-        """Сохраняет immutable plan и STARTED до вызова Google Sheets."""
+        """Сохраняет неизменяемый план и статус started до вызова Google Sheets."""
         from sqlalchemy import select
 
         with SessionLocal.begin() as db:
@@ -825,7 +939,7 @@ class SubmissionService:
             )
 
     def _persist_catalog_completed(self, order_no: str, plan: dict[str, Any]) -> None:
-        """Фиксирует пустой plan как completed без внешней записи."""
+        """Фиксирует пустой план как completed без внешней записи."""
         from sqlalchemy import select
 
         with SessionLocal.begin() as db:
@@ -851,7 +965,7 @@ class SubmissionService:
             )
 
     def _mark_catalog_uncertain(self, chat_id: str, order_no: str, error: str) -> None:
-        """Фиксирует неизвестный результат и запрещает повторный Sheets write."""
+        """Фиксирует неизвестный результат и запрещает повторную запись в таблицу."""
         from sqlalchemy import select
 
         with SessionLocal.begin() as db:
@@ -884,12 +998,54 @@ class SubmissionService:
             )
 
     def _send_catalog_uncertain_reply(self, chat_id: str, order_no: str) -> None:
-        """Показывает безопасное временное сообщение без второго write."""
+        """Показывает спокойное сообщение без технических терминов и повторной записи."""
         with SessionLocal() as db:
             _, state = SessionRepository(db).get_for_update(chat_id)
         self.telegram.send_reply(
             chat_id,
-            submission_failure_reply(state, order_no),
+            submission_catalog_uncertain_reply(state, order_no),
+        )
+
+    def _mark_catalog_conflict(self, chat_id: str, order_no: str, error: str) -> None:
+        """Фиксирует конфликт каталога и запрещает автоматическую перезапись."""
+        from sqlalchemy import select
+
+        with SessionLocal.begin() as db:
+            sessions = SessionRepository(db)
+            row, state = sessions.get_for_update(chat_id)
+            state.stage = SessionStage.SUBMISSION_FAILED
+            state.status = "catalog_update_conflict"
+            if state.pending_submission:
+                state.pending_submission.failed_stage = "catalog_update_conflict"
+                state.pending_submission.last_error = error[:1000]
+            sessions.save(chat_id, state, row)
+            record = db.scalar(
+                select(SubmissionRecord)
+                .where(SubmissionRecord.order_no == order_no)
+                .with_for_update()
+            )
+            if record is None:
+                raise RuntimeError(f"Submission record {order_no} not found")
+            record.catalog_update_status = "conflict"
+            record.catalog_updated = False
+            record.last_error = error[:4000]
+            pending = PendingSubmission.model_validate(record.payload)
+            self._append_submission_event(
+                OrderEventRepository(db),
+                pending,
+                event_type="submission_catalog_verification_conflict",
+                idempotency_key=f"order:{order_no}:catalog-verification-conflict",
+                status="conflict",
+                details={"error": error},
+            )
+
+    def _send_catalog_conflict_reply(self, chat_id: str, order_no: str) -> None:
+        """Показывает понятное сообщение без кнопки опасного повтора."""
+        with SessionLocal() as db:
+            _, state = SessionRepository(db).get_for_update(chat_id)
+        self.telegram.send_reply(
+            chat_id,
+            submission_catalog_conflict_reply(state, order_no),
         )
 
     def _checkpoint(self, order_no: str, field: str) -> None:

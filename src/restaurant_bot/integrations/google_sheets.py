@@ -4,6 +4,7 @@ import re
 from collections import defaultdict
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from enum import StrEnum
 from functools import cached_property
 from time import sleep
 from typing import Any, cast
@@ -48,6 +49,15 @@ class OrderSubmissionResult:
     base_rows: int
     request_rows: int
     notifications: dict[str, Any]
+
+
+class CatalogMutationVerification(StrEnum):
+    """Описывает результат чтения ячеек после изменения каталога."""
+
+    APPLIED = "applied"
+    NOT_APPLIED = "not_applied"
+    CONFLICT = "conflict"
+    UNAVAILABLE = "unavailable"
 
 
 class GoogleSheetsGateway:
@@ -213,7 +223,7 @@ class GoogleSheetsGateway:
         operation_id: str,
         order_no: str,
     ) -> dict[str, Any]:
-        """Строит детерминированный план записи каталога без внешнего write."""
+        """Строит детерминированный план записи каталога без внешней записи."""
         target_id = self._require_spreadsheet_id(spreadsheet_id)
         catalog = self.load_catalog(target_id)
         by_id = {product.product_id: product for product in catalog}
@@ -292,6 +302,8 @@ class GoogleSheetsGateway:
 
     def apply_catalog_mutation(self, plan: dict[str, Any]) -> None:
         """Применяет только сохранённые значения плана без повторного чтения каталога."""
+        if not self._valid_catalog_mutation_plan(plan):
+            raise GoogleSheetsError("Invalid catalog mutation plan")
         target_id = self._require_spreadsheet_id(clean_text(plan.get("spreadsheet_id")))
         mutations = plan.get("mutations") or []
         if not mutations:
@@ -310,8 +322,121 @@ class GoogleSheetsGateway:
             .execute()
         )
 
+    def verify_catalog_mutation(
+        self,
+        plan: dict[str, Any],
+    ) -> CatalogMutationVerification:
+        """Читает запланированные ячейки одним запросом и классифицирует результат."""
+        if not self._valid_catalog_mutation_plan(plan):
+            return CatalogMutationVerification.CONFLICT
+        mutations = plan["mutations"]
+        if not mutations:
+            return CatalogMutationVerification.APPLIED
+        try:
+            target_id = self._require_spreadsheet_id(plan["spreadsheet_id"])
+            response = (
+                self.service.spreadsheets()
+                .values()
+                .batchGet(
+                    spreadsheetId=target_id,
+                    ranges=[mutation["range"] for mutation in mutations],
+                )
+                .execute()
+            )
+        except Exception:
+            return CatalogMutationVerification.UNAVAILABLE
+
+        value_ranges = response.get("valueRanges")
+        if not isinstance(value_ranges, list):
+            return CatalogMutationVerification.UNAVAILABLE
+        current_values = [
+            self._batch_get_cell(value_ranges, index) for index in range(len(mutations))
+        ]
+        before = all(
+            self._catalog_cell_matches(current, mutation["before"], mutation["kind"])
+            for current, mutation in zip(current_values, mutations, strict=True)
+        )
+        expected_after = all(
+            self._catalog_cell_matches(current, mutation["expected_after"], mutation["kind"])
+            for current, mutation in zip(current_values, mutations, strict=True)
+        )
+        if expected_after:
+            return CatalogMutationVerification.APPLIED
+        if before:
+            return CatalogMutationVerification.NOT_APPLIED
+        return CatalogMutationVerification.CONFLICT
+
+    @staticmethod
+    def _valid_catalog_mutation_plan(plan: Any) -> bool:
+        """Проверяет минимальную структуру плана до чтения или записи."""
+        if not isinstance(plan, dict):
+            return False
+        if plan.get("schema_version") != 1:
+            return False
+        if not all(
+            clean_text(plan.get(key)) for key in ("operation_id", "order_no", "spreadsheet_id")
+        ):
+            return False
+        mutations = plan.get("mutations")
+        if not isinstance(mutations, list):
+            return False
+        ranges: set[str] = set()
+        for mutation in mutations:
+            if not isinstance(mutation, dict):
+                return False
+            kind = mutation.get("kind")
+            required = {"kind", "range", "product_id", "before", "expected_after"}
+            if kind == "quantity":
+                required.update({"department", "increment"})
+            elif kind != "comment":
+                return False
+            if any(key not in mutation for key in required):
+                return False
+            range_name = clean_text(mutation.get("range"))
+            if not range_name or range_name in ranges or not clean_text(mutation.get("product_id")):
+                return False
+            ranges.add(range_name)
+            if kind == "quantity" and any(
+                GoogleSheetsGateway._catalog_number(mutation.get(key)) is None
+                for key in ("before", "increment", "expected_after")
+            ):
+                return False
+        return True
+
+    @staticmethod
+    def _batch_get_cell(value_ranges: list[Any], index: int) -> Any:
+        """Извлекает одну ячейку из ответа values.batchGet без подстановки нуля."""
+        if index >= len(value_ranges) or not isinstance(value_ranges[index], dict):
+            return None
+        values = value_ranges[index].get("values")
+        if not isinstance(values, list) or not values or not isinstance(values[0], list):
+            return None
+        return values[0][0] if values[0] else None
+
+    @staticmethod
+    def _catalog_cell_matches(current: Any, expected: Any, kind: str) -> bool:
+        """Сравнивает число или текст ячейки с сохранённым значением плана."""
+        if kind == "quantity":
+            current_number = GoogleSheetsGateway._catalog_number(current)
+            expected_number = GoogleSheetsGateway._catalog_number(expected)
+            return (
+                current_number is not None
+                and expected_number is not None
+                and current_number == expected_number
+            )
+        return clean_text(current) == clean_text(expected)
+
+    @staticmethod
+    def _catalog_number(value: Any) -> float | None:
+        """Нормализует числовую ячейку, сохраняя различие нуля и пустоты."""
+        if value is None or (isinstance(value, str) and not value.strip()):
+            return None
+        if isinstance(value, (int, float)) and not isinstance(value, bool):
+            return float(value)
+        return to_float(value)
+
     def increment_catalog_quantities(self, rows: list[dict[str, Any]], spreadsheet_id: str) -> None:
-        """Совместимо обновляет каталог через одноразовый plan/apply путь."""
+        """Совместимо обновляет каталог через одноразовый план и его применение."""
         plan = self.prepare_catalog_mutation(
             rows,
             spreadsheet_id,

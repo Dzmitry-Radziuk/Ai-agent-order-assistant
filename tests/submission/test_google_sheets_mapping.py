@@ -6,6 +6,7 @@ from pydantic import SecretStr
 from restaurant_bot.domain.models import CatalogProduct, DepartmentQuantities
 from restaurant_bot.integrations import google_sheets as google_sheets_module
 from restaurant_bot.integrations.google_sheets import (
+    CatalogMutationVerification,
     GoogleSheetsError,
     GoogleSheetsGateway,
     PreparedOrderSubmission,
@@ -422,6 +423,140 @@ def test_catalog_mutation_plan_contains_all_writes_and_is_deterministic(settings
             ],
         },
     ]
+
+
+def _readback_plan() -> dict[str, object]:
+    """Создаёт небольшой план для проверки чтения ячеек каталога."""
+    return {
+        "schema_version": 1,
+        "operation_id": "catalog:ORDER-1",
+        "order_no": "ORDER-1",
+        "spreadsheet_id": VENUE_SPREADSHEET_ID,
+        "mutations": [
+            {
+                "kind": "quantity",
+                "range": "'Заявка'!D7",
+                "product_id": "rose",
+                "department": "Кухня",
+                "before": 10,
+                "increment": 5,
+                "expected_after": 15,
+            },
+            {
+                "kind": "comment",
+                "range": "'Заявка'!E7",
+                "product_id": "rose",
+                "before": "старое",
+                "expected_after": "новое",
+            },
+        ],
+    }
+
+
+def test_catalog_readback_returns_applied_for_expected_values(settings) -> None:  # type: ignore[no-untyped-def]
+    """Возвращает APPLIED, если все ячейки совпали с expected_after."""
+    gateway = GoogleSheetsGateway(settings)
+    gateway.service = MagicMock()
+    gateway.service.spreadsheets.return_value.values.return_value.batchGet.return_value.execute.return_value = {
+        "valueRanges": [{"values": [[15]]}, {"values": [["новое"]]}]
+    }
+
+    assert gateway.verify_catalog_mutation(_readback_plan()) is CatalogMutationVerification.APPLIED
+
+
+def test_catalog_readback_returns_not_applied_for_before_values(settings) -> None:  # type: ignore[no-untyped-def]
+    """Возвращает NOT_APPLIED, если все ячейки остались в состоянии before."""
+    gateway = GoogleSheetsGateway(settings)
+    gateway.service = MagicMock()
+    gateway.service.spreadsheets.return_value.values.return_value.batchGet.return_value.execute.return_value = {
+        "valueRanges": [{"values": [[10]]}, {"values": [["старое"]]}]
+    }
+
+    assert (
+        gateway.verify_catalog_mutation(_readback_plan()) is CatalogMutationVerification.NOT_APPLIED
+    )
+
+
+def test_catalog_readback_returns_conflict_for_changed_value(settings) -> None:  # type: ignore[no-untyped-def]
+    """Возвращает CONFLICT, если одна ячейка содержит другое значение."""
+    gateway = GoogleSheetsGateway(settings)
+    gateway.service = MagicMock()
+    gateway.service.spreadsheets.return_value.values.return_value.batchGet.return_value.execute.return_value = {
+        "valueRanges": [{"values": [[12]]}, {"values": [["старое"]]}]
+    }
+
+    assert gateway.verify_catalog_mutation(_readback_plan()) is CatalogMutationVerification.CONFLICT
+
+
+def test_catalog_readback_returns_conflict_for_mixed_before_and_after(settings) -> None:  # type: ignore[no-untyped-def]
+    """Возвращает CONFLICT для смешанного before/expected_after результата."""
+    gateway = GoogleSheetsGateway(settings)
+    gateway.service = MagicMock()
+    gateway.service.spreadsheets.return_value.values.return_value.batchGet.return_value.execute.return_value = {
+        "valueRanges": [{"values": [[15]]}, {"values": [["старое"]]}]
+    }
+
+    assert gateway.verify_catalog_mutation(_readback_plan()) is CatalogMutationVerification.CONFLICT
+
+
+@pytest.mark.parametrize("current", [15, 15.0, "15"])
+def test_catalog_readback_normalizes_quantity_values(settings, current) -> None:  # type: ignore[no-untyped-def]
+    """Считает равными числовые значения Sheets в разных представлениях."""
+    gateway = GoogleSheetsGateway(settings)
+    gateway.service = MagicMock()
+    gateway.service.spreadsheets.return_value.values.return_value.batchGet.return_value.execute.return_value = {
+        "valueRanges": [{"values": [[current]]}, {"values": [["новое"]]}]
+    }
+
+    assert gateway.verify_catalog_mutation(_readback_plan()) is CatalogMutationVerification.APPLIED
+
+
+def test_catalog_readback_normalizes_comment_whitespace_but_not_meaning(settings) -> None:  # type: ignore[no-untyped-def]
+    """Сравнивает комментарий после очистки пробелов без нечёткого сопоставления."""
+    gateway = GoogleSheetsGateway(settings)
+    gateway.service = MagicMock()
+    gateway.service.spreadsheets.return_value.values.return_value.batchGet.return_value.execute.return_value = {
+        "valueRanges": [{"values": [[15]]}, {"values": [["  новое  "]]}]
+    }
+
+    assert gateway.verify_catalog_mutation(_readback_plan()) is CatalogMutationVerification.APPLIED
+
+
+def test_catalog_readback_treats_missing_empty_comment_as_before(settings) -> None:  # type: ignore[no-untyped-def]
+    """Считает пустую или отсутствующую ячейку пустым сохранённым комментарием."""
+    plan = _readback_plan()
+    plan["mutations"] = [plan["mutations"][1]]
+    plan["mutations"][0]["before"] = ""
+    gateway = GoogleSheetsGateway(settings)
+    gateway.service = MagicMock()
+    gateway.service.spreadsheets.return_value.values.return_value.batchGet.return_value.execute.return_value = {
+        "valueRanges": [{}]
+    }
+
+    assert gateway.verify_catalog_mutation(plan) is CatalogMutationVerification.NOT_APPLIED
+
+
+def test_catalog_readback_rejects_invalid_plan_without_google_read(settings) -> None:  # type: ignore[no-untyped-def]
+    """Отклоняет повреждённый план до обращения к Google Sheets."""
+    gateway = GoogleSheetsGateway(settings)
+    gateway.service = MagicMock()
+
+    assert (
+        gateway.verify_catalog_mutation({"schema_version": 1, "mutations": []})
+        is CatalogMutationVerification.CONFLICT
+    )
+    gateway.service.spreadsheets.assert_not_called()
+
+
+def test_catalog_readback_returns_unavailable_on_google_read_failure(settings) -> None:  # type: ignore[no-untyped-def]
+    """Возвращает UNAVAILABLE, если чтение Google Sheets завершилось ошибкой."""
+    gateway = GoogleSheetsGateway(settings)
+    gateway.service = MagicMock()
+    gateway.service.spreadsheets.return_value.values.return_value.batchGet.return_value.execute.side_effect = TimeoutError
+
+    assert (
+        gateway.verify_catalog_mutation(_readback_plan()) is CatalogMutationVerification.UNAVAILABLE
+    )
 
 
 def test_order_submission_is_prepared_from_venue_spreadsheet(settings) -> None:  # type: ignore[no-untyped-def]

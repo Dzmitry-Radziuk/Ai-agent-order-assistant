@@ -88,6 +88,38 @@ def submission_dispatch_uncertain_reply(state: Any, order_no: str) -> BotReply:
     )
 
 
+def submission_catalog_uncertain_reply(state: Any, order_no: str) -> BotReply:
+    """Сообщает о временной остановке без технических терминов и опасного повтора."""
+    del order_no
+    return BotReply(
+        text=(
+            "⚠️ <b>Отправка не завершена</b>\n\n"
+            "Заявка сохранена, но бот не смог безопасно подтвердить изменение данных.\n\n"
+            "Чтобы случайно не изменить заявку повторно, отправка временно остановлена. "
+            "Попробуйте позже или обратитесь к ответственному сотруднику."
+        ),
+        rows=[
+            [Button(text="К черновику", callback_data=_callback_with_revision(state, "v2:back"))]
+        ],
+    )
+
+
+def submission_catalog_conflict_reply(state: Any, order_no: str) -> BotReply:
+    """Сообщает об изменении данных заявки без автоматической перезаписи."""
+    del order_no
+    return BotReply(
+        text=(
+            "⚠️ <b>Отправка не завершена</b>\n\n"
+            "Данные заявки изменились после начала отправки.\n\n"
+            "Заявка сохранена. Бот не будет перезаписывать изменения автоматически. "
+            "Обратитесь к ответственному сотруднику для проверки."
+        ),
+        rows=[
+            [Button(text="К черновику", callback_data=_callback_with_revision(state, "v2:back"))]
+        ],
+    )
+
+
 def submission_recovery_unavailable_reply() -> BotReply:
     """Сообщает о сбое, для которого в состоянии нет безопасного снимка."""
     return BotReply(

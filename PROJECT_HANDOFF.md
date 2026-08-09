@@ -3699,9 +3699,44 @@ schema и migrations не менялись.
 - Следующее действие: отдельное подтверждение implementation H1; до него не
   менять код и не исправлять текущие 14 baseline failures.
 
+## BLOCK H2 — DONE / SAFE UNCERTAIN RECOVERY
+
+- Реализована только H2-граница для каталожных мутаций. Parser, prompts, matching,
+  engine, orchestrator, state policy и decomposition не менялись; миграция не
+  добавлялась, `0006` остаётся текущим Alembic head.
+- `CatalogMutationVerification` различает `APPLIED`, `NOT_APPLIED`, `CONFLICT` и
+  `UNAVAILABLE`. Gateway выполняет один `values.batchGet` по всем затронутым
+  диапазонам и сравнивает `before`/`expected_after`: числовые значения принимаются
+  в формах `15`, `15.0`, `"15"`, текст сравнивается после `clean_text`, без
+  нестрогого/fuzzy-сопоставления.
+- План проверяется до любого чтения/записи: schema version, operation id
+  `catalog:<order_no>`, order/spreadsheet consistency, уникальные диапазоны и
+  product IDs, допустимые mutation kinds и числовые quantity-поля. Невалидный
+  persisted plan переводит запись в `conflict` и не вызывает `batchUpdate`.
+- Для `STARTED` и `UNCERTAIN` сначала выполняется read-back. `APPLIED` только
+  фиксирует completion; `NOT_APPLIED` разрешает ровно одну controlled apply после
+  свежего доказательства, что все значения равны `before`; затем выполняется
+  повторная проверка. `CONFLICT`, mixed state и `UNAVAILABLE` останавливают
+  автоматическую запись. Для исходного `PENDING` initial apply также проверяется
+  read-back; exception сначала проходит recovery read-back.
+- Инвариант безопасности: после неизвестного результата ни один путь не пишет
+  повторно без свежего all-BEFORE доказательства; более одного controlled write
+  на один recovery checkpoint не допускается. Exactly-once не заявляется.
+- Cache invalidation, recalc, central dispatch и completion checkpoint выполняются
+  только после подтверждённого `APPLIED`; ошибка cache не повторяет write. Conflict
+  и unavailable получают понятное пользовательское сообщение без технических
+  терминов и кнопки повторной отправки.
+- H2 focused suite: **92 passed** (включает H1 safety tests; до H2 было 69).
+- Full suite до H2: **1262 collected / 1248 passed / 14 failed**. После H2:
+  **1285 collected / 1271 passed / 14 failed / 0 skipped / 0 xfailed / 0 errors**,
+  duration **18.271s**. Все 14 failures совпадают с прежним baseline; новых
+  regressions не обнаружено.
+- Проверки: Ruff check/format, mypy (`52 source files`), markdown links,
+  `git diff --check` и `alembic heads` проходят. H3 и migration `0007` не начаты.
+
 ## NEXT FUNCTIONAL STEP
 
-`BLOCK H2 — catalog read-back verification and uncertain recovery` — только после
-отдельного подтверждения. H1 safety gate остаётся обязательным; prompts, parser,
+`BLOCK H3 — recalc/cache/notification hardening` — только после отдельного
+подтверждения. H1/H2 safety gates остаются обязательными; prompts, parser,
 matching, engine, state compatibility, decomposition и MAX не входят в следующий
 патч автоматически.
