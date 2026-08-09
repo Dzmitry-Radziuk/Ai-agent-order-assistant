@@ -3340,6 +3340,16 @@ analysis-only аудита. Сначала подтвердить план и re
 - Не изменялись prompts, parser, matching, state-machine, MAX/submission
   idempotency, logging и decomposition.
 
+## BLOCK A PLAN — READY / IMPLEMENTATION PENDING
+
+- Owner: recover_omitted_explicit_items() в integrations/openai_parsing.py.
+- Target: 7 MUST FIX data-integrity tests; дополнительные случаи отмечены как
+  LIKELY FIX или OUT OF SCOPE по отдельным Block B–G.
+- Boundary: structured AI result + raw text/transcript → source-evidence
+  reconciliation → ParsedCommand; catalog и state machine не затрагиваются.
+- Expected files: openai_parsing.py и focused AI/voice recovery tests.
+- План: [docs/DATA_INTEGRITY_BLOCK_A_PLAN.md](docs/DATA_INTEGRITY_BLOCK_A_PLAN.md).
+- Следующий шаг: отдельная реализация только Block A после утверждения плана.
 ## ARCHITECTURAL REFACTOR STATUS
 
 Декомпозиция не продолжалась. Изменения ограничены существующими границами
