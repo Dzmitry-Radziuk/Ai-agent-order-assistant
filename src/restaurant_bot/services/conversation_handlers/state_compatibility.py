@@ -42,6 +42,7 @@ class CompatibilityContext(StrEnum):
     UNIT_MISMATCH = "unit_mismatch"
     PRODUCT_ADD_DETAILS = "product_add_details"
     ADD_MORE_CONFIRM = "add_more_confirm"
+    SUBMIT_CONFIRM = "submit_confirm"
 
 
 @dataclass(frozen=True, slots=True)
@@ -99,6 +100,8 @@ class StateCompatibilityPolicy:
             return self._evaluate_product_add_details(command, state)
         if context is CompatibilityContext.ADD_MORE_CONFIRM:
             return self._evaluate_add_more_confirm(command, state)
+        if context is CompatibilityContext.SUBMIT_CONFIRM:
+            return self._evaluate_submit_confirm(command, state)
         if context is CompatibilityContext.CANDIDATE_SELECTION:
             return self._evaluate_candidate_selection(command, state)
         if context is CompatibilityContext.NOT_FOUND:
@@ -225,6 +228,46 @@ class StateCompatibilityPolicy:
         if command.intent is Intent.ADD_ITEMS:
             return CompatibilityDecision(CompatibilityAction.CONTINUE)
         if command.intent in {Intent.BACK, Intent.CANCEL, Intent.SHOW_CART}:
+            return CompatibilityDecision(CompatibilityAction.CONTINUE)
+        if command.intent is Intent.UNKNOWN:
+            return CompatibilityDecision(CompatibilityAction.AMBIGUOUS)
+        return CompatibilityDecision(CompatibilityAction.INTERRUPT)
+
+    def _evaluate_submit_confirm(
+        self,
+        command: ParsedCommand,
+        state: ConversationState,
+    ) -> CompatibilityDecision:
+        """Разрешает подтверждение отправки только в валидном review-контексте."""
+        if not self._can_use_submit_confirm_context(state):
+            return CompatibilityDecision(CompatibilityAction.NOT_APPLICABLE)
+        if command.intent is Intent.ADD_ITEMS:
+            if self._has_concrete_new_items(command):
+                return CompatibilityDecision(CompatibilityAction.INTERRUPT)
+            return CompatibilityDecision(CompatibilityAction.AMBIGUOUS)
+        if command.intent is Intent.ADD_MORE:
+            return CompatibilityDecision(CompatibilityAction.INTERRUPT)
+        if command.dialogue_response is DialogueResponse.UNCERTAIN:
+            return CompatibilityDecision(CompatibilityAction.AMBIGUOUS)
+        if command.dialogue_response in {
+            DialogueResponse.AFFIRM,
+            DialogueResponse.DECLINE,
+        }:
+            return CompatibilityDecision(CompatibilityAction.CONTINUE)
+        if command.intent in {
+            Intent.CONFIRM,
+            Intent.SUBMIT_REQUEST,
+            Intent.SUBMIT_AS_IS,
+            Intent.BACK,
+            Intent.CANCEL,
+            Intent.SHOW_CART,
+            Intent.SHOW_FINAL_REVIEW,
+            Intent.CHECK_MIN_SUM,
+            Intent.CHOOSE_SUPPLIER_WARNING,
+            Intent.ADD_SUPPLIER_ITEMS,
+            Intent.SEARCH_ALL_SUPPLIERS,
+            Intent.SWITCH_SUPPLIER,
+        }:
             return CompatibilityDecision(CompatibilityAction.CONTINUE)
         if command.intent is Intent.UNKNOWN:
             return CompatibilityDecision(CompatibilityAction.AMBIGUOUS)
@@ -483,6 +526,8 @@ class StateCompatibilityPolicy:
             return CompatibilityContext.QUANTITY
         if StateCompatibilityPolicy._can_use_add_more_context(state):
             return CompatibilityContext.ADD_MORE_CONFIRM
+        if StateCompatibilityPolicy._can_use_submit_confirm_context(state):
+            return CompatibilityContext.SUBMIT_CONFIRM
         return None
 
     @staticmethod
@@ -511,6 +556,34 @@ class StateCompatibilityPolicy:
             }
             for item in state.cart
         )
+
+    @staticmethod
+    def _can_use_submit_confirm_context(state: ConversationState) -> bool:
+        """Проверяет инвариант обычного финального review без raw-текста."""
+        if state.stage is not SessionStage.AWAIT_SUBMIT_CONFIRM or state.review_mode != "cart":
+            return False
+        if (
+            state.pending_comment_items
+            or state.current_issue_item_id
+            or state.pending_product_add_request_id
+            or state.manual_item_index is not None
+            or state.unit_item_index is not None
+            or state.edit_multiple_index is not None
+            or state.pending_new_order_confirmation
+        ):
+            return False
+        unresolved_statuses = {
+            ItemStatus.AMBIGUOUS,
+            ItemStatus.NOT_FOUND,
+            ItemStatus.DUPLICATE_PENDING,
+            ItemStatus.UNIT_MISMATCH,
+            ItemStatus.MISSING_QTY,
+            ItemStatus.NEW,
+            ItemStatus.AI_PENDING,
+        }
+        if any(item.status in unresolved_statuses for item in state.cart):
+            return False
+        return any(item.status is ItemStatus.MATCHED for item in state.cart)
 
     def _evaluate_comment_scope(
         self,

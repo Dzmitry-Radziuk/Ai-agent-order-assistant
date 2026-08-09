@@ -22,6 +22,7 @@ class ModalRoutingDecision:
     manual_details: CompatibilityDecision
     product_add_details: CompatibilityDecision
     add_more_confirm: CompatibilityDecision
+    submit_confirm: CompatibilityDecision
     candidate_selection: CompatibilityDecision
     not_found: CompatibilityDecision
     duplicate: CompatibilityDecision
@@ -51,6 +52,11 @@ class ModalRoutingDecision:
     def add_more_confirm_interrupted(self) -> bool:
         """Показывает, прерван ли add-more prompt независимой командой."""
         return self.add_more_confirm.action is CompatibilityAction.INTERRUPT
+
+    @property
+    def submit_confirm_active(self) -> bool:
+        """Показывает, что обычный финальный review является active modal context."""
+        return self.submit_confirm.action is not CompatibilityAction.NOT_APPLICABLE
 
     @property
     def candidate_interrupted(self) -> bool:
@@ -92,6 +98,11 @@ def evaluate_modal_routing(
             command,
             state,
             CompatibilityContext.ADD_MORE_CONFIRM,
+        ),
+        submit_confirm=policy.evaluate(
+            command,
+            state,
+            CompatibilityContext.SUBMIT_CONFIRM,
         ),
         candidate_selection=policy.evaluate(
             command,

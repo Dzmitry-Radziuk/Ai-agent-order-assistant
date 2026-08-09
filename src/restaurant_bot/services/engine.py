@@ -175,10 +175,10 @@ class ConversationEngine:
             )
         # Keep the existing voice normalizer as a pre-policy normalization
         # step for legacy/LLM commands that mislabel a submit phrase as add-more.
-        if event.input_type is InputKind.VOICE and command.intent in {
-            Intent.ADD_MORE,
-            Intent.CONFIRM,
-        }:
+        if event.input_type is InputKind.VOICE and (
+            command.intent in {Intent.ADD_MORE, Intent.CONFIRM}
+            or state.stage is SessionStage.AWAIT_SUBMIT_CONFIRM
+        ):
             command = self._contextual_voice_command(command, event, state)
         modal_decision = evaluate_modal_routing(
             self.state_compatibility_policy,
@@ -201,6 +201,40 @@ class ConversationEngine:
             return EngineResult(state=state, reply=reply)
 
         state.last_input_text = event.text or command.text
+        submit_confirm_decision = modal_decision.submit_confirm
+        if submit_confirm_decision.action is CompatibilityAction.AMBIGUOUS:
+            return EngineResult(state=state, reply=final_review_reply(state))
+        if submit_confirm_decision.action is CompatibilityAction.INTERRUPT:
+            state.stage = SessionStage.REVIEW
+            state.status = "review"
+        elif submit_confirm_decision.action is CompatibilityAction.CONTINUE:
+            if command.dialogue_response is DialogueResponse.UNCERTAIN:
+                return EngineResult(state=state, reply=final_review_reply(state))
+            if command.dialogue_response is DialogueResponse.AFFIRM or command.intent in {
+                Intent.CONFIRM,
+                Intent.SUBMIT_REQUEST,
+            }:
+                command = command.model_copy(update={"intent": Intent.SUBMIT_AS_IS})
+            elif command.intent is Intent.SHOW_CART:
+                if self._is_generic_show_products_command(command.text):
+                    return EngineResult(
+                        state=state,
+                        reply=supplier_warning_details_reply(state),
+                    )
+                state.stage = SessionStage.REVIEW
+                state.status = "review"
+                return EngineResult(state=state, reply=cart_reply(state))
+            elif command.intent is Intent.BACK:
+                state.stage = SessionStage.REVIEW
+                state.status = "review"
+                return EngineResult(state=state, reply=cart_reply(state))
+            elif command.intent is Intent.CANCEL or command.dialogue_response is DialogueResponse.DECLINE:
+                state.stage = SessionStage.REVIEW
+                state.status = "review"
+                return EngineResult(
+                    state=state,
+                    reply=cart_reply(state, title="Отправка отменена"),
+                )
         add_more_decision = modal_decision.add_more_confirm
         if add_more_decision.action is not CompatibilityAction.NOT_APPLICABLE:
             if add_more_decision.action is CompatibilityAction.AMBIGUOUS:
@@ -1505,12 +1539,6 @@ class ConversationEngine:
                 "подоб",
             ):
                 return command.model_copy(update={"intent": Intent.FIX_MULTIPLE})
-
-        if state.stage == SessionStage.AWAIT_SUBMIT_CONFIRM:
-            if self._is_explicit_yes(phrase) or self._has_any_prefix(phrase, "подтверж", "отправ"):
-                return command.model_copy(update={"intent": Intent.SUBMIT_AS_IS})
-            if self._has_any_prefix(phrase, "нет", "отмен", "назад", "черновик"):
-                return command.model_copy(update={"intent": Intent.BACK})
 
         supplier_index = self._spoken_supplier_warning_index(phrase, state)
         if supplier_index is not None:

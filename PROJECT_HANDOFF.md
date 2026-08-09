@@ -2394,7 +2394,57 @@ mutation/enqueue на AMBIGUOUS.
   глубже retry semantics;
 - `suspended_interaction` не требуется для этого анализа.
 
+## AWAIT_SUBMIT_CONFIRM — IMPLEMENTATION
+
+Этап реализован минимальным functional diff без изменения `submission.py`,
+OpenAI parsing/prompts, каталожного matching или внешней границы enqueue.
+
+Добавлен `CompatibilityContext.SUBMIT_CONFIRM` в существующую
+`StateCompatibilityPolicy`. Контекст активен только для обычного cart review с
+одними `MATCHED` позициями и без другого pending/modal context. `ModalRoutingDecision`
+теперь отдаёт это решение engine до state-specific routing.
+
+Порядок TEXT/VOICE теперь такой:
+
+`global ParsedCommand → submit policy → обычный routing или FinalReviewHandler`.
+
+- `AFFIRM`, `CONFIRM`, `SUBMIT_REQUEST`, `SUBMIT_AS_IS` проходят существующий
+  `SUBMIT_AS_IS` guard и только затем создают `PendingSubmission`/enqueue;
+- `DECLINE`, `CANCEL`, `BACK` возвращают пользователя к сохранённому review без
+  отправки;
+- `UNCERTAIN` и `UNKNOWN` повторяют final review без изменения cart;
+- concrete `ADD_ITEMS`, `ADD_MORE` и остальные независимые intents прерывают modal
+  context и не получают его metadata;
+- `SHOW_CART` сохраняет специальный voice route для supplier warning details;
+- photo с товарами проходит тот же независимый `ADD_ITEMS` путь;
+- fresh/stale submit, back и pagination callbacks сохраняют существующий revision
+  guard, stale callback не меняет state и не enqueue-ит задачу.
+
+Удалён старый raw-phrase submit fallback из `_contextual_voice_command`; voice
+нормализация остаётся перед policy, поэтому текст и голос используют одну точку
+совместимости. Дополнительный `suspended_interaction` не вводился.
+
+Добавлен `tests/conversation/test_submit_confirm_routing.py` (33 regression cases):
+affirmative/negative/uncertain TEXT и VOICE, independent intents, ADD_MORE с
+affirmative dialogue, unresolved priority, multiple warning, photo и fresh/stale
+callbacks.
+
+Проверки текущего checkout:
+
+- новые submit-confirm tests: **33 passed**;
+- целевые conversation/voice/submission/telegram suites: функционально новые тесты
+  проходят; остаются ранее существующие падения контрактов UI/AI/postprocessing,
+  не затронутые этим diff;
+- `ruff` по изменённым source/test files: passed;
+- `mypy` по изменённым source/test files: passed;
+- `git diff --check`: passed.
+
+Полный checkout baseline сейчас содержит известные pre-existing failures вне этой
+задачи (в том числе старые AI/comment/voice recovery и UI-text expectations); они
+не исправлялись заодно.
+
 ## NEXT FUNCTIONAL STEP
 
-`AWAIT_SUBMIT_CONFIRM` — реализовать только после отдельного согласования минимального
-policy diff и regression tests; `SUBMISSION_FAILED` пока не начинать.
+`SUBMISSION_FAILED` — отдельный analysis/implementation этап. Не смешивать его с
+текущим `AWAIT_SUBMIT_CONFIRM` и не менять retry/uncertain submission semantics до
+нового согласования.
