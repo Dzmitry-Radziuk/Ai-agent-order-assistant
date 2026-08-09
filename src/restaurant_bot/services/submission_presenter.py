@@ -88,6 +88,16 @@ def submission_dispatch_uncertain_reply(state: Any, order_no: str) -> BotReply:
     )
 
 
+def submission_recovery_unavailable_reply() -> BotReply:
+    """Сообщает о сбое, для которого в состоянии нет безопасного снимка."""
+    return BotReply(
+        text=(
+            "⚠️ <b>Отправку нельзя безопасно повторить</b>\n\n"
+            "Снимок заявки не найден. Сохраните этот экран и обратитесь к менеджеру по снабжению."
+        )
+    )
+
+
 def _status_value(row: dict[str, Any], *keys: str, default: str = "") -> str:
     """Возвращает первое заполненное поле статуса."""
     for key in keys:

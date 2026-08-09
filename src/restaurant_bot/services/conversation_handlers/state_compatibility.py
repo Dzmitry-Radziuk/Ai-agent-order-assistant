@@ -43,6 +43,7 @@ class CompatibilityContext(StrEnum):
     PRODUCT_ADD_DETAILS = "product_add_details"
     ADD_MORE_CONFIRM = "add_more_confirm"
     SUBMIT_CONFIRM = "submit_confirm"
+    SUBMISSION_FAILED = "submission_failed"
 
 
 @dataclass(frozen=True, slots=True)
@@ -50,6 +51,7 @@ class CompatibilityDecision:
     """Возвращает решение без изменения команды или состояния."""
 
     action: CompatibilityAction
+    mode: str = ""
 
 
 class StateCompatibilityPolicy:
@@ -102,6 +104,8 @@ class StateCompatibilityPolicy:
             return self._evaluate_add_more_confirm(command, state)
         if context is CompatibilityContext.SUBMIT_CONFIRM:
             return self._evaluate_submit_confirm(command, state)
+        if context is CompatibilityContext.SUBMISSION_FAILED:
+            return self._evaluate_submission_failed(command, state)
         if context is CompatibilityContext.CANDIDATE_SELECTION:
             return self._evaluate_candidate_selection(command, state)
         if context is CompatibilityContext.NOT_FOUND:
@@ -161,6 +165,77 @@ class StateCompatibilityPolicy:
         if command.intent in self._INTERRUPT_INTENTS:
             return CompatibilityDecision(CompatibilityAction.INTERRUPT)
         return CompatibilityDecision(CompatibilityAction.INTERRUPT)
+
+    def _evaluate_submission_failed(
+        self,
+        command: ParsedCommand,
+        state: ConversationState,
+    ) -> CompatibilityDecision:
+        """Блокирует изменение черновика до безопасного восстановления отправки."""
+        mode = self.submission_failure_mode(state)
+        if state.stage is not SessionStage.SUBMISSION_FAILED:
+            return CompatibilityDecision(CompatibilityAction.NOT_APPLICABLE)
+        if state.pending_submission is None:
+            if command.intent in {
+                Intent.BACK,
+                Intent.SHOW_CART,
+                Intent.HELP,
+                Intent.THANKS,
+                Intent.SMALL_TALK,
+                Intent.GREETING,
+                Intent.ORDER_STATUS,
+                Intent.PRODUCT_ADD_LIST,
+            }:
+                return CompatibilityDecision(CompatibilityAction.CONTINUE, mode="broken")
+            return CompatibilityDecision(CompatibilityAction.REJECT, mode="broken")
+
+        retry = (
+            command.retry_requested
+            or command.intent in {Intent.SUBMIT_AS_IS, Intent.SUBMIT_REQUEST, Intent.CONFIRM}
+            or command.dialogue_response is DialogueResponse.AFFIRM
+        )
+        if mode == "dispatch_uncertain":
+            if retry:
+                return CompatibilityDecision(CompatibilityAction.REJECT, mode=mode)
+            if command.intent in {
+                Intent.BACK,
+                Intent.SHOW_CART,
+                Intent.HELP,
+                Intent.THANKS,
+                Intent.SMALL_TALK,
+                Intent.GREETING,
+                Intent.ORDER_STATUS,
+                Intent.PRODUCT_ADD_LIST,
+            }:
+                return CompatibilityDecision(CompatibilityAction.CONTINUE, mode=mode)
+            return CompatibilityDecision(CompatibilityAction.REJECT, mode=mode)
+        if retry:
+            return CompatibilityDecision(CompatibilityAction.CONTINUE, mode=mode)
+        if command.intent in {
+            Intent.BACK,
+            Intent.SHOW_CART,
+            Intent.HELP,
+            Intent.THANKS,
+            Intent.SMALL_TALK,
+            Intent.GREETING,
+            Intent.ORDER_STATUS,
+            Intent.CANCEL,
+            Intent.PRODUCT_ADD_LIST,
+        } or command.dialogue_response is DialogueResponse.DECLINE:
+            return CompatibilityDecision(CompatibilityAction.CONTINUE, mode=mode)
+        if command.intent is Intent.UNKNOWN or command.dialogue_response is DialogueResponse.UNCERTAIN:
+            return CompatibilityDecision(CompatibilityAction.AMBIGUOUS, mode=mode)
+        return CompatibilityDecision(CompatibilityAction.REJECT, mode=mode)
+
+    @staticmethod
+    def submission_failure_mode(state: ConversationState) -> str:
+        """Определяет structured-режим сбоя без анализа текста ошибки."""
+        pending = state.pending_submission
+        if state.status == "dispatch_uncertain" or (
+            pending is not None and pending.failed_stage == "dispatch_uncertain"
+        ):
+            return "dispatch_uncertain"
+        return "retryable"
 
     def _evaluate_product_add_details(
         self,
@@ -494,6 +569,8 @@ class StateCompatibilityPolicy:
     @staticmethod
     def context_for(state: ConversationState) -> CompatibilityContext | None:
         """Определяет поддержанный modal-контекст по состоянию без разбора текста."""
+        if state.stage is SessionStage.SUBMISSION_FAILED:
+            return CompatibilityContext.SUBMISSION_FAILED
         if state.pending_comment_items:
             return CompatibilityContext.COMMENT_SCOPE
         item = state.current_item()

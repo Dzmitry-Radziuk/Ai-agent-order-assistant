@@ -233,6 +233,7 @@ class ParsedCommand(BaseModel):
 
     intent: Intent = Intent.UNKNOWN
     explicit_add_items: bool = False
+    retry_requested: bool = False
     dialogue_response: DialogueResponse = DialogueResponse.NONE
     text: str = ""
     items: list[ExtractedItem] = Field(default_factory=list)

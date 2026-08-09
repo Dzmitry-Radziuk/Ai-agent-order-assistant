@@ -1152,6 +1152,17 @@ _NON_PRODUCT_ADD_TARGET_RE = re.compile(
     re.IGNORECASE,
 )
 
+_STANDALONE_RETRY_RE = re.compile(
+    r"(?:повтори|повторить|повтори отправку|повторить отправку|"
+    r"отправь еще раз|отправь ещё раз|попробуй снова|отправляй)",
+    re.IGNORECASE,
+)
+
+
+def retry_requested_for(text: str) -> bool:
+    """Распознаёт только самостоятельную просьбу повторить отправку."""
+    return bool(_STANDALONE_RETRY_RE.fullmatch(normalize_command_text(text)))
+
 
 def has_explicit_add_items(text: str, items: Sequence[object] | None = None) -> bool:
     """Определяет явную команду добавления новой товарной позиции."""
@@ -1343,6 +1354,7 @@ def infer_intent(text: str, callback_data: str = "") -> ParsedCommand:
     command = _infer_intent(text, callback_data)
     return command.model_copy(
         update={
+            "retry_requested": retry_requested_for(text),
             "dialogue_response": dialogue_response_for(
                 text or command.text,
                 command.intent,

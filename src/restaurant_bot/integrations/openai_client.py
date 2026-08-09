@@ -43,6 +43,7 @@ from restaurant_bot.services.parser import (
     has_explicit_add_items,
     has_explicit_global_comment_scope,
     infer_intent,
+    retry_requested_for,
 )
 from restaurant_bot.services.text import (
     UNIT_ALIASES,
@@ -296,6 +297,7 @@ class OpenAIService:
                 "explicit_add_items": has_explicit_add_items(text, payload.get("items", []))
                 if command.intent is Intent.ADD_ITEMS
                 else False,
+                "retry_requested": retry_requested_for(text),
             }
         )
         if command.global_comment and not command.items:

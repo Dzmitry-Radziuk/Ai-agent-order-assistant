@@ -951,6 +951,7 @@ class SubmissionService:
             sessions = SessionRepository(db)
             row, state = sessions.get_for_update(chat_id)
             state.stage = SessionStage.SUBMISSION_FAILED
+            state.status = "submission_failed"
             if state.pending_submission:
                 state.pending_submission.last_error = error[:1000]
             sessions.save(chat_id, state, row)

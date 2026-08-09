@@ -1,8 +1,18 @@
 # PROJECT HANDOFF
 
+## CURRENT IMPLEMENTATION STATUS
+
+`SUBMISSION_FAILED` реализован. Следующая функциональная задача — `review/modal contexts`.
+
 > Актуальный статус: этап `NOT_FOUND` завершён. Следующий функциональный этап — `DUPLICATE_PENDING`.
 
 ## CURRENT ROADMAP OVERRIDE
+
+## PRIORITY ROADMAP OVERRIDE (LATEST)
+
+`SUBMISSION_FAILED` завершён. Следующая функциональная задача — `review/modal contexts`.
+В рамках текущего этапа recovery lock остаётся последним изменённым функциональным слоем;
+новый функционал до отдельного разрешения не начинать.
 
 - Завершено: `MISSING_QTY`, `AWAIT_COMMENT_SCOPE`, `AMBIGUOUS / candidate selection`, `NOT_FOUND`.
 - Следующий и единственный функциональный этап: `DUPLICATE_PENDING`.
@@ -2728,3 +2738,20 @@ candidate/item routing.
   только policy diff;
 - notification failure после finalize не является `SUBMISSION_FAILED`;
 - `SUBMISSION_FAILED` implementation не начиналась.
+## SUBMISSION_FAILED — IMPLEMENTED
+
+Этап реализован в текущем checkout и ограничен recovery routing.
+
+- `CompatibilityContext.SUBMISSION_FAILED` добавлен в единый `StateCompatibilityPolicy`.
+- Recovery lock сохраняет frozen `PendingSubmission`, блокирует mutation intents и не допускает retry при `dispatch_uncertain`.
+- Standalone retry-фразы передаются как `ParsedCommand.retry_requested`; text и voice используют один путь.
+- Обычный `_fail()` сохраняет structured status `submission_failed`.
+- Добавлены регрессии в `tests/conversation/test_submission_failed_routing.py`.
+
+## NEXT FUNCTIONAL STEP
+
+`review/modal contexts` — следующий функциональный этап roadmap. Он не реализуется в текущем diff.
+
+## ARCHITECTURAL REFACTOR STATUS
+
+Декомпозиция не продолжалась; изменения ограничены существующими domain/parser/policy/modal/engine/submission границами.

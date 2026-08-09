@@ -56,6 +56,7 @@ from restaurant_bot.services.conversation_handlers.state import item_index as st
 from restaurant_bot.services.conversation_handlers.state_compatibility import (
     CompatibilityAction,
     CompatibilityContext,
+    CompatibilityDecision,
     StateCompatibilityPolicy,
 )
 from restaurant_bot.services.matching import (
@@ -102,6 +103,8 @@ from restaurant_bot.services.replies import (
 )
 from restaurant_bot.services.submission_presenter import (
     submission_dispatch_uncertain_reply,
+    submission_failure_reply,
+    submission_recovery_unavailable_reply,
 )
 from restaurant_bot.services.text import (
     NUMBER_WORDS,
@@ -201,6 +204,14 @@ class ConversationEngine:
             return EngineResult(state=state, reply=reply)
 
         state.last_input_text = event.text or command.text
+        submission_failed_decision = modal_decision.submission_failed
+        if submission_failed_decision.action is not CompatibilityAction.NOT_APPLICABLE:
+            return self._handle_submission_failed_recovery(
+                event,
+                command,
+                state,
+                submission_failed_decision,
+            )
         submit_confirm_decision = modal_decision.submit_confirm
         if submit_confirm_decision.action is CompatibilityAction.AMBIGUOUS:
             return EngineResult(state=state, reply=final_review_reply(state))
@@ -3102,6 +3113,62 @@ class ConversationEngine:
             reply=BotReply(text=f"{progress} <b>{order_no}</b>..."),
             enqueue_submission=True,
         )
+
+    def _handle_submission_failed_recovery(
+        self,
+        event: TelegramEvent,
+        command: ParsedCommand,
+        state: ConversationState,
+        decision: CompatibilityDecision,
+    ) -> EngineResult:
+        """Применяет recovery lock до любого изменения текущего черновика."""
+        action = decision.action
+        mode = decision.mode
+        pending = state.pending_submission
+        if action in {CompatibilityAction.REJECT, CompatibilityAction.AMBIGUOUS}:
+            if mode == "broken" or pending is None:
+                reply = submission_recovery_unavailable_reply()
+            elif mode == "dispatch_uncertain":
+                reply = submission_dispatch_uncertain_reply(state, pending.order_no)
+            else:
+                reply = submission_failure_reply(state, pending.order_no)
+            return EngineResult(state=state, reply=reply)
+
+        if command.intent in {
+            Intent.HELP,
+            Intent.THANKS,
+            Intent.SMALL_TALK,
+            Intent.GREETING,
+        }:
+            passive = self.passive_intent_handler.handle(command, state)
+            if passive is not None:
+                return passive
+        if command.intent is Intent.ORDER_STATUS:
+            status = self.order_status_handler.handle(event, command, state)
+            if status is not None:
+                return status
+        if command.intent is Intent.PRODUCT_ADD_LIST:
+            return EngineResult(state=state, reply=product_add_requests_reply(state))
+        if command.intent in {Intent.BACK, Intent.SHOW_CART}:
+            if command.intent is Intent.SHOW_CART:
+                state.cart_page = self._cart_page(command, state)
+            return EngineResult(state=state, reply=cart_reply(state))
+
+        retry_requested = (
+            command.retry_requested
+            or command.intent in {Intent.SUBMIT_AS_IS, Intent.SUBMIT_REQUEST, Intent.CONFIRM}
+            or command.dialogue_response is DialogueResponse.AFFIRM
+        )
+        if retry_requested and mode == "retryable":
+            return self._prepare_submission(event, state)
+        if pending is None:
+            return EngineResult(state=state, reply=submission_recovery_unavailable_reply())
+        reply = (
+            submission_dispatch_uncertain_reply(state, pending.order_no)
+            if mode == "dispatch_uncertain"
+            else submission_failure_reply(state, pending.order_no)
+        )
+        return EngineResult(state=state, reply=reply)
 
     @staticmethod
     def _submission_department_quantities(item: CartItem) -> list[tuple[str, float]]:
