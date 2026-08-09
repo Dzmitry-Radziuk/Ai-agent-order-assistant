@@ -98,6 +98,17 @@ def submission_recovery_unavailable_reply() -> BotReply:
     )
 
 
+def submission_in_progress_reply(order_no: str) -> BotReply:
+    """Сообщает, что заявка уже находится в процессе отправки."""
+    return BotReply(
+        text=(
+            "<i>Заявка уже обрабатывается</i>\n\n"
+            f"Номер заявки: {escape(order_no)}\n"
+            "Дождитесь завершения отправки и не запускайте новую заявку сейчас."
+        )
+    )
+
+
 def _status_value(row: dict[str, Any], *keys: str, default: str = "") -> str:
     """Возвращает первое заполненное поле статуса."""
     for key in keys:

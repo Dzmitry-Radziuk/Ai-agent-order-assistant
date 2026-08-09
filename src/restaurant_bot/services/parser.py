@@ -19,6 +19,7 @@ from restaurant_bot.services.text import (
     UNIT_ALIASES,
     clean_text,
     normalize_text,
+    normalize_unit,
 )
 
 has_explicit_global_comment_scope = _has_explicit_global_comment_scope
@@ -1146,6 +1147,17 @@ _EXPLICIT_ADD_ITEMS_RE = re.compile(
     r"(?P<target>.+)$",
     re.IGNORECASE,
 )
+_MIXED_ADD_ITEMS_RE = re.compile(
+    r"^(?:да|нет)\s*(?:[,;:—–-]\s*)?"
+    r"(?:добав(?:ь|ить|им)|закаж(?:и|ем|ать)|полож(?:и|ить)|"
+    r"возьм(?:и|ем)|постав(?:ь|ить))\s+(?P<target>.+)$",
+    re.IGNORECASE,
+)
+_AFFIRM_NEW_ORDER_RE = re.compile(
+    r"^да\s*(?:[,;:—–-]\s*)?(?:начинай|начать|начн(?:ем|ём)|"
+    r"сделай|создай|оформи)\s+(?:новую(?:\s+заявку)?|новый\s+заказ)$",
+    re.IGNORECASE,
+)
 _NON_PRODUCT_ADD_TARGET_RE = re.compile(
     r"^(?:ещ[её]\s+)?(?:товар(?:ы|а|ов)?|позици(?:я|и|й)|продукт(?:ы|а|ов)?|"
     r"что(?:-нибудь|\s+нибудь)?)(?:\s+ещ[её])?$",
@@ -1183,6 +1195,64 @@ def has_explicit_add_items(text: str, items: Sequence[object] | None = None) -> 
     return not bool(re.fullmatch(r"(?:в|во)\s+(?:корзин\w*|заявк\w*)", target, re.IGNORECASE))
 
 
+def _parse_mixed_add_items(text: str) -> ParsedCommand | None:
+    """Сохраняет явное добавление после вводного да/нет-маркера."""
+    match = _MIXED_ADD_ITEMS_RE.fullmatch(normalize_command_text(text))
+    if match is None:
+        return None
+    target = clean_command_target(match.group("target"))
+    if not target or _NON_PRODUCT_ADD_TARGET_RE.fullmatch(target):
+        return None
+    product_text, global_comment = _extract_global_comment(target)
+    items = parse_product_lines(product_text)
+    if not items:
+        return None
+    return ParsedCommand(
+        intent=Intent.ADD_ITEMS,
+        explicit_add_items=True,
+        text=text,
+        items=items,
+        global_comment=global_comment,
+    )
+
+
+_QUANTITY_HINT_LEADINS = {
+    "да",
+    "давай",
+    "ладно",
+    "мне",
+    "нужен",
+    "нужна",
+    "нужно",
+    "ок",
+    "окей",
+    "поставь",
+    "поставить",
+    "пусть",
+    "тогда",
+    "хорошо",
+    "возьми",
+    "возьмем",
+    "закажи",
+    "заказать",
+}
+
+
+def _standalone_quantity_hint(text: str) -> tuple[float | None, str]:
+    """Извлекает количество только из короткой standalone-фразы."""
+    normalized = normalize_command_text(text)
+    quantity, unit = parse_quantity_unit(normalized)
+    if quantity is None:
+        return None, ""
+    tokens = normalized.replace(",", " ").split()
+    allowed = set(UNIT_ALIASES) | set(NUMBER_WORDS) | _QUANTITY_HINT_LEADINS
+    if not all(
+        token in allowed or re.fullmatch(r"\d+(?:\.\d+)?", token) for token in tokens
+    ):
+        return None, ""
+    return quantity, normalize_unit(unit)
+
+
 def _infer_intent(text: str, callback_data: str = "") -> ParsedCommand:
     """Определяет намерение пользователя."""
     if callback_data:
@@ -1210,12 +1280,17 @@ def _infer_intent(text: str, callback_data: str = "") -> ParsedCommand:
     normalized = normalize_command_text(text)
     if status_command := _parse_order_status_navigation(normalized, text):
         return status_command
+    if _AFFIRM_NEW_ORDER_RE.fullmatch(normalized):
+        return ParsedCommand(intent=Intent.CONFIRM, text=text)
     for intent, pattern in (*_COMMANDS, *_NATURAL_COMMANDS):
         if pattern.fullmatch(normalized):
             return ParsedCommand(intent=intent, text=text)
 
     if is_explicit_item_rejection(normalized):
         return ParsedCommand(intent=Intent.SKIP_CURRENT, text=text)
+
+    if mixed_add := _parse_mixed_add_items(text):
+        return mixed_add
 
     if negated_intent := _infer_negated_command(normalized):
         return ParsedCommand(intent=negated_intent, text=text)
@@ -1352,8 +1427,11 @@ def dialogue_response_for(
 def infer_intent(text: str, callback_data: str = "") -> ParsedCommand:
     """Определяет intent и нормализует общий короткий ответ пользователя."""
     command = _infer_intent(text, callback_data)
+    quantity_hint, quantity_hint_unit = _standalone_quantity_hint(text)
     return command.model_copy(
         update={
+            "quantity_hint": quantity_hint,
+            "quantity_hint_unit": quantity_hint_unit,
             "retry_requested": retry_requested_for(text),
             "dialogue_response": dialogue_response_for(
                 text or command.text,

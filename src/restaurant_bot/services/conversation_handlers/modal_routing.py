@@ -24,6 +24,7 @@ class ModalRoutingDecision:
     add_more_confirm: CompatibilityDecision
     submit_confirm: CompatibilityDecision
     submission_failed: CompatibilityDecision
+    new_order_confirmation: CompatibilityDecision
     candidate_selection: CompatibilityDecision
     not_found: CompatibilityDecision
     duplicate: CompatibilityDecision
@@ -109,6 +110,11 @@ def evaluate_modal_routing(
             command,
             state,
             CompatibilityContext.SUBMISSION_FAILED,
+        ),
+        new_order_confirmation=policy.evaluate(
+            command,
+            state,
+            CompatibilityContext.NEW_ORDER_CONFIRMATION,
         ),
         candidate_selection=policy.evaluate(
             command,

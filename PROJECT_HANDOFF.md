@@ -3179,3 +3179,146 @@ preemption/resume routing. После завершения этого этапа
 Декомпозиция не продолжалась. Анализ использует существующие границы
 `StateCompatibilityPolicy`, `ConversationEngine` и `UpdateOrchestrator`; переносов
 между директориями и изменения application behavior в этом этапе нет.
+
+## PENDING NEW ORDER CONFIRMATION — IMPLEMENTED
+
+Этап 13/13 завершён в commit `refactor: protect new order confirmation routing`.
+Изменён только последний modal block; decomposition, MAX integration и полный
+behavior audit в этот commit не входят.
+
+### Реализованный pipeline
+
+```text
+global ParsedCommand
+  -> evaluate_modal_routing()
+  -> stale callback guard
+  -> SUBMISSION_FAILED / frozen SUBMITTING safety
+  -> NEW_ORDER_CONFIRMATION decision
+  -> underlying modal или обычный routing
+```
+
+Добавлен единый `CompatibilityContext.NEW_ORDER_CONFIRMATION` и поле
+`ModalRoutingDecision.new_order_confirmation`. Policy не разбирает raw text,
+не вызывает `normalize_text(command.text)`, не использует regex и не содержит
+state-specific reparse.
+
+Удалён старый engine-блок с `_is_explicit_yes`, `has_negation` и префиксами
+`нет/остав/сохран/передум` для confirmation. Решение теперь принимает только
+structured command и state.
+
+### Приоритеты и инварианты
+
+- concrete `ADD_ITEMS` с реальным item, `REMOVE_ITEM`, `EDIT_QUANTITY` и
+  `EDIT_COMMENT` прерывают confirmation; draft не очищается;
+- `да, добавь пармезан 3 кг` добавляет пармезан в текущую заявку, не удаляя курицу;
+- `пармезан` без количества проходит обычный flow и может открыть quantity;
+- чистое `CONFIRM/AFFIRM` (`да`, `ага`, `подтверждаю`) вызывает единственный
+  destructive `_start_new_order()`;
+- `CANCEL`, `BACK`, `DECLINE` снимают overlay и сохраняют draft;
+- повторный `START_NEW_ORDER` остаётся `AMBIGUOUS` и повторяет карточку;
+- explicit `CLEAR_CART` и свежий `v2:clear:rN` остаются destructive YES;
+- `SHOW_CART`, `HELP`, `THANKS`, `ORDER_STATUS` и прочие независимые intents
+  больше не проглатываются confirmation;
+- unknown/uncertain сохраняет `pending_new_order_confirmation`, cart, stage и
+  modal metadata без side effects;
+- stale callback отклоняется до любого confirmation transition;
+- `SUBMISSION_FAILED` сохраняет прежний recovery lock;
+- `SUBMITTING`/`pending_submission` больше не могут быть уничтожены через YES,
+  CLEAR или START_NEW_ORDER; возвращается безопасное сообщение о текущей отправке.
+
+### Mixed parser contract
+
+Фактический parser терял товар в `нет, добавь сыр` и превращал `да, добавь
+пармезан 3 кг` в product query с вводным маркером. Добавлена небольшая общая
+normalization-функция parser, не знающая о state confirmation:
+
+- explicit positive action после вводного `да/нет` сохраняется как `ADD_ITEMS`;
+- отрицание `не добавляй сыр` не становится положительным ADD;
+- affirmative «да, начинай новую» нормализуется в `CONFIRM/AFFIRM`;
+- standalone quantity получает structured `quantity_hint`, не меняя global intent.
+
+Это позволило вернуть `5 кг` в существующий `PendingQuantityHandler` после снятия
+overlay без raw-language policy.
+
+### Underlying modal resume
+
+После NO сохранённый underlying context отображается своим текущим presenter-ом:
+quantity/candidate/not-found/duplicate/unit идут через `_advance()`, comment scope
+повторяет clarification card, product-add и add-more используют существующие
+prompts, submit-confirm показывает final review. `suspended_interaction`, state
+stack и копирование предыдущего stage не добавлялись.
+
+### Audit, trace и сохранённые данные
+
+`_start_new_order()` и существующий audit contract не переписывались. Только
+фактический destructive reset закрывает прежний trace и создаёт `order_cancelled`;
+NO и independent interrupt trace не закрывают. `product_add_requests` сохраняются
+как раньше; их ownership между заявками оставлен отдельным follow-up.
+
+### Regression coverage
+
+Добавлен `tests/conversation/test_new_order_confirmation_routing.py` с проверками:
+
+- TEXT/VOICE YES, NO, AMBIGUOUS;
+- mixed ADD с affirmative/decline marker и ADD без quantity;
+- REMOVE, EDIT_QUANTITY, EDIT_COMMENT, SHOW_CART, HELP, THANKS;
+- AWAIT_UNIT_QUANTITY resume;
+- candidate selection resume;
+- fresh/stale callbacks;
+- PHOTO с товарами и без товаров;
+- защита `SUBMITTING` frozen `PendingSubmission`;
+- parser negative contract для `не добавляй`.
+
+Focused routing suite прошёл. Соседний targeted набор прошёл после исключения одного
+известного исторического теста duplicate prompt. Более широкий набор показывает
+несвязанные с этим diff исторические падения voice/AI postprocessing recovery
+(`tests/input/test_voice_input_contract.py`, `test_voice_quantity_recovery.py`,
+`test_voice_processing_card.py`); они не исправлялись.
+
+Проверки текущего diff:
+
+- project `.venv` pytest focused/adjacent: passed;
+- Ruff check: passed;
+- mypy: passed (`52 source files`);
+- markdown links: passed;
+- `git diff --check`: passed;
+- `.env` не читался и не tracked.
+
+`build_agent_context.py` всё ещё не может обновить snapshot из-за
+`PermissionError` на `.agents/runtime/CURRENT_CONTEXT.md`; это Agent Harness
+follow-up, не часть state-machine diff.
+
+## STATE MACHINE ROADMAP — 13/13 DONE
+
+Все запланированные modal blocks реализованы: MISSING_QTY, COMMENT_SCOPE,
+AMBIGUOUS/CANDIDATE, NOT_FOUND, DUPLICATE_PENDING, UNIT_MISMATCH,
+AWAIT_MANUAL_DETAILS, AWAIT_PRODUCT_ADD_DETAILS, AWAIT_ADD_MORE_CONFIRM,
+AWAIT_SUBMIT_CONFIRM, SUBMISSION_FAILED, REVIEW/MODAL CONTEXTS и
+PENDING_NEW_ORDER_CONFIRMATION.
+
+## REQUIRED FOLLOW-UPS
+
+### FULL USER JOURNEY LOGGING
+
+Отдельный production observability этап. Позже нужно связывать по `trace_id`:
+input/transcript/photo/callback, ParsedCommand, state/cart before, compatibility
+decision, handler, state/cart after, state diff, reply, visible actions, side
+effects, errors/retries, `order_no` и `update_id`. Secrets (`.env`, API keys,
+credentials, authorization tokens) не логировать. В текущем commit полное
+пользовательское логирование не реализовывалось.
+
+### PRODUCT_ADD_REQUESTS OWNERSHIP
+
+Сохранить решение о том, являются ли `product_add_requests` глобальной историей
+заведения или должны иметь ownership заявки/trace. В текущем этапе contract и
+существующие тесты не менялись.
+
+## NEXT FUNCTIONAL STEP
+
+`FULL REGRESSION / BEHAVIOR AUDIT` по каналам TEXT, VOICE, PHOTO и CALLBACK.
+Аудит не начинать в рамках текущего commit.
+
+## ARCHITECTURAL REFACTOR STATUS
+
+Декомпозиция не продолжалась. Изменения ограничены существующими границами
+policy, parser normalization, engine routing и focused regression tests.

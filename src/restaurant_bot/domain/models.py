@@ -243,6 +243,8 @@ class ParsedCommand(BaseModel):
     selection_query: str = ""
     edit_quantity: float | None = None
     edit_unit: str = ""
+    quantity_hint: float | None = None
+    quantity_hint_unit: str = ""
     global_comment: str = ""
     comment_target_query: str = ""
     comment_text: str = ""

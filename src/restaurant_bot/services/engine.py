@@ -104,6 +104,7 @@ from restaurant_bot.services.replies import (
 from restaurant_bot.services.submission_presenter import (
     submission_dispatch_uncertain_reply,
     submission_failure_reply,
+    submission_in_progress_reply,
     submission_recovery_unavailable_reply,
 )
 from restaurant_bot.services.text import (
@@ -212,13 +213,43 @@ class ConversationEngine:
                 state,
                 submission_failed_decision,
             )
+        new_order_decision = modal_decision.new_order_confirmation
+        if new_order_decision.action is CompatibilityAction.REJECT:
+            pending = state.pending_submission
+            if pending is not None and pending.order_no:
+                return EngineResult(
+                    state=state,
+                    reply=submission_in_progress_reply(pending.order_no),
+                )
+            return EngineResult(state=state, reply=submission_recovery_unavailable_reply())
+        if new_order_decision.action is CompatibilityAction.AMBIGUOUS:
+            return EngineResult(state=state, reply=new_order_confirmation_reply(state))
+        new_order_interrupted = False
+        if new_order_decision.action is CompatibilityAction.CONTINUE:
+            if new_order_decision.mode == "yes":
+                return self._start_new_order(state)
+            if new_order_decision.mode == "no":
+                state.pending_new_order_confirmation = False
+                return self._resume_after_new_order_confirmation(state)
+        elif new_order_decision.action is CompatibilityAction.INTERRUPT:
+            state.pending_new_order_confirmation = False
+            new_order_interrupted = True
         submit_confirm_decision = modal_decision.submit_confirm
-        if submit_confirm_decision.action is CompatibilityAction.AMBIGUOUS:
+        if (
+            not new_order_interrupted
+            and submit_confirm_decision.action is CompatibilityAction.AMBIGUOUS
+        ):
             return EngineResult(state=state, reply=final_review_reply(state))
-        if submit_confirm_decision.action is CompatibilityAction.INTERRUPT:
+        if (
+            not new_order_interrupted
+            and submit_confirm_decision.action is CompatibilityAction.INTERRUPT
+        ):
             state.stage = SessionStage.REVIEW
             state.status = "review"
-        elif submit_confirm_decision.action is CompatibilityAction.CONTINUE:
+        elif (
+            not new_order_interrupted
+            and submit_confirm_decision.action is CompatibilityAction.CONTINUE
+        ):
             if command.dialogue_response is DialogueResponse.UNCERTAIN:
                 return EngineResult(state=state, reply=final_review_reply(state))
             if command.dialogue_response is DialogueResponse.AFFIRM or command.intent in {
@@ -272,12 +303,20 @@ class ConversationEngine:
                 state.pending_added_items_count = 0
                 state.stage = SessionStage.REVIEW
                 state.status = "review"
-        if state.pending_comment_items and modal_decision.comment_scope.action in {
-            CompatibilityAction.CONTINUE,
-            CompatibilityAction.AMBIGUOUS,
-        }:
+        if (
+            not new_order_interrupted
+            and state.pending_comment_items
+            and modal_decision.comment_scope.action
+            in {
+                CompatibilityAction.CONTINUE,
+                CompatibilityAction.AMBIGUOUS,
+            }
+        ):
             return self._resolve_pending_comment_scope(event, command, state, catalog)
-        if modal_decision.manual_details.action is CompatibilityAction.AMBIGUOUS:
+        if (
+            not new_order_interrupted
+            and modal_decision.manual_details.action is CompatibilityAction.AMBIGUOUS
+        ):
             current = state.current_item()
             if current is not None:
                 return EngineResult(
@@ -285,7 +324,8 @@ class ConversationEngine:
                     reply=issue_reply(current, self._item_index(state, current)),
                 )
         if (
-            modal_decision.not_found.action is CompatibilityAction.AMBIGUOUS
+            not new_order_interrupted
+            and modal_decision.not_found.action is CompatibilityAction.AMBIGUOUS
             and command.intent is Intent.ADD_ITEMS
             and command.items
         ):
@@ -330,7 +370,8 @@ class ConversationEngine:
             CompatibilityContext.DUPLICATE_PENDING,
         )
         if (
-            duplicate_decision.action is CompatibilityAction.AMBIGUOUS
+            not new_order_interrupted
+            and duplicate_decision.action is CompatibilityAction.AMBIGUOUS
             and command.intent is Intent.ADD_ITEMS
         ):
             current = state.current_item()
@@ -344,10 +385,11 @@ class ConversationEngine:
             state,
             CompatibilityContext.UNIT_MISMATCH,
         )
-        if unit_mismatch_decision.action is CompatibilityAction.AMBIGUOUS and command.intent in {
-            Intent.ADD_ITEMS,
-            Intent.UNKNOWN,
-        }:
+        if (
+            not new_order_interrupted
+            and unit_mismatch_decision.action is CompatibilityAction.AMBIGUOUS
+            and command.intent in {Intent.ADD_ITEMS, Intent.UNKNOWN}
+        ):
             current = state.current_item()
             if current is not None:
                 return EngineResult(
@@ -401,6 +443,7 @@ class ConversationEngine:
         if (
             current
             and current.status == ItemStatus.AMBIGUOUS
+            and not new_order_interrupted
             and self.state_compatibility_policy.evaluate(
                 command,
                 state,
@@ -441,23 +484,6 @@ class ConversationEngine:
             for request in state.product_add_requests
         ):
             return EngineResult(state=state, reply=cart_reply(state))
-
-        if state.pending_new_order_confirmation:
-            phrase = normalize_text(event.text or command.text)
-            if command.intent in {
-                Intent.CLEAR_CART,
-                Intent.START_NEW_ORDER,
-                Intent.CONFIRM,
-            } or self._is_explicit_yes(phrase):
-                return self._start_new_order(state)
-            if (
-                command.intent in {Intent.BACK, Intent.CANCEL, Intent.SHOW_CART}
-                or has_negation(phrase)
-                or self._has_any_prefix(phrase, "нет", "остав", "сохран", "передум")
-            ):
-                state.pending_new_order_confirmation = False
-                return EngineResult(state=state, reply=cart_reply(state))
-            return EngineResult(state=state, reply=new_order_confirmation_reply(state))
 
         pending_quantity_action = (
             PendingQuantityAction.NOT_HANDLED
@@ -2671,6 +2697,40 @@ class ConversationEngine:
         state.stage = SessionStage.REVIEW if state.cart else SessionStage.COLLECTING
         title = f"Добавлено позиций: {added_count}" if added_count else "Черновик заявки"
         return EngineResult(state=state, reply=cart_reply(state, title=title))
+
+    def _resume_after_new_order_confirmation(self, state: ConversationState) -> EngineResult:
+        """Показывает сохранённый underlying modal context после отказа."""
+        if state.pending_comment_items:
+            return EngineResult(
+                state=state,
+                reply=comment_scope_clarification_reply(
+                    comment_scope_items(state),
+                    state.pending_comment_text,
+                ),
+            )
+        if state.stage is SessionStage.AWAIT_ADD_MORE_CONFIRM:
+            return EngineResult(state=state, reply=self._repeat_add_more_prompt(state))
+        if state.stage is SessionStage.AWAIT_SUBMIT_CONFIRM:
+            return EngineResult(state=state, reply=final_review_reply(state))
+        if state.stage is SessionStage.AWAIT_PRODUCT_ADD_DETAILS:
+            index = state.pending_product_add_item_index
+            item = (
+                state.cart[index]
+                if index is not None and 0 <= index < len(state.cart)
+                else None
+            )
+            if item is not None:
+                return EngineResult(state=state, reply=BotReply(text=product_add_prompt(item)))
+        current = state.current_item()
+        if current is not None and current.status in {
+            ItemStatus.AMBIGUOUS,
+            ItemStatus.NOT_FOUND,
+            ItemStatus.DUPLICATE_PENDING,
+            ItemStatus.UNIT_MISMATCH,
+            ItemStatus.MISSING_QTY,
+        }:
+            return self._advance(state)
+        return EngineResult(state=state, reply=cart_reply(state))
 
     def _select_candidate(
         self,

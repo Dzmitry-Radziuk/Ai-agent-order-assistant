@@ -44,6 +44,7 @@ class CompatibilityContext(StrEnum):
     ADD_MORE_CONFIRM = "add_more_confirm"
     SUBMIT_CONFIRM = "submit_confirm"
     SUBMISSION_FAILED = "submission_failed"
+    NEW_ORDER_CONFIRMATION = "new_order_confirmation"
     SHEET_REVIEW = "sheet_review"
 
 
@@ -107,6 +108,8 @@ class StateCompatibilityPolicy:
             return self._evaluate_submit_confirm(command, state)
         if context is CompatibilityContext.SUBMISSION_FAILED:
             return self._evaluate_submission_failed(command, state)
+        if context is CompatibilityContext.NEW_ORDER_CONFIRMATION:
+            return self._evaluate_new_order_confirmation(command, state)
         if context is CompatibilityContext.SHEET_REVIEW:
             return self._evaluate_sheet_review(command, state)
         if context is CompatibilityContext.CANDIDATE_SELECTION:
@@ -176,6 +179,88 @@ class StateCompatibilityPolicy:
             return CompatibilityDecision(CompatibilityAction.AMBIGUOUS)
 
         return CompatibilityDecision(CompatibilityAction.INTERRUPT)
+
+    def _evaluate_new_order_confirmation(
+        self,
+        command: ParsedCommand,
+        state: ConversationState,
+    ) -> CompatibilityDecision:
+        """Решает судьбу команды поверх подтверждения новой заявки."""
+        if not state.pending_new_order_confirmation:
+            return CompatibilityDecision(CompatibilityAction.NOT_APPLICABLE)
+        if state.stage in {SessionStage.SUBMISSION_FAILED, SessionStage.SUBMITTING} or (
+            state.pending_submission is not None
+        ):
+            return CompatibilityDecision(CompatibilityAction.REJECT, mode="frozen_submission")
+
+        if command.intent is Intent.ADD_ITEMS and self._has_product_items(command):
+            return CompatibilityDecision(CompatibilityAction.INTERRUPT, mode="independent")
+        if command.intent is Intent.CLEAR_CART:
+            return CompatibilityDecision(CompatibilityAction.CONTINUE, mode="yes")
+        if command.intent is Intent.START_NEW_ORDER:
+            return CompatibilityDecision(CompatibilityAction.AMBIGUOUS)
+        if command.intent in {Intent.CANCEL, Intent.BACK} or (
+            command.dialogue_response is DialogueResponse.DECLINE
+        ):
+            return CompatibilityDecision(CompatibilityAction.CONTINUE, mode="no")
+        if command.intent is Intent.CONFIRM and not self._has_product_items(command):
+            return CompatibilityDecision(CompatibilityAction.CONTINUE, mode="yes")
+        if command.dialogue_response is DialogueResponse.AFFIRM and not self._has_product_items(
+            command
+        ):
+            return CompatibilityDecision(CompatibilityAction.CONTINUE, mode="yes")
+        if command.intent is Intent.UNKNOWN and command.quantity_hint is not None:
+            return CompatibilityDecision(CompatibilityAction.INTERRUPT, mode="underlying")
+        if command.intent in {
+            Intent.SELECT_CANDIDATE,
+            Intent.MANUAL_CURRENT,
+            Intent.SKIP_CURRENT,
+            Intent.CLARIFY_CURRENT,
+            Intent.PRODUCT_ADD,
+            Intent.PRODUCT_ADD_RETRY,
+            Intent.PRODUCT_ADD_SKIP,
+            Intent.SEARCH_ALL_SUPPLIERS,
+            Intent.SWITCH_SUPPLIER,
+            Intent.USE_CATALOG_UNIT,
+            Intent.UNIT_OK,
+            Intent.UNIT_EDIT,
+            Intent.ENTER_OTHER_QUANTITY,
+            Intent.ACCEPT_SUGGESTED_QUANTITY,
+            Intent.KEEP_CURRENT_QUANTITY,
+            Intent.KEEP_MULTIPLE,
+            Intent.FIX_MULTIPLE,
+            Intent.EDIT_MULTIPLE,
+            Intent.MERGE_DUPLICATE,
+            Intent.CONTINUE_CURRENT,
+        } or command.comment_scope_action:
+            return CompatibilityDecision(CompatibilityAction.INTERRUPT, mode="underlying")
+        if command.intent in {
+            Intent.REMOVE_ITEM,
+            Intent.EDIT_QUANTITY,
+            Intent.EDIT_COMMENT,
+            Intent.SHOW_CART,
+            Intent.SHOW_FINAL_REVIEW,
+            Intent.ORDER_STATUS,
+            Intent.HELP,
+            Intent.THANKS,
+            Intent.SMALL_TALK,
+            Intent.GREETING,
+            Intent.PRODUCT_ADD_LIST,
+            Intent.ADD_MORE,
+            Intent.SUBMIT_REQUEST,
+            Intent.SUBMIT_AS_IS,
+        }:
+            return CompatibilityDecision(CompatibilityAction.INTERRUPT, mode="independent")
+        if command.dialogue_response is DialogueResponse.UNCERTAIN or command.intent is Intent.UNKNOWN:
+            return CompatibilityDecision(CompatibilityAction.AMBIGUOUS)
+        return CompatibilityDecision(CompatibilityAction.INTERRUPT, mode="independent")
+
+    @staticmethod
+    def _has_product_items(command: ParsedCommand) -> bool:
+        """Проверяет наличие реальной товарной позиции в команде."""
+        if command.dialogue_response is DialogueResponse.UNCERTAIN:
+            return False
+        return any(item.product_query.strip() for item in command.items)
 
     def _evaluate_manual_details(
         self,
@@ -612,6 +697,8 @@ class StateCompatibilityPolicy:
         """Определяет поддержанный modal-контекст по состоянию без разбора текста."""
         if state.stage is SessionStage.SUBMISSION_FAILED:
             return CompatibilityContext.SUBMISSION_FAILED
+        if state.pending_new_order_confirmation:
+            return CompatibilityContext.NEW_ORDER_CONFIRMATION
         if state.stage is SessionStage.REVIEW and state.review_mode == "sheet_link":
             return CompatibilityContext.SHEET_REVIEW
         if state.pending_comment_items:
