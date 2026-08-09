@@ -3512,6 +3512,16 @@ Block E requires separate approval and must not move provenance logic back into 
 - Added regressions for source/query/line preservation, source-owned duplicated product facts,
   and idempotent catalog application. The supplier-lock expectation now asserts the provenance
   contract (`source_query` is the parsed product query; `source_line` is the full user line).
+- MUST FIX accounting is split explicitly: unchanged expectations fixed are
+  `tests/catalog/test_product_matching.py::test_catalog_product_facts_are_not_saved_as_supplier_comments`,
+  `tests/catalog/test_product_matching.py::test_catalog_title_facts_are_not_quantity_or_comment`,
+  `tests/catalog/test_product_matching.py::test_quantity_only_comment_residue_is_removed`, and
+  `tests/catalog/test_product_matching.py::test_exact_catalog_title_number_requires_explicit_order_quantity`.
+  `tests/supplier/test_supplier_lock.py::test_short_catalog_supplier_matches_selected_full_supplier_name`
+  is a contract-migrated test: on pre-Block-D the old `source_query == name` assertion passed and
+  the first failure was `comment == ""`; Block D fixed that runtime comment/provenance bug, while
+  the old catalog-title expectation became intentionally obsolete under
+  `catalog_name = catalog title; source_query = parsed user meaning`.
 - Focused catalog/supplier suite: **39 passed**. Provenance/comment integrity suite:
   **50 passed**; the one remaining failure in the combined comment run is the pre-existing
   `tests/conversation/test_comment_handling.py::test_late_global_comment_applies_to_existing_and_new_items_without_overlap`.
