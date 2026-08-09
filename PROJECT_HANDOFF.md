@@ -3315,7 +3315,9 @@ credentials, authorization tokens) не логировать. В текущем 
 
 ## NEXT FUNCTIONAL STEP
 
-`FIX CONFIRMED REGRESSIONS` после завершённого full regression audit.
+`Block A — AI source-evidence/provenance reconciliation` после завершённого
+analysis-only аудита. Сначала подтвердить план и regression matrix, затем менять
+только recovery/provenance boundary.
 
 ## FULL REGRESSION AUDIT — COMPLETE / FIXES PENDING
 
@@ -3326,8 +3328,17 @@ credentials, authorization tokens) не логировать. В текущем 
 - High-risk follow-up: повторный `increment_catalog_quantities()` при падении
   между внешней записью и checkpoint `catalog_updated`.
 - Полная карта аудита: [docs/FULL_REGRESSION_AUDIT.md](docs/FULL_REGRESSION_AUDIT.md).
-- Следующий функциональный этап: исправить подтверждённые baseline/data-integrity
-  проблемы и вернуть стабильный regression baseline.
+
+## DATA INTEGRITY ANALYSIS — COMPLETE / FIXES PENDING
+
+- Добавлен [docs/DATA_INTEGRITY_ANALYSIS.md](docs/DATA_INTEGRITY_ANALYSIS.md).
+- Зафиксированы 10 кластеров A–J: 8 data/semantic, photo contract drift и UX
+  wording drift; 45 old baseline failures и 7 stale `SUB-08` failures сохранены
+  отдельно.
+- Первый рекомендуемый P0/P1 блок: source-evidence/provenance reconciliation
+  вокруг `recover_omitted_explicit_items()`; код пока не менялся.
+- Не изменялись prompts, parser, matching, state-machine, MAX/submission
+  idempotency, logging и decomposition.
 
 ## ARCHITECTURAL REFACTOR STATUS
 
