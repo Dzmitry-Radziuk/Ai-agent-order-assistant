@@ -3536,3 +3536,21 @@ Block E requires separate approval and must not move provenance logic back into 
   No new failure nodeids appeared; the remaining 21 are the documented PHOTO, routing/UX,
   stale scenario-catalog, shadow/voice, quantity and comment baseline failures.
 - Block D stops at the catalog/title/attribute boundary. **Block E is not started.**
+
+## BLOCK E PLAN — READY / IMPLEMENTATION PENDING
+
+- Owner boundary: `matching.py` отвечает за candidate admission/ranking; `CatalogResolver`
+  координирует search/decision; `ConversationEngine` применяет выбранный catalog row;
+  `_resolve_ai_pending` остаётся вторичным shortlist-only matcher.
+- Текущий matching call graph, helper inventory, heuristic map и false-positive/true-positive
+  matrices зафиксированы в [docs/DATA_INTEGRITY_BLOCK_E_PLAN.md](docs/DATA_INTEGRITY_BLOCK_E_PLAN.md).
+- Search, ranking и auto-selection разделены. Fuzzy/ASR допускается для shortlist, но не
+  является достаточным доказательством silent auto-select; qualifier/numeric/category gates
+  остаются hard safety checks.
+- Свежий baseline на HEAD `57d8184`: **1254 collected / 1233 passed / 21 failed / 0 skipped /
+  0 xfailed / 0 errors**. `BLOCK E MUST FIX = 0`: ни один из 21 failures не имеет первым
+  неверным переходом `matching.py`/`CatalogResolver`; failures классифицированы в плане.
+- Source/comment/quantity/unit/supplier provenance и Block D sanitizers в планируемом Block E
+  изменении не трогать. Parser, prompts, PHOTO, state machine и decomposition out of scope.
+- Следующий шаг: отдельное утверждение плана, затем только focused implementation и regression
+  delta. До утверждения код и tests не менять.
