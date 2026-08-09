@@ -142,8 +142,8 @@ def test_review_confirmation_stays_local_when_submission_is_disabled() -> None:
     assert "Отправка пока отключена" in result.reply.text
 
 
-def test_review_voice_maps_arbitrary_confirmation_through_visible_action_ai() -> None:
-    """Проверяет, что разговорная голосовая команда отправки выбирает только видимую кнопку."""
+def test_sheet_review_does_not_map_arbitrary_text_to_visible_action() -> None:
+    """Проверяет, что произвольный текст не запускает действие карточки sheet-review."""
 
     class ReviewVoiceAI:
         """Изолирует AI-выбор кнопки в маршрутизаторном тесте."""
@@ -158,14 +158,8 @@ def test_review_voice_maps_arbitrary_confirmation_through_visible_action_ai() ->
             screen_text: str,
             actions: list[dict[str, str]],
         ) -> str:
-            """Возвращает callback кнопки отправки из разрешённого списка."""
-            assert text == "ну всё готово, можно передавать снабженцу"
-            assert screen_text
-            assert {action["action_id"] for action in actions} == {
-                "v2:review_submit:token",
-                "v2:review_cancel:token",
-            }
-            return "v2:review_submit:token"
+            """Падает, если произвольный текст передали в выбор кнопки."""
+            raise AssertionError("visible action fallback must not run in sheet review")
 
     orchestrator = UpdateOrchestrator.__new__(UpdateOrchestrator)
     orchestrator.openai = ReviewVoiceAI()
@@ -184,7 +178,7 @@ def test_review_voice_maps_arbitrary_confirmation_through_visible_action_ai() ->
         state,
     )
 
-    assert command.intent is Intent.REVIEW_SUBMIT
+    assert command.intent is Intent.UNKNOWN
     assert command.text == "ну всё готово, можно передавать снабженцу"
 
 
@@ -202,10 +196,14 @@ def test_review_voice_maps_negative_and_refresh_phrases_without_product_addition
             """Возвращает сохранённое намерение без обращения к OpenAI."""
             return ParsedCommand(intent=self.intent, text=text)
 
-    state = ConversationState(stage=SessionStage.REVIEW, review_mode="sheet_link")
+    state = ConversationState(
+        stage=SessionStage.REVIEW,
+        review_mode="sheet_link",
+        review_token="token123",
+    )
     for phrase, parsed_intent, expected in (
         ("нет, не отправляй", Intent.CANCEL, Intent.REVIEW_CANCEL),
-        ("покажи заявку ещё раз", Intent.ADD_ITEMS, Intent.REVIEW_REFRESH),
+        ("покажи заявку ещё раз", Intent.ADD_ITEMS, Intent.UNKNOWN),
     ):
         orchestrator = UpdateOrchestrator.__new__(UpdateOrchestrator)
         orchestrator.openai = ReviewVoiceAI(parsed_intent)

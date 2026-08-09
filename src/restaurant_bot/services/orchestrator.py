@@ -39,7 +39,9 @@ from restaurant_bot.repositories.sessions import SessionRepository
 from restaurant_bot.repositories.updates import UpdateRepository
 from restaurant_bot.services.conversation_handlers.comment_scope import comment_scope_items
 from restaurant_bot.services.conversation_handlers.state_compatibility import (
+    CompatibilityAction,
     CompatibilityContext,
+    StateCompatibilityPolicy,
 )
 from restaurant_bot.services.engine import ConversationEngine
 from restaurant_bot.services.input_normalizer import normalize_telegram_update
@@ -67,6 +69,14 @@ _AI_MATCH_SELECT_MIN_CONFIDENCE = 0.90
 _AI_MATCH_NOT_FOUND_MIN_CONFIDENCE = 0.80
 _AI_MATCH_MIN_SCORE = 40.0
 _SHEET_REVIEW_MODE = "sheet_link"
+_REVIEW_INTENTS = frozenset(
+    {
+        Intent.REVIEW_ORDER,
+        Intent.REVIEW_REFRESH,
+        Intent.REVIEW_SUBMIT,
+        Intent.REVIEW_CANCEL,
+    }
+)
 
 
 def _catalog_match_evidence(item: CartItem) -> str:
@@ -274,6 +284,21 @@ class UpdateOrchestrator:
                     command = self._parse(event, state, processing_message_id)
                     timings["parse_ms"] = round((perf_counter() - stage_started) * 1000)
                     log.info("command_parsed", **self._command_log(command))
+                    if event.input_type is InputKind.PHOTO and command.intent in _REVIEW_INTENTS:
+                        command = ParsedCommand(intent=Intent.UNKNOWN, text=event.text)
+                    sheet_review_decision = (
+                        self.engine.state_compatibility_policy.evaluate(
+                            command,
+                            state,
+                            CompatibilityContext.SHEET_REVIEW,
+                        )
+                        if event.input_type is not InputKind.CALLBACK
+                        else None
+                    )
+                    sheet_review_ambiguous = (
+                        sheet_review_decision is not None
+                        and sheet_review_decision.action is CompatibilityAction.AMBIGUOUS
+                    )
                     if command.intent == Intent.SEARCH_ALL_SUPPLIERS:
                         if event.callback_message_id:
                             self.telegram.delete_message(
@@ -285,12 +310,7 @@ class UpdateOrchestrator:
                             self._all_suppliers_processing_reply(),
                         )
                     stage_started = perf_counter()
-                    review_command = command.intent in {
-                        Intent.REVIEW_ORDER,
-                        Intent.REVIEW_REFRESH,
-                        Intent.REVIEW_SUBMIT,
-                        Intent.REVIEW_CANCEL,
-                    }
+                    review_command = command.intent in _REVIEW_INTENTS and not sheet_review_ambiguous
                     catalog_needed = False if review_command else self._needs_catalog(command)
                     fresh_catalog_required = (
                         False if review_command else self._requires_fresh_catalog(command)
@@ -321,14 +341,22 @@ class UpdateOrchestrator:
                     previous_new_order_confirmation = state.pending_new_order_confirmation
                     previous_order_status_view_active = state.order_status_view_active
                     result = (
-                        self._handle_review_command(event, state, command)
-                        if review_command
-                        else self.engine.handle(event, command, state, catalog)
+                        EngineResult(
+                            state=state,
+                            reply=self._sheet_review_ambiguous_reply(state),
+                        )
+                        if sheet_review_ambiguous
+                        else (
+                            self._handle_review_command(event, state, command)
+                            if review_command
+                            else self.engine.handle(event, command, state, catalog)
+                        )
                     )
 
                     # AI работает за пределами DB-транзакции. Он может выбрать только ID из shortlist.
                     if not review_command:
-                        result = self._resolve_ai_pending(event, result, catalog)
+                        if not sheet_review_ambiguous:
+                            result = self._resolve_ai_pending(event, result, catalog)
                         self._leave_sheet_review_on_regular_command(command, result.state)
                     trace_started = bool(result.state.cart and not result.state.order_trace_id)
                     if trace_started:
@@ -662,6 +690,49 @@ class UpdateOrchestrator:
             text="⚠️ Эта карточка заявки устарела. Обновите заявку и проверьте её ещё раз.",
             rows=rows,
         )
+
+    @staticmethod
+    def _sheet_review_ambiguous_reply(state: ConversationState) -> BotReply:
+        """Возвращает безопасный ответ с актуальными кнопками sheet-review."""
+        rows: list[list[Button]] = []
+        buttons: list[Button] = []
+        for action in state.visible_actions:
+            callback_data = re.sub(r":r\d+$", "", action.get("action_id", ""))
+            if not callback_data.startswith("v2:review_"):
+                continue
+            if state.review_token and state.review_token not in callback_data:
+                continue
+            label = action.get("label", "")
+            if label:
+                buttons.append(Button(text=label, callback_data=callback_data))
+        if buttons:
+            rows.append(buttons)
+        elif state.review_token:
+            rows.append(
+                [
+                    Button(
+                        text="Отправить заявку",
+                        callback_data=f"v2:review_submit:{state.review_token}",
+                    ),
+                    Button(
+                        text="Отменить",
+                        callback_data=f"v2:review_cancel:{state.review_token}",
+                    ),
+                ]
+            )
+        if state.review_venue_code:
+            rows.append(
+                [
+                    Button(
+                        text="Обновить заявку",
+                        callback_data=f"v2:review:{state.review_venue_code}",
+                    )
+                ]
+            )
+        text = "Не удалось понять команду для этой заявки."
+        if state.ui_message_text:
+            text = f"{text}\n\n{state.ui_message_text}"
+        return BotReply(text=text, rows=rows)
 
     @staticmethod
     def _scenario_for_intent(intent: Intent) -> str:
@@ -1136,7 +1207,7 @@ class UpdateOrchestrator:
                 callback_target=review_match.group(1),
             )
         parsed = self.openai.parse_text(text)
-        review_command = self._parse_review_voice_command(text, parsed, state)
+        review_command = self._parse_sheet_review_command(text, parsed, state)
         if review_command is not None:
             return review_command
         if state.pending_comment_items and self.engine.state_compatibility_policy.should_try_contextual_fallback(
@@ -1171,73 +1242,58 @@ class UpdateOrchestrator:
             return parsed
         return infer_intent("", selected).model_copy(update={"text": text})
 
-    def _parse_review_voice_command(
+    def _parse_sheet_review_command(
         self,
         text: str,
         parsed: ParsedCommand,
         state: ConversationState,
     ) -> ParsedCommand | None:
-        """Преобразует произвольную фразу на карточке заявки в безопасное действие."""
+        """Нормализует только подтверждённую структурированную команду sheet-review."""
         if state.stage != SessionStage.REVIEW or state.review_mode != _SHEET_REVIEW_MODE:
             return None
 
-        direct_mapping = {
-            Intent.REVIEW_ORDER: Intent.REVIEW_ORDER,
-            Intent.REVIEW_REFRESH: Intent.REVIEW_REFRESH,
-            Intent.REVIEW_SUBMIT: Intent.REVIEW_SUBMIT,
-            Intent.REVIEW_CANCEL: Intent.REVIEW_CANCEL,
-            Intent.SUBMIT_REQUEST: Intent.REVIEW_SUBMIT,
-            Intent.SUBMIT_AS_IS: Intent.REVIEW_SUBMIT,
-            Intent.CONFIRM: Intent.REVIEW_SUBMIT,
-            Intent.CANCEL: Intent.REVIEW_CANCEL,
-            Intent.BACK: Intent.REVIEW_CANCEL,
-            Intent.CLEAR_CART: Intent.REVIEW_CANCEL,
-            Intent.SHOW_CART: Intent.REVIEW_REFRESH,
-            Intent.SHOW_FINAL_REVIEW: Intent.REVIEW_REFRESH,
-        }
-        mapped_intent = direct_mapping.get(parsed.intent)
-        if mapped_intent is not None:
-            return ParsedCommand(intent=mapped_intent, text=text)
-
-        normalized = normalize_text(text)
-        # A one-letter transcription is not a reliable
-        # navigation command.  Do not let the visible-action model turn noise
-        # into an accidental send/cancel action.
-        words = re.findall(r"[a-zа-яё0-9]+", normalized, flags=re.IGNORECASE)
-        if not any(len(word) >= 2 for word in words):
+        policy = getattr(
+            getattr(self, "engine", None),
+            "state_compatibility_policy",
+            StateCompatibilityPolicy(),
+        )
+        decision = policy.evaluate(
+            parsed,
+            state,
+            CompatibilityContext.SHEET_REVIEW,
+        )
+        if decision.action is CompatibilityAction.INTERRUPT:
+            return parsed
+        if decision.action is CompatibilityAction.AMBIGUOUS:
             return ParsedCommand(intent=Intent.UNKNOWN, text=text)
-        if re.search(
-            r"\b(?:проверь|проверим|проверить|покажи|показать|открой|открыть|обнови|обновить|посмотрим)\w*\b",
-            normalized,
-        ) and not re.search(
-            r"\b(?:не\s+отправ|не\s+переда|отправ|переда|подтверд|отмен)\w*\b",
-            normalized,
-        ):
-            return ParsedCommand(intent=Intent.REVIEW_REFRESH, text=text)
+        if decision.action is not CompatibilityAction.CONTINUE:
+            return parsed.model_copy(update={"text": text})
 
-        # A phrase containing a real product and quantity must remain an item
-        # operation; it must never be mistaken for a confirmation of sending.
-        if parsed.intent == Intent.ADD_ITEMS and any(
-            item.quantity is not None for item in parsed.items
+        if parsed.intent in {Intent.REVIEW_SUBMIT, Intent.REVIEW_CANCEL}:
+            return parsed.model_copy(
+                update={"callback_target": state.review_token, "text": text}
+            )
+        if parsed.intent in {Intent.SUBMIT_REQUEST, Intent.SUBMIT_AS_IS, Intent.CONFIRM} or (
+            parsed.dialogue_response.value == "affirm"
         ):
-            return None
-        if not state.visible_actions:
-            return None
-        try:
-            selected = self.openai.choose_visible_action(
-                text,
-                state.ui_message_text,
-                state.visible_actions,
+            return parsed.model_copy(
+                update={
+                    "intent": Intent.REVIEW_SUBMIT,
+                    "callback_target": state.review_token,
+                    "text": text,
+                }
             )
-        except _OPENAI_TRANSIENT_ERRORS as error:
-            logger.warning(
-                "review_voice_action_transport_failed",
-                error_type=type(error).__name__,
+        if parsed.intent in {Intent.CANCEL, Intent.BACK} or (
+            parsed.dialogue_response.value == "decline"
+        ):
+            return parsed.model_copy(
+                update={
+                    "intent": Intent.REVIEW_CANCEL,
+                    "callback_target": state.review_token,
+                    "text": text,
+                }
             )
-            return None
-        if not selected:
-            return None
-        return infer_intent("", selected).model_copy(update={"text": text})
+        return parsed.model_copy(update={"text": text})
 
     def _parse_pending_comment_scope(
         self,

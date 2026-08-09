@@ -44,6 +44,7 @@ class CompatibilityContext(StrEnum):
     ADD_MORE_CONFIRM = "add_more_confirm"
     SUBMIT_CONFIRM = "submit_confirm"
     SUBMISSION_FAILED = "submission_failed"
+    SHEET_REVIEW = "sheet_review"
 
 
 @dataclass(frozen=True, slots=True)
@@ -106,6 +107,8 @@ class StateCompatibilityPolicy:
             return self._evaluate_submit_confirm(command, state)
         if context is CompatibilityContext.SUBMISSION_FAILED:
             return self._evaluate_submission_failed(command, state)
+        if context is CompatibilityContext.SHEET_REVIEW:
+            return self._evaluate_sheet_review(command, state)
         if context is CompatibilityContext.CANDIDATE_SELECTION:
             return self._evaluate_candidate_selection(command, state)
         if context is CompatibilityContext.NOT_FOUND:
@@ -135,6 +138,44 @@ class StateCompatibilityPolicy:
         # UNKNOWN remains available to the existing deterministic quantity
         # handler for short answers such as a bare number or unit phrase.
         return CompatibilityDecision(CompatibilityAction.CONTINUE)
+
+    @staticmethod
+    def _evaluate_sheet_review(
+        command: ParsedCommand,
+        state: ConversationState,
+    ) -> CompatibilityDecision:
+        """Разрешает только подтверждённые действия карточки sheet-review."""
+        if state.stage is not SessionStage.REVIEW or state.review_mode != "sheet_link":
+            return CompatibilityDecision(CompatibilityAction.NOT_APPLICABLE)
+
+        if command.intent is Intent.ADD_ITEMS:
+            if command.items:
+                return CompatibilityDecision(CompatibilityAction.INTERRUPT)
+            return CompatibilityDecision(CompatibilityAction.AMBIGUOUS)
+
+        if command.intent in {
+            Intent.REVIEW_ORDER,
+            Intent.REVIEW_REFRESH,
+            Intent.REVIEW_SUBMIT,
+            Intent.REVIEW_CANCEL,
+            Intent.SUBMIT_REQUEST,
+            Intent.SUBMIT_AS_IS,
+            Intent.CONFIRM,
+            Intent.CANCEL,
+            Intent.BACK,
+        }:
+            return CompatibilityDecision(CompatibilityAction.CONTINUE)
+
+        if command.intent is Intent.UNKNOWN and command.dialogue_response in {
+            DialogueResponse.AFFIRM,
+            DialogueResponse.DECLINE,
+        }:
+            return CompatibilityDecision(CompatibilityAction.CONTINUE)
+
+        if command.intent is Intent.UNKNOWN:
+            return CompatibilityDecision(CompatibilityAction.AMBIGUOUS)
+
+        return CompatibilityDecision(CompatibilityAction.INTERRUPT)
 
     def _evaluate_manual_details(
         self,
@@ -571,6 +612,8 @@ class StateCompatibilityPolicy:
         """Определяет поддержанный modal-контекст по состоянию без разбора текста."""
         if state.stage is SessionStage.SUBMISSION_FAILED:
             return CompatibilityContext.SUBMISSION_FAILED
+        if state.stage is SessionStage.REVIEW and state.review_mode == "sheet_link":
+            return CompatibilityContext.SHEET_REVIEW
         if state.pending_comment_items:
             return CompatibilityContext.COMMENT_SCOPE
         item = state.current_item()

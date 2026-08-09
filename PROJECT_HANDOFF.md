@@ -2931,3 +2931,47 @@ candidate/item routing.
 ## ARCHITECTURAL REFACTOR STATUS
 
 Декомпозиция не продолжалась; изменения ограничены существующими domain/parser/policy/modal/engine/submission границами.
+
+## REVIEW / MODAL CONTEXTS — IMPLEMENTED
+
+Этап REVIEW/MODAL CONTEXTS завершён минимальным изменением маршрутизации
+карточки заявки из таблицы.
+
+- В `StateCompatibilityPolicy` добавлен узкий `CompatibilityContext.SHEET_REVIEW`,
+  активный только для `stage=REVIEW` и `review_mode="sheet_link"`.
+- Обычный `review_mode="cart"` не получает modal-lock и остаётся редактируемым.
+- В `UpdateOrchestrator` global `ParsedCommand` проходит policy до contextual
+  sheet-review нормализации и review dispatch.
+- `ADD_ITEMS` с реальными позициями, включая позицию без quantity, и остальные
+  независимые business intents проходят обычный routing и не превращаются в
+  submit/cancel карточки.
+- `SUBMIT_REQUEST`, `SUBMIT_AS_IS`, `CONFIRM`/AFFIRM нормализуются в
+  `REVIEW_SUBMIT`, а `CANCEL`, `BACK`/DECLINE — в `REVIEW_CANCEL` с текущим
+  `review_token`.
+- Удалён sheet-review fallback через `choose_visible_action`; произвольная или
+  uncertain-фраза получает безопасный ambiguous reply с актуальными
+  submit/refresh/cancel controls и сохраняет token, fingerprint, venue и cart.
+- Callback-путь, token/revision guards и fingerprint refresh сохранены.
+- Фото остаётся отдельным recognition path и не может отправить sheet review.
+- `_parse_review_voice_command` переименован в `_parse_sheet_review_command`;
+  helper больше не угадывает UI-действие по raw language.
+
+Проверки:
+
+- focused и связанные routing/review тесты прошли;
+- Ruff, mypy, `git diff --check` и проверка markdown-ссылок прошли;
+- один известный исторический failure
+  `test_manual_action_without_an_open_item_uses_source_recovery_card` не входит
+  в текущий diff и оставлен без изменения.
+- `build_agent_context.py` ранее не смог обновить runtime snapshot из-за
+  `PermissionError`; это отдельная проблема harness и не относится к этапу.
+
+## NEXT FUNCTIONAL STEP
+
+`pending_new_order_confirmation` — следующий функциональный этап roadmap.
+До его отдельного анализа и реализации semantics блока не менять.
+
+## ARCHITECTURAL REFACTOR STATUS
+
+Декомпозиция при реализации REVIEW/MODAL CONTEXTS не продолжалась; изменены
+только существующие policy/orchestrator boundaries и focused regression tests.
