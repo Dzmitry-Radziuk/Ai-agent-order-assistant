@@ -2975,3 +2975,207 @@ candidate/item routing.
 
 Декомпозиция при реализации REVIEW/MODAL CONTEXTS не продолжалась; изменены
 только существующие policy/orchestrator boundaries и focused regression tests.
+
+## PENDING NEW ORDER CONFIRMATION — ANALYSIS COMPLETE / IMPLEMENTATION PENDING
+
+Анализ выполнен без изменения application code. Checkout на момент анализа:
+`decompose_bot`, HEAD `e96de7c53e5f2f89539b9caf49a0d7dbd263b75d`, `origin` — только
+GitHub. Файл `.env` не читался.
+
+### Фактический контракт и владельцы состояния
+
+`ConversationState.pending_new_order_confirmation` объявлен в
+`src/restaurant_bot/domain/models.py` и по умолчанию равен `False`. Единственное
+место, где флаг устанавливается в обычном runtime, — ветка `START_NEW_ORDER` в
+`ConversationEngine.handle()`:
+
+```text
+SUBMITTED или нет активных позиций -> _start_new_order()
+иначе -> pending_new_order_confirmation=True и карточка подтверждения
+```
+
+Сброс в обычном runtime выполняется только в текущем confirmation-блоке при
+отказе/навигации. При подтверждении вызывается `_start_new_order()`, который
+создаёт новый `ConversationState`; поэтому флаг и все данные текущего черновика
+исчезают вместе со старым state. Других прямых присваиваний флагу не найдено.
+
+Активный черновик определяется как наличие хотя бы одного `CartItem`, чей статус
+не `SKIPPED`. Пустая корзина и корзина только со `SKIPPED` не требуют подтверждения.
+`product_add_requests` сами по себе активным черновиком не считаются.
+
+### Текущий порядок обработки
+
+Фактический путь `ConversationEngine.handle()` сейчас выглядит так:
+
+```text
+TEXT/VOICE ParsedCommand
+  -> voice contextual normalization
+  -> StateCompatibilityPolicy для уже поддержанных modal contexts
+  -> stale callback revision guard
+  -> SUBMISSION_FAILED recovery
+  -> submit/add-more/comment/manual/not-found modal guards
+  -> contextual rewrites, duplicate/unit/candidate/product-add handling
+  -> pending_new_order_confirmation block
+  -> pending quantity и обычный navigation/business routing
+```
+
+То есть confirmation-флаг проверяется после большинства contextual преобразований
+и не является частью `StateCompatibilityPolicy`. Его блок содержит собственный
+разбор raw text: `normalize_text`, `_is_explicit_yes`, `has_negation` и префиксы
+`нет/остав/сохран/передум`. Это второй независимый источник решения о смысле
+сообщения и главный архитектурный конфликт с единым policy-пайплайном.
+
+### Первый подтверждённый небезопасный переход
+
+Для активной корзины с `pending_new_order_confirmation=True` фактическая
+репродукция дала следующие результаты:
+
+| Вход | ParsedCommand | Текущее действие |
+|---|---|---|
+| `да` | `CONFIRM/AFFIRM` | очищает корзину и создаёт новый state |
+| `нет` | `CANCEL/DECLINE` | сбрасывает флаг, корзина остаётся |
+| `пармезан 3 кг` | `ADD_ITEMS` с реальным item | confirmation повторяется, товар не добавляется |
+| `удали сыр` | `REMOVE_ITEM` | confirmation повторяется, удаление не выполняется |
+| `измени курицу на 5 кг` | `EDIT_QUANTITY` | confirmation повторяется |
+| `покажи черновик` | `SHOW_CART` | флаг сбрасывается, показывается корзина |
+| `помощь`, `спасибо`, `статус заявок` | независимый/близкий intent | confirmation повторяется |
+| `новая заявка` | `START_NEW_ORDER` | трактуется как подтверждение и очищает корзину |
+| `очисти черновик` | `CLEAR_CART` | немедленно очищает корзину |
+| `ну посмотрим` | deterministic `CHECK_MIN_SUM` | confirmation повторяется |
+
+Самый опасный переход — смешанная фраза `да, добавь пармезан 3 кг`. Парсер
+возвращает реальный `ADD_ITEMS`, но текущий engine сначала смотрит на raw token
+`да` и вызывает `_start_new_order()`. В результате исходный черновик удаляется,
+а новый товар не добавляется. Это не частный случай товара: он показывает, что
+raw-language confirmation имеет приоритет над уже структурированным intent.
+
+Также `нет, добавь сыр` сейчас теряет товар ещё на этапе parser и становится
+`CANCEL/DECLINE`; policy не должна пытаться восстановить такую семантику по raw
+строке. На этапе реализации нужно отдельно решить, достаточно ли изменить
+structured parser contract для смешанных фраз.
+
+### Callback и destructive boundary
+
+Карточка подтверждения создаёт кнопки `v2:clear` и `v2:back`. Callback parser
+преобразует их в `CLEAR_CART` и `BACK`; варианты с `:rN` несут revision. Свежий
+callback проходит stale-revision guard до любого state mutation. Старый
+revision отклоняется. Legacy callback без revision пока принимается — это
+отдельный compatibility gap, не исправляемый в этом analysis-only этапе.
+
+`_start_new_order()` является destructive boundary. Новый state сохраняет только
+идентичность заведения/пользователя, историю номеров, metadata и глубокую копию
+`product_add_requests`. Он уничтожает корзину, комментарии, quantities,
+кандидатов, статусы, issue refs, pending submission, order trace, review data,
+pending modal contexts и UI revision/actions.
+
+Сохранение `product_add_requests` намеренно подтверждено существующими тестами.
+Запросы не связаны с `order_trace_id`/`order_no`, поэтому после начала новой
+заявки они остаются общей историей заведения и могут визуально смешиваться с
+новым заказом. Это отдельный follow-up, не изменение текущего этапа.
+
+Подтверждён дополнительный риск: если вручную выставить confirmation-флаг в
+`SUBMITTING`, то `да` вызывает `_start_new_order()` и уничтожает
+`pending_submission`. Обычный путь установки флага из `SUBMITTING` сейчас не
+защищён. При будущей реализации confirmation policy состояние с активной
+отправкой должно быть `REJECT`/recovery-lock, а не обычным подтверждением.
+
+### Сосуществование с текущими modal contexts
+
+| Текущее состояние | Что происходит при `START_NEW_ORDER` сейчас | Риск |
+|---|---|---|
+| `COLLECTING`/`REVIEW` с активной корзиной | включается confirmation overlay | overlay перехватывает независимые intents |
+| `AWAIT_UNIT_QUANTITY` | сохраняются missing-quantity refs, затем включается overlay | после `нет`/`SHOW_CART` modal остаётся скрытым, UI показывает только корзину |
+| `AWAIT_MANUAL_DETAILS`, `AWAIT_PRODUCT_ADD_DETAILS` | refs остаются, overlay ставится поверх | resume-контракт не определён |
+| `AWAIT_ADD_MORE_CONFIRM` | текущая ветка меняет stage на `REVIEW`, затем ставит overlay | исходный add-more context не восстанавливается |
+| `AWAIT_COMMENT_SCOPE` | pending comment context остаётся до destructive reset | при отказе возможен скрытый scope-контекст |
+| candidate/`NOT_FOUND`/duplicate/unit | item refs/candidates сохраняются | confirmation перекрывает contextual choice |
+| `AWAIT_SUBMIT_CONFIRM` | submit policy прерывается, stage может перейти в `REVIEW` | review/submit context не имеет единого resume |
+| `SUBMISSION_FAILED` | recovery policy имеет более ранний приоритет и обычно блокирует START/CLEAR | требует явного запрета обхода recovery |
+| `SUBMITTING` | прямой policy lock отсутствует | подтверждён риск потери frozen submission |
+| `SUBMITTED` или пустая/только skipped корзина | новый state создаётся сразу | безопасно по текущему контракту |
+| sheet review | orchestrator закрывает sheet metadata перед обычным routing | нужно сохранить token/revision invariants |
+
+Существующий state способен сохранить underlying modal data, поэтому отдельный
+`suspended_interaction` для этого этапа не нужен. Но при `NO`/`INTERRUPT` нужно
+будущее правило возобновления: снять только overlay и передать команду обычному
+modal handler либо показать соответствующий текущему stage вопрос. Простая
+отправка `cart_reply` оставляет state modal и UI несогласованными.
+
+### Независимые intents и будущая policy
+
+Новая policy должна быть единственной точкой решения и получать уже готовый
+`ParsedCommand`; raw natural language не должен повторно разбираться в
+`orchestrator`/`engine`.
+
+Предлагаемый будущий контекст — узкий
+`CompatibilityContext.NEW_ORDER_CONFIRMATION`, активный только при
+`pending_new_order_confirmation=True`. Точка подключения: после stale callback
+guard и SUBMISSION_FAILED/SUBMITTING safety, до underlying modal handlers и до
+старого confirmation block. Структуру `StateCompatibilityPolicy` и
+`ModalRoutingDecision` нужно расширить, а не создавать параллельный набор if в
+engine.
+
+| ParsedCommand/context | Решение |
+|---|---|
+| свежий `v2:clear` callback | `CONTINUE`/YES, destructive `_start_new_order()` |
+| `CONFIRM` + `AFFIRM` без concrete items | `CONTINUE`/YES |
+| `CANCEL`, `BACK`, `DECLINE` | `CONTINUE`/NO: снять overlay, сохранить draft и корректно возобновить context |
+| concrete `ADD_ITEMS` | `INTERRUPT`: снять overlay, обычный add routing, старый draft не менять |
+| `REMOVE_ITEM`, `EDIT_QUANTITY`, `EDIT_COMMENT` | `INTERRUPT`, обычный routing |
+| `SHOW_CART`, `SHOW_FINAL_REVIEW`, status/help/thanks/navigation | `INTERRUPT` или безопасная navigation без destructive reset |
+| повторный `START_NEW_ORDER` | `AMBIGUOUS`/повторить prompt; не считать сам себя подтверждением |
+| typed `CLEAR_CART`/`/reset` | отдельное explicit destructive действие; не смешивать с YES callback semantics |
+| unknown/uncertain | `AMBIGUOUS`, state и draft без изменений |
+| `SUBMISSION_FAILED`/`SUBMITTING` | `REJECT`/recovery lock, pending submission не удалять |
+| stale callback | `REJECT` до mutation |
+| photo с реальными items | `INTERRUPT` в обычный product routing; OCR не может быть YES |
+
+Критический приоритет — concrete items над affirmative/decline marker в смешанной
+фразе. Если parser не сохраняет item, policy не должна угадывать его из raw
+текста; это отдельная доказательная задача parser contract.
+
+### Audit, trace и внешние эффекты
+
+`UpdateOrchestrator._append_order_transition_events()` уже различает prompt,
+подтверждённое очищение и отказ: prompt пишет только `user_action`, подтверждение
+пишет `order_cancelled` один раз, отказ не отменяет trace. Будущее прерывание
+confirmation независимым intent должно не создавать `order_cancelled`; событие
+должно отражать только фактическое destructive очищение. Нужно отдельно проверить
+случай, когда последний item становится `SKIPPED`: текущая проверка смотрит на
+пустой список, а не на отсутствие активных позиций.
+
+Обычные START/YES/NO проверены для текста и голоса: voice проходит тот же
+engine confirmation block и демонстрирует те же перехваты. Фото recognition
+также не может обойти блок: результат с реальным item повторно показывает
+confirmation. Callback остаётся отдельным явным UI-путём и должен сохранить
+revision guard.
+
+### Безопасный порядок реализации
+
+1. Добавить только `NEW_ORDER_CONFIRMATION` в существующую
+   `StateCompatibilityPolicy`/`ModalRoutingDecision`.
+2. Подключить один preemption point в `ConversationEngine` после stale/recovery
+   guards и убрать raw-text confirmation precedence.
+3. Явно закрыть `SUBMITTING`/`pending_submission` от destructive reset.
+4. Реализовать корректное NO/INTERRUPT resume underlying modal context без
+   `suspended_interaction`.
+5. Только при доказанном parser gap отдельно исправлять смешанные structured
+   clauses; prompts и общий parser без такого evidence не менять.
+
+Нужны regression tests для text/voice/photo/callback: YES, NO, fresh/stale
+callbacks, concrete ADD/REMOVE/EDIT/SHOW_CART/THANKS/help/status, unknown,
+`SUBMITTING`, `SUBMISSION_FAILED`, every underlying modal context, preserved
+`product_add_requests`, audit events, repeated delivery and resume after modal
+interruption. До этой реализации новые тесты и application code не добавлялись.
+
+## NEXT FUNCTIONAL STEP
+
+`pending_new_order_confirmation` — реализовать описанную policy и единый
+preemption/resume routing. После завершения этого этапа следующий roadmap-блок —
+`FULL REGRESSION / BEHAVIOR AUDIT`.
+
+## ARCHITECTURAL REFACTOR STATUS
+
+Декомпозиция не продолжалась. Анализ использует существующие границы
+`StateCompatibilityPolicy`, `ConversationEngine` и `UpdateOrchestrator`; переносов
+между директориями и изменения application behavior в этом этапе нет.
