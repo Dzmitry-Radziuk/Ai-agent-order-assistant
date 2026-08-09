@@ -8,6 +8,7 @@ from enum import StrEnum
 from restaurant_bot.domain.models import (
     CartItem,
     ConversationState,
+    DialogueResponse,
     Intent,
     ItemStatus,
     ParsedCommand,
@@ -40,6 +41,7 @@ class CompatibilityContext(StrEnum):
     DUPLICATE_PENDING = "duplicate_pending"
     UNIT_MISMATCH = "unit_mismatch"
     PRODUCT_ADD_DETAILS = "product_add_details"
+    ADD_MORE_CONFIRM = "add_more_confirm"
 
 
 @dataclass(frozen=True, slots=True)
@@ -95,6 +97,8 @@ class StateCompatibilityPolicy:
             return self._evaluate_manual_details(command, state)
         if context is CompatibilityContext.PRODUCT_ADD_DETAILS:
             return self._evaluate_product_add_details(command, state)
+        if context is CompatibilityContext.ADD_MORE_CONFIRM:
+            return self._evaluate_add_more_confirm(command, state)
         if context is CompatibilityContext.CANDIDATE_SELECTION:
             return self._evaluate_candidate_selection(command, state)
         if context is CompatibilityContext.NOT_FOUND:
@@ -194,6 +198,36 @@ class StateCompatibilityPolicy:
             Intent.SWITCH_SUPPLIER,
         }:
             return CompatibilityDecision(CompatibilityAction.INTERRUPT)
+        return CompatibilityDecision(CompatibilityAction.INTERRUPT)
+
+    def _evaluate_add_more_confirm(
+        self,
+        command: ParsedCommand,
+        state: ConversationState,
+    ) -> CompatibilityDecision:
+        """Разрешает ответ на вопрос о продолжении сбора товаров."""
+        if self.context_for(state) is not CompatibilityContext.ADD_MORE_CONFIRM:
+            return CompatibilityDecision(CompatibilityAction.NOT_APPLICABLE)
+
+        if command.dialogue_response is DialogueResponse.AFFIRM:
+            return CompatibilityDecision(CompatibilityAction.CONTINUE)
+        if command.dialogue_response is DialogueResponse.DECLINE:
+            return CompatibilityDecision(CompatibilityAction.CONTINUE)
+        if command.dialogue_response is DialogueResponse.UNCERTAIN:
+            return CompatibilityDecision(CompatibilityAction.AMBIGUOUS)
+        if command.intent in {Intent.ADD_MORE, Intent.CONFIRM}:
+            # Textual commands are normalized to dialogue_response before this
+            # policy. A non-empty command without that marker cannot force the
+            # modal question to continue.
+            if not command.text:
+                return CompatibilityDecision(CompatibilityAction.CONTINUE)
+            return CompatibilityDecision(CompatibilityAction.INTERRUPT)
+        if command.intent is Intent.ADD_ITEMS:
+            return CompatibilityDecision(CompatibilityAction.CONTINUE)
+        if command.intent in {Intent.BACK, Intent.CANCEL, Intent.SHOW_CART}:
+            return CompatibilityDecision(CompatibilityAction.CONTINUE)
+        if command.intent is Intent.UNKNOWN:
+            return CompatibilityDecision(CompatibilityAction.AMBIGUOUS)
         return CompatibilityDecision(CompatibilityAction.INTERRUPT)
 
     def _evaluate_candidate_selection(
@@ -447,7 +481,36 @@ class StateCompatibilityPolicy:
             and state.stage in StateCompatibilityPolicy._QUANTITY_STAGES
         ):
             return CompatibilityContext.QUANTITY
+        if StateCompatibilityPolicy._can_use_add_more_context(state):
+            return CompatibilityContext.ADD_MORE_CONFIRM
         return None
+
+    @staticmethod
+    def _can_use_add_more_context(state: ConversationState) -> bool:
+        """Проверяет, что add-more prompt не смешан с конкретным modal state."""
+        if state.stage is not SessionStage.AWAIT_ADD_MORE_CONFIRM:
+            return False
+        if (
+            state.pending_comment_items
+            or state.current_issue_item_id
+            or state.pending_product_add_request_id
+            or state.manual_item_index is not None
+            or state.unit_item_index is not None
+            or state.edit_multiple_index is not None
+        ):
+            return False
+        return not any(
+            item.status
+            in {
+                ItemStatus.AMBIGUOUS,
+                ItemStatus.NOT_FOUND,
+                ItemStatus.DUPLICATE_PENDING,
+                ItemStatus.UNIT_MISMATCH,
+                ItemStatus.MISSING_QTY,
+                ItemStatus.AI_PENDING,
+            }
+            for item in state.cart
+        )
 
     def _evaluate_comment_scope(
         self,

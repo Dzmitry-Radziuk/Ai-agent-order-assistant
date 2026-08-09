@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 from collections.abc import Sequence
 
-from restaurant_bot.domain.models import Intent, ParsedCommand
+from restaurant_bot.domain.models import DialogueResponse, ExtractedItem, Intent, ParsedCommand
 from restaurant_bot.services.product_parser import _extract_global_comment
 from restaurant_bot.services.product_parser import (
     has_explicit_global_comment_scope as _has_explicit_global_comment_scope,
@@ -1172,7 +1172,7 @@ def has_explicit_add_items(text: str, items: Sequence[object] | None = None) -> 
     return not bool(re.fullmatch(r"(?:в|во)\s+(?:корзин\w*|заявк\w*)", target, re.IGNORECASE))
 
 
-def infer_intent(text: str, callback_data: str = "") -> ParsedCommand:
+def _infer_intent(text: str, callback_data: str = "") -> ParsedCommand:
     """Определяет намерение пользователя."""
     if callback_data:
         return parse_callback(callback_data)
@@ -1292,6 +1292,64 @@ def infer_intent(text: str, callback_data: str = "") -> ParsedCommand:
             global_comment=global_comment,
         )
     return ParsedCommand(intent=Intent.UNKNOWN, text=text)
+
+
+def dialogue_response_for(
+    text: str,
+    intent: Intent,
+    items: Sequence[ExtractedItem] | None = None,
+) -> DialogueResponse:
+    """Определяет общий короткий ответ без привязки к modal state."""
+    normalized = normalize_command_text(text)
+    if normalized in {"ну", "не знаю", "может быть", "ладно"}:
+        return DialogueResponse.UNCERTAIN
+    if normalized in {"хватит", "достаточно"} or re.fullmatch(
+        r"нет(?:\s+.*)?(?:не\s+надо|не\s+нужно|хватит|достаточно)",
+        normalized,
+    ):
+        return DialogueResponse.DECLINE
+    if intent is Intent.CONFIRM and (
+        not normalized or not re.search(r"\b(?:отправ|переда|оформ)\w*\b", normalized)
+    ):
+        return DialogueResponse.AFFIRM
+    if intent is Intent.CANCEL:
+        return DialogueResponse.DECLINE
+    if intent is Intent.ADD_MORE and not normalized:
+        return DialogueResponse.AFFIRM
+    if intent is Intent.ADD_MORE and re.fullmatch(
+        r"(?:да\s+)?(?:давай\s+)?(?:добавим|добавить|добавь)\s+ещ[её]"
+        r"(?:\s+(?:товар\w*|позици\w*|что[- ]?нибудь))?",
+        normalized,
+        flags=re.IGNORECASE,
+    ):
+        return DialogueResponse.AFFIRM
+    if intent is not Intent.ADD_ITEMS or not normalized:
+        return DialogueResponse.NONE
+
+    # These phrases reach product parsing as pseudo-items in the deterministic
+    # fallback. Keep their meaning as data for state policy instead of teaching
+    # each modal handler to inspect the raw text.
+    if re.fullmatch(
+        r"(?:да\s+)?(?:давай\s+)?(?:добавим|добавить|добавь)\s+ещ[её]",
+        normalized,
+        flags=re.IGNORECASE,
+    ) or re.fullmatch(r"давай\s+ещ[её]", normalized, flags=re.IGNORECASE):
+        return DialogueResponse.AFFIRM
+    return DialogueResponse.NONE
+
+
+def infer_intent(text: str, callback_data: str = "") -> ParsedCommand:
+    """Определяет intent и нормализует общий короткий ответ пользователя."""
+    command = _infer_intent(text, callback_data)
+    return command.model_copy(
+        update={
+            "dialogue_response": dialogue_response_for(
+                text or command.text,
+                command.intent,
+                command.items,
+            )
+        }
+    )
 
 
 def _parse_order_status_navigation(normalized: str, source_text: str) -> ParsedCommand | None:

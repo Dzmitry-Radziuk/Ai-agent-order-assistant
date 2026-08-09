@@ -1942,7 +1942,7 @@ persistence, `_advance()`, `_find_cart_item()`, другие modal states, UX и
 - Regression coverage added for text descriptions, candidate overlap, and explicit add
   interruption. `AWAIT_ADD_MORE_CONFIRM` remains the next functional step.
 
-## AWAIT_ADD_MORE_CONFIRM — ANALYSIS COMPLETE / IMPLEMENTATION PENDING
+## AWAIT_ADD_MORE_CONFIRM — ANALYSIS BASELINE (IMPLEMENTATION COMPLETED BELOW)
 
 ### Граница текущего состояния
 
@@ -2095,3 +2095,28 @@ matching, product-add и предыдущие modal contexts без отдель
 - `NEXT FUNCTIONAL STEP` остаётся `AWAIT_ADD_MORE_CONFIRM`.
 - В application code, parser, prompts, matching и callbacks в рамках этого анализа ничего
   не изменялось.
+
+## AWAIT_ADD_MORE_CONFIRM — IMPLEMENTATION DONE (2026-08-09)
+
+Реализована единая маршрутизация для активного вопроса «Добавить ещё товары?».
+
+- `DialogueResponse` (`NONE`, `AFFIRM`, `DECLINE`, `UNCERTAIN`) определяется при parser/AI-нормализации;
+  policy не анализирует raw natural language.
+- `CompatibilityContext.ADD_MORE_CONFIRM` добавлен в общий `StateCompatibilityPolicy` и
+  используется через `ModalRoutingDecision`.
+- Уверенное `AFFIRM` переводит сбор в `COLLECTING`; `DECLINE`, `BACK`, `CANCEL` и `SHOW_CART`
+  переводят в `REVIEW`; `UNCERTAIN` повторяет существующий prompt без изменения корзины.
+- Конкретный `ADD_ITEMS` прерывает modal prompt и проходит обычный add-items routing;
+  старый batch count и контекст не переносятся в новый товар.
+- Независимые intents прерывают prompt и маршрутизируются обычным путём.
+- Stale callbacks проверяются до state mutation; `v2:add` и `v2:back` используют общий policy path.
+- Text и voice используют одну семантическую классификацию; photo-контракт и callback path
+  сохранены.
+
+Добавлены regression tests для semantic responses, text/voice parity, нового товара,
+неуверенного ответа, благодарности и callback revision. Изменения не затрагивают prompts,
+matching, comment logic, `_advance()` или предыдущие modal contexts.
+
+## NEXT FUNCTIONAL STEP
+
+`AWAIT_SUBMIT_CONFIRM` — следующий функциональный этап StateCompatibilityPolicy.

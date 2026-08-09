@@ -39,6 +39,7 @@ from restaurant_bot.integrations.openai_prompts import (
 from restaurant_bot.observability import Tracer
 from restaurant_bot.services.matching import has_product_variant_qualifier
 from restaurant_bot.services.parser import (
+    dialogue_response_for,
     has_explicit_add_items,
     has_explicit_global_comment_scope,
     infer_intent,
@@ -317,6 +318,15 @@ class OpenAIService:
                 fallback_items=[self._item_log(item) for item in deterministic.items],
             )
             command = deterministic
+        command = command.model_copy(
+            update={
+                "dialogue_response": dialogue_response_for(
+                    text,
+                    command.intent,
+                    command.items,
+                )
+            }
+        )
         logger.info(
             "text_command_normalized",
             intent=command.intent.value,

@@ -15,6 +15,7 @@ from restaurant_bot.domain.models import (
     CatalogProduct,
     CommentSource,
     ConversationState,
+    DialogueResponse,
     EngineResult,
     ExtractedItem,
     InputKind,
@@ -64,6 +65,7 @@ from restaurant_bot.services.matching import (
 )
 from restaurant_bot.services.parser import (
     clean_command_target,
+    dialogue_response_for,
     has_negated_action,
     has_negation,
     infer_intent,
@@ -158,12 +160,73 @@ class ConversationEngine:
         catalog: list[CatalogProduct],
     ) -> EngineResult:
         """Обрабатывает входные данные текущего компонента."""
-        state.last_input_text = event.text or command.text
+        if (
+            event.input_type in {InputKind.TEXT, InputKind.VOICE}
+            and command.dialogue_response is DialogueResponse.NONE
+        ):
+            command = command.model_copy(
+                update={
+                    "dialogue_response": dialogue_response_for(
+                        event.text or command.text,
+                        command.intent,
+                        command.items,
+                    )
+                }
+            )
+        # Keep the existing voice normalizer as a pre-policy normalization
+        # step for legacy/LLM commands that mislabel a submit phrase as add-more.
+        if event.input_type is InputKind.VOICE and command.intent in {
+            Intent.ADD_MORE,
+            Intent.CONFIRM,
+        }:
+            command = self._contextual_voice_command(command, event, state)
         modal_decision = evaluate_modal_routing(
             self.state_compatibility_policy,
             command,
             state,
         )
+        # A stale callback must be rejected before any modal transition or
+        # cleanup can mutate the current draft.
+        if (
+            event.input_type == InputKind.CALLBACK
+            and command.callback_revision is not None
+            and command.callback_revision != state.ui_revision
+        ):
+            unresolved = self._first_unresolved(state)
+            reply = (
+                issue_reply(unresolved, self._item_index(state, unresolved))
+                if unresolved
+                else cart_reply(state)
+            )
+            return EngineResult(state=state, reply=reply)
+
+        state.last_input_text = event.text or command.text
+        add_more_decision = modal_decision.add_more_confirm
+        if add_more_decision.action is not CompatibilityAction.NOT_APPLICABLE:
+            if add_more_decision.action is CompatibilityAction.AMBIGUOUS:
+                return EngineResult(state=state, reply=self._repeat_add_more_prompt(state))
+            if command.dialogue_response is DialogueResponse.AFFIRM or command.intent in {
+                Intent.ADD_MORE,
+                Intent.CONFIRM,
+            }:
+                command = command.model_copy(update={"intent": Intent.ADD_MORE, "items": []})
+            elif command.dialogue_response is DialogueResponse.DECLINE or command.intent in {
+                Intent.BACK,
+                Intent.CANCEL,
+                Intent.SHOW_CART,
+            }:
+                state.pending_added_items_count = 0
+                state.stage = SessionStage.REVIEW
+                state.status = "review"
+                return EngineResult(state=state, reply=cart_reply(state))
+            elif command.intent is Intent.ADD_ITEMS:
+                state.pending_added_items_count = 0
+                state.stage = SessionStage.COLLECTING
+                state.status = "collecting"
+            elif add_more_decision.action is CompatibilityAction.INTERRUPT:
+                state.pending_added_items_count = 0
+                state.stage = SessionStage.REVIEW
+                state.status = "review"
         if state.pending_comment_items and modal_decision.comment_scope.action in {
             CompatibilityAction.CONTINUE,
             CompatibilityAction.AMBIGUOUS,
@@ -207,6 +270,7 @@ class ConversationEngine:
             and not modal_decision.unit_mismatch_interrupted
             and not modal_decision.manual_details_interrupted
             and not modal_decision.product_add_details_interrupted
+            and not modal_decision.add_more_confirm_active
         ):
             command = self._contextual_negative_command(command, event, state)
             command = self._contextual_quantity_command(command, event.text, state)
@@ -258,25 +322,6 @@ class ConversationEngine:
             Intent.CHECK_MIN_SUM,
         }:
             self._refresh_cart_order_values(state, catalog)
-        if (
-            state.stage == SessionStage.AWAIT_ADD_MORE_CONFIRM
-            and command.intent == Intent.ADD_ITEMS
-        ):
-            # A product sent directly is an implicit confirmation to continue.
-            # Any following issue card must use the normal collecting context.
-            state.stage = SessionStage.COLLECTING
-            state.status = "collecting"
-
-        if state.stage == SessionStage.AWAIT_ADD_MORE_CONFIRM and command.intent in {
-            Intent.BACK,
-            Intent.CANCEL,
-            Intent.SHOW_CART,
-        }:
-            state.pending_added_items_count = 0
-            state.stage = SessionStage.REVIEW
-            state.status = "review"
-            return EngineResult(state=state, reply=cart_reply(state))
-
         if (
             current
             and current.status in {ItemStatus.NOT_FOUND, ItemStatus.AMBIGUOUS}
@@ -341,22 +386,6 @@ class ConversationEngine:
                     command = ParsedCommand(
                         intent=Intent.CONTINUE_CURRENT, text=event.text or command.text
                     )
-
-        # n8n appends the current UI revision to callback_data. A stale button
-        # may still be delivered by Telegram after a newer card was rendered;
-        # it must only reopen the current view and never mutate the cart.
-        if (
-            event.input_type == InputKind.CALLBACK
-            and command.callback_revision is not None
-            and command.callback_revision != state.ui_revision
-        ):
-            unresolved = self._first_unresolved(state)
-            reply = (
-                issue_reply(unresolved, self._item_index(state, unresolved))
-                if unresolved
-                else cart_reply(state)
-            )
-            return EngineResult(state=state, reply=reply)
 
         # A delivery retry of product-add details must not be interpreted as a
         # fresh product line after the first attempt has already created the
@@ -1947,6 +1976,15 @@ class ConversationEngine:
         state.pending_added_items_count = 0
         ConversationEngine._clear_pending_comment(state)
         clear_product_add_pending(state)
+
+    @staticmethod
+    def _repeat_add_more_prompt(state: ConversationState) -> BotReply:
+        """Повторяет существующий вопрос о добавлении товаров без мутации state."""
+        fallback = added_items_question_reply(state, 1)
+        return BotReply(
+            text=state.ui_message_text or fallback.text,
+            rows=fallback.rows,
+        )
 
     @staticmethod
     def _item_index(state: ConversationState, item: CartItem) -> int:

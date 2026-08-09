@@ -1,6 +1,7 @@
 from restaurant_bot.domain.models import (
     CatalogProduct,
     ConversationState,
+    DialogueResponse,
     ExtractedItem,
     InputKind,
     Intent,
@@ -80,6 +81,26 @@ def test_voice_yes_continues_product_collection(settings) -> None:  # type: igno
         result.reply.text == "Отправьте товары текстом, голосом или фото — я добавлю их в текущий "
         "черновик заказа."
     )
+
+
+def test_text_yes_continues_product_collection(settings) -> None:  # type: ignore[no-untyped-def]
+    """Текстовый ответ использует тот же semantic routing, что и голосовой."""
+    added = _add_syrup(settings)
+    phrase = "Да, давай добавим ещё"
+    result = ConversationEngine(settings).handle(
+        TelegramEvent(
+            update_id=20,
+            chat_id="add-more",
+            input_type=InputKind.TEXT,
+            text=phrase,
+        ),
+        infer_intent(phrase),
+        added.state,
+        [],
+    )
+
+    assert result.state.stage is SessionStage.COLLECTING
+    assert result.state.pending_added_items_count == 0
 
 
 def test_voice_no_returns_to_draft(settings) -> None:  # type: ignore[no-untyped-def]
@@ -162,3 +183,121 @@ def test_product_sent_from_add_more_prompt_opens_duplicate_in_collecting_stage(
     assert merged.state.cart[0].quantity == 20
     assert merged.state.cart[1].status is ItemStatus.SKIPPED
     assert "Добавить ещё товары?" in merged.reply.text
+
+
+def test_add_more_dialogue_responses_are_normalized_before_state_policy() -> None:
+    """Нормализует короткие ответы независимо от текущего modal state."""
+    expected = {
+        "да": DialogueResponse.AFFIRM,
+        "да, давай добавим ещё": DialogueResponse.AFFIRM,
+        "давай ещё": DialogueResponse.AFFIRM,
+        "нет": DialogueResponse.DECLINE,
+        "нет, больше не надо": DialogueResponse.DECLINE,
+        "хватит": DialogueResponse.DECLINE,
+        "ну": DialogueResponse.UNCERTAIN,
+        "не знаю": DialogueResponse.UNCERTAIN,
+        "может быть": DialogueResponse.UNCERTAIN,
+        "ладно": DialogueResponse.UNCERTAIN,
+    }
+
+    for phrase, response in expected.items():
+        assert infer_intent(phrase).dialogue_response is response
+
+
+def test_new_product_preempts_add_more_prompt_without_reusing_old_context(settings) -> None:
+    """Новый товар прерывает вопрос и не наследует старый modal context."""
+    added = _add_syrup(settings)
+    phrase = "Пармезан 3 кг"
+    result = ConversationEngine(settings).handle(
+        _voice(phrase, update_id=10),
+        infer_intent(phrase),
+        added.state,
+        [
+            CatalogProduct(
+                product_id="parmesan",
+                name="Пармезан",
+                unit="кг",
+                supplier="МБР",
+            )
+        ],
+    )
+
+    assert result.state.stage in {
+        SessionStage.COLLECTING,
+        SessionStage.AWAIT_ADD_MORE_CONFIRM,
+    }
+    assert len(result.state.cart) == 2
+    parmesan = result.state.cart[-1]
+    assert parmesan.source_query == "Пармезан"
+    assert parmesan.quantity == 3
+    assert parmesan.unit == "кг"
+    assert result.state.pending_added_items_count == 0
+
+
+def test_uncertain_add_more_answer_repeats_prompt_without_mutation(settings) -> None:
+    """Неуверенный ответ не выбирает действие и не меняет черновик."""
+    added = _add_syrup(settings)
+    before = added.state.model_copy(deep=True)
+    result = ConversationEngine(settings).handle(
+        _voice("ну", update_id=11),
+        infer_intent("ну"),
+        added.state,
+        [],
+    )
+
+    assert result.state.stage is SessionStage.AWAIT_ADD_MORE_CONFIRM
+    assert result.state.cart == before.cart
+    assert result.state.pending_added_items_count == before.pending_added_items_count
+    assert "Добавить ещё товары?" in result.reply.text
+
+
+def test_thanks_interrupts_add_more_prompt_without_adding_item(settings) -> None:
+    """Независимая благодарность закрывает modal prompt без изменения корзины."""
+    added = _add_syrup(settings)
+    before = added.state.model_copy(deep=True)
+    result = ConversationEngine(settings).handle(
+        TelegramEvent(
+            update_id=21,
+            chat_id="add-more",
+            input_type=InputKind.TEXT,
+            text="Спасибо",
+        ),
+        infer_intent("Спасибо"),
+        added.state,
+        [],
+    )
+
+    assert result.state.stage is SessionStage.REVIEW
+    assert result.state.cart == before.cart
+    assert result.state.pending_added_items_count == 0
+
+
+def test_add_more_callbacks_respect_revision(settings) -> None:
+    """Свежие callbacks меняют modal state, а устаревшие ничего не меняют."""
+    added = _add_syrup(settings)
+    added.state.ui_revision = 3
+    stale = ConversationEngine(settings).handle(
+        TelegramEvent(
+            update_id=12,
+            chat_id="add-more",
+            input_type=InputKind.CALLBACK,
+            callback_data="v2:add:r2",
+        ),
+        infer_intent("", callback_data="v2:add:r2"),
+        added.state,
+        [],
+    )
+    assert stale.state.stage is SessionStage.AWAIT_ADD_MORE_CONFIRM
+
+    fresh = ConversationEngine(settings).handle(
+        TelegramEvent(
+            update_id=13,
+            chat_id="add-more",
+            input_type=InputKind.CALLBACK,
+            callback_data="v2:add:r3",
+        ),
+        infer_intent("", callback_data="v2:add:r3"),
+        stale.state,
+        [],
+    )
+    assert fresh.state.stage is SessionStage.COLLECTING
