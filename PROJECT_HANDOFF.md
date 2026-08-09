@@ -3645,3 +3645,53 @@ Block E requires separate approval and must not move provenance logic back into 
   quantity failures; they were not changed.
 - Block G is closed. The next step must be a separately approved roadmap task,
   not a Block G production implementation.
+
+## BLOCK H PLAN — READY / IMPLEMENTATION PENDING
+
+Block H — `SUBMISSION SIDE-EFFECT IDEMPOTENCY / UNCERTAIN CHECKPOINTS` —
+проанализирован только документально. Application code, tests, prompts, DB
+schema и migrations не менялись.
+
+- Severity: **P1 / production-safety blocker** для каталожного increment при
+  неизвестном результате Google Sheets.
+- Подтверждённое окно: `increment_catalog_quantities()` выполняет внешний
+  `values.batchUpdate` с `old + increment`, затем отдельный
+  `_checkpoint("catalog_updated")`. Crash/timeout или ошибка DB между ними
+  оставляет `catalog_updated=false` после уже применённого write.
+- Duplicate increment возможен: retry снова читает увеличенное значение и
+  прибавляет тот же snapshot increment.
+- Timeout каталога сегодня нельзя считать безопасным для автоматического
+  retry. `test_transient_pre_dispatch_error_can_be_retried_safely` остаётся
+  green, но классифицирован как **DANGEROUS ASSUMPTION / INCOMPLETE**: он
+  различает только «до central dispatch», а не definitely-before-apply.
+- Рекомендуемый дизайн: persisted deterministic mutation plan с
+  `before/expected-after`, started/uncertain gate и read-back verification;
+  `before` разрешает ровно один retry, expected-after восстанавливает
+  checkpoint без повторного write, conflict останавливает автоматическое
+  изменение.
+- Fallback: временно хранить execution metadata в отдельном JSONB-поле
+  `SubmissionRecord`, не меняя frozen `PendingSubmission.rows`; постоянный
+  вариант требует typed DB fields и Alembic migration.
+- DB/schema: **migration required** для production-варианта; сейчас migration
+  не создавалась.
+- Google Sheets schema: не требуется для Option B.
+- Apps Script: текущий repository не содержит catalog-mutation endpoint;
+  Option D с LockService/ledger остаётся только долгосрочным усилением.
+- Recalc: повтор выглядит convergent, но Apps Script исходник недоступен;
+  идемпотентность не доказана, нужен отдельный uncertain/recovery этап.
+- Dispatch: существующий `dispatch_started → POST → dispatch_completed` уже
+  запрещает второй POST при unknown и не менялся.
+- Completion notification: Telegram send до `completion_notified` допускает
+  duplicate success card при checkpoint failure; риск **MEDIUM**, отдельный
+  этап после catalog safety.
+- План: [docs/SUBMISSION_IDEMPOTENCY_PLAN.md](docs/SUBMISSION_IDEMPOTENCY_PLAN.md).
+- Будущие фазы: H1 catalog plan/state boundary, H2 read-back recovery, H3
+  recalc/cache/notification hardening, H4 optional Apps Script ledger.
+- Следующее действие: отдельное подтверждение implementation H1; до него не
+  менять код и не исправлять текущие 14 baseline failures.
+
+## NEXT FUNCTIONAL STEP
+
+`BLOCK H IMPLEMENTATION — catalog mutation uncertainty safety (H1)` после
+отдельного подтверждения. Block H остаётся docs-only до этого подтверждения;
+decomposition и MAX не начинаются.
