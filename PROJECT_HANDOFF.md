@@ -3607,3 +3607,22 @@ Block E requires separate approval and must not move provenance logic back into 
   still reports pre-existing unrelated formatting drift in `orchestrator.py`;
   no unrelated formatting was applied.
 - Block A–E contracts remain unchanged; Block G and decomposition are not started.
+
+## BLOCK G PLAN — READY / IMPLEMENTATION PENDING
+
+- Plan: [docs/DATA_INTEGRITY_BLOCK_G_PLAN.md](docs/DATA_INTEGRITY_BLOCK_G_PLAN.md).
+- Scope is split into G1 PHOTO input contract and G2 voice recovery UX; no
+  application code, tests, or prompts were changed during analysis.
+- Current accounting: **functional MUST FIX = 0**, **contract migrations = 4**,
+  **stale Block G tests = 4**. The four stale assertions are two PHOTO literal
+  prompt checks and two old voice recovery-card title checks.
+- G1 owner is the existing `_PHOTO_SYSTEM` / `parse_photo()` /
+  `_normalise_photo_command()` boundary. The prompt already contains the needed
+  row, department, stock/packaging, right-cell, and handwritten-correction
+  safety semantics; prompt modification is not currently required.
+- G2 owner is `unrecognized_voice_reply()` for UX text and the existing
+  `ConversationEngine` voice branch for routing. Both empty `ADD_ITEMS` and
+  `UNKNOWN` voice commands already reach the intended state-preserving recovery
+  card; engine modification is not currently required.
+- The next action is explicit approval of a future test-contract migration only;
+  do not fix the four stale assertions or the other 14 baseline failures here.
