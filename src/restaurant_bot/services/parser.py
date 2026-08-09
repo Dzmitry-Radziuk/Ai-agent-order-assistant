@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Sequence
 
 from restaurant_bot.domain.models import Intent, ParsedCommand
 from restaurant_bot.services.product_parser import _extract_global_comment
@@ -1139,6 +1140,38 @@ def is_product_add_request_phrase(text: str) -> bool:
     return has_action and (has_procurement_target or has_product_target)
 
 
+_EXPLICIT_ADD_ITEMS_RE = re.compile(
+    r"^(?:(?:мне\s+нужно|мне\s+надо|я\s+хочу|хочу|давай(?:те)?|пожалуйста)\s+)?"
+    r"(?:добав(?:ь|ить|им)|закаж(?:и|ем|ать)|полож(?:и|ить)|возьм(?:и|ем)|постав(?:ь|ить))\s+"
+    r"(?P<target>.+)$",
+    re.IGNORECASE,
+)
+_NON_PRODUCT_ADD_TARGET_RE = re.compile(
+    r"^(?:ещ[её]\s+)?(?:товар(?:ы|а|ов)?|позици(?:я|и|й)|продукт(?:ы|а|ов)?|"
+    r"что(?:-нибудь|\s+нибудь)?)(?:\s+ещ[её])?$",
+    re.IGNORECASE,
+)
+
+
+def has_explicit_add_items(text: str, items: Sequence[object] | None = None) -> bool:
+    """Определяет явную команду добавления новой товарной позиции."""
+    if items is not None:
+        has_product = any(
+            (item.get("product_query", "") if isinstance(item, dict) else getattr(item, "product_query", "")).strip()
+            for item in items
+        )
+        if not has_product:
+            return False
+    normalized = normalize_command_text(text)
+    match = _EXPLICIT_ADD_ITEMS_RE.fullmatch(normalized)
+    if match is None:
+        return False
+    target = clean_command_target(match.group("target"))
+    if not target or _NON_PRODUCT_ADD_TARGET_RE.fullmatch(target):
+        return False
+    return not bool(re.fullmatch(r"(?:в|во)\s+(?:корзин\w*|заявк\w*)", target, re.IGNORECASE))
+
+
 def infer_intent(text: str, callback_data: str = "") -> ParsedCommand:
     """Определяет намерение пользователя."""
     if callback_data:
@@ -1253,6 +1286,7 @@ def infer_intent(text: str, callback_data: str = "") -> ParsedCommand:
     if items:
         return ParsedCommand(
             intent=Intent.ADD_ITEMS,
+            explicit_add_items=has_explicit_add_items(text, items),
             text=text,
             items=items,
             global_comment=global_comment,

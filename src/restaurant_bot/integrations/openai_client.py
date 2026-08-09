@@ -39,6 +39,7 @@ from restaurant_bot.integrations.openai_prompts import (
 from restaurant_bot.observability import Tracer
 from restaurant_bot.services.matching import has_product_variant_qualifier
 from restaurant_bot.services.parser import (
+    has_explicit_add_items,
     has_explicit_global_comment_scope,
     infer_intent,
 )
@@ -174,6 +175,7 @@ class OpenAIService:
         ]
         result = ParsedCommand(
             intent=Intent.ADD_ITEMS,
+            explicit_add_items=has_explicit_add_items(source_text, items),
             text=source_text,
             items=items,
             global_comment=comments[-1] if comments else "",
@@ -288,6 +290,13 @@ class OpenAIService:
             if item.get("user_comment_to_supplier") and not item.get("comment"):
                 item["comment"] = item["user_comment_to_supplier"]
         command = ParsedCommand.model_validate(payload)
+        command = command.model_copy(
+            update={
+                "explicit_add_items": has_explicit_add_items(text, payload.get("items", []))
+                if command.intent is Intent.ADD_ITEMS
+                else False,
+            }
+        )
         if command.global_comment and not command.items:
             # A standalone request such as «добавь общий комментарий:
             # желательно на завтра» modifies the current draft.  It is not a
@@ -650,7 +659,9 @@ class OpenAIService:
             item_count=len(parsed.items),
             items=[self._item_log(item) for item in parsed.items],
         )
-        command = ParsedCommand.model_validate(parsed.model_dump())
+        command = ParsedCommand.model_validate(parsed.model_dump()).model_copy(
+            update={"explicit_add_items": False}
+        )
         document_type = clean_text(parsed.document_type).lower()
         normalized = self._normalise_photo_command(command, document_type)
         logger.info(

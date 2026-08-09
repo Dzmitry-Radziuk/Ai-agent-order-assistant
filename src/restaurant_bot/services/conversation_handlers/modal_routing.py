@@ -20,6 +20,7 @@ class ModalRoutingDecision:
     quantity: CompatibilityDecision
     comment_scope: CompatibilityDecision
     manual_details: CompatibilityDecision
+    product_add_details: CompatibilityDecision
     candidate_selection: CompatibilityDecision
     not_found: CompatibilityDecision
     duplicate: CompatibilityDecision
@@ -34,6 +35,11 @@ class ModalRoutingDecision:
     def manual_details_interrupted(self) -> bool:
         """Показывает, прерван ли запрос ручного названия товара."""
         return self.manual_details.action is CompatibilityAction.INTERRUPT
+
+    @property
+    def product_add_details_interrupted(self) -> bool:
+        """Показывает, прервано ли ожидание описания нового товара."""
+        return self.product_add_details.action is CompatibilityAction.INTERRUPT
 
     @property
     def candidate_interrupted(self) -> bool:
@@ -66,6 +72,11 @@ def evaluate_modal_routing(
         quantity=policy.evaluate(command, state, CompatibilityContext.QUANTITY),
         comment_scope=policy.evaluate(command, state, CompatibilityContext.COMMENT_SCOPE),
         manual_details=policy.evaluate(command, state, CompatibilityContext.MANUAL_DETAILS),
+        product_add_details=policy.evaluate(
+            command,
+            state,
+            CompatibilityContext.PRODUCT_ADD_DETAILS,
+        ),
         candidate_selection=policy.evaluate(
             command,
             state,

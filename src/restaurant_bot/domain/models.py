@@ -223,6 +223,7 @@ class ParsedCommand(BaseModel):
     """Описывает нормализованную команду пользователя."""
 
     intent: Intent = Intent.UNKNOWN
+    explicit_add_items: bool = False
     text: str = ""
     items: list[ExtractedItem] = Field(default_factory=list)
     target_query: str = ""

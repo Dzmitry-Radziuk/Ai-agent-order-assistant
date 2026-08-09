@@ -1898,3 +1898,35 @@ status-based candidate/not-found contexts, только при валидных 
 В рамках анализа не изменялись parser, prompts, OpenAI schemas, matching, submission,
 persistence, `_advance()`, `_find_cart_item()`, другие modal states, UX или callback contract.
 Сделан только этот handoff-документ.
+
+## AWAIT_PRODUCT_ADD_DETAILS — DONE
+
+Реализован отдельный этап защиты ожидания подробного описания товара.
+
+- `ParsedCommand.explicit_add_items` вычисляется только в parser-нормализации;
+  для обычного описания товара и структурированного количества значение `False`,
+  для явного `добавь ...` — `True`.
+- TEXT и транскрибированный VOICE используют одинаковый parser-контракт.
+  PHOTO принудительно не получает семантику явной текстовой команды.
+- `CompatibilityContext.PRODUCT_ADD_DETAILS` добавлен в общий policy и имеет приоритет
+  над status-контекстами при валидных pending product-add refs.
+- `ADD_ITEMS` с `explicit_add_items=True` прерывает product-add flow и проходит обычный
+  routing; старый item, request refs и pending context не переносятся в новую позицию.
+- Описание с `ADD_ITEMS=False` или непустым `UNKNOWN` продолжает текущий product-add flow.
+  Пустой ответ остаётся без мутации и возвращает текущую подсказку.
+- Два прежних engine-блока создания product-add request объединены через
+  `_submit_product_add_description`; request fields, idempotency и callback contracts сохранены.
+- Добавлены regression tests для parser flag, policy priority, explicit interruption,
+  pending-context isolation и navigation interruption.
+
+## NEXT FUNCTIONAL STEP
+
+`AWAIT_ADD_MORE_CONFIRM` — следующий функциональный этап StateCompatibilityPolicy.
+
+## AWAIT_PRODUCT_ADD_DETAILS — VERIFICATION
+
+- `tests/product_add`: passed.
+- `tests/conversation/test_not_found_preemption.py`: passed.
+- `tests/conversation/test_voice_route_safety.py`: passed.
+- Existing unrelated baseline failures remain separately tracked; no parser/comment
+  or prompt changes were made for them.

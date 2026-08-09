@@ -39,6 +39,7 @@ class CompatibilityContext(StrEnum):
     NOT_FOUND = "not_found"
     DUPLICATE_PENDING = "duplicate_pending"
     UNIT_MISMATCH = "unit_mismatch"
+    PRODUCT_ADD_DETAILS = "product_add_details"
 
 
 @dataclass(frozen=True, slots=True)
@@ -92,6 +93,8 @@ class StateCompatibilityPolicy:
             return self._evaluate_comment_scope(command, state)
         if context is CompatibilityContext.MANUAL_DETAILS:
             return self._evaluate_manual_details(command, state)
+        if context is CompatibilityContext.PRODUCT_ADD_DETAILS:
+            return self._evaluate_product_add_details(command, state)
         if context is CompatibilityContext.CANDIDATE_SELECTION:
             return self._evaluate_candidate_selection(command, state)
         if context is CompatibilityContext.NOT_FOUND:
@@ -149,6 +152,47 @@ class StateCompatibilityPolicy:
         if command.intent is Intent.UNKNOWN:
             return CompatibilityDecision(CompatibilityAction.AMBIGUOUS)
         if command.intent in self._INTERRUPT_INTENTS:
+            return CompatibilityDecision(CompatibilityAction.INTERRUPT)
+        return CompatibilityDecision(CompatibilityAction.INTERRUPT)
+
+    def _evaluate_product_add_details(
+        self,
+        command: ParsedCommand,
+        state: ConversationState,
+    ) -> CompatibilityDecision:
+        """Разрешает описание ненайденного товара или прерывает его независимой командой."""
+        index = state.pending_product_add_item_index
+        if (
+            state.stage is not SessionStage.AWAIT_PRODUCT_ADD_DETAILS
+            or not state.pending_product_add_request_id
+            or index is None
+            or not 0 <= index < len(state.cart)
+        ):
+            return CompatibilityDecision(CompatibilityAction.NOT_APPLICABLE)
+
+        if command.intent in {Intent.CANCEL, Intent.PRODUCT_ADD_SKIP}:
+            return CompatibilityDecision(CompatibilityAction.CONTINUE)
+        if command.intent is Intent.ADD_ITEMS:
+            if command.explicit_add_items:
+                return CompatibilityDecision(CompatibilityAction.INTERRUPT)
+            if self._has_product_add_description(command):
+                return CompatibilityDecision(CompatibilityAction.CONTINUE)
+            return CompatibilityDecision(CompatibilityAction.AMBIGUOUS)
+        if command.intent is Intent.UNKNOWN:
+            if self._has_product_add_description(command):
+                return CompatibilityDecision(CompatibilityAction.CONTINUE)
+            return CompatibilityDecision(CompatibilityAction.AMBIGUOUS)
+        if command.intent in self._INTERRUPT_INTENTS or command.intent in {
+            Intent.ADD_MORE,
+            Intent.EDIT_QUANTITY,
+            Intent.MANUAL_CURRENT,
+            Intent.SELECT_CANDIDATE,
+            Intent.CONFIRM,
+            Intent.PRODUCT_ADD,
+            Intent.PRODUCT_ADD_RETRY,
+            Intent.SEARCH_ALL_SUPPLIERS,
+            Intent.SWITCH_SUPPLIER,
+        }:
             return CompatibilityDecision(CompatibilityAction.INTERRUPT)
         return CompatibilityDecision(CompatibilityAction.INTERRUPT)
 
@@ -379,6 +423,13 @@ class StateCompatibilityPolicy:
             and item is not None
         ):
             return CompatibilityContext.MANUAL_DETAILS
+        if (
+            state.stage is SessionStage.AWAIT_PRODUCT_ADD_DETAILS
+            and state.pending_product_add_request_id
+            and state.pending_product_add_item_index is not None
+            and 0 <= state.pending_product_add_item_index < len(state.cart)
+        ):
+            return CompatibilityContext.PRODUCT_ADD_DETAILS
         if item is not None and item.status is ItemStatus.AMBIGUOUS and item.candidates:
             return CompatibilityContext.CANDIDATE_SELECTION
         if item is not None and item.status is ItemStatus.NOT_FOUND:
@@ -421,6 +472,14 @@ class StateCompatibilityPolicy:
         """Считает любую явно извлечённую товарную позицию новым intent."""
         return command.intent is Intent.ADD_ITEMS and any(
             item.product_query.strip() for item in command.items
+        )
+
+    @staticmethod
+    def _has_product_add_description(command: ParsedCommand) -> bool:
+        """Проверяет наличие структурированного или свободного описания товара."""
+        return bool(
+            command.text.strip()
+            or any(item.product_query.strip() or item.source_line.strip() for item in command.items)
         )
 
     @staticmethod

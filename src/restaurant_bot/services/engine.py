@@ -629,60 +629,27 @@ class ConversationEngine:
             state.stage = SessionStage.COLLECTING
             return EngineResult(state=state, reply=cart_reply(state, title="Отправка отменена"))
 
-        if state.stage == SessionStage.AWAIT_PRODUCT_ADD_DETAILS:
+        if (
+            state.stage == SessionStage.AWAIT_PRODUCT_ADD_DETAILS
+            and modal_decision.product_add_details.action is CompatibilityAction.CONTINUE
+            and command.intent in {Intent.ADD_ITEMS, Intent.UNKNOWN}
+        ):
             description = (command.text or event.text).strip()
+            if not description and command.intent is Intent.ADD_ITEMS:
+                description = ", ".join(
+                    item.source_line or item.product_query for item in command.items
+                ).strip()
             if description:
-                request_id = state.pending_product_add_request_id or new_product_add_request_id(
-                    None
-                )
-                existing = next(
-                    (
-                        row
-                        for row in state.product_add_requests
-                        if row.get("request_id") == request_id
-                    ),
-                    None,
-                )
-                if existing is None:
-                    now = datetime.now(UTC).isoformat()
-                    index = state.pending_product_add_item_index
-                    item = (
-                        state.cart[index] if index is not None and index < len(state.cart) else None
-                    )
-                    state.product_add_requests.append(
-                        {
-                            "request_id": request_id,
-                            "source_item_id": item.id if item else "",
-                            "original_query": item.source_query if item else "",
-                            "description": description[:1000],
-                            "description_event_key": str(event.update_id),
-                            "telegram_user_id": event.telegram_user_id or event.chat_id,
-                            "telegram_username": event.telegram_username,
-                            "telegram_first_name": event.telegram_first_name,
-                            "telegram_last_name": event.telegram_last_name,
-                            "status": "pending_write",
-                            "created_at": now,
-                            "updated_at": now,
-                            "submitted_at": "",
-                            "sheets_error": "",
-                        }
-                    )
-                # n8n removes the source unresolved line from the purchase
-                # draft once its separate procurement request is created.
-                # Keeping it as NOT_FOUND made one product appear twice:
-                # in "Запросы снабженцу" and again in "Нужно уточнить".
-                if item is not None:
-                    item.status = ItemStatus.SKIPPED
-                state.current_issue_item_id = ""
-                state.pending_product_add_request_id = request_id
-                state.product_add_write_in_progress = True
-                state.stage = SessionStage.REVIEW
-                state.status = "review"
-                return EngineResult(
-                    state=state,
-                    reply=product_add_sending_reply(),
-                    enqueue_product_add=True,
-                )
+                return self._submit_product_add_description(event, state, description)
+        if (
+            state.stage == SessionStage.AWAIT_PRODUCT_ADD_DETAILS
+            and modal_decision.product_add_details.action is CompatibilityAction.AMBIGUOUS
+            and not (event.input_type is InputKind.PHOTO and command.intent is Intent.ADD_ITEMS)
+        ):
+            index = state.pending_product_add_item_index
+            item = state.cart[index] if index is not None and index < len(state.cart) else None
+            if item is not None:
+                return EngineResult(state=state, reply=BotReply(text=product_add_prompt(item)))
 
         if command.intent == Intent.ADD_ITEMS:
             if command.global_comment:
@@ -703,58 +670,6 @@ class ConversationEngine:
                 return EngineResult(state=state, reply=unrecognized_voice_reply(state))
             if event.input_type == InputKind.PHOTO and not command.items:
                 return EngineResult(state=state, reply=photo_without_quantities_reply(state))
-            if state.stage == SessionStage.AWAIT_PRODUCT_ADD_DETAILS:
-                description = command.text.strip() or ", ".join(
-                    item.source_line or item.product_query for item in command.items
-                )
-                if description:
-                    request_id = state.pending_product_add_request_id or new_product_add_request_id(
-                        None
-                    )
-                    index = state.pending_product_add_item_index
-                    item = (
-                        state.cart[index] if index is not None and index < len(state.cart) else None
-                    )
-                    existing = next(
-                        (
-                            row
-                            for row in state.product_add_requests
-                            if row.get("request_id") == request_id
-                        ),
-                        None,
-                    )
-                    if existing is None:
-                        now = datetime.now(UTC).isoformat()
-                        state.product_add_requests.append(
-                            {
-                                "request_id": request_id,
-                                "source_item_id": item.id if item else "",
-                                "original_query": item.source_query if item else "",
-                                "description": description[:1000],
-                                "description_event_key": str(event.update_id),
-                                "telegram_user_id": event.telegram_user_id or event.chat_id,
-                                "telegram_username": event.telegram_username,
-                                "telegram_first_name": event.telegram_first_name,
-                                "telegram_last_name": event.telegram_last_name,
-                                "status": "pending_write",
-                                "created_at": now,
-                                "updated_at": now,
-                                "submitted_at": "",
-                                "sheets_error": "",
-                            }
-                        )
-                    if item is not None:
-                        item.status = ItemStatus.SKIPPED
-                    state.current_issue_item_id = ""
-                    state.pending_product_add_request_id = request_id
-                    state.product_add_write_in_progress = True
-                    state.stage = SessionStage.REVIEW
-                    state.status = "review"
-                    return EngineResult(
-                        state=state,
-                        reply=product_add_sending_reply(),
-                        enqueue_product_add=True,
-                    )
             if (
                 modal_decision.manual_details.action is CompatibilityAction.CONTINUE
                 and state.stage == SessionStage.AWAIT_MANUAL_DETAILS
@@ -1659,6 +1574,57 @@ class ConversationEngine:
         fresh = self._fresh_order_state(state)
         fresh.metadata["onboarding_shown"] = True
         return EngineResult(state=fresh, reply=new_order_started_reply())
+
+    def _submit_product_add_description(
+        self,
+        event: TelegramEvent,
+        state: ConversationState,
+        description: str,
+    ) -> EngineResult:
+        """Сохраняет подтверждённое описание товара для отдельного запроса снабженцу."""
+        index = state.pending_product_add_item_index
+        item = state.cart[index] if index is not None and 0 <= index < len(state.cart) else None
+        request_id = state.pending_product_add_request_id or new_product_add_request_id(item)
+        existing = next(
+            (
+                row
+                for row in state.product_add_requests
+                if row.get("request_id") == request_id
+            ),
+            None,
+        )
+        if existing is None:
+            now = datetime.now(UTC).isoformat()
+            state.product_add_requests.append(
+                {
+                    "request_id": request_id,
+                    "source_item_id": item.id if item else "",
+                    "original_query": item.source_query if item else "",
+                    "description": description[:1000],
+                    "description_event_key": str(event.update_id),
+                    "telegram_user_id": event.telegram_user_id or event.chat_id,
+                    "telegram_username": event.telegram_username,
+                    "telegram_first_name": event.telegram_first_name,
+                    "telegram_last_name": event.telegram_last_name,
+                    "status": "pending_write",
+                    "created_at": now,
+                    "updated_at": now,
+                    "submitted_at": "",
+                    "sheets_error": "",
+                }
+            )
+        if item is not None:
+            item.status = ItemStatus.SKIPPED
+        state.current_issue_item_id = ""
+        state.pending_product_add_request_id = request_id
+        state.product_add_write_in_progress = True
+        state.stage = SessionStage.REVIEW
+        state.status = "review"
+        return EngineResult(
+            state=state,
+            reply=product_add_sending_reply(),
+            enqueue_product_add=True,
+        )
 
     def _contextual_negative_command(
         self,
