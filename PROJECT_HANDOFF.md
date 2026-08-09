@@ -3366,3 +3366,22 @@ credentials, authorization tokens) не логировать. В текущем 
 
 Декомпозиция не продолжалась. Изменения ограничены существующими границами
 policy, parser normalization, engine routing и focused regression tests.
+
+## BLOCK B PLAN — READY / IMPLEMENTATION PENDING
+
+- Owner: `recover_omitted_explicit_items()` в
+  `src/restaurant_bot/integrations/openai_parsing.py`, после Block A
+  source-evidence reconciliation и до `ParsedCommand.model_validate`.
+- MUST FIX: 7 shadow/connector/root/duplicate regression tests; conjoined-item
+  restoration и packaging quantity cases отмечены как conditional follow-ups.
+- Planned helpers: source-occurrence gate, trailing processing projection,
+  comment/global shadow cleanup, connector-only cleanup, strict duplicate pass,
+  contained-fragment pass. Существующие helpers нельзя включать без единой
+  ownership policy.
+- Защита: не удалять по token count, каталогу, blacklist или длине; сохранять
+  one-word products, две реальные позиции, intentional duplicates, quantity,
+  comments и source_line; обеспечить идемпотентность.
+- План: [docs/DATA_INTEGRITY_BLOCK_B_PLAN.md](docs/DATA_INTEGRITY_BLOCK_B_PLAN.md).
+- Следующий шаг: отдельное утверждение этого плана, затем только минимальная
+  реализация Block B. Block C, каталог, state machine и decomposition пока не
+  начинать.
