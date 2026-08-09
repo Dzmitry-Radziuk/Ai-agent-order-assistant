@@ -3433,14 +3433,22 @@ policy, parser normalization, engine routing и focused regression tests.
 - MUST FIX: 5/5 passed. Добавлены regression cases для explicit quantity,
   packaging-only, order+packaging, dash range, percentage, idempotency и
   TEXT/VOICE parity.
-- Full pytest: 1245 collected / 1214 passed / 31 failed — тот же baseline,
-  новых падений относительно Block B не выявлено. Оставшиеся failures остаются
-  прежними out-of-scope PHOTO, catalog/matching, visible actions, shadow-count,
-  omitted conjoined item, supplier и docs-contract failures.
+- Свежий full pytest на HEAD `b3ed3f0662d6f717641d6729548f8c4abe6303c8`:
+  1252 collected / 1224 passed / 28 failed / 0 skipped / 0 xfailed / 0 errors,
+  duration 15.47s. Рост collection на 7 — это добавленные Block C regression
+  tests; сохранённый результат 1245/1214/31 был baseline до Block C и не является
+  свежим post-Block-C результатом.
+- Block C исправил 5 ранее failing MUST FIX: ambiguous weight pair, from-to range,
+  catalog packaging role with separate order quantity, packaging preference и
+  ambiguous packaging role. Новых failure categories относительно baseline не
+  обнаружено; оставшиеся падения относятся к прежним PHOTO, catalog/matching,
+  visible-action, comment/UX, shadow-count, omitted-conjoined-item, supplier и
+  stale docs-contract сценариям.
 - Block A и Block B сохранены; PHOTO prompts/normalizer, catalog, matching,
   state machine, submission, logging и decomposition не менялись.
-- Проверки: Ruff check passed; Ruff format check passed; mypy passed;
-  markdown links passed; `git diff --check` passed.
+- Проверки: Ruff check passed; изменённые Block C файлы проходят Ruff format;
+  repo-wide format check сохраняет ранее существовавший drift в несвязанных
+  файлах; mypy passed; markdown links passed; `git diff --check` passed.
 
 ## NEXT FUNCTIONAL STEP
 
