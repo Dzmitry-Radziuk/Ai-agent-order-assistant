@@ -5,6 +5,32 @@ from restaurant_bot.integrations.openai_client import (
 )
 
 
+def test_compact_catalog_measurement_does_not_become_order_quantity() -> None:
+    """Не принимает слитную фасовочную меру из названия за заказ."""
+    source = "\u0425\u043b\u043e\u043f\u044c\u044f \u043e\u0432\u0441\u044f\u043d\u044b\u0435 \u0413\u0435\u0440\u043a\u0443\u043b\u0435\u0441 450\u0433"
+    restored = recover_omitted_explicit_items(
+        {
+            "intent": Intent.ADD_ITEMS,
+            "items": [
+                {
+                    "product_query": source,
+                    "quantity": None,
+                    "unit": "",
+                    "source_line": source,
+                }
+            ],
+        },
+        source,
+    )
+
+    item = restored["items"][0]
+    assert item["quantity"] is None
+    assert item["unit"] == ""
+    assert item["product_query"] == source
+    assert item["packaging_text"] == "450г"
+    assert item["packaging_role"] == "catalog_attribute"
+
+
 def test_voice_recovery_restores_quantity_and_unit_from_shared_source_line() -> None:
     """Проверяет, что голос восстановление восстанавливает количество и единица измерения из общая исходный строка."""
     source = "Сироп роза 10 штук, говядина 5 кг"

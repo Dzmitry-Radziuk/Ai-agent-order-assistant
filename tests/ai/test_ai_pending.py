@@ -230,6 +230,42 @@ def test_ai_does_not_auto_select_weak_single_corn_candidate(settings) -> None:  
     assert "Точного совпадения не найдено" in resolved.reply.text
 
 
+def test_ai_not_found_preserves_base_candidate_for_unresolved_qualifier(settings) -> None:  # type: ignore[no-untyped-def]
+    """Сохраняет базовый кандидат, если AI отклонил только неизвестный признак."""
+    product = CatalogProduct(
+        product_id="broccoli",
+        name="Брокколи свежая 10 кг",
+        supplier="Овощи",
+        unit="кг",
+    )
+    item = CartItem(
+        id="broccoli-request",
+        source_query="брокколи крупные кочаны",
+        quantity=1,
+        unit="кг",
+        status=ItemStatus.AMBIGUOUS,
+        candidates=rank_candidates("брокколи крупные кочаны", [product]),
+    )
+    matcher = _Matcher(
+        ProductMatchDecision(
+            action="not_found",
+            confidence=0.99,
+            contradictions=["размер кочана не подтверждён"],
+        )
+    )
+
+    resolved = _orchestrator(settings, matcher)._resolve_ai_pending(
+        TelegramEvent(update_id=8, chat_id="123456", input_type=InputKind.VOICE),
+        EngineResult(state=ConversationState(cart=[item]), reply=issue_reply(item, 0)),
+        [product],
+    )
+
+    resolved_item = resolved.state.cart[0]
+    assert resolved_item.status is ItemStatus.AMBIGUOUS
+    assert [candidate.product_id for candidate in resolved_item.candidates] == ["broccoli"]
+    assert "Брокколи свежая 10 кг" in resolved.reply.text
+
+
 def test_ai_rejects_semantically_conflicting_pork_candidate(settings) -> None:  # type: ignore[no-untyped-def]
     """Не предлагает свиное сало вместо свинины с явными требованиями."""
     catalog = [

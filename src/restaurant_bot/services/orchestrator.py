@@ -1846,8 +1846,28 @@ class UpdateOrchestrator:
                 decision.action == "not_found"
                 and decision.confidence >= _AI_MATCH_NOT_FOUND_MIN_CONFIDENCE
             ):
-                item.status = ItemStatus.NOT_FOUND
-                item.candidates = []
+                # AI can reject an unresolved qualifier while the deterministic
+                # shortlist still proves the requested base product. Preserve
+                # that evidence for clarification; only discard a shortlist
+                # that has no meaningful identity match at all.
+                primary = item.candidates[0] if item.candidates else None
+                deterministic_evidence = (
+                    query_evidence_tokens(search_query, primary.name)
+                    if primary is not None
+                    else set()
+                )
+                if deterministic_evidence and primary is not None:
+                    item.status = ItemStatus.AMBIGUOUS
+                    logger.info(
+                        "catalog_candidate_ai_not_found_preserved",
+                        target_query=item.source_query,
+                        candidate_product_id=primary.product_id,
+                        evidence=sorted(deterministic_evidence),
+                        contradictions=decision.contradictions,
+                    )
+                else:
+                    item.status = ItemStatus.NOT_FOUND
+                    item.candidates = []
             else:
                 item.status = ItemStatus.AMBIGUOUS
                 if decision.action == "select":

@@ -140,6 +140,21 @@ def _is_packaging_reference_prefix(value: str) -> bool:
     return bool(_PACKAGING_REFERENCE_PREFIX_RE.search(clean_text(value)))
 
 
+def _is_compact_catalog_measurement(value: str, mark: re.Match[str]) -> bool:
+    """Отличает слитную фасовочную меру от явного заказа."""
+    if re.search(r"\s", mark.group(0)):
+        return False
+    prefix = normalize_text(value[: mark.start()])
+    return not bool(
+        re.search(
+            r"\b(?:\u043d\u0443\u0436\u043d\u043e|\u043d\u0430\u0434\u043e|\u0437\u0430\u043a\u0430\u0436\w*|"
+            r"\u043f\u043e\u0441\u0442\u0430\u0432\w*|\u0434\u043e\u0431\u0430\u0432\w*)\b",
+            prefix,
+            flags=re.I,
+        )
+    )
+
+
 def _single_product_packaging_item(
     text: str,
     source_line: str,
@@ -294,6 +309,14 @@ def parse_product_lines(text: str) -> list[ExtractedItem]:
     )
 
     for line in lines:
+        has_explicit_order_lead = bool(
+            re.match(
+                r"^(?:\u0434\u043e\u0431\u0430\u0432\w*|\u0437\u0430\u043a\u0430\u0436\w*|"
+                r"\u043d\u0443\u0436\u043d\u043e|\u043d\u0430\u0434\u043e)\s+",
+                normalize_text(line),
+                flags=re.I,
+            )
+        )
         stripped = re.sub(
             r"^(?:добавь|добавить|закажи|заказать|нужно|надо)\s+", "", line, flags=re.I
         )
@@ -333,6 +356,22 @@ def parse_product_lines(text: str) -> list[ExtractedItem]:
                 for start, end in alternative_packaging_spans
             )
         ]
+        if (
+            len(quantity_marks) == 1
+            and not has_explicit_order_lead
+            and _is_compact_catalog_measurement(stripped, quantity_marks[0])
+        ):
+            mark = quantity_marks[0]
+            items.append(
+                ExtractedItem(
+                    product_query=stripped,
+                    source_line=line,
+                    packaging_text=clean_text(mark.group(0)),
+                    packaging_role="catalog_attribute",
+                    packaging_confidence=0.9,
+                )
+            )
+            continue
         if len(quantity_marks) == 1 and _is_packaging_reference_prefix(
             stripped[: quantity_marks[0].start()]
         ):

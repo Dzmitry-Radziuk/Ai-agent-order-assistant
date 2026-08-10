@@ -4052,3 +4052,24 @@ Validation on the current working tree:
   tracked; GitLab was not used.
 
 The next functional step is intentionally left to a separate user request.
+
+## FINAL SEMANTIC/STABILITY FIX PASS — CURRENT CHECKOUT
+
+This section supersedes the earlier 1359-test semantic snapshot.
+
+- Branch: `decompose_bot`; semantic checkpoint `84673fc` is present locally.
+- The deterministic parser now treats a compact measurement attached to a
+  catalog title (for example `450г`) as `catalog_attribute`, not as order
+  quantity. Explicit order leads such as `добавь сыр 5кг` remain order terms.
+- AI `not_found` preserves a deterministic shortlist when base identity
+  evidence exists; unresolved qualifiers remain clarification/ambiguous and
+  do not auto-select. A shortlist without identity evidence is still rejected.
+- The global text parsing boundary is covered for quantity-flow preemption;
+  independent product commands cannot be consumed as a pending quantity.
+- Full validation: **1362 collected / 1362 passed / 0 failed / 0 skipped /
+  0 xfailed / 0 errors**.
+- Focused quantity, input, AI, and conversation suites are green. Ruff check,
+  Ruff format on touched files, mypy, and `git diff --check` are green.
+- `manual_smoke_forensic_logs.txt` remains an untracked local diagnostic and
+  is intentionally excluded from commits. `.env` is not tracked; GitLab was
+  not used.

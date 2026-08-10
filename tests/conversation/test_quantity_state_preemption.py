@@ -1,3 +1,5 @@
+from types import SimpleNamespace
+
 from restaurant_bot.domain.models import (
     CartItem,
     CatalogProduct,
@@ -15,11 +17,15 @@ from restaurant_bot.services.conversation_handlers.state_compatibility import (
     StateCompatibilityPolicy,
 )
 from restaurant_bot.services.engine import ConversationEngine
+from restaurant_bot.services.orchestrator import UpdateOrchestrator
+from restaurant_bot.services.parser import infer_intent
 
 
 def _event(text: str, input_type: InputKind = InputKind.TEXT) -> TelegramEvent:
     """Создаёт событие для проверки preemption quantity modal."""
-    return TelegramEvent(update_id=1, chat_id="quantity-preemption", input_type=input_type, text=text)
+    return TelegramEvent(
+        update_id=1, chat_id="quantity-preemption", input_type=input_type, text=text
+    )
 
 
 def _missing_quantity_state() -> ConversationState:
@@ -72,6 +78,30 @@ def test_quantity_state_keeps_incomplete_item_when_text_adds_new_product(setting
         ItemStatus.MISSING_QTY,
     )
     assert (parmesan.source_query, parmesan.quantity, parmesan.unit) == ("пармезан", 3, "кг")
+
+
+def test_quantity_preemption_uses_global_text_parser_boundary(settings) -> None:  # type: ignore[no-untyped-def]
+    """Проверяет прерывание quantity-flow через реальный text parsing boundary."""
+    parser = object.__new__(UpdateOrchestrator)
+    parser.openai = SimpleNamespace(parse_text=infer_intent)
+    state = _missing_quantity_state()
+
+    command = parser._parse_text_in_context("пармезан 3 кг", state)
+
+    assert command.intent is Intent.ADD_ITEMS
+    assert command.items[0].product_query == "пармезан"
+    assert command.items[0].quantity == 3
+
+    result = ConversationEngine(settings).handle(
+        _event(command.text),
+        command,
+        state,
+        [CatalogProduct(product_id="parmesan", name="Пармезан", unit="кг")],
+    )
+
+    assert result.state.cart[0].status is ItemStatus.MISSING_QTY
+    parmesan = next(item for item in result.state.cart if item.source_query == "пармезан")
+    assert (parmesan.quantity, parmesan.unit) == (3, "кг")
 
 
 def test_quantity_state_keeps_incomplete_item_for_voice_addition(settings) -> None:  # type: ignore[no-untyped-def]
@@ -168,7 +198,9 @@ def test_new_product_without_quantity_preempts_then_resumes_old_pending_item(set
     pending = engine.handle(_event(add_horseradish.text), add_horseradish, state, catalog)
 
     assert pending.state.cart[0].status is ItemStatus.MISSING_QTY
-    horseradish = next(item for item in pending.state.cart if item.catalog_product_id == "horseradish")
+    horseradish = next(
+        item for item in pending.state.cart if item.catalog_product_id == "horseradish"
+    )
     assert horseradish.status is ItemStatus.MISSING_QTY
     assert pending.state.current_issue_item_id == horseradish.id
 
