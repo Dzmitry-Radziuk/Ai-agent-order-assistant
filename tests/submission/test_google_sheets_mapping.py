@@ -10,6 +10,7 @@ from restaurant_bot.integrations.google_sheets import (
     GoogleSheetsError,
     GoogleSheetsGateway,
     PreparedOrderSubmission,
+    PreparedRecalculation,
 )
 
 VENUE_SPREADSHEET_ID = "venue-sheet"
@@ -658,6 +659,49 @@ def test_recalculation_uses_the_same_body_as_n8n(settings, monkeypatch) -> None:
             "sheetName": "Заявка",
             "spreadsheetId": VENUE_SPREADSHEET_ID,
         },
+        timeout=45.0,
+        follow_redirects=True,
+    )
+    response.raise_for_status.assert_called_once()
+
+
+def test_recalculation_prepare_performs_no_http_call(settings, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    """Проверяет подготовку пересчёта без внешнего вызова."""
+    settings.google_recalc_token = SecretStr("secret")
+    post = MagicMock()
+    monkeypatch.setattr(google_sheets_module.httpx, "post", post)
+
+    request = GoogleSheetsGateway(settings).prepare_recalculation(VENUE_SPREADSHEET_ID)
+
+    assert isinstance(request, PreparedRecalculation)
+    assert request.url == settings.google_recalc_url
+    assert request.payload == {
+        "token": "secret",
+        "sheetName": "Заявка",
+        "spreadsheetId": VENUE_SPREADSHEET_ID,
+    }
+    assert request.timeout_seconds == 45.0
+    post.assert_not_called()
+
+
+def test_recalculation_send_performs_one_post(settings, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    """Проверяет один внешний вызов подготовленного пересчёта."""
+    response = MagicMock()
+    response.json.return_value = {"success": True}
+    response.text = '{"success":true}'
+    post = MagicMock(return_value=response)
+    monkeypatch.setattr(google_sheets_module.httpx, "post", post)
+
+    request = PreparedRecalculation(
+        url=settings.google_recalc_url,
+        payload={"token": "secret", "sheetName": "Заявка", "spreadsheetId": "sheet"},
+        timeout_seconds=45.0,
+    )
+    GoogleSheetsGateway.send_recalculation(request)
+
+    post.assert_called_once_with(
+        settings.google_recalc_url,
+        json=request.payload,
         timeout=45.0,
         follow_redirects=True,
     )

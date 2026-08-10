@@ -3798,7 +3798,44 @@ schema и migrations не менялись.
 
 ## NEXT FUNCTIONAL STEP
 
-`BLOCK H3b — recalc uncertainty gate` — отдельная implementation задача после
-подтверждения. H1/H2/H3a safety gates остаются обязательными; Telegram
-notification, prompts, parser, matching, engine, state compatibility,
-decomposition и MAX не входят в следующий патч автоматически.
+## BLOCK H3b — DONE / RECALC SAFETY GATE ACTIVE
+
+- Устранено окно blind retry: после разрешения первого внешнего вызова
+  пересчёта запись больше не возвращается автоматически в `pending`.
+- Gateway разделён на `prepare_recalculation()` (проверка конфигурации и сборка
+  запроса без HTTP) и `send_recalculation()` (единственный внешний вызов).
+  Совместимый `trigger_recalculation()` оставлен только как wrapper; production
+  `SubmissionService` его не использует.
+- Migration `alembic/versions/0007_recalculation_state.py` добавляет
+  `recalc_status`, `recalc_operation_id`, `recalc_started_at` и
+  `recalc_completed_at`. Старые `recalc_done=true` получают `completed`,
+  остальные — `pending`; исторические timestamps не придумываются.
+- Локальный operation ID стабилен: `recalc:<order_no>`. Он не отправляется во
+  внешний Apps Script и не доказывает его идемпотентность.
+- Для `pending` порядок такой: prepare → cache invalidate → committed
+  `started` → send → committed `completed`. Если cache/prepare/STARTED
+  persistence не прошли, внешний вызов не разрешается и retry остаётся
+  допустимым.
+- `started` при входе трактуется как неизвестный результат: запись переводится
+  в `uncertain`, внешний вызов не повторяется. `uncertain` не вызывает cache,
+  recalc, dispatch или finalize. `completed` продолжает обычный dispatch без
+  лишней cache repair.
+- При timeout, ошибке ответа или сбое checkpoint после успешного ответа второй
+  recalc POST запрещён. Текст для пользователя сохраняет заявку, объясняет
+  остановку понятными словами и не содержит опасной кнопки повтора.
+- Внешняя идемпотентность Apps Script не доказана; H3b защищает только отказом
+  от blind повторения. Read-back и H3c notification policy не реализованы.
+- H3a-тест с повторным POST после ошибки пересчёта мигрирован на новый контракт:
+  cache failure до `started` остаётся retryable, внешний unknown становится
+  `uncertain` и не допускает второго POST.
+- H3b focused suite: **113 passed** (submission, Google Sheets, migration,
+  submission guards и H1/H2/H3a venue safety). Полный post-H3b запуск: **1301
+  collected / 1287 passed / 14 failed / 0 skipped / 0 xfailed / 0 errors**;
+  duration **16.53s**. Все 14 failure nodeids совпали с H3a baseline; новых
+  regressions нет.
+
+## NEXT FUNCTIONAL STEP
+
+`BLOCK H3c — completion notification safety` — отдельный этап после проверки
+H3b. Не начинать его автоматически; parser, prompts, engine, modal routing,
+matching, decomposition и MAX остаются вне scope.

@@ -104,6 +104,22 @@ def submission_catalog_uncertain_reply(state: Any, order_no: str) -> BotReply:
     )
 
 
+def submission_recalculation_uncertain_reply(state: Any, order_no: str) -> BotReply:
+    """Сообщает о сохранённой заявке без опасного повторения пересчёта."""
+    del order_no
+    return BotReply(
+        text=(
+            "⚠️ <b>Заявка сохранена, но отправка остановлена</b>\n\n"
+            "Бот не смог безопасно подтвердить обновление расчётов.\n\n"
+            "Чтобы не повторить действие дважды, заявка не отправлена автоматически. "
+            "Обратитесь к ответственному сотруднику для проверки."
+        ),
+        rows=[
+            [Button(text="К черновику", callback_data=_callback_with_revision(state, "v2:back"))]
+        ],
+    )
+
+
 def submission_catalog_conflict_reply(state: Any, order_no: str) -> BotReply:
     """Сообщает об изменении данных заявки без автоматической перезаписи."""
     del order_no

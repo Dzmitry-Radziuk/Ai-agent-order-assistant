@@ -77,6 +77,10 @@ class SubmissionRecord(Base):
     catalog_update_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     catalog_update_completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     recalc_done: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    recalc_status: Mapped[str] = mapped_column(String(16), nullable=False, default="pending")
+    recalc_operation_id: Mapped[str] = mapped_column(String(128), nullable=False, default="")
+    recalc_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    recalc_completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     dispatch_started: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     dispatch_completed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     dispatch_uncertain_notified: Mapped[bool] = mapped_column(

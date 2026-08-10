@@ -301,6 +301,10 @@ def _record(**overrides: object) -> SimpleNamespace:
         "catalog_update_started_at": None,
         "catalog_update_completed_at": None,
         "recalc_done": False,
+        "recalc_status": "pending",
+        "recalc_operation_id": "",
+        "recalc_started_at": None,
+        "recalc_completed_at": None,
         "dispatch_started": False,
         "dispatch_completed": False,
         "dispatch_uncertain_notified": False,
@@ -310,6 +314,8 @@ def _record(**overrides: object) -> SimpleNamespace:
     values.update(overrides)
     if "catalog_update_status" not in overrides:
         values["catalog_update_status"] = "completed" if values["catalog_updated"] else "pending"
+    if "recalc_status" not in overrides:
+        values["recalc_status"] = "completed" if values["recalc_done"] else "pending"
     return SimpleNamespace(**values)
 
 
@@ -478,14 +484,19 @@ def _cache_submission_service(
     service.sheets = MagicMock()
     service.catalog_cache = MagicMock()
     service.catalog_cache.invalidate.side_effect = invalidate_results
+    service.sheets.prepare_recalculation.return_value = MagicMock()
     if recalc_results is not None:
-        service.sheets.trigger_recalculation.side_effect = recalc_results
+        service.sheets.send_recalculation.side_effect = recalc_results
     pending = PendingSubmission(order_no="ORDER-CACHE", spreadsheet_id="venue-sheet", rows=[])
     service._load_pending = MagicMock(return_value=pending)  # type: ignore[method-assign]
     service._record = MagicMock(return_value=records[0])  # type: ignore[method-assign]
     service._get_record = MagicMock(side_effect=records)  # type: ignore[method-assign]
     service._run_catalog_update = MagicMock(return_value=True)  # type: ignore[method-assign]
     service._checkpoint = MagicMock()  # type: ignore[method-assign]
+    service._mark_recalc_started = MagicMock()  # type: ignore[method-assign]
+    service._mark_recalc_completed = MagicMock()  # type: ignore[method-assign]
+    service._mark_recalc_uncertain = MagicMock()  # type: ignore[method-assign]
+    service._send_recalc_uncertain_reply = MagicMock()  # type: ignore[method-assign]
     service._finalize = MagicMock(  # type: ignore[method-assign]
         return_value=ConversationState(status="saved_locally")
     )
@@ -510,7 +521,7 @@ def test_completed_catalog_with_unfinished_recalc_invalidates_cache(
     service.submit("chat-1", report_failure=False)
 
     service.catalog_cache.invalidate.assert_called_once_with("venue-sheet")
-    service.sheets.trigger_recalculation.assert_called_once_with("ORDER-CACHE", "venue-sheet")
+    service.sheets.send_recalculation.assert_called_once()
     service.sheets.prepare_catalog_mutation.assert_not_called()
     service.sheets.apply_catalog_mutation.assert_not_called()
 
@@ -531,7 +542,8 @@ def test_cache_failure_after_catalog_completion_stops_before_recalc_and_dispatch
         service.submit("chat-1", report_failure=False)
 
     service.catalog_cache.invalidate.assert_called_once_with("venue-sheet")
-    service.sheets.trigger_recalculation.assert_not_called()
+    service.sheets.send_recalculation.assert_not_called()
+    service._mark_recalc_started.assert_not_called()
     service.sheets.prepare_order_submission.assert_not_called()
     service.sheets.send_order_submission.assert_not_called()
     service._finalize.assert_not_called()
@@ -554,7 +566,7 @@ def test_cache_failure_retry_invalidates_again_without_catalog_write(
     service.submit("chat-1", report_failure=False)
 
     assert service.catalog_cache.invalidate.call_count == 2
-    service.sheets.trigger_recalculation.assert_called_once_with("ORDER-CACHE", "venue-sheet")
+    service.sheets.send_recalculation.assert_called_once()
     service.sheets.prepare_catalog_mutation.assert_not_called()
     service.sheets.apply_catalog_mutation.assert_not_called()
 
@@ -576,29 +588,30 @@ def test_repeated_cache_failure_never_reapplies_catalog_mutation(
             service.submit("chat-1", report_failure=False)
 
     assert service.catalog_cache.invalidate.call_count == 2
-    service.sheets.trigger_recalculation.assert_not_called()
+    service.sheets.send_recalculation.assert_not_called()
     service.sheets.prepare_catalog_mutation.assert_not_called()
     service.sheets.apply_catalog_mutation.assert_not_called()
 
 
-def test_cache_success_then_recalc_failure_retries_cache_without_catalog_write(
+def test_recalc_failure_blocks_retry_without_second_post(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Повторяет безопасное удаление кэша после сбоя пересчёта."""
+    """Блокирует повтор после неизвестного результата пересчёта."""
     record = _record(catalog_updated=True, recalc_done=False)
+    started = _record(catalog_updated=True, recalc_status="uncertain")
     service = _cache_submission_service(
         monkeypatch,
-        [record, record, record, record, _record(catalog_updated=True, recalc_done=True)],
-        invalidate_results=[None, None],
-        recalc_results=[RuntimeError("recalc unavailable"), None],
+        [record, record, record, started],
+        invalidate_results=[None],
+        recalc_results=[RuntimeError("recalc unavailable")],
     )
 
-    with pytest.raises(RuntimeError, match="recalc unavailable"):
-        service.submit("chat-1", report_failure=False)
+    service.submit("chat-1", report_failure=False)
     service.submit("chat-1", report_failure=False)
 
-    assert service.catalog_cache.invalidate.call_count == 2
-    assert service.sheets.trigger_recalculation.call_count == 2
+    assert service.catalog_cache.invalidate.call_count == 1
+    assert service.sheets.send_recalculation.call_count == 1
+    assert service._send_recalc_uncertain_reply.call_count == 2
     service.sheets.prepare_catalog_mutation.assert_not_called()
     service.sheets.apply_catalog_mutation.assert_not_called()
 
@@ -618,7 +631,70 @@ def test_completed_recalc_skips_unnecessary_cache_repair(
     service.submit("chat-1", report_failure=False)
 
     service.catalog_cache.invalidate.assert_not_called()
-    service.sheets.trigger_recalculation.assert_not_called()
+    service.sheets.send_recalculation.assert_not_called()
+
+
+def test_started_recalc_stops_without_cache_or_second_post(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Останавливает заявку при сохранённом started без нового вызова."""
+    started = _record(catalog_updated=True, recalc_status="started")
+    service = _cache_submission_service(
+        monkeypatch,
+        [started, started],
+        invalidate_results=[None],
+        recalc_results=[None],
+    )
+
+    service.submit("chat-1", report_failure=False)
+
+    service.catalog_cache.invalidate.assert_not_called()
+    service.sheets.send_recalculation.assert_not_called()
+    service._mark_recalc_uncertain.assert_called_once()
+    service._finalize.assert_not_called()
+
+
+def test_recalculation_prepare_failure_stays_retryable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Оставляет пересчёт pending при безопасном сбое подготовки."""
+    record = _record(catalog_updated=True, recalc_done=False)
+    service = _cache_submission_service(
+        monkeypatch,
+        [record, record],
+        invalidate_results=[None],
+        recalc_results=[None],
+    )
+    service.sheets.prepare_recalculation.side_effect = GoogleSheetsError("bad settings")
+
+    with pytest.raises(GoogleSheetsError, match="bad settings"):
+        service.submit("chat-1", report_failure=False)
+
+    service.catalog_cache.invalidate.assert_not_called()
+    service.sheets.send_recalculation.assert_not_called()
+    service._mark_recalc_started.assert_not_called()
+
+
+def test_recalculation_checkpoint_failure_blocks_follow_up_post(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Не повторяет пересчёт после сбоя checkpoint успешного вызова."""
+    pending = _record(catalog_updated=True, recalc_done=False)
+    started = _record(catalog_updated=True, recalc_status="started")
+    service = _cache_submission_service(
+        monkeypatch,
+        [pending, pending, started, started],
+        invalidate_results=[None],
+        recalc_results=[None],
+    )
+    service._mark_recalc_completed.side_effect = RuntimeError("database unavailable")
+
+    service.submit("chat-1", report_failure=False)
+    service.submit("chat-1", report_failure=False)
+
+    assert service.sheets.send_recalculation.call_count == 1
+    service._mark_recalc_uncertain.assert_called()
+    service._finalize.assert_not_called()
 
 
 def _recovery_service(*verifications: CatalogMutationVerification) -> SubmissionService:
@@ -953,6 +1029,7 @@ def test_submission_runs_all_external_stages_and_uses_external_order_number(
     }
     service.sheets.prepare_catalog_mutation.return_value = catalog_plan
     service.sheets.verify_catalog_mutation.return_value = CatalogMutationVerification.APPLIED
+    service.sheets.prepare_recalculation.return_value = MagicMock()
     service.sheets.prepare_order_submission.return_value = _prepared_request()
     service.sheets.send_order_submission.return_value = result
     service._load_pending = MagicMock(return_value=pending)  # type: ignore[method-assign]
@@ -965,6 +1042,8 @@ def test_submission_runs_all_external_stages_and_uses_external_order_number(
         ]
     )
     service._checkpoint = MagicMock()  # type: ignore[method-assign]
+    service._mark_recalc_started = MagicMock()  # type: ignore[method-assign]
+    service._mark_recalc_completed = MagicMock()  # type: ignore[method-assign]
     service._persist_catalog_started = MagicMock()  # type: ignore[method-assign]
     service._mark_dispatch_started = MagicMock()  # type: ignore[method-assign]
     service._mark_dispatch_completed = MagicMock()  # type: ignore[method-assign]
@@ -983,15 +1062,16 @@ def test_submission_runs_all_external_stages_and_uses_external_order_number(
     )
     service.sheets.apply_catalog_mutation.assert_called_once_with(catalog_plan)
     service._persist_catalog_started.assert_called_once_with("ORDER-1", catalog_plan)
-    service.sheets.trigger_recalculation.assert_called_once_with("ORDER-1", "venue-sheet")
+    service.sheets.prepare_recalculation.assert_called_once_with("venue-sheet")
+    service.sheets.send_recalculation.assert_called_once()
+    service.sheets.trigger_recalculation.assert_not_called()
+    service._mark_recalc_started.assert_called_once_with("ORDER-1")
+    service._mark_recalc_completed.assert_called_once_with("ORDER-1")
     service.sheets.prepare_order_submission.assert_called_once_with("venue-sheet", "ORDER-1")
     service._mark_dispatch_started.assert_called_once_with("ORDER-1")
     service.sheets.send_order_submission.assert_called_once_with(_prepared_request())
     service._mark_dispatch_completed.assert_called_once_with("ORDER-1", result)
-    assert [call.args for call in service._checkpoint.call_args_list] == [
-        ("ORDER-1", "catalog_updated"),
-        ("ORDER-1", "recalc_done"),
-    ]
+    service._checkpoint.assert_called_once_with("ORDER-1", "catalog_updated")
     service.catalog_cache.invalidate.assert_called_once_with("venue-sheet")
     service.redis.lock.assert_called_once_with(
         google_submission_lock_key("venue-sheet"),
@@ -1225,7 +1305,7 @@ def test_revoked_access_stops_submission_before_google_write(
     )
     service.sheets.prepare_catalog_mutation.assert_not_called()
     service.sheets.apply_catalog_mutation.assert_not_called()
-    service.sheets.trigger_recalculation.assert_not_called()
+    service.sheets.send_recalculation.assert_not_called()
     service.sheets.send_order_submission.assert_not_called()
     reply = service.telegram.send_reply.call_args.args[1]
     assert "Доступ к заведению отключён" in reply.text
@@ -1260,6 +1340,7 @@ def test_disabled_dispatch_writes_and_recalculates_but_never_calls_submission_sc
         ],
     }
     service.sheets.verify_catalog_mutation.return_value = CatalogMutationVerification.APPLIED
+    service.sheets.prepare_recalculation.return_value = MagicMock()
     pending = PendingSubmission(
         order_no="ORDER-LOCAL",
         spreadsheet_id="venue-sheet",
@@ -1275,6 +1356,8 @@ def test_disabled_dispatch_writes_and_recalculates_but_never_calls_submission_sc
         ]
     )
     service._checkpoint = MagicMock()  # type: ignore[method-assign]
+    service._mark_recalc_started = MagicMock()  # type: ignore[method-assign]
+    service._mark_recalc_completed = MagicMock()  # type: ignore[method-assign]
     service._persist_catalog_started = MagicMock()  # type: ignore[method-assign]
     final_state = ConversationState(last_order_no="ORDER-LOCAL", status="saved_locally")
     service._finalize = MagicMock(return_value=final_state)  # type: ignore[method-assign]
@@ -1285,10 +1368,11 @@ def test_disabled_dispatch_writes_and_recalculates_but_never_calls_submission_sc
 
     service.sheets.prepare_catalog_mutation.assert_called_once()
     service.sheets.apply_catalog_mutation.assert_called_once()
-    service.sheets.trigger_recalculation.assert_called_once_with(
-        "ORDER-LOCAL",
-        "venue-sheet",
-    )
+    service.sheets.prepare_recalculation.assert_called_once_with("venue-sheet")
+    service.sheets.send_recalculation.assert_called_once()
+    service.sheets.trigger_recalculation.assert_not_called()
+    service._mark_recalc_started.assert_called_once_with("ORDER-LOCAL")
+    service._mark_recalc_completed.assert_called_once_with("ORDER-LOCAL")
     service.sheets.prepare_order_submission.assert_not_called()
     service.sheets.send_order_submission.assert_not_called()
     service._finalize.assert_called_once_with(

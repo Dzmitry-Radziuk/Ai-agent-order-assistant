@@ -41,6 +41,7 @@ from restaurant_bot.services.submission_presenter import (
     submission_dispatch_uncertain_reply,
     submission_failure_reply,
     submission_local_saved_reply,
+    submission_recalculation_uncertain_reply,
     submission_success_reply,
 )
 from restaurant_bot.services.text import escape
@@ -109,6 +110,7 @@ class SubmissionService:
                 True,
             )
             finalized = False
+            recalc_send_started = False
             try:
                 record = self._record(chat_id, pending)
                 spreadsheet_id = self._require_venue_spreadsheet_id(pending.spreadsheet_id)
@@ -141,20 +143,54 @@ class SubmissionService:
                             duration_ms=round((perf_counter() - stage_started) * 1000),
                         )
                         record = self._get_record(pending.order_no)
-                        if not record.recalc_done:
-                            self.catalog_cache.invalidate(spreadsheet_id)
-                            stage_started = perf_counter()
-                            self.sheets.trigger_recalculation(
-                                pending.order_no,
-                                spreadsheet_id,
+                        recalc_status = self._recalc_status(record)
+                        if recalc_status == "pending":
+                            prepared_recalculation = self.sheets.prepare_recalculation(
+                                spreadsheet_id
                             )
-                            self._checkpoint(pending.order_no, "recalc_done")
+                            self.catalog_cache.invalidate(spreadsheet_id)
+                            self._mark_recalc_started(pending.order_no)
+                            stage_started = perf_counter()
+                            recalc_send_started = True
+                            try:
+                                self.sheets.send_recalculation(prepared_recalculation)
+                            except Exception as exc:
+                                self._mark_recalc_uncertain(
+                                    chat_id,
+                                    pending.order_no,
+                                    str(exc) or type(exc).__name__,
+                                )
+                                self._send_recalc_uncertain_reply(
+                                    chat_id,
+                                    pending.order_no,
+                                )
+                                return
+                            self._mark_recalc_completed(pending.order_no)
                             logger.info(
                                 "submission_recalculation_completed",
                                 chat_id=chat_id,
                                 order_no=pending.order_no,
                                 duration_ms=round((perf_counter() - stage_started) * 1000),
                             )
+                        elif recalc_status == "started":
+                            self._mark_recalc_uncertain(
+                                chat_id,
+                                pending.order_no,
+                                "Предыдущая попытка пересчёта не завершила контрольную точку.",
+                            )
+                            self._send_recalc_uncertain_reply(chat_id, pending.order_no)
+                            return
+                        elif recalc_status == "uncertain":
+                            self._send_recalc_uncertain_reply(chat_id, pending.order_no)
+                            return
+                        elif recalc_status != "completed":
+                            self._mark_recalc_uncertain(
+                                chat_id,
+                                pending.order_no,
+                                "Состояние пересчёта заявки повреждено.",
+                            )
+                            self._send_recalc_uncertain_reply(chat_id, pending.order_no)
+                            return
                         record = self._get_record(pending.order_no)
                         if record.dispatch_completed:
                             external_order_no = record.external_order_no or pending.order_no
@@ -244,6 +280,21 @@ class SubmissionService:
                 )
             except Exception as exc:
                 logger.exception("submission_failed", chat_id=chat_id, order_no=pending.order_no)
+                if recalc_send_started and not finalized:
+                    try:
+                        self._mark_recalc_uncertain(
+                            chat_id,
+                            pending.order_no,
+                            str(exc) or type(exc).__name__,
+                        )
+                        self._send_recalc_uncertain_reply(chat_id, pending.order_no)
+                    except Exception:
+                        logger.exception(
+                            "submission_recalculation_uncertain_recovery_failed",
+                            chat_id=chat_id,
+                            order_no=pending.order_no,
+                        )
+                    return
                 if finalized:
                     self._remember_transient_error(pending.order_no, str(exc))
                 elif report_failure:
@@ -754,6 +805,121 @@ class SubmissionService:
             return status
         return "completed" if getattr(record, "catalog_updated", False) else "pending"
 
+    @staticmethod
+    def _recalc_status(record: SubmissionRecord) -> str:
+        """Возвращает безопасный статус жизненного цикла пересчёта."""
+        status = getattr(record, "recalc_status", "")
+        recalc_done = bool(getattr(record, "recalc_done", False))
+        if not status:
+            return "completed" if recalc_done else "pending"
+        if status not in {"pending", "started", "uncertain", "completed"}:
+            return "uncertain"
+        if status == "completed":
+            return "completed" if recalc_done else "uncertain"
+        if status == "pending" and recalc_done:
+            return "completed"
+        if status in {"started", "uncertain"} and recalc_done:
+            return "uncertain"
+        return status
+
+    def _mark_recalc_started(self, order_no: str) -> None:
+        """Фиксирует начало пересчёта до первого внешнего вызова."""
+        from sqlalchemy import select
+
+        with SessionLocal.begin() as db:
+            record = db.scalar(
+                select(SubmissionRecord)
+                .where(SubmissionRecord.order_no == order_no)
+                .with_for_update()
+            )
+            if record is None:
+                raise RuntimeError(f"Submission record {order_no} not found")
+            status = self._recalc_status(record)
+            if status != "pending":
+                if status == "completed":
+                    return
+                raise RuntimeError("Recalculation is already started or uncertain")
+            record.recalc_status = "started"
+            record.recalc_operation_id = f"recalc:{order_no}"
+            record.recalc_started_at = datetime.now(UTC)
+            record.recalc_completed_at = None
+            record.recalc_done = False
+            record.last_error = None
+            pending = PendingSubmission.model_validate(record.payload)
+            self._append_submission_event(
+                OrderEventRepository(db),
+                pending,
+                event_type="submission_recalculation_started",
+                idempotency_key=f"order:{order_no}:recalc-started",
+                details={"operation_id": record.recalc_operation_id},
+            )
+
+    def _mark_recalc_completed(self, order_no: str) -> None:
+        """Фиксирует подтверждённое завершение пересчёта."""
+        from sqlalchemy import select
+
+        with SessionLocal.begin() as db:
+            record = db.scalar(
+                select(SubmissionRecord)
+                .where(SubmissionRecord.order_no == order_no)
+                .with_for_update()
+            )
+            if record is None:
+                raise RuntimeError(f"Submission record {order_no} not found")
+            record.recalc_status = "completed"
+            record.recalc_done = True
+            record.recalc_completed_at = datetime.now(UTC)
+            record.last_error = None
+            pending = PendingSubmission.model_validate(record.payload)
+            self._append_submission_event(
+                OrderEventRepository(db),
+                pending,
+                event_type="submission_recalculation_completed",
+                idempotency_key=f"order:{order_no}:recalc-completed",
+            )
+
+    def _mark_recalc_uncertain(self, chat_id: str, order_no: str, error: str) -> None:
+        """Блокирует повтор пересчёта после неизвестного внешнего результата."""
+        from sqlalchemy import select
+
+        with SessionLocal.begin() as db:
+            sessions = SessionRepository(db)
+            row, state = sessions.get_for_update(chat_id)
+            state.stage = SessionStage.SUBMISSION_FAILED
+            state.status = "recalculation_uncertain"
+            if state.pending_submission:
+                state.pending_submission.failed_stage = "recalculation_uncertain"
+                state.pending_submission.last_error = error[:1000]
+            sessions.save(chat_id, state, row)
+            record = db.scalar(
+                select(SubmissionRecord)
+                .where(SubmissionRecord.order_no == order_no)
+                .with_for_update()
+            )
+            if record is None:
+                raise RuntimeError(f"Submission record {order_no} not found")
+            record.recalc_status = "uncertain"
+            record.recalc_done = False
+            record.last_error = error[:4000]
+            pending = PendingSubmission.model_validate(record.payload)
+            self._append_submission_event(
+                OrderEventRepository(db),
+                pending,
+                event_type="submission_recalculation_uncertain",
+                idempotency_key=f"order:{order_no}:recalc-uncertain",
+                status="uncertain",
+                details={"error": error},
+            )
+
+    def _send_recalc_uncertain_reply(self, chat_id: str, order_no: str) -> None:
+        """Показывает безопасное уведомление без повторной отправки."""
+        with SessionLocal() as db:
+            _, state = SessionRepository(db).get_for_update(chat_id)
+        self.telegram.send_reply(
+            chat_id,
+            submission_recalculation_uncertain_reply(state, order_no),
+        )
+
     def _run_catalog_update(
         self,
         chat_id: str,
@@ -1062,6 +1228,9 @@ class SubmissionService:
             if field == "catalog_updated":
                 record.catalog_update_status = "completed"
                 record.catalog_update_completed_at = datetime.now(UTC)
+            if field == "recalc_done":
+                record.recalc_status = "completed"
+                record.recalc_completed_at = datetime.now(UTC)
             record.last_error = None
             pending = PendingSubmission.model_validate(record.payload)
             event_types = {

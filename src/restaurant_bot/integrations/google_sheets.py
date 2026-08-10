@@ -41,6 +41,15 @@ class PreparedOrderSubmission:
     timeout_seconds: float
 
 
+@dataclass(frozen=True, slots=True, repr=False)
+class PreparedRecalculation:
+    """Хранит проверенный запрос пересчёта без внешнего вызова."""
+
+    url: str
+    payload: dict[str, Any]
+    timeout_seconds: float
+
+
 @dataclass(frozen=True, slots=True)
 class OrderSubmissionResult:
     """Описывает созданную центральным Web App заявку."""
@@ -689,21 +698,35 @@ class GoogleSheetsGateway:
             notifications=notifications if isinstance(notifications, dict) else {},
         )
 
-    def trigger_recalculation(self, order_no: str, spreadsheet_id: str) -> None:
-        """Запускает перерасчёт итогов заявки."""
-        del order_no  # The source n8n Apps Script recalculates the whole Заявка sheet.
+    def prepare_recalculation(self, spreadsheet_id: str) -> PreparedRecalculation:
+        """Готовит запрос пересчёта без выполнения внешнего POST."""
         target_id = self._require_spreadsheet_id(spreadsheet_id)
+        url = self.settings.google_recalc_url.strip()
         token = self.settings.google_recalc_token.get_secret_value()
+        sheet_name = self.settings.google_recalc_sheet.strip()
+        if not url:
+            raise GoogleSheetsError("GOOGLE_RECALC_URL is not configured")
         if not token:
             raise GoogleSheetsError("GOOGLE_RECALC_TOKEN is not configured")
-        response = httpx.post(
-            self.settings.google_recalc_url,
-            json={
+        if not sheet_name:
+            raise GoogleSheetsError("GOOGLE_RECALC_SHEET is not configured")
+        return PreparedRecalculation(
+            url=url,
+            payload={
                 "token": token,
-                "sheetName": self.settings.google_recalc_sheet,
+                "sheetName": sheet_name,
                 "spreadsheetId": target_id,
             },
-            timeout=45.0,
+            timeout_seconds=45.0,
+        )
+
+    @staticmethod
+    def send_recalculation(request: PreparedRecalculation) -> None:
+        """Отправляет один заранее подготовленный запрос пересчёта."""
+        response = httpx.post(
+            request.url,
+            json=request.payload,
+            timeout=request.timeout_seconds,
             follow_redirects=True,
         )
         response.raise_for_status()
@@ -717,6 +740,11 @@ class GoogleSheetsGateway:
             raise GoogleSheetsError("Recalculation script returned an error")
         if payload is None and re.search(r"(?:error|exception|failed|ошиб)", response.text, re.I):
             raise GoogleSheetsError("Recalculation script returned an error")
+
+    def trigger_recalculation(self, order_no: str, spreadsheet_id: str) -> None:
+        """Совместимо запускает пересчёт через подготовку и отправку."""
+        del order_no
+        self.send_recalculation(self.prepare_recalculation(spreadsheet_id))
 
     @staticmethod
     def _merge_comment(base: str, addition: str) -> str:
