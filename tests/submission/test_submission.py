@@ -309,6 +309,10 @@ def _record(**overrides: object) -> SimpleNamespace:
         "dispatch_completed": False,
         "dispatch_uncertain_notified": False,
         "external_order_no": None,
+        "completion_notified": False,
+        "completion_notification_status": "pending",
+        "completion_notification_started_at": None,
+        "completion_notification_completed_at": None,
         "last_error": None,
     }
     values.update(overrides)
@@ -316,6 +320,10 @@ def _record(**overrides: object) -> SimpleNamespace:
         values["catalog_update_status"] = "completed" if values["catalog_updated"] else "pending"
     if "recalc_status" not in overrides:
         values["recalc_status"] = "completed" if values["recalc_done"] else "pending"
+    if "completion_notification_status" not in overrides:
+        values["completion_notification_status"] = (
+            "completed" if values["completion_notified"] else "pending"
+        )
     return SimpleNamespace(**values)
 
 
@@ -1021,16 +1029,125 @@ def test_retry_delivers_local_saved_card_without_claiming_dispatch(
 
 
 def test_success_card_is_checkpointed_only_after_telegram_accepts_it() -> None:
-    """Фиксирует уведомление только после успешного ответа Telegram."""
+    """Фиксирует уведомление после успешного ответа Telegram."""
     service = object.__new__(SubmissionService)
     service.telegram = MagicMock()
-    service._checkpoint = MagicMock()  # type: ignore[method-assign]
+    lifecycle: list[str] = []
+    service._mark_completion_notification_started = MagicMock(  # type: ignore[method-assign]
+        side_effect=lambda _order_no: lifecycle.append("started") or True
+    )
+    service._mark_completion_notification_completed = MagicMock(  # type: ignore[method-assign]
+        side_effect=lambda _order_no: lifecycle.append("completed")
+    )
+    service._mark_completion_notification_uncertain = MagicMock()  # type: ignore[method-assign]
+    service.telegram.send_reply.side_effect = lambda *_args: lifecycle.append("telegram")
     state = ConversationState(last_order_no="A-1", status="submitted")
 
     service._send_completion("123", state, "A-1", "ORDER-INTERNAL")
 
     service.telegram.send_reply.assert_called_once()
-    service._checkpoint.assert_called_once_with("ORDER-INTERNAL", "completion_notified")
+    assert lifecycle == ["started", "telegram", "completed"]
+    service._mark_completion_notification_uncertain.assert_not_called()
+
+
+def test_completion_notification_does_not_send_when_start_checkpoint_fails() -> None:
+    """Не отправляет карточку, если контрольная точка старта не сохранена."""
+    service = object.__new__(SubmissionService)
+    service.telegram = MagicMock()
+    service._mark_completion_notification_started = MagicMock(  # type: ignore[method-assign]
+        side_effect=RuntimeError("database unavailable")
+    )
+    state = ConversationState(last_order_no="A-1", status="submitted")
+
+    with pytest.raises(RuntimeError, match="database unavailable"):
+        service._send_completion("123", state, "A-1", "ORDER-INTERNAL")
+
+    service.telegram.send_reply.assert_not_called()
+
+
+def test_completion_notification_send_failure_marks_uncertain_without_retry() -> None:
+    """Помечает неизвестный результат Telegram и не повторяет отправку автоматически."""
+    service = object.__new__(SubmissionService)
+    service.telegram = MagicMock()
+    service.telegram.send_reply.side_effect = TimeoutError("telegram timeout")
+    lifecycle: list[str] = []
+    service._mark_completion_notification_started = MagicMock(  # type: ignore[method-assign]
+        side_effect=lambda _order_no: lifecycle.append("started") or True
+    )
+    service._mark_completion_notification_uncertain = MagicMock(  # type: ignore[method-assign]
+        side_effect=lambda _order_no, _error: lifecycle.append("uncertain")
+    )
+    service._mark_completion_notification_completed = MagicMock()  # type: ignore[method-assign]
+    state = ConversationState(last_order_no="A-1", status="submitted")
+
+    with pytest.raises(TimeoutError, match="telegram timeout"):
+        service._send_completion("123", state, "A-1", "ORDER-INTERNAL")
+
+    assert lifecycle == ["started", "uncertain"]
+    service.telegram.send_reply.assert_called_once()
+    service._mark_completion_notification_completed.assert_not_called()
+
+
+def test_completion_notification_checkpoint_failure_blocks_the_next_send() -> None:
+    """Блокирует повтор после принятой Telegram карточки и сбоя completion checkpoint."""
+    service = object.__new__(SubmissionService)
+    service.telegram = MagicMock()
+    service._mark_completion_notification_started = MagicMock(return_value=True)  # type: ignore[method-assign]
+    service._mark_completion_notification_completed = MagicMock(  # type: ignore[method-assign]
+        side_effect=RuntimeError("checkpoint unavailable")
+    )
+    state = ConversationState(last_order_no="A-1", status="submitted")
+
+    with pytest.raises(RuntimeError, match="checkpoint unavailable"):
+        service._send_completion("123", state, "A-1", "ORDER-INTERNAL")
+
+    service.telegram.send_reply.assert_called_once()
+
+    recovery = object.__new__(SubmissionService)
+    recovery.telegram = MagicMock()
+    recovery._mark_completion_notification_started = MagicMock(  # type: ignore[method-assign]
+        return_value=False
+    )
+    recovery._send_completion("123", state, "A-1", "ORDER-INTERNAL")
+
+    recovery.telegram.send_reply.assert_not_called()
+
+
+def test_completion_notification_started_or_completed_status_skips_send() -> None:
+    """Не повторяет уведомление после начатой или завершённой попытки."""
+    state = ConversationState(last_order_no="A-1", status="submitted")
+    for _status in ("started", "uncertain", "completed"):
+        service = object.__new__(SubmissionService)
+        service.telegram = MagicMock()
+        service._mark_completion_notification_started = MagicMock(  # type: ignore[method-assign]
+            return_value=False
+        )
+
+        service._send_completion("123", state, "A-1", "ORDER-INTERNAL")
+
+        service.telegram.send_reply.assert_not_called()
+
+
+def test_local_completion_uses_the_same_notification_lifecycle() -> None:
+    """Применяет те же контрольные точки к локальному сохранению заявки."""
+    service = object.__new__(SubmissionService)
+    service.telegram = MagicMock()
+    lifecycle: list[str] = []
+    service._mark_completion_notification_started = MagicMock(  # type: ignore[method-assign]
+        side_effect=lambda _order_no: lifecycle.append("started") or True
+    )
+    service._mark_completion_notification_completed = MagicMock(  # type: ignore[method-assign]
+        side_effect=lambda _order_no: lifecycle.append("completed")
+    )
+    service._mark_completion_notification_uncertain = MagicMock()  # type: ignore[method-assign]
+    service.telegram.send_reply.side_effect = lambda *_args: lifecycle.append("telegram")
+    state = ConversationState(last_order_no="A-1", status="saved_locally")
+
+    service._send_local_completion("123", state, "A-1")
+
+    service.telegram.send_reply.assert_called_once()
+    assert lifecycle == ["started", "telegram", "completed"]
+    service._mark_completion_notification_uncertain.assert_not_called()
 
 
 def test_submission_runs_all_external_stages_and_uses_external_order_number(

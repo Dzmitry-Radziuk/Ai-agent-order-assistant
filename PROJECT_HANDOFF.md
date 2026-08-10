@@ -3841,8 +3841,31 @@ schema и migrations не менялись.
   завершённый recalc в `uncertain`; сбой самой completion persistence остаётся
   неопределённым и блокирует повторный POST. H3c не начинался.
 
+## BLOCK H3c — DONE / COMPLETION NOTIFICATION SAFETY ACTIVE
+
+- Для `submission_records` добавлена миграция `0008`: `completion_notification_status`,
+  `completion_notification_started_at` и `completion_notification_completed_at`. Старый
+  `completion_notified` сохранён; историческое `true` переводится в `completed`, `false` —
+  в `pending`, без выдумывания старых timestamp.
+- Доставка финальной карточки теперь имеет lifecycle `pending → started → completed`.
+  Перед вызовом Telegram сначала фиксируется `started`; после успешного ответа фиксируется
+  `completed` и старый boolean синхронизируется. Исключение после вызова Telegram переводит
+  запись в `uncertain` и не создаёт техническую карточку/автоматический повтор.
+- Если контрольная точка `started` не сохранилась, Telegram не вызывается. Записи со статусами
+  `started`, `uncertain` или противоречивым `completed` не отправляются повторно при recovery.
+  Pending-запись может выполнить только одну первую доставку через тот же gate. Локальная
+  карточка сохранённой заявки использует тот же lifecycle.
+- Аудит ограничен idempotency-ключами
+  `order:<order_no>:notification-started|notification-sent|notification-uncertain`; бизнес-запись,
+  каталог, пересчёт, dispatch и UX-тексты не менялись.
+- H3c focused suite: **122 passed** (submission, migration, H1/H2/H3a/H3b safety tests).
+  Свежий полный запуск: **1316 collected / 1302 passed / 14 failed / 0 skipped / 0 xfailed /
+  0 errors**. Все 14 падений совпадают с baseline H3b; новых regressions нет.
+- Проверки: Ruff check/format для изменённых Python-файлов, mypy (`52 source files`), markdown
+  links, `git diff --check` и `alembic heads` (`0008`) проходят.
+
 ## NEXT FUNCTIONAL STEP
 
-`BLOCK H3c — completion notification safety` — отдельный этап после проверки
-H3b. Не начинать его автоматически; parser, prompts, engine, modal routing,
-matching, decomposition и MAX остаются вне scope.
+`RAPID INPUT / BUTTON STORM / CONCURRENCY SAFETY ANALYSIS ONLY` — только анализ следующего
+этапа. Не начинать реализацию автоматически; parser, prompts, engine decomposition и MAX
+остаются вне scope до отдельного согласования.
