@@ -708,6 +708,23 @@ def test_recalculation_send_performs_one_post(settings, monkeypatch) -> None:  #
     response.raise_for_status.assert_called_once()
 
 
+def test_recalculation_invalid_json_is_not_treated_as_success(settings, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    """Считает невалидный ответ неизвестным результатом пересчёта."""
+    response = MagicMock()
+    response.json.side_effect = ValueError("invalid json")
+    post = MagicMock(return_value=response)
+    monkeypatch.setattr(google_sheets_module.httpx, "post", post)
+
+    request = PreparedRecalculation(
+        url=settings.google_recalc_url,
+        payload={"token": "secret", "sheetName": "Заявка", "spreadsheetId": "sheet"},
+        timeout_seconds=45.0,
+    )
+
+    with pytest.raises(GoogleSheetsError, match="invalid JSON"):
+        GoogleSheetsGateway.send_recalculation(request)
+
+
 def test_recalculation_without_token_cannot_be_marked_successful(settings) -> None:  # type: ignore[no-untyped-def]
     """Проверяет, что перерасчёт без токен не может be отмечается успешная."""
     settings.google_recalc_token = SecretStr("")

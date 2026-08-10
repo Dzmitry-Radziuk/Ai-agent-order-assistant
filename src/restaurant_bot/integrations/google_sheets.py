@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import re
 from collections import defaultdict
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -732,13 +731,11 @@ class GoogleSheetsGateway:
         response.raise_for_status()
         try:
             payload = response.json()
-        except ValueError:
-            payload = None
-        if isinstance(payload, dict) and (
-            payload.get("ok") is False or payload.get("success") is False or payload.get("error")
-        ):
-            raise GoogleSheetsError("Recalculation script returned an error")
-        if payload is None and re.search(r"(?:error|exception|failed|ошиб)", response.text, re.I):
+        except ValueError as exc:
+            raise GoogleSheetsError("Recalculation script returned invalid JSON") from exc
+        if not isinstance(payload, dict):
+            raise GoogleSheetsError("Recalculation script returned invalid payload")
+        if payload.get("ok") is False or payload.get("success") is False or payload.get("error"):
             raise GoogleSheetsError("Recalculation script returned an error")
 
     def trigger_recalculation(self, order_no: str, spreadsheet_id: str) -> None:
