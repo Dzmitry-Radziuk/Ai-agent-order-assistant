@@ -3866,6 +3866,13 @@ schema и migrations не менялись.
 
 ## NEXT FUNCTIONAL STEP
 
-`RAPID INPUT / BUTTON STORM / CONCURRENCY SAFETY ANALYSIS ONLY` — только анализ следующего
-этапа. Не начинать реализацию автоматически; parser, prompts, engine decomposition и MAX
-остаются вне scope до отдельного согласования.
+`RAPID INPUT / BUTTON STORM / CONCURRENCY SAFETY ANALYSIS ONLY` завершён как analysis-only.
+Документ: [docs/RAPID_INPUT_CONCURRENCY_ANALYSIS.md](docs/RAPID_INPUT_CONCURRENCY_ANALYSIS.md).
+На checkout `736b04c` подтверждены P0/P1 риски: истечение per-chat Redis lock без
+fencing (default TTL 120 s при vision timeout до 180 s), потеря валидного update после
+15 s contention и отсутствие FIFO между разными update одного чата. H1–H3c gates
+сохраняют безопасность известных irreversible submission side effects, но не решают
+эти state/ordering gaps. Рекомендованы ровно два будущих bounded блока: durable
+per-chat sequencing/contention handling и lease-expiry fencing. В этом этапе production
+код, тесты и миграции не менялись; `.env` не читался и не tracked; GitLab не использовался.
+Реализацию блоков не начинать автоматически.
