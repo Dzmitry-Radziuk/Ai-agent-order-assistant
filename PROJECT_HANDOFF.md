@@ -59,9 +59,11 @@ Telegram update
 - `services/input_normalizer.py` — Telegram payload -> TelegramEvent.
 - `services/input_recognition.py` — voice/photo, транскрибация и visible actions.
 - `services/parser.py` — глобальный intent/callback parser и совместимый фасад.
-- `services/product_parser.py` — временный compatibility facade после Block 1.
-- `parsing/products.py` — текущий владелец детерминированного разбора товарных
-  строк, количества, фасовки и явной области общего комментария.
+- `parsing/products.py` — orchestration разбора товарных строк и сборка
+  итогового списка `ExtractedItem`.
+- `parsing/quantities.py` — короткие ответы количества и quantity primitives.
+- `parsing/packaging.py` — фасовка, диапазоны и catalog measurement parsing.
+- `parsing/comment_scope.py` — явная область общего комментария.
 - `services/text.py` — лексическая нормализация, единицы, числа и диапазоны.
 - `integrations/openai_parsing.py` — structured schemas и reconciliation
   источника, комментариев, количеств и shadow items.
@@ -116,7 +118,7 @@ GitLab не используется. В этой задаче разрешён 
 
 ## 7. Известные ручные acceptance-проблемы
 
-Эти сценарии не исправляются в Block 1:
+Эти сценарии не исправляются в Block 2A:
 
 - после вопроса о количестве для «хлеб» фраза «новый товар» не должна стать
   количеством хлеба;
@@ -129,12 +131,19 @@ Block 0 завершён: зафиксированы владельцы, depende
 facades и порядок миграции в `docs/ARCHITECTURE_DECOMPOSITION.md`.
 
 Block 1 завершён механически: реализация product parser находится в
-`parsing/products.py`, а `services/parser.py` импортирует её напрямую.
+`parsing/products.py`, а `services/parser.py` импортирует его напрямую.
 Поведение, prompts, state machine, matching, UX, persistence и deployment не
 менялись. Focused и полный regression baseline проходят.
 
-После переноса `services/product_parser.py` остаётся тонким фасадом и
-кандидатом на удаление только после следующего repository-wide import audit.
+Block 2A завершён: из `products.py` вынесены три доказанных независимых
+кластера — quantities, packaging и explicit global comment scope. Старый
+`services/product_parser.py` удалён после полного import audit: callers старого
+пути не найдены.
+
+Постоянное правило: перед каждым `MOVE`/`MERGE`/`DELETE` выполняются
+repository-wide usage и duplicate audit. Мёртвый или дублирующий код не
+переносится; для одной ответственности остаётся одна реализация. Временный
+facade допустим только как явный re-export при подтверждённых callers.
 
 ## 9. Следующий блок
 
@@ -144,7 +153,7 @@ Block 1 завершён механически: реализация product pa
 
 ## 10. Проверки
 
-Для Block 1 обязательны:
+Для Block 2A обязательны:
 
 ```text
 focused pytest:
@@ -164,8 +173,9 @@ git diff --check
 ```
 
 Также проверяются импорты `restaurant_bot.parsing.products`,
-`restaurant_bot.services.product_parser`, `restaurant_bot.services.parser`
-и отсутствие циклических импортов.
+`restaurant_bot.parsing.quantities`, `restaurant_bot.parsing.packaging`,
+`restaurant_bot.parsing.comment_scope`, `restaurant_bot.services.parser` и
+отсутствие циклических импортов.
 
 ## 11. Правила передачи
 

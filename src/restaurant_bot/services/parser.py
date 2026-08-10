@@ -4,16 +4,12 @@ import re
 from collections.abc import Sequence
 
 from restaurant_bot.domain.models import DialogueResponse, ExtractedItem, Intent, ParsedCommand
-from restaurant_bot.parsing.products import _extract_global_comment
-from restaurant_bot.parsing.products import (
+from restaurant_bot.parsing.comment_scope import _extract_global_comment
+from restaurant_bot.parsing.comment_scope import (
     has_explicit_global_comment_scope as _has_explicit_global_comment_scope,
 )
-from restaurant_bot.parsing.products import (
-    parse_product_lines as _parse_product_lines,
-)
-from restaurant_bot.parsing.products import (
-    parse_quantity_unit as _parse_quantity_unit,
-)
+from restaurant_bot.parsing.products import parse_product_lines as _parse_product_lines
+from restaurant_bot.parsing.quantities import parse_quantity_unit as _parse_quantity_unit
 from restaurant_bot.services.text import (
     NUMBER_WORDS,
     UNIT_ALIASES,
