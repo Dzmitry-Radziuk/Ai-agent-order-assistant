@@ -48,8 +48,11 @@ flowchart LR
 | `services/orchestrator.py` | Транзакционный pipeline: claim update, регистрация и доступ, блокировка чата, загрузка состояния, текстовая маршрутизация, каталог, engine, сохранение, задачи и доставка ответа |
 | `services/engine.py` | Детерминированная state machine, приоритет незавершённых вопросов, команды, callback и переходы черновика |
 | `services/input_recognition.py` | Скачивание voice/photo, транскрибация с безопасным fallback и обновление карточки прогресса |
-| `services/parser.py` | Быстрые команды, callback, intent и совместимый фасад товарного парсера |
-| `services/product_parser.py` | Товарные строки, количества, фасовка и явная область комментария без внешних эффектов |
+| `services/parser.py` | Text intent facade, callback contract и временный dispatcher command parsing |
+| `parsing/products.py` | Разбор товарных строк и сборка `ExtractedItem` без внешних эффектов |
+| `parsing/quantities.py` | Короткие quantity primitives |
+| `parsing/packaging.py` | Фасовка и каталожные measurement spans |
+| `parsing/comment_scope.py` | Явная область общего комментария во входной товарной строке |
 | `services/comment_policy.py` | Единая policy явных пожеланий поставщику для детерминированного и AI-разбора |
 | `services/catalog_resolver.py` | Область поиска поставщика, кандидаты и hard veto безопасного автосопоставления |
 | `services/conversation_handlers/` | Изолированные переходы количества, выбора товара, области комментария, финальной проверки, статусов и пассивной навигации |

@@ -147,9 +147,11 @@ facade допустим только как явный re-export при подт
 
 ## 9. Следующий блок
 
-Следующий блок — перенос command parsing из `services/parser.py` в
-`parsing/commands.py`. Его нельзя начинать автоматически в рамках текущей
-задачи.
+Block 2B начат после проверки SHA `4a24f0d0106e48943865be507d6380ae1a8a94db`.
+Сначала отдельным documentation commit закрепляются долговременные правила
+платформы, channel-agnostic core, root-cause диагностики и usage audit. Затем
+будет выполнен механический перенос text command parsing по доказанным
+ответственностям. `parse_callback()` остаётся отдельным channel contract.
 
 ## 10. Проверки
 

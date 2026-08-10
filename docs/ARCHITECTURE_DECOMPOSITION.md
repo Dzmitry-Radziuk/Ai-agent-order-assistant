@@ -194,7 +194,24 @@ services/parser.py
 `_parse_product_line` — 84 строки как orchestration одной исходной строки.
 Focused и полный regression baseline проходят.
 
-## 9. Проверки Block 2A
+## 9. Долговременная архитектурная цель
+
+Проект развивается как production-grade платформа закупок, а не как набор
+Telegram-specific сценариев. Telegram Bot, Telegram Mini App, MAX и Web должны
+оставаться внешними adapters одного application/domain core. Новые владельцы
+parsing, routing, catalog, conversation, history и submission не импортируют
+объекты конкретного канала.
+
+Будущие свободные вопросы о прошлых заявках проходят через структурированный
+`HistoryQuery` и отдельный history use case. Этот migration block историю не
+реализует и не добавляет новые history intents.
+
+Перед каждым `MOVE`, `MERGE`, `DELETE` или `SPLIT` выполняется repository-wide
+usage/duplicate/dead-code audit до и после изменения. Для одной ответственности
+остаётся один owner; facade возможен только как простой re-export при доказанных
+callers.
+
+## 10. Проверки Block 2A
 
 Focused:
 
