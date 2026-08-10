@@ -8,7 +8,7 @@ from redis import Redis
 
 from restaurant_bot.config import get_settings
 from restaurant_bot.db import SessionLocal
-from restaurant_bot.integrations.cache import ChatLockBusyError
+from restaurant_bot.integrations.cache import ChatLeaseLostError, ChatLockBusyError
 from restaurant_bot.integrations.google_sheets import GoogleSheetsGateway
 from restaurant_bot.integrations.openai_client import OpenAIService
 from restaurant_bot.integrations.telegram import TELEGRAM_TRANSIENT_ERRORS, TelegramClient
@@ -43,7 +43,12 @@ def dependencies() -> tuple[UpdateOrchestrator, SubmissionService]:
 
 @celery_app.task(
     bind=True,
-    autoretry_for=(*TELEGRAM_TRANSIENT_ERRORS, ChatLockBusyError, UpdateSequenceDeferred),
+    autoretry_for=(
+        *TELEGRAM_TRANSIENT_ERRORS,
+        ChatLockBusyError,
+        UpdateSequenceDeferred,
+        ChatLeaseLostError,
+    ),
     retry_backoff=True,
     retry_jitter=True,
     retry_kwargs={"max_retries": UPDATE_DELIVERY_MAX_RETRIES},
@@ -59,6 +64,9 @@ def process_telegram_update(self, update_id: int) -> None:  # type: ignore[no-un
         raise
     except UpdateSequenceDeferred:
         logger.info("telegram_update_deferred_sequence", update_id=update_id)
+        raise
+    except ChatLeaseLostError:
+        logger.info("telegram_update_deferred_lease_loss", update_id=update_id)
         raise
 
 

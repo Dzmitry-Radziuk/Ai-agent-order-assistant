@@ -216,6 +216,23 @@ def test_update_repository_does_not_redrive_fresh_processing_row() -> None:
     assert [row.update_id for row in result] == [301, 401]
 
 
+def test_update_repository_defers_only_matching_processing_attempt() -> None:
+    """Возвращает в очередь только указанную попытку обработки."""
+    db = MagicMock()
+    db.execute.return_value.rowcount = 1
+
+    assert UpdateRepository(db).defer_if_current_attempt(42, 3) is True
+    db.execute.assert_called_once()
+
+
+def test_update_repository_reports_stale_attempt_without_mutation() -> None:
+    """Не считает устаревшую попытку успешно возвращённой в очередь."""
+    db = MagicMock()
+    db.execute.return_value.rowcount = 0
+
+    assert UpdateRepository(db).defer_if_current_attempt(42, 2) is False
+
+
 def test_submission_repository_returns_existing_record() -> None:
     """Не создаёт повторную запись для существующего номера заявки."""
     db = MagicMock()

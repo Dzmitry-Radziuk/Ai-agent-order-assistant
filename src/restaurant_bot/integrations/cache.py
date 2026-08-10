@@ -4,6 +4,7 @@ import hashlib
 import json
 from collections.abc import Iterator
 from contextlib import contextmanager
+from threading import Event, Thread
 from time import perf_counter
 from typing import Any
 
@@ -103,13 +104,101 @@ class ChatLockBusyError(TimeoutError):
     """Сообщает, что другой обработчик временно владеет блокировкой чата."""
 
 
+class ChatLeaseLostError(RuntimeError):
+    """Сообщает, что обработчик потерял право изменять данные чата."""
+
+
+class ChatLease:
+    """Продлевает Redis-блокировку и проверяет её владение."""
+
+    def __init__(self, lock: Lock, timeout: int, heartbeat_interval: float):
+        """Создаёт возобновляемую блокировку чата."""
+        self.lock = lock
+        self.timeout = timeout
+        self.heartbeat_interval = heartbeat_interval
+        self._stop = Event()
+        self._lost = Event()
+        self._heartbeat = Thread(target=self._run_heartbeat, daemon=True)
+        self._heartbeat.start()
+
+    @property
+    def lost(self) -> bool:
+        """Возвращает признак потери владения блокировкой."""
+        return self._lost.is_set()
+
+    def ensure_owned(self) -> None:
+        """Проверяет право владельца продолжать работу с чатом."""
+        if self._lost.is_set():
+            raise ChatLeaseLostError("Chat lease ownership was lost")
+        try:
+            owned = self.lock.owned()
+        except Exception as exc:
+            self._mark_lost(type(exc).__name__)
+            raise ChatLeaseLostError("Chat lease ownership could not be verified") from exc
+        if not owned:
+            self._mark_lost("ownership_changed")
+            raise ChatLeaseLostError("Chat lease ownership was lost")
+
+    def refresh(self) -> bool:
+        """Продлевает срок блокировки до исходной длительности."""
+        if self._lost.is_set():
+            return False
+        try:
+            self.ensure_owned()
+            self.lock.extend(self.timeout, replace_ttl=True)
+            logger.debug("telegram_chat_lease_renewed")
+            return True
+        except ChatLeaseLostError:
+            return False
+        except Exception as exc:
+            self._mark_lost(type(exc).__name__)
+            return False
+
+    def close(self) -> None:
+        """Останавливает продление и безопасно освобождает свою блокировку."""
+        self._stop.set()
+        self._heartbeat.join(timeout=min(max(self.heartbeat_interval * 2, 0.1), 1.0))
+        if self._heartbeat.is_alive():
+            logger.warning("telegram_chat_lease_release_deferred")
+            return
+        if self._lost.is_set():
+            return
+        try:
+            if self.lock.owned():
+                self.lock.release()
+        except Exception as exc:
+            logger.warning("telegram_chat_lease_release_skipped", error_type=type(exc).__name__)
+
+    def _run_heartbeat(self) -> None:
+        """Периодически продлевает блокировку до выхода из контекста."""
+        while not self._stop.wait(self.heartbeat_interval):
+            if not self.refresh():
+                return
+
+    def _mark_lost(self, reason: str) -> None:
+        """Фиксирует потерю владения и записывает одно предупреждение."""
+        if not self._lost.is_set():
+            self._lost.set()
+            logger.warning("telegram_chat_lease_lost", reason=reason)
+
+
 @contextmanager
-def chat_lock(redis: Redis[Any], chat_id: str, timeout: int = 120) -> Iterator[Lock]:
+def chat_lock(
+    redis: Redis[Any],
+    chat_id: str,
+    timeout: int = 120,
+    *,
+    heartbeat_interval: float | None = None,
+) -> Iterator[ChatLease]:
     """Последовательно обрабатывает сообщения одного чата."""
+    interval = timeout / 3 if heartbeat_interval is None else heartbeat_interval
+    if interval <= 0 or interval > timeout / 3:
+        raise ValueError("heartbeat_interval must be positive and no greater than timeout / 3")
     lock = redis.lock(
         f"restaurant-bot:chat-lock:{chat_id}",
         timeout=timeout,
         blocking_timeout=15,
+        thread_local=False,
     )
     started_at = perf_counter()
     acquired = lock.acquire(blocking=True)
@@ -123,8 +212,8 @@ def chat_lock(redis: Redis[Any], chat_id: str, timeout: int = 120) -> Iterator[L
         "telegram_chat_lock_acquired",
         wait_ms=round((perf_counter() - started_at) * 1000),
     )
+    lease = ChatLease(lock, timeout, interval)
     try:
-        yield lock
+        yield lease
     finally:
-        if lock.owned():
-            lock.release()
+        lease.close()

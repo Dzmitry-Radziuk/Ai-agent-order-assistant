@@ -1,10 +1,16 @@
 from datetime import UTC, datetime
+from threading import Event
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
 
-from restaurant_bot.integrations.cache import ChatLockBusyError, chat_lock
+from restaurant_bot.integrations.cache import (
+    ChatLease,
+    ChatLeaseLostError,
+    ChatLockBusyError,
+    chat_lock,
+)
 from restaurant_bot.repositories.updates import UpdateSequenceDeferred
 from restaurant_bot.services import orchestrator as orchestrator_module
 from restaurant_bot.services.orchestrator import UpdateOrchestrator
@@ -121,6 +127,115 @@ def test_chat_lock_keys_are_scoped_per_chat() -> None:
         pass
 
     assert redis.lock.call_args_list[0].args[0] != redis.lock.call_args_list[1].args[0]
+
+
+def test_chat_lease_renews_from_a_shared_token_thread() -> None:
+    """Продлевает срок блокировки отдельным потоком с общим токеном."""
+    redis = MagicMock()
+    lock = MagicMock()
+    lock.acquire.return_value = True
+    lock.owned.return_value = True
+    renewed = Event()
+
+    def extend(*_args, **_kwargs):
+        """Фиксирует вызов продления блокировки."""
+        renewed.set()
+
+    lock.extend.side_effect = extend
+    redis.lock.return_value = lock
+
+    with chat_lock(redis, "chat-renew", timeout=1, heartbeat_interval=0.05) as lease:
+        assert renewed.wait(1)
+        lease.ensure_owned()
+
+    assert not lease._heartbeat.is_alive()
+    assert redis.lock.call_args.kwargs["thread_local"] is False
+    assert lock.release.called
+
+
+def test_chat_lease_stops_heartbeat_on_context_exit() -> None:
+    """Останавливает поток продления при выходе из контекста."""
+    redis = MagicMock()
+    lock = MagicMock()
+    lock.acquire.return_value = True
+    lock.owned.return_value = True
+    redis.lock.return_value = lock
+
+    with chat_lock(redis, "chat-stop", timeout=1, heartbeat_interval=0.05) as lease:
+        heartbeat = lease._heartbeat
+        assert heartbeat.is_alive()
+
+    assert not heartbeat.is_alive()
+    lock.release.assert_called_once_with()
+
+
+def test_chat_lease_raises_when_renewal_fails() -> None:
+    """Сигнализирует о потере владения после ошибки продления."""
+    redis = MagicMock()
+    lock = MagicMock()
+    lock.acquire.return_value = True
+    lock.owned.return_value = True
+    lock.extend.side_effect = RuntimeError("redis unavailable")
+    redis.lock.return_value = lock
+
+    with chat_lock(redis, "chat-lost", timeout=1, heartbeat_interval=0.05) as lease:
+        assert lease._lost.wait(1)
+        with pytest.raises(ChatLeaseLostError):
+            lease.ensure_owned()
+
+    lock.release.assert_not_called()
+
+
+def test_chat_lease_fences_changed_owner_and_old_close() -> None:
+    """Не позволяет старому владельцу менять данные или снимать новую блокировку."""
+    lock = MagicMock()
+    lock.owned.return_value = False
+    lease = ChatLease(lock, timeout=30, heartbeat_interval=10)
+
+    with pytest.raises(ChatLeaseLostError):
+        lease.ensure_owned()
+    lease.close()
+
+    lock.release.assert_not_called()
+
+
+def test_different_chat_leases_are_independent() -> None:
+    """Сохраняет независимость блокировок разных чатов."""
+    redis = MagicMock()
+    first_lock = MagicMock()
+    second_lock = MagicMock()
+    first_lock.acquire.return_value = True
+    second_lock.acquire.return_value = True
+    first_lock.owned.return_value = True
+    second_lock.owned.return_value = True
+    redis.lock.side_effect = [first_lock, second_lock]
+
+    with (
+        chat_lock(redis, "chat-a", timeout=1, heartbeat_interval=0.2),
+        chat_lock(redis, "chat-b", timeout=1, heartbeat_interval=0.2),
+    ):
+        pass
+
+    assert redis.lock.call_count == 2
+    assert redis.lock.call_args_list[0].args[0] != redis.lock.call_args_list[1].args[0]
+
+
+def test_side_effect_enqueue_is_fenced_before_task_publish(mocker) -> None:  # type: ignore[no-untyped-def]
+    """Не публикует фоновую задачу после потери владения чатом."""
+    lease = MagicMock()
+    lease.ensure_owned.side_effect = ChatLeaseLostError("lost")
+    result = SimpleNamespace(
+        enqueue_submission=True,
+        enqueue_order_status=False,
+        enqueue_product_add=False,
+        enqueue_review_submission=False,
+    )
+    submit_order = mocker.patch("restaurant_bot.workers.tasks.submit_order")
+
+    with pytest.raises(ChatLeaseLostError):
+        UpdateOrchestrator._enqueue_side_effects("chat-1", result, lease=lease)
+
+    submit_order.delay.assert_not_called()
 
 
 def test_redrive_enqueues_oldest_recoverable_updates(mocker) -> None:  # type: ignore[no-untyped-def]

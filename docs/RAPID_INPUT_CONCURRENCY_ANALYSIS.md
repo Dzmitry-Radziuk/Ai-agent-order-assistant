@@ -273,6 +273,44 @@ Application code, tests and migrations were not changed in this analysis.
 `.env` was not read and is not tracked (`git ls-files .env` returned empty).
 GitLab was not used.
 
+## CONCURRENCY BLOCK 2 — IMPLEMENTATION RESULT
+
+Block 2 is implemented without changing parser, engine business rules, UX,
+database schema, or the existing Block 1 sequencing contract.
+
+\`chat_lock()\` now returns a renewable \`ChatLease\`. Redis locks use
+\`thread_local=False\`, so the heartbeat thread and the worker share the same
+redis-py ownership token. Renewal runs at \`timeout / 3\` (or a stricter
+validated interval), and release checks ownership after the heartbeat stops;
+an expired or replaced token is never released by the old worker.
+
+\`ChatLeaseLostError\` is an explicit retryable signal. Orchestrator checkpoints,
+Telegram replies, background task publication, catalog invalidation, and
+completion fencing check ownership before committing the next step. Submission
+and review services use the same lease and check it around state writes and
+external Google Sheets/Telegram boundaries. A lost lease is not converted into
+a generic failed update: the current \`processing\` row is returned to
+\`queued\` only when its \`attempts\` value still matches the worker's claimed attempt.
+Product-add writes are conservatively marked \`write_uncertain\` before the
+external append, so a worker losing ownership cannot mark the request submitted
+or blindly repeat the append.
+
+Regression coverage includes lease acquisition, heartbeat renewal and stop,
+renewal failure, changed-owner fencing, safe release, per-chat isolation,
+task-publication fencing, attempt-safe deferral, and the Celery retry signal.
+
+Validation:
+
+- Block 2 focused tests: **42 passed**.
+- H1–H3c submission safety focused tests: **122 passed**.
+- Fresh full suite: **1337 collected / 1323 passed / 14 failed / 0 skipped /
+  0 xfailed / 0 errors**. The 14 failures are the known pre-existing baseline;
+  no new failure nodeids appeared.
+- Ruff and \`git diff --check\` pass. No migration was added; Alembic remains at
+  \`0008\`.
+
+\`.env\` was not read and is not tracked. GitLab was not used.
+
 ## CONCURRENCY BLOCK 1 — IMPLEMENTATION RESULT
 
 Block 1 is implemented at the webhook/repository/worker boundary. The durable

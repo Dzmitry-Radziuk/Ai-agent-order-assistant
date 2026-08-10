@@ -29,7 +29,12 @@ from restaurant_bot.domain.models import (
     SessionStage,
     TelegramEvent,
 )
-from restaurant_bot.integrations.cache import CatalogCache, chat_lock
+from restaurant_bot.integrations.cache import (
+    CatalogCache,
+    ChatLease,
+    ChatLeaseLostError,
+    chat_lock,
+)
 from restaurant_bot.integrations.google_sheets import GoogleSheetsGateway
 from restaurant_bot.integrations.openai_client import OpenAIService
 from restaurant_bot.integrations.telegram import TELEGRAM_TRANSIENT_ERRORS, TelegramClient
@@ -68,6 +73,19 @@ from restaurant_bot.services.venue_registration import (
 )
 
 logger = structlog.get_logger(__name__)
+
+
+def _ensure_lease(lease: ChatLease | None) -> None:
+    """Проверяет владение чатом, если обработчик работает с реальным lease."""
+    if lease is not None:
+        lease.ensure_owned()
+
+
+def _lease_kwargs(lease: ChatLease | None) -> dict[str, Any]:
+    """Возвращает совместимые именованные аргументы для необязательного lease."""
+    return {"lease": lease} if lease is not None else {}
+
+
 _OPENAI_TRANSIENT_ERRORS = (APIConnectionError, APITimeoutError, RateLimitError)
 _AI_MATCH_SELECT_MIN_CONFIDENCE = 0.90
 _AI_MATCH_NOT_FOUND_MIN_CONFIDENCE = 0.80
@@ -97,6 +115,7 @@ class ClaimedUpdate:
     state_applied: bool
     reply_sent: bool
     tasks_enqueued: bool
+    attempt: int = 0
 
 
 class UpdateOrchestrator:
@@ -162,8 +181,9 @@ class UpdateOrchestrator:
                 input={"update_id": update_id, "input_type": event.input_type.value},
                 metadata={"chat_hash": self.tracer.anonymized_chat_id(event.chat_id)},
             ) as trace,
-            chat_lock(self.redis, event.chat_id),
+            chat_lock(self.redis, event.chat_id) as lease,
         ):
+            _ensure_lease(lease)
             claim = self._claim(update_id)
             if claim is None:
                 return
@@ -185,8 +205,19 @@ class UpdateOrchestrator:
 
                 registration = self.registration.handle(event)
                 if registration.handled:
-                    self._complete_registration(update_id, event, claim, registration)
-                    self._finish(update_id, "done")
+                    self._complete_registration(
+                        update_id,
+                        event,
+                        claim,
+                        registration,
+                        **_lease_kwargs(lease),
+                    )
+                    _ensure_lease(lease)
+                    self._finish(
+                        update_id,
+                        "done",
+                        **_lease_kwargs(lease),
+                    )
                     analytics.update(
                         scenario="registration",
                         intent="registration",
@@ -216,8 +247,18 @@ class UpdateOrchestrator:
                         chat_id=event.chat_id,
                         input_type=event.input_type.value,
                     )
-                    self._complete_unauthorized(update_id, event, claim)
-                    self._finish(update_id, "done")
+                    self._complete_unauthorized(
+                        update_id,
+                        event,
+                        claim,
+                        **_lease_kwargs(lease),
+                    )
+                    _ensure_lease(lease)
+                    self._finish(
+                        update_id,
+                        "done",
+                        **_lease_kwargs(lease),
+                    )
                     analytics.update(
                         scenario="access",
                         intent="authorization",
@@ -231,7 +272,7 @@ class UpdateOrchestrator:
                         chat_id=event.chat_id,
                     )
                     return
-                self._ensure_venue_session(event, venue_context)
+                self._ensure_venue_session(event, venue_context, lease=lease)
                 logger.info(
                     "venue_context_loaded",
                     telegram_user_id=event.telegram_user_id,
@@ -361,6 +402,7 @@ class UpdateOrchestrator:
                             else self.engine.handle(event, command, state, catalog)
                         )
                     )
+                    _ensure_lease(lease)
 
                     # AI работает за пределами DB-транзакции. Он может выбрать только ID из shortlist.
                     if not review_command:
@@ -415,6 +457,7 @@ class UpdateOrchestrator:
                     result.state.ui_message_text = result.reply.text
                     self._store_visible_actions(result.state, result.reply)
                     stage_started = perf_counter()
+                    _ensure_lease(lease)
                     self._checkpoint_state(
                         update_id,
                         event.chat_id,
@@ -431,6 +474,7 @@ class UpdateOrchestrator:
                             "previous_cart_count": previous_cart_count,
                             "previous_new_order_confirmation": (previous_new_order_confirmation),
                         },
+                        **_lease_kwargs(lease),
                     )
                     timings["state_checkpoint_ms"] = round((perf_counter() - stage_started) * 1000)
                     log.info(
@@ -442,9 +486,16 @@ class UpdateOrchestrator:
                     claim.result = result.model_dump(mode="json")
 
                 if not claim.reply_sent:
+                    _ensure_lease(lease)
                     stage_started = perf_counter()
                     message_id = self.telegram.send_reply(event.chat_id, result.reply)
-                    self._checkpoint_reply(update_id, event.chat_id, message_id)
+                    _ensure_lease(lease)
+                    self._checkpoint_reply(
+                        update_id,
+                        event.chat_id,
+                        message_id,
+                        **_lease_kwargs(lease),
+                    )
                     timings["reply_ms"] = round((perf_counter() - stage_started) * 1000)
                     log.info(
                         "telegram_reply_sent",
@@ -455,8 +506,17 @@ class UpdateOrchestrator:
                     claim.reply_sent = True
 
                 if not claim.tasks_enqueued:
-                    self._enqueue_side_effects(event.chat_id, result)
-                    self._checkpoint_tasks(update_id)
+                    _ensure_lease(lease)
+                    self._enqueue_side_effects(
+                        event.chat_id,
+                        result,
+                        **_lease_kwargs(lease),
+                    )
+                    _ensure_lease(lease)
+                    self._checkpoint_tasks(
+                        update_id,
+                        **_lease_kwargs(lease),
+                    )
                     claim.tasks_enqueued = True
                     task_names = [
                         name
@@ -475,8 +535,14 @@ class UpdateOrchestrator:
                     )
 
                 if result.invalidate_catalog:
+                    _ensure_lease(lease)
                     self.catalog.invalidate(result.state.spreadsheet_id)
-                self._finish(update_id, "done")
+                    _ensure_lease(lease)
+                self._finish(
+                    update_id,
+                    "done",
+                    **_lease_kwargs(lease),
+                )
                 self._record_request_outcome(
                     trace,
                     log,
@@ -489,7 +555,17 @@ class UpdateOrchestrator:
                     total_ms=round((perf_counter() - started_at) * 1000),
                     **timings,
                 )
+            except ChatLeaseLostError:
+                log.warning("telegram_update_deferred_lease_loss")
+                self._defer_if_current_attempt(update_id, claim.attempt)
+                raise
             except Exception as exc:
+                try:
+                    _ensure_lease(lease)
+                except ChatLeaseLostError:
+                    log.warning("telegram_update_deferred_lease_loss")
+                    self._defer_if_current_attempt(update_id, claim.attempt)
+                    raise
                 log.exception("telegram_update_failed", error=str(exc))
                 analytics.update(
                     status="failed",
@@ -503,7 +579,12 @@ class UpdateOrchestrator:
                     chat_id=event.chat_id,
                 )
                 trace.update(level="ERROR", status_message=str(exc)[:500])
-                self._finish(update_id, "failed", str(exc))
+                self._finish(
+                    update_id,
+                    "failed",
+                    str(exc),
+                    **_lease_kwargs(lease),
+                )
                 delivery_deferred = (
                     claim.state_applied
                     and not claim.reply_sent
@@ -519,9 +600,11 @@ class UpdateOrchestrator:
                     )
                 elif not claim.reply_sent:
                     try:
+                        _ensure_lease(lease)
                         error_reply = self._error_reply(event)
                         error_reply.edit_message_id = processing_message_id
                         self.telegram.send_reply(event.chat_id, error_reply)
+                        _ensure_lease(lease)
                     except Exception:
                         log.exception("telegram_error_reply_failed")
                 raise
@@ -1110,6 +1193,8 @@ class UpdateOrchestrator:
         event: Any,
         claim: ClaimedUpdate,
         registration: RegistrationResult,
+        *,
+        lease: ChatLease | None = None,
     ) -> None:
         """Сохраняет результат обработанной регистрации и отвечает."""
         with SessionLocal() as db:
@@ -1126,14 +1211,42 @@ class UpdateOrchestrator:
         self._store_visible_actions(state, reply)
         result = EngineResult(state=state, reply=reply)
         if not claim.state_applied:
-            self._checkpoint_state(update_id, event.chat_id, result)
+            if lease is not None:
+                _ensure_lease(lease)
+            self._checkpoint_state(
+                update_id,
+                event.chat_id,
+                result,
+                **_lease_kwargs(lease),
+            )
         if not claim.reply_sent:
+            if lease is not None:
+                _ensure_lease(lease)
             message_id = self.telegram.send_reply(event.chat_id, reply)
-            self._checkpoint_reply(update_id, event.chat_id, message_id)
+            if lease is not None:
+                _ensure_lease(lease)
+            self._checkpoint_reply(
+                update_id,
+                event.chat_id,
+                message_id,
+                **_lease_kwargs(lease),
+            )
         if not claim.tasks_enqueued:
-            self._checkpoint_tasks(update_id)
+            if lease is not None:
+                _ensure_lease(lease)
+            self._checkpoint_tasks(
+                update_id,
+                **_lease_kwargs(lease),
+            )
 
-    def _complete_unauthorized(self, update_id: int, event: Any, claim: ClaimedUpdate) -> None:
+    def _complete_unauthorized(
+        self,
+        update_id: int,
+        event: Any,
+        claim: ClaimedUpdate,
+        *,
+        lease: ChatLease | None = None,
+    ) -> None:
         """Сохраняет отказ в доступе и отвечает пользователю."""
         self._complete_registration(
             update_id,
@@ -1143,6 +1256,7 @@ class UpdateOrchestrator:
                 handled=True,
                 reply=self.registration.denied_reply(event),
             ),
+            lease=lease,
         )
 
     @staticmethod
@@ -1156,7 +1270,13 @@ class UpdateOrchestrator:
         state.spreadsheet_id = context.spreadsheet_id
         state.spreadsheet_url = context.spreadsheet_url
 
-    def _ensure_venue_session(self, event: TelegramEvent, context: VenueContext) -> None:
+    def _ensure_venue_session(
+        self,
+        event: TelegramEvent,
+        context: VenueContext,
+        *,
+        lease: ChatLease | None = None,
+    ) -> None:
         """Загружает сессию активного заведения."""
         with SessionLocal.begin() as db:
             sessions = SessionRepository(db)
@@ -1164,6 +1284,8 @@ class UpdateOrchestrator:
             if state.venue_code and state.venue_code != context.venue_code:
                 state = ConversationState()
             self._apply_venue_context(state, context)
+            if lease is not None:
+                _ensure_lease(lease)
             sessions.save(event.chat_id, state, row)
 
     def _parse(
@@ -1685,6 +1807,7 @@ class UpdateOrchestrator:
                     state_applied=update.state_applied,
                     reply_sent=update.reply_sent,
                     tasks_enqueued=update.tasks_enqueued,
+                    attempt=update.attempts,
                 )
             if repository.has_lower_unfinished(update.chat_id, update_id):
                 logger.info(
@@ -1711,7 +1834,16 @@ class UpdateOrchestrator:
                 state_applied=update.state_applied,
                 reply_sent=update.reply_sent,
                 tasks_enqueued=update.tasks_enqueued,
+                attempt=update.attempts,
             )
+
+    @staticmethod
+    def _defer_if_current_attempt(update_id: int, attempt: int) -> None:
+        """Возвращает в очередь только принадлежащую обработчику попытку."""
+        if not attempt:
+            return
+        with SessionLocal.begin() as db:
+            UpdateRepository(db).defer_if_current_attempt(update_id, attempt)
 
     def _checkpoint_state(
         self,
@@ -1720,11 +1852,14 @@ class UpdateOrchestrator:
         result: EngineResult,
         *,
         audit_context: dict[str, Any] | None = None,
+        lease: ChatLease | None = None,
     ) -> None:
         """Сохраняет контрольную точку изменения состояния."""
         with SessionLocal.begin() as db:
             sessions = SessionRepository(db)
             session_row, _ = sessions.get_for_update(chat_id)
+            if lease is not None:
+                _ensure_lease(lease)
             sessions.save(chat_id, result.state, session_row)
             if audit_context:
                 self._append_order_transition_events(
@@ -1736,6 +1871,8 @@ class UpdateOrchestrator:
             update = UpdateRepository(db).get_for_update(update_id)
             if update is None:
                 raise RuntimeError(f"Update {update_id} disappeared")
+            if lease is not None:
+                _ensure_lease(lease)
             update.result = result.model_dump(mode="json")
             update.state_applied = True
 
@@ -1814,9 +1951,18 @@ class UpdateOrchestrator:
                 **identity,
             )
 
-    def _checkpoint_reply(self, update_id: int, chat_id: str, message_id: int | None) -> None:
+    def _checkpoint_reply(
+        self,
+        update_id: int,
+        chat_id: str,
+        message_id: int | None,
+        *,
+        lease: ChatLease | None = None,
+    ) -> None:
         """Сохраняет контрольную точку ответа Telegram."""
         with SessionLocal.begin() as db:
+            if lease is not None:
+                _ensure_lease(lease)
             update = UpdateRepository(db).get_for_update(update_id)
             if update is None:
                 raise RuntimeError(f"Update {update_id} disappeared")
@@ -1827,21 +1973,32 @@ class UpdateOrchestrator:
                 state.ui_message_id = message_id
                 sessions.save(chat_id, state, session_row)
 
-    def _checkpoint_tasks(self, update_id: int) -> None:
+    def _checkpoint_tasks(self, update_id: int, *, lease: ChatLease | None = None) -> None:
         """Сохраняет контрольную точку фоновых задач."""
         with SessionLocal.begin() as db:
+            if lease is not None:
+                _ensure_lease(lease)
             update = UpdateRepository(db).get_for_update(update_id)
             if update:
                 update.tasks_enqueued = True
 
     @staticmethod
-    def _enqueue_side_effects(chat_id: str, result: EngineResult) -> None:
+    def _enqueue_side_effects(
+        chat_id: str,
+        result: EngineResult,
+        *,
+        lease: ChatLease | None = None,
+    ) -> None:
         """Ставит отложенные действия в очередь."""
         if result.enqueue_submission:
+            if lease is not None:
+                _ensure_lease(lease)
             from restaurant_bot.workers.tasks import submit_order
 
             submit_order.delay(chat_id)
         if result.enqueue_order_status:
+            if lease is not None:
+                _ensure_lease(lease)
             from restaurant_bot.workers.tasks import send_order_status
 
             send_order_status.delay(
@@ -1852,17 +2009,29 @@ class UpdateOrchestrator:
                 order_number=result.order_status_order_number,
             )
         if result.enqueue_product_add:
+            if lease is not None:
+                _ensure_lease(lease)
             from restaurant_bot.workers.tasks import submit_product_add
 
             submit_product_add.delay(chat_id)
         if result.enqueue_review_submission:
+            if lease is not None:
+                _ensure_lease(lease)
             from restaurant_bot.workers.tasks import submit_review_order
 
             submit_review_order.delay(chat_id, result.state.review_token)
 
-    def _finish(self, update_id: int, status: str, error: str | None = None) -> None:
+    def _finish(
+        self,
+        update_id: int,
+        status: str,
+        error: str | None = None,
+        *,
+        lease: ChatLease | None = None,
+    ) -> None:
         """Помечает обновление успешно обработанным."""
         with SessionLocal.begin() as db:
+            _ensure_lease(lease)
             update = UpdateRepository(db).get_for_update(update_id)
             if update:
                 update.status = status

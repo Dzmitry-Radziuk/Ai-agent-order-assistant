@@ -1,6 +1,6 @@
 from unittest.mock import MagicMock
 
-from restaurant_bot.integrations.cache import ChatLockBusyError
+from restaurant_bot.integrations.cache import ChatLeaseLostError, ChatLockBusyError
 from restaurant_bot.integrations.telegram import TELEGRAM_TRANSIENT_ERRORS
 from restaurant_bot.repositories.updates import UpdateSequenceDeferred
 from restaurant_bot.workers import tasks
@@ -47,6 +47,7 @@ def test_process_update_retries_only_transient_telegram_delivery_failures() -> N
         *TELEGRAM_TRANSIENT_ERRORS,
         ChatLockBusyError,
         UpdateSequenceDeferred,
+        ChatLeaseLostError,
     )
     assert tasks.process_telegram_update.retry_kwargs == {
         "max_retries": tasks.UPDATE_DELIVERY_MAX_RETRIES

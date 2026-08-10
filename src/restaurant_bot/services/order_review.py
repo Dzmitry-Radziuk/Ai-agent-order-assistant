@@ -12,7 +12,7 @@ from redis import Redis
 from restaurant_bot.config import Settings
 from restaurant_bot.db import SessionLocal
 from restaurant_bot.domain.models import BotReply, Button, SessionStage
-from restaurant_bot.integrations.cache import chat_lock
+from restaurant_bot.integrations.cache import ChatLeaseLostError, chat_lock
 from restaurant_bot.integrations.google_sheets import GoogleSheetsGateway
 from restaurant_bot.integrations.telegram import TelegramClient
 from restaurant_bot.repositories.sessions import SessionRepository
@@ -189,7 +189,9 @@ class OrderReviewService:
 
     def submit(self, chat_id: str, token: str) -> None:
         """Повторно проверяет заявку и отправляет её через существующий Web App."""
-        with chat_lock(self.redis, chat_id, timeout=300), SessionLocal.begin() as db:
+        with chat_lock(self.redis, chat_id, timeout=300) as lease, SessionLocal.begin() as db:
+            if lease is not None:
+                lease.ensure_owned()
             sessions = SessionRepository(db)
             row, state = sessions.get_for_update(chat_id)
             if state.review_token != token:
@@ -200,9 +202,13 @@ class OrderReviewService:
                 force_refresh=True,
             )
             if context is None or context.venue_code != state.review_venue_code:
+                if lease is not None:
+                    lease.ensure_owned()
                 state.review_submission_in_progress = False
                 state.review_mode = "cart"
                 sessions.save(chat_id, state, row)
+                if lease is not None:
+                    lease.ensure_owned()
                 self.telegram.send_reply(
                     chat_id,
                     self.registration.access_disabled_reply(),
@@ -216,7 +222,11 @@ class OrderReviewService:
                 state.review_submission_in_progress = False
                 state.stage = SessionStage.REVIEW
                 state.status = "review"
+                if lease is not None:
+                    lease.ensure_owned()
                 sessions.save(chat_id, state, row)
+                if lease is not None:
+                    lease.ensure_owned()
                 self.telegram.send_reply(
                     chat_id,
                     self.preview_reply(
@@ -231,7 +241,11 @@ class OrderReviewService:
                 state.review_submission_in_progress = False
                 state.stage = SessionStage.REVIEW
                 state.status = "review"
+                if lease is not None:
+                    lease.ensure_owned()
                 sessions.save(chat_id, state, row)
+                if lease is not None:
+                    lease.ensure_owned()
                 self.telegram.send_reply(
                     chat_id,
                     BotReply(
@@ -253,17 +267,27 @@ class OrderReviewService:
                 )
                 return
             try:
+                if lease is not None:
+                    lease.ensure_owned()
                 prepared = self.sheets.prepare_order_submission(
                     current.spreadsheet_id,
                     f"review:{token}",
                 )
                 result = self.sheets.send_order_submission(prepared)
+                if lease is not None:
+                    lease.ensure_owned()
+            except ChatLeaseLostError:
+                raise
             except Exception:
                 logger.exception("review_order_submission_failed", chat_id=chat_id)
                 state.review_submission_in_progress = False
                 state.stage = SessionStage.REVIEW
                 state.status = "review"
+                if lease is not None:
+                    lease.ensure_owned()
                 sessions.save(chat_id, state, row)
+                if lease is not None:
+                    lease.ensure_owned()
                 self.telegram.send_reply(
                     chat_id,
                     BotReply(
@@ -290,7 +314,11 @@ class OrderReviewService:
             state.review_mode = "cart"
             state.stage = SessionStage.SUBMITTED
             state.status = "submitted"
+            if lease is not None:
+                lease.ensure_owned()
             sessions.save(chat_id, state, row)
+            if lease is not None:
+                lease.ensure_owned()
             self.telegram.send_reply(
                 chat_id,
                 BotReply(

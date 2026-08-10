@@ -3906,3 +3906,42 @@ expiry fencing is still open.
 ## NEXT FUNCTIONAL STEP
 
 `CONCURRENCY BLOCK 2 — LEASE EXPIRY FENCING`
+
+## RAPID INPUT / CONCURRENCY HARDENING — CLOSED
+
+`CONCURRENCY BLOCK 2 — LEASE EXPIRY FENCING` завершён; ниже зафиксированы его
+реализация и проверки.
+
+Добавлен возобновляемый lease чата поверх существующего Redis lock.
+Heartbeat продлевает TTL не реже чем раз в `timeout / 3`; Redis lock создаётся
+с `thread_local=False`, поэтому heartbeat и рабочий поток используют один
+токен redis-py. Освобождение выполняется только после остановки heartbeat и
+проверки текущего владения, поэтому старый worker не снимает lock нового
+владельца.
+
+`ChatLeaseLostError` является отдельным retryable сигналом. Orchestrator,
+`SubmissionService` и `OrderReviewService` проверяют lease перед checkpoint,
+Telegram/Google Sheets вызовами, публикацией фоновых задач и финальными
+изменениями. Потеря lease не превращается в generic failed update: текущая
+обработка возвращается в `queued` только при совпадении `attempts` с попыткой
+worker. Для product-add состояние перед внешней записью фиксируется как
+`write_uncertain`, поэтому потерявший lease worker не может отметить запись
+успешной или безопасно повторить неизвестный append.
+
+Добавлены regression tests для heartbeat, renewal failure, смены владельца,
+безопасного release, изоляции чатов, fencing side-effect enqueue и
+attempt-safe defer. Миграции нет; Alembic остаётся на `0008`.
+
+Проверки:
+
+- Block 2 focused: **42 passed**.
+- H1–H3c submission safety: **122 passed**.
+- Полный запуск: **1337 collected / 1323 passed / 14 failed / 0 skipped /
+  0 xfailed / 0 errors**. Все 14 падений совпадают с baseline до Block 2;
+  новых failure nodeids нет.
+- Ruff и `git diff --check` проходят.
+- `.env` не читался и не tracked; GitLab не использовался.
+
+## NEXT FUNCTIONAL STEP
+
+`RESOLVE THE EXISTING 14 BASELINE FAILURES`

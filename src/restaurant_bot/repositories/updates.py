@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 from typing import Any
 
-from sqlalchemy import and_, or_, select
+from sqlalchemy import and_, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -92,3 +92,17 @@ class UpdateRepository:
         return self.db.scalar(
             select(TelegramUpdate).where(TelegramUpdate.update_id == update_id).with_for_update()
         )
+
+    def defer_if_current_attempt(self, update_id: int, attempt: int) -> bool:
+        """Возвращает в очередь только указанную текущую попытку обработки."""
+        result = self.db.execute(
+            update(TelegramUpdate)
+            .where(
+                TelegramUpdate.update_id == update_id,
+                TelegramUpdate.status == "processing",
+                TelegramUpdate.attempts == attempt,
+            )
+            .values(status="queued", error=None)
+        )
+        rowcount = getattr(result, "rowcount", 0)
+        return int(rowcount or 0) == 1

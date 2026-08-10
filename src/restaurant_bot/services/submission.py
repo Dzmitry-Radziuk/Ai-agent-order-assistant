@@ -17,7 +17,13 @@ from restaurant_bot.domain.models import (
     PendingSubmission,
     SessionStage,
 )
-from restaurant_bot.integrations.cache import CatalogCache, chat_lock, google_submission_lock_key
+from restaurant_bot.integrations.cache import (
+    CatalogCache,
+    ChatLease,
+    ChatLeaseLostError,
+    chat_lock,
+    google_submission_lock_key,
+)
 from restaurant_bot.integrations.google_sheets import (
     CatalogMutationVerification,
     GoogleSheetsError,
@@ -74,7 +80,9 @@ class SubmissionService:
         """Выполняет надёжную отправку текущей заявки."""
         started_at = perf_counter()
         logger.info("submission_started", chat_id=chat_id, report_failure=report_failure)
-        with chat_lock(self.redis, chat_id, timeout=300):
+        with chat_lock(self.redis, chat_id, timeout=300) as lease:
+            if lease is not None:
+                lease.ensure_owned()
             pending = self._load_pending(chat_id)
             if pending is None:
                 logger.info("submission_without_pending_order", chat_id=chat_id)
@@ -82,17 +90,23 @@ class SubmissionService:
                 if completion is not None:
                     checkpoint_order_no, external_order_no, state, dispatched = completion
                     if dispatched:
+                        if lease is not None:
+                            lease.ensure_owned()
                         self._send_completion(
                             chat_id,
                             state,
                             external_order_no,
                             checkpoint_order_no,
+                            **({"lease": lease} if lease is not None else {}),
                         )
                     else:
+                        if lease is not None:
+                            lease.ensure_owned()
                         self._send_local_completion(
                             chat_id,
                             state,
                             checkpoint_order_no,
+                            **({"lease": lease} if lease is not None else {}),
                         )
                 return
             if not self._has_current_access(
@@ -102,6 +116,8 @@ class SubmissionService:
                 venue_code=pending.venue_code,
                 spreadsheet_id=pending.spreadsheet_id,
             ):
+                if lease is not None:
+                    lease.ensure_owned()
                 self._send_access_disabled(chat_id)
                 return
             dispatch_enabled = getattr(
@@ -112,6 +128,8 @@ class SubmissionService:
             finalized = False
             recalc_send_started = False
             try:
+                if lease is not None:
+                    lease.ensure_owned()
                 record = self._record(chat_id, pending)
                 spreadsheet_id = self._require_venue_spreadsheet_id(pending.spreadsheet_id)
                 dispatch_uncertain = ""
@@ -133,6 +151,8 @@ class SubmissionService:
                             dispatch_uncertain,
                         )
                     else:
+                        if lease is not None:
+                            lease.ensure_owned()
                         stage_started = perf_counter()
                         if not self._run_catalog_update(chat_id, pending, record):
                             return
@@ -143,29 +163,47 @@ class SubmissionService:
                             duration_ms=round((perf_counter() - stage_started) * 1000),
                         )
                         record = self._get_record(pending.order_no)
+                        if lease is not None:
+                            lease.ensure_owned()
                         recalc_status = self._recalc_status(record)
                         if recalc_status == "pending":
+                            if lease is not None:
+                                lease.ensure_owned()
                             prepared_recalculation = self.sheets.prepare_recalculation(
                                 spreadsheet_id
                             )
+                            if lease is not None:
+                                lease.ensure_owned()
                             self.catalog_cache.invalidate(spreadsheet_id)
+                            if lease is not None:
+                                lease.ensure_owned()
                             self._mark_recalc_started(pending.order_no)
                             stage_started = perf_counter()
                             recalc_send_started = True
                             try:
+                                if lease is not None:
+                                    lease.ensure_owned()
                                 self.sheets.send_recalculation(prepared_recalculation)
                             except Exception as exc:
+                                if lease is not None:
+                                    lease.ensure_owned()
                                 self._mark_recalc_uncertain(
                                     chat_id,
                                     pending.order_no,
                                     str(exc) or type(exc).__name__,
                                 )
+                                if lease is not None:
+                                    lease.ensure_owned()
                                 self._send_recalc_uncertain_reply(
                                     chat_id,
                                     pending.order_no,
                                 )
                                 return
+                            if lease is not None:
+                                lease.ensure_owned()
                             self._mark_recalc_completed(pending.order_no)
+                            if lease is not None:
+                                lease.ensure_owned()
                             recalc_send_started = False
                             logger.info(
                                 "submission_recalculation_completed",
@@ -193,9 +231,13 @@ class SubmissionService:
                             self._send_recalc_uncertain_reply(chat_id, pending.order_no)
                             return
                         record = self._get_record(pending.order_no)
+                        if lease is not None:
+                            lease.ensure_owned()
                         if record.dispatch_completed:
                             external_order_no = record.external_order_no or pending.order_no
                         elif dispatch_enabled:
+                            if lease is not None:
+                                lease.ensure_owned()
                             prepared = self.sheets.prepare_order_submission(
                                 spreadsheet_id,
                                 pending.order_no,
@@ -203,8 +245,12 @@ class SubmissionService:
                             self._mark_dispatch_started(pending.order_no)
                             stage_started = perf_counter()
                             try:
+                                if lease is not None:
+                                    lease.ensure_owned()
                                 result = self.sheets.send_order_submission(prepared)
                             except Exception as exc:
+                                if lease is not None:
+                                    lease.ensure_owned()
                                 dispatch_uncertain = str(exc)
                                 self._mark_dispatch_uncertain(
                                     chat_id,
@@ -217,6 +263,8 @@ class SubmissionService:
                                     order_no=pending.order_no,
                                 )
                             else:
+                                if lease is not None:
+                                    lease.ensure_owned()
                                 self._mark_dispatch_completed(
                                     pending.order_no,
                                     result,
@@ -239,12 +287,16 @@ class SubmissionService:
                                 order_no=pending.order_no,
                             )
                 if dispatch_uncertain:
+                    if lease is not None:
+                        lease.ensure_owned()
                     self._send_dispatch_uncertain_once(
                         chat_id,
                         pending.order_no,
                     )
                     return
                 was_dispatched = dispatch_enabled or record.dispatch_completed
+                if lease is not None:
+                    lease.ensure_owned()
                 if was_dispatched:
                     final_state = self._finalize(
                         chat_id,
@@ -260,17 +312,23 @@ class SubmissionService:
                     )
                 finalized = True
                 if was_dispatched:
+                    if lease is not None:
+                        lease.ensure_owned()
                     self._send_completion(
                         chat_id,
                         final_state,
                         external_order_no,
                         pending.order_no,
+                        **({"lease": lease} if lease is not None else {}),
                     )
                 else:
+                    if lease is not None:
+                        lease.ensure_owned()
                     self._send_local_completion(
                         chat_id,
                         final_state,
                         pending.order_no,
+                        **({"lease": lease} if lease is not None else {}),
                     )
                 logger.info(
                     "submission_completed" if was_dispatched else "submission_saved_locally",
@@ -279,6 +337,8 @@ class SubmissionService:
                     external_order_no=external_order_no,
                     total_ms=round((perf_counter() - started_at) * 1000),
                 )
+            except ChatLeaseLostError:
+                raise
             except Exception as exc:
                 logger.exception("submission_failed", chat_id=chat_id, order_no=pending.order_no)
                 if recalc_send_started and not finalized:
@@ -405,15 +465,25 @@ class SubmissionService:
         state: ConversationState,
         external_order_no: str,
         checkpoint_order_no: str,
+        *,
+        lease: ChatLease | None = None,
     ) -> None:
         """Отправляет подтверждение с защитой от автоматического дубля."""
+        if lease is not None:
+            lease.ensure_owned()
         if not self._mark_completion_notification_started(checkpoint_order_no):
             return
         try:
+            if lease is not None:
+                lease.ensure_owned()
             self.telegram.send_reply(
                 chat_id,
                 submission_success_reply(state, external_order_no),
             )
+            if lease is not None:
+                lease.ensure_owned()
+        except ChatLeaseLostError:
+            raise
         except Exception as exc:
             try:
                 self._mark_completion_notification_uncertain(
@@ -422,6 +492,8 @@ class SubmissionService:
                 )
             finally:
                 raise
+        if lease is not None:
+            lease.ensure_owned()
         self._mark_completion_notification_completed(checkpoint_order_no)
 
     def _send_local_completion(
@@ -429,15 +501,25 @@ class SubmissionService:
         chat_id: str,
         state: ConversationState,
         order_no: str,
+        *,
+        lease: ChatLease | None = None,
     ) -> None:
         """Подтверждает локальную запись с защитой от автоматического дубля."""
+        if lease is not None:
+            lease.ensure_owned()
         if not self._mark_completion_notification_started(order_no):
             return
         try:
+            if lease is not None:
+                lease.ensure_owned()
             self.telegram.send_reply(
                 chat_id,
                 submission_local_saved_reply(state, order_no),
             )
+            if lease is not None:
+                lease.ensure_owned()
+        except ChatLeaseLostError:
+            raise
         except Exception as exc:
             try:
                 self._mark_completion_notification_uncertain(
@@ -446,6 +528,8 @@ class SubmissionService:
                 )
             finally:
                 raise
+        if lease is not None:
+            lease.ensure_owned()
         self._mark_completion_notification_completed(order_no)
 
     def _load_unnotified_completion(
@@ -503,9 +587,13 @@ class SubmissionService:
         detail_page: int = 0,
     ) -> None:
         """Показывает список заявок или подробности выбранной заявки."""
-        with chat_lock(self.redis, chat_id):
+        with chat_lock(self.redis, chat_id) as lease:
+            if lease is not None:
+                lease.ensure_owned()
             with SessionLocal.begin() as db:
                 _, state = SessionRepository(db).get_for_update(chat_id)
+            if lease is not None:
+                lease.ensure_owned()
             if not self._has_current_access(
                 chat_id,
                 user_id=state.telegram_user_id or chat_id,
@@ -513,6 +601,8 @@ class SubmissionService:
                 venue_code=state.venue_code,
                 spreadsheet_id=state.spreadsheet_id,
             ):
+                if lease is not None:
+                    lease.ensure_owned()
                 self._send_access_disabled(chat_id)
                 return
             if selected_index is not None or order_number:
@@ -522,9 +612,10 @@ class SubmissionService:
                     selected_index=selected_index,
                     order_number=order_number,
                     detail_page=detail_page,
+                    lease=lease,
                 )
                 return
-            self._send_order_status_page(chat_id, state, page=max(0, page))
+            self._send_order_status_page(chat_id, state, page=max(0, page), lease=lease)
 
     def _send_order_status_page(
         self,
@@ -532,9 +623,12 @@ class SubmissionService:
         state: ConversationState,
         *,
         page: int,
+        lease: ChatLease | None = None,
     ) -> None:
         """Показывает одну страницу реальных заявок текущего заведения."""
         spreadsheet_id = self._require_venue_spreadsheet_id(state.spreadsheet_id)
+        if lease is not None:
+            lease.ensure_owned()
         venue_name = state.venue_name or state.restaurant
         rows = self.sheets.read_recent_order_statuses(
             spreadsheet_id,
@@ -544,7 +638,7 @@ class SubmissionService:
         )
         groups = group_order_status_rows(rows)
         if page > 0 and not groups:
-            self._send_order_status_page(chat_id, state, page=0)
+            self._send_order_status_page(chat_id, state, page=0, lease=lease)
             return
         shown_groups = groups[: self.ORDER_STATUS_PAGE_SIZE]
         shown_rows = [row for _, order_rows in shown_groups for row in order_rows]
@@ -553,6 +647,7 @@ class SubmissionService:
             chat_id,
             page=page,
             order_numbers=order_numbers,
+            lease=lease,
         )
         self._send_status_reply(
             chat_id,
@@ -562,6 +657,7 @@ class SubmissionService:
                 page=page,
                 has_more=len(groups) > self.ORDER_STATUS_PAGE_SIZE,
             ),
+            lease=lease,
         )
 
     def _send_order_status_detail(
@@ -572,6 +668,7 @@ class SubmissionService:
         selected_index: int | None,
         order_number: str,
         detail_page: int = 0,
+        lease: ChatLease | None = None,
     ) -> None:
         """Показывает поставщиков и товары выбранной реальной заявки."""
         stored_numbers = state.order_status_order_numbers
@@ -584,6 +681,7 @@ class SubmissionService:
                 chat_id,
                 state,
                 page=max(0, state.order_status_page),
+                lease=lease,
             )
             return
 
@@ -610,6 +708,7 @@ class SubmissionService:
                         ]
                     ],
                 ),
+                lease=lease,
             )
             return
 
@@ -636,6 +735,7 @@ class SubmissionService:
                     display_index=selected,
                 ),
             ),
+            lease=lease,
         )
 
     def _send_status_reply(
@@ -643,9 +743,13 @@ class SubmissionService:
         chat_id: str,
         state: ConversationState,
         reply: BotReply,
+        *,
+        lease: ChatLease | None = None,
     ) -> None:
         """Обновляет одну карточку статусов и не накапливает сообщения."""
         previous_message_id = state.ui_message_id
+        if lease is not None:
+            lease.ensure_owned()
         reply.edit_message_id = previous_message_id or None
         try:
             message_id = self.telegram.send_reply(chat_id, reply)
@@ -662,9 +766,19 @@ class SubmissionService:
             if not can_fallback:
                 raise
             reply.edit_message_id = None
+            if lease is not None:
+                lease.ensure_owned()
             message_id = self.telegram.send_reply(chat_id, reply)
+        if lease is not None:
+            lease.ensure_owned()
         if isinstance(message_id, int):
-            self._persist_worker_ui(chat_id, state.ui_revision, message_id, reply.text)
+            self._persist_worker_ui(
+                chat_id,
+                state.ui_revision,
+                message_id,
+                reply.text,
+                lease=lease,
+            )
 
     @staticmethod
     def _persist_order_status_view(
@@ -672,6 +786,7 @@ class SubmissionService:
         *,
         page: int,
         order_numbers: list[str],
+        lease: ChatLease | None = None,
     ) -> None:
         """Запоминает показанный список для голосового и кнопочного выбора."""
         with SessionLocal.begin() as db:
@@ -684,13 +799,19 @@ class SubmissionService:
             state.order_status_selected_index = None
             state.order_status_selected_order_number = ""
             state.order_status_order_numbers = order_numbers
+            if lease is not None:
+                lease.ensure_owned()
             sessions.save(chat_id, state, row)
 
     def submit_product_add(self, chat_id: str) -> None:
         """Отправляет запрос на добавление нового товара."""
-        with chat_lock(self.redis, chat_id, timeout=300):
+        with chat_lock(self.redis, chat_id, timeout=300) as lease:
+            if lease is not None:
+                lease.ensure_owned()
             with SessionLocal.begin() as db:
                 _, access_state = SessionRepository(db).get_for_update(chat_id)
+            if lease is not None:
+                lease.ensure_owned()
             if not self._has_current_access(
                 chat_id,
                 user_id=access_state.telegram_user_id or chat_id,
@@ -698,6 +819,8 @@ class SubmissionService:
                 venue_code=access_state.venue_code,
                 spreadsheet_id=access_state.spreadsheet_id,
             ):
+                if lease is not None:
+                    lease.ensure_owned()
                 self._send_access_disabled(chat_id)
                 return
             with SessionLocal.begin() as db:
@@ -718,18 +841,26 @@ class SubmissionService:
                     "write_failed",
                 }:
                     return
-                request["status"] = "pending_write"
+                request["status"] = "write_uncertain"
                 request["updated_at"] = datetime.now(UTC).isoformat()
+                if lease is not None:
+                    lease.ensure_owned()
                 sessions.save(chat_id, state, row)
 
             try:
+                if lease is not None:
+                    lease.ensure_owned()
                 self.sheets.append_product_request(
                     {"description": request["description"]},
                     self._require_venue_spreadsheet_id(state.spreadsheet_id),
                 )
+                if lease is not None:
+                    lease.ensure_owned()
                 status = "submitted"
                 error = ""
             except Exception as exc:
+                if lease is not None:
+                    lease.ensure_owned()
                 error = str(exc)[:1000]
                 status = (
                     "write_uncertain" if self._uncertain_product_add_error(exc) else "write_failed"
@@ -741,10 +872,17 @@ class SubmissionService:
                 request = self._apply_product_add_write_outcome(state, request_id, status, error)
                 if request is None:
                     return
+                if lease is not None:
+                    lease.ensure_owned()
                 sessions.save(chat_id, state, row)
 
             if status == "submitted":
-                self._send_product_add_success(chat_id, state, request)
+                if lease is not None:
+                    lease.ensure_owned()
+                if lease is None:
+                    self._send_product_add_success(chat_id, state, request)
+                else:
+                    self._send_product_add_success(chat_id, state, request, lease=lease)
                 return
             elif status == "write_failed":
                 reply = BotReply(
@@ -764,17 +902,28 @@ class SubmissionService:
                 reply = BotReply(
                     text="<b>Не удалось подтвердить отправку</b>\n\nЗапрос сохранён в черновике, но бот не уверен, что он попал в таблицу. Сообщите менеджеру по снабжению. Повторно отправлять запрос не нужно."
                 )
+            if lease is not None:
+                lease.ensure_owned()
             self.telegram.send_reply(chat_id, reply)
 
     def _send_product_add_success(
-        self, chat_id: str, state: ConversationState, request: dict[str, Any]
+        self,
+        chat_id: str,
+        state: ConversationState,
+        request: dict[str, Any],
+        *,
+        lease: ChatLease | None = None,
     ) -> None:
         """Показывает успешную запись запроса на новый товар."""
         confirmation = BotReply(
             text=f"<i>Запрос менеджеру отправлен</i>\n\n{escape(request['description'])}",
             edit_message_id=state.ui_message_id or None,
         )
+        if lease is not None:
+            lease.ensure_owned()
         self.telegram.send_reply(chat_id, confirmation)
+        if lease is not None:
+            lease.ensure_owned()
 
         state.ui_revision += 1
         draft = cart_reply(state)
@@ -783,12 +932,30 @@ class SubmissionService:
             for button in row:
                 if button.callback_data:
                     button.callback_data += suffix
+        if lease is not None:
+            lease.ensure_owned()
         draft_message_id = self.telegram.send_reply(chat_id, draft)
-        self._persist_worker_ui(chat_id, state.ui_revision, draft_message_id, draft.text)
+        if lease is not None:
+            lease.ensure_owned()
+        if lease is None:
+            self._persist_worker_ui(chat_id, state.ui_revision, draft_message_id, draft.text)
+        else:
+            self._persist_worker_ui(
+                chat_id,
+                state.ui_revision,
+                draft_message_id,
+                draft.text,
+                lease=lease,
+            )
 
     @staticmethod
     def _persist_worker_ui(
-        chat_id: str, revision: int, message_id: int | None, message_text: str
+        chat_id: str,
+        revision: int,
+        message_id: int | None,
+        message_text: str,
+        *,
+        lease: ChatLease | None = None,
     ) -> None:
         """Сохраняет состояние интерфейса фоновой задачи."""
         with SessionLocal.begin() as db:
@@ -797,6 +964,8 @@ class SubmissionService:
             state.ui_revision = revision
             state.ui_message_id = message_id
             state.ui_message_text = message_text
+            if lease is not None:
+                lease.ensure_owned()
             sessions.save(chat_id, state, row)
 
     @staticmethod
