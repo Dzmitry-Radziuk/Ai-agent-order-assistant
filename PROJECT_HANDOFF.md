@@ -3946,6 +3946,33 @@ attempt-safe defer. Миграции нет; Alembic остаётся на `0008
 
 `RESOLVE THE EXISTING 14 BASELINE FAILURES`
 
+## MANUAL SMOKE CORRECTION — TEXT/VOICE SEMANTIC QUALITY
+
+На текущем checkout выполнена парная проверка текста и голоса с одинаковым ASR
+transcript. Semantic pipeline у TEXT и VOICE общий; первое расхождение для duck и
+cucumber находилось в `restore_explicit_order_terms()` →
+`recover_omitted_explicit_items()`: детерминированное восстановление брало число
+из спецификации/диапазона вместо уже подтверждённого AI order quantity.
+
+Исправление ограничено доказанными владельцами поведения:
+
+- сохранён source-supported order quantity (`3 кг` для duck и `5 шт` для cucumber),
+  а packaging/specification остаётся отдельной ролью;
+- добавлено временное canonical-представление только для matching/evidence:
+  spoken ranges, `40 на 45`/`40/45`, кириллица/латиница и unit aliases;
+- catalog-backed title facts удаляются из сохраняемого комментария только после
+  разрешения товара, при этом пользовательские инструкции сохраняются;
+- AI not_found не блокирует доказанную deterministic equivalence, а unresolved
+  qualifiers по-прежнему запрещают auto-select;
+- успешное сообщение добавления использует `<b>Товар добавлен в черновик заказа</b>`.
+
+Проверки после изменений: **1350 collected / 1350 passed / 0 failed**; focused
+voice, matching, AI и conversation suites green; Ruff, mypy, Markdown links,
+`git diff --check` и Alembic `0008` green. Docker `api`, `worker`, `beat`,
+Postgres и Redis пересобраны/перезапущены; сервисы healthy. Изменения пока не
+закоммичены и не отправлялись в remote. Следующий ручной шаг — повторить
+проверочные TEXT/VOICE сценарии в Telegram.
+
 ## BASELINE FAILURE CLOSURE — DONE
 
 На HEAD `0d4c7bb8c361995cd21509da22af77f3e6d1556f` закрыты все 14 исторических
@@ -3983,3 +4010,45 @@ GitLab не использовался.
 ## NEXT FUNCTIONAL STEP
 
 `RESOLVE THE EXISTING 14 BASELINE FAILURES`
+
+## PRODUCT SEMANTIC ACCEPTANCE - CURRENT CHECKOUT
+
+This is the newest authoritative status for the uncommitted semantic-acceptance
+changes in this checkout. The catalog is intentionally treated as an open-ended,
+venue-scoped data set; no product-specific dictionary or one-off rule was added.
+
+- Deterministic candidate generation performs a scoped O(N) catalog scan and
+  returns a bounded shortlist (at most five) to the existing AI matcher.
+- Search evidence is generic: canonical morphology, Cyrillic/Latin
+  transliteration, order-independent terms, numeric ranges/dimensions,
+  abbreviations, and rarity-weighted identity evidence. Missing catalog
+  metadata never vetoes a title match.
+- Candidate admission, ranking, and auto-select remain separate. AI receives
+  only the deterministic shortlist and cannot bypass deterministic safety gates.
+- Catalog title facts are kept in catalog fields and are removed from saved
+  comments only when they are not source-backed user instructions. Equivalent
+  user comments are merged by semantic key, so duplicate instructions persist
+  exactly once.
+- The direct one-candidate catalog path now applies the same catalog-fact
+  sanitizer as the normal resolver path.
+- A newly added product can interrupt an older missing-quantity context without
+  inheriting its quantity/comment; the older pending item remains resumable.
+- The supplied forensic log identifies the old voice quantity boundary in
+  `restore_explicit_order_terms()` -> `recover_omitted_explicit_items()` and the
+  old ribs comment boundary in the direct catalog-apply path. The trout, almond,
+  chickpea, sour-cream, and mustard/horseradish cases were not present in that
+  log; their current behavior is covered by deterministic regression tests.
+
+Validation on the current working tree:
+
+- **1359 collected / 1359 passed / 0 failed** (`pytest -q --tb=short` with a
+  project-local basetemp).
+- Ruff check, mypy, Markdown links, and `git diff --check` pass.
+- `ruff format --check` still reports the repository's pre-existing formatting
+  mismatch; no global formatting rewrite was performed.
+- Alembic validation could not complete because the database service was not
+  available; no migration or application change was made for that check.
+- Changes are intentionally uncommitted and were not pushed. `.env` is not
+  tracked; GitLab was not used.
+
+The next functional step is intentionally left to a separate user request.

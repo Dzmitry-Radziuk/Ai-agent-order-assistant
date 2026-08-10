@@ -408,8 +408,34 @@ def restore_explicit_order_terms(
                 for quantity, unit in explicit_terms
             )
         ):
-            if len(recovered_from_message) == 1 and recovered_from_message[0].quantity is not None:
-                source_item = recovered_from_message[0]
+            source_item = recovered_from_message[0] if len(recovered_from_message) == 1 else None
+            if (
+                source_item is not None
+                and source_item.quantity is not None
+                and source_item.packaging_role in {"catalog_attribute", "user_preference"}
+            ):
+                item["source_line"] = original_line
+                item["quantity"] = source_item.quantity
+                item["unit"] = source_item.unit
+                item["packaging_text"] = source_item.packaging_text
+                item["packaging_role"] = source_item.packaging_role
+                item["packaging_confidence"] = source_item.packaging_confidence
+                continue
+            # When several measurements are present, the model value is safe
+            # only if it is the final explicit term. Earlier measurements are
+            # packaging/specification values (for example ``80 g, 3 kg``),
+            # while the final term is the order quantity. Keep the validated
+            # model value instead of replacing it with the first value that
+            # the deterministic parser happens to recover.
+            if (
+                abs(explicit_terms[-1][0] - model_quantity) <= 1e-9
+                and explicit_terms[-1][1] == model_unit
+            ):
+                item["source_line"] = original_line
+                item["quantity"] = model_quantity
+                item["unit"] = model_unit
+                continue
+            if source_item is not None and source_item.quantity is not None:
                 item["quantity"] = source_item.quantity
                 item["unit"] = source_item.unit
                 item["source_line"] = original_line

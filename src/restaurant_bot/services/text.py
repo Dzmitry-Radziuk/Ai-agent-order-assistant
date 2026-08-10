@@ -224,7 +224,7 @@ def normalize_department(value: Any) -> str:
 
 
 def numeric_range_spans(value: Any) -> list[tuple[int, int]]:
-    """Находит диапазоны характеристик товара, например ``0,8–1,2 кг``."""
+    """Находит цифровые и словесные диапазоны характеристик товара."""
     text = clean_text(value)
     if not text:
         return []
@@ -232,11 +232,22 @@ def numeric_range_spans(value: Any) -> list[tuple[int, int]]:
         sorted((re.escape(unit) for unit in UNIT_ALIASES), key=len, reverse=True)
     )
     pattern = re.compile(
-        rf"(?<!\w)\d+(?:[,.]\d+)?\s*(?:--|[-–—])\s*\d+(?:[,.]\d+)?"
+        rf"(?<!\w)\d+(?:[,.]\d+)?\s*(?:--|[-–—]|/|на|x|х)\s*\d+(?:[,.]\d+)?"
         rf"(?:\s*(?:{unit_pattern}))?\b",
         flags=re.IGNORECASE,
     )
-    return [match.span() for match in pattern.finditer(text)]
+    spans = [match.span() for match in pattern.finditer(text)]
+    number_word = "|".join(
+        sorted((re.escape(word) for word in NUMBER_WORDS), key=len, reverse=True)
+    )
+    word_phrase = rf"(?:{number_word})(?:\s+(?:{number_word}))*"
+    spoken_pattern = re.compile(
+        rf"(?<!\w){word_phrase}\s*[-–—]\s*{word_phrase}"
+        rf"(?:\s*(?:{unit_pattern}))?\b",
+        flags=re.IGNORECASE,
+    )
+    spans.extend(match.span() for match in spoken_pattern.finditer(text))
+    return sorted(spans)
 
 
 def to_float(value: Any) -> float | None:

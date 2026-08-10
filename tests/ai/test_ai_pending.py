@@ -130,6 +130,37 @@ def test_safe_inflected_catalog_name_is_selected_without_ai_guess(settings) -> N
     assert resolved.state.cart[0].catalog_product_id == "rose"
 
 
+def test_safe_canonical_equivalence_is_not_vetoed_by_ai_not_found(settings) -> None:  # type: ignore[no-untyped-def]
+    """Не отдаёт однозначный диапазон и бренд обратно в уточнение из-за AI not_found."""
+    product = CatalogProduct(
+        product_id="cucumber-maier",
+        name="Огурцы Мар. 40/45 Maier 10л/9700г/5600г, Германия",
+        supplier="Поставщик",
+        unit="шт",
+    )
+    item = CartItem(
+        id="cucumber",
+        source_query="Огурцы 40 на 45 Майер",
+        quantity=5,
+        unit="шт",
+        status=ItemStatus.AMBIGUOUS,
+        candidates=rank_candidates("Огурцы 40 на 45 Майер", [product]),
+    )
+    state = ConversationState(cart=[item])
+    matcher = _Matcher(ProductMatchDecision(action="not_found", confidence=0.99))
+    result = EngineResult(state=state, reply=issue_reply(item, 0))
+    event = TelegramEvent(update_id=1, chat_id="123456", input_type=InputKind.TEXT)
+
+    resolved = _orchestrator(settings, matcher)._resolve_ai_pending(
+        event,
+        result,
+        [product],
+    )
+
+    assert matcher.calls == []
+    assert resolved.state.cart[0].catalog_product_id == "cucumber-maier"
+
+
 def test_equivalent_names_from_different_suppliers_still_require_user_choice(settings) -> None:  # type: ignore[no-untyped-def]
     """Не выбирает строку сам, если одинаковый товар есть у нескольких поставщиков."""
     catalog = [

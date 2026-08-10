@@ -2,13 +2,16 @@ from __future__ import annotations
 
 import math
 import re
+from collections.abc import Mapping
 from difflib import SequenceMatcher
 
 from restaurant_bot.domain.models import Candidate, CatalogProduct
 from restaurant_bot.services.text import (
+    NUMBER_WORDS,
     UNIT_ALIASES,
     normalize_text,
     normalize_unit,
+    parse_number_words,
 )
 
 _STOP_WORDS = {
@@ -125,6 +128,103 @@ def _compact_voice_name(value: str) -> str:
     # "Сироп Роза, 1л" must be compared as "сиропроза" when speech
     # recognition merges its words. The order format is not part of the name.
     return re.sub(r"\d+(?:[a-zа-я]+)?$", "", compact)
+
+
+_CYRILLIC_TO_LATIN = str.maketrans(
+    {
+        "а": "a",
+        "б": "b",
+        "в": "v",
+        "г": "g",
+        "д": "d",
+        "е": "e",
+        "ж": "zh",
+        "з": "z",
+        "и": "i",
+        "й": "i",
+        "к": "k",
+        "л": "l",
+        "м": "m",
+        "н": "n",
+        "о": "o",
+        "п": "p",
+        "р": "r",
+        "с": "s",
+        "т": "t",
+        "у": "u",
+        "ф": "f",
+        "х": "h",
+        "ц": "c",
+        "ч": "ch",
+        "ш": "sh",
+        "щ": "shch",
+        "ъ": "",
+        "ы": "y",
+        "ь": "",
+        "э": "e",
+        "ю": "yu",
+        "я": "ya",
+    }
+)
+
+
+def _canonical_token(value: str) -> str:
+    """Сводит кириллические и латинские варианты одного слова к общей форме."""
+    return normalize_text(value).translate(_CYRILLIC_TO_LATIN)
+
+
+def _catalog_abbreviation_match(left: str, right: str) -> bool:
+    """Распознаёт короткое каталожное сокращение длинного слова."""
+    short, long = sorted(
+        (_canonical_token(left), _canonical_token(right)),
+        key=len,
+    )
+    return (
+        3 <= len(short) <= 4
+        and len(long) >= 7
+        and long.startswith(short)
+        and len(long) - len(short) >= 3
+    )
+
+
+def _spoken_range_pattern() -> re.Pattern[str]:
+    """Создаёт ограниченный шаблон словесного диапазона с единицей."""
+    number_word = "|".join(
+        sorted((re.escape(word) for word in NUMBER_WORDS), key=len, reverse=True)
+    )
+    phrase = rf"(?:{number_word})(?:\s+(?:{number_word}))*"
+    unit_pattern = "|".join(
+        sorted((re.escape(unit) for unit in UNIT_ALIASES), key=len, reverse=True)
+    )
+    return re.compile(
+        rf"(?P<left>{phrase})\s*[-–—]\s*(?P<right>{phrase})"
+        rf"(?:\s*(?P<unit>{unit_pattern}))?\b",
+        flags=re.IGNORECASE,
+    )
+
+
+def canonical_search_query(value: str) -> str:
+    """Возвращает временное каноническое представление поискового запроса."""
+    normalized = normalize_text(value).replace(",", ".")
+    normalized = re.sub(
+        r"(?P<left>\d+(?:\.\d+)?)\s+на\s+(?P<right>\d+(?:\.\d+)?)",
+        r"\g<left>/\g<right>",
+        normalized,
+        flags=re.IGNORECASE,
+    )
+    pattern = _spoken_range_pattern()
+    replacements: list[tuple[int, int, str]] = []
+    for match in pattern.finditer(normalized):
+        left = parse_number_words(match.group("left").split(), 0)
+        right = parse_number_words(match.group("right").split(), 0)
+        if left is None or right is None:
+            continue
+        unit = normalize_unit(match.group("unit") or "")
+        suffix = f" {unit}" if unit else ""
+        replacements.append((match.start(), match.end(), f"{left[0]:g}-{right[0]:g}{suffix}"))
+    for start, end, replacement in reversed(replacements):
+        normalized = f"{normalized[:start]}{replacement}{normalized[end:]}"
+    return normalized
 
 
 def tokens(value: str) -> set[str]:
@@ -246,7 +346,11 @@ def supplier_matches_hint(supplier: str, supplier_hint: str) -> bool:
 
 def _token_matches(query_token: str, product_token: str) -> bool:
     """Проверяет достаточность совпадения поискового слова."""
+    query_token = _canonical_token(query_token)
+    product_token = _canonical_token(product_token)
     if query_token == product_token:
+        return True
+    if _catalog_abbreviation_match(query_token, product_token):
         return True
     short, long = sorted((query_token, product_token), key=len)
     if len(short) >= 4 and short in long and len(short) / len(long) >= 0.6:
@@ -329,6 +433,20 @@ def query_evidence_tokens(query: str, product_name: str) -> set[str]:
     }
 
 
+def _strong_query_evidence_tokens(query: str, product_name: str) -> set[str]:
+    """Возвращает точные и канонические признаки без fuzzy-совпадений."""
+    product_tokens = _product_identity_tokens(product_name)
+    return {
+        query_token
+        for query_token in _product_identity_tokens(query)
+        if any(
+            _canonical_token(query_token) == _canonical_token(product_token)
+            or _catalog_abbreviation_match(query_token, product_token)
+            for product_token in product_tokens
+        )
+    }
+
+
 def unverified_product_terms(query: str, product_name: str) -> list[str]:
     """Возвращает длинные признаки запроса, которых нет в названии каталога.
 
@@ -377,7 +495,11 @@ def unverified_product_terms(query: str, product_name: str) -> list[str]:
 
 def _identity_token_matches(query_token: str, product_token: str) -> bool:
     """Сопоставляет только безопасные грамматические формы одного слова."""
+    query_token = _canonical_token(query_token)
+    product_token = _canonical_token(product_token)
     if query_token == product_token:
+        return True
+    if _catalog_abbreviation_match(query_token, product_token):
         return True
 
     short, long = sorted((query_token, product_token), key=len)
@@ -410,14 +532,17 @@ def is_safe_catalog_name_equivalent(query: str, product_name: str) -> bool:
         for token in tokens(product_name)
         if not any(char.isdigit() for char in token) and token not in UNIT_ALIASES
     }
-    if len(query_tokens) < 2 or len(query_tokens) != len(product_tokens):
+    query_tokens = {
+        _canonical_token(token) for token in query_tokens if token not in NUMBER_WORDS
+    }
+    product_tokens = {
+        _canonical_token(token) for token in product_tokens if token not in NUMBER_WORDS
+    }
+    if len(query_tokens) < 2 or not product_tokens:
         return False
     return all(
         any(_identity_token_matches(query_token, product_token) for product_token in product_tokens)
         for query_token in query_tokens
-    ) and all(
-        any(_identity_token_matches(query_token, product_token) for query_token in query_tokens)
-        for product_token in product_tokens
     )
 
 
@@ -434,12 +559,25 @@ def _numeric_characteristics(value: str) -> list[tuple[float, float | None, str]
         )
     )
     range_pattern = re.compile(
-        rf"(?<!\w)(?P<left>\d+(?:\.\d+)?)\s*(?:--|-)\s*"
+        rf"(?<!\w)(?P<left>\d+(?:\.\d+)?)\s*(?:--|-|/|на|x|х)\s*"
         rf"(?P<right>\d+(?:\.\d+)?)(?:\s*(?P<unit>{unit_pattern}))?\b",
         flags=re.IGNORECASE,
     )
     characteristics: list[tuple[float, float | None, str]] = []
     masked = list(normalized)
+    for match in _spoken_range_pattern().finditer(normalized):
+        left = parse_number_words(match.group("left").split(), 0)
+        right = parse_number_words(match.group("right").split(), 0)
+        if left is None or right is None:
+            continue
+        characteristics.append(
+            (
+                left[0],
+                right[0],
+                _normalize_characteristic_unit(match.group("unit") or ""),
+            )
+        )
+        masked[match.start() : match.end()] = [" "] * (match.end() - match.start())
     for match in range_pattern.finditer(normalized):
         characteristics.append(
             (
@@ -498,7 +636,13 @@ def has_compatible_numeric_characteristics(query: str, product_name: str) -> boo
     )
 
 
-def match_score(query: str, product: CatalogProduct, supplier_hint: str = "") -> float:
+def match_score(
+    query: str,
+    product: CatalogProduct,
+    supplier_hint: str = "",
+    *,
+    token_frequency: Mapping[str, int] | None = None,
+) -> float:
     """Рассчитывает оценку совпадения товара."""
     q = normalize_text(query)
     name = normalize_text(product.name)
@@ -530,7 +674,27 @@ def match_score(query: str, product: CatalogProduct, supplier_hint: str = "") ->
             if len(compact_query) >= 6 and len(compact_name) >= 6
             else 0.0
         )
-        base = 45 * containment + 25 * jaccard + 25 * sequence + 15 * fuzzy_token + 5 * substring
+        strong_evidence = _strong_query_evidence_tokens(q, name)
+        evidence_coverage = (
+            len(strong_evidence) / max(1, len(q_tokens))
+            if len(q_tokens) == 1 or len(strong_evidence) >= 2
+            else 0.0
+        )
+        rarity_bonus = 0.0
+        if token_frequency and len(q_tokens) >= 2 and len(strong_evidence) >= 2:
+            rarity_bonus = 48 * sum(
+                1 / max(1, token_frequency.get(_canonical_token(token), 1))
+                for token in strong_evidence
+            ) / max(1, len(q_tokens))
+        base = (
+            45 * containment
+            + 25 * jaccard
+            + 25 * sequence
+            + 15 * fuzzy_token
+            + 5 * substring
+            + 18 * evidence_coverage
+            + rarity_bonus
+        )
         # Enough to retain a joined-word candidate for the AI resolver, but
         # below the automatic-selection threshold.
         if compact_similarity >= 0.77:
@@ -551,9 +715,18 @@ def rank_candidates(
         product for product in catalog if supplier_matches_hint(product.supplier, supplier_hint)
     ]
     scoped_catalog = supplier_matches or catalog
+    token_frequency: dict[str, int] = {}
+    for product in scoped_catalog:
+        for token in {_canonical_token(token) for token in tokens(product.name)}:
+            token_frequency[token] = token_frequency.get(token, 0) + 1
     ranked: list[Candidate] = []
     for product in scoped_catalog:
-        score = match_score(query, product, supplier_hint)
+        score = match_score(
+            query,
+            product,
+            supplier_hint,
+            token_frequency=token_frequency,
+        )
         # n8n never shows a candidate based on a weak aggregate similarity
         # alone.  A real token match is required before the clarification UI.
         if score < 20 or not has_catalog_search_evidence(query, product):

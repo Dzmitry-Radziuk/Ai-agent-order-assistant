@@ -124,6 +124,45 @@ def test_model_quantity_wins_when_source_also_contains_packaging() -> None:
     assert restored[0]["source_line"] == source
 
 
+def test_spoken_range_does_not_replace_explicit_order_quantity() -> None:
+    """Сохраняет заказанные 3 кг рядом со словесной фасовкой 350–380 г."""
+    source = (
+        "Утиные ножки триста пятьдесят-триста восемьдесят грамм, "
+        "три килограмма, желательно нежирные."
+    )
+    restored = restore_explicit_order_terms(
+        [
+            {
+                "product_query": "Утиные ножки триста пятьдесят-триста восемьдесят грамм",
+                "quantity": 3,
+                "unit": "кг",
+                "source_line": source,
+            }
+        ],
+        source,
+    )
+
+    assert (restored[0]["quantity"], restored[0]["unit"]) == (3.0, "кг")
+
+
+def test_last_explicit_order_term_wins_over_multiple_packaging_measurements() -> None:
+    """Не заменяет заказ 5 шт первыми справочными объёмами огурцов."""
+    source = "Огурцы 40 на 45 Майер, 10 литров, 700 грамм, 500 грамм, Германия, 5 штук."
+    restored = restore_explicit_order_terms(
+        [
+            {
+                "product_query": "Огурцы 40 на 45 Майер",
+                "quantity": 5,
+                "unit": "шт",
+                "source_line": source,
+            }
+        ],
+        source,
+    )
+
+    assert (restored[0]["quantity"], restored[0]["unit"]) == (5.0, "шт")
+
+
 def test_voice_range_only_line_drops_model_invented_quantity() -> None:
     """Диапазон фасовки не становится количеством заказа после AI-разбора."""
     source = "Филе форели свежее 0,8-1,2 килограмма зачищенное 3НС"

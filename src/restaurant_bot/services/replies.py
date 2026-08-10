@@ -354,7 +354,7 @@ def added_items_question_reply(_state: ConversationState, added_count: int) -> B
         if added_count == 1
         else "Товары добавлены в черновик заказа"
     )
-    lines = [f"<i>{title}</i>", "", "Добавить ещё товары?"]
+    lines = [f"<b>{title}</b>", "", "Добавить ещё товары?"]
     return BotReply(
         text="\n".join(lines),
         rows=[
