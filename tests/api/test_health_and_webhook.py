@@ -95,6 +95,11 @@ def test_duplicate_webhook_is_acknowledged_without_a_second_task(
             assert payload["message"]["text"] == "/start"
             return False
 
+        def get_status(self, update_id: int) -> str:
+            """Возвращает terminal status для проверки отсутствия replay."""
+            assert update_id == 42
+            return "done"
+
     monkeypatch.setattr(api_module, "SessionLocal", _SessionFactory())
     monkeypatch.setattr(api_module, "UpdateRepository", DuplicateRepository)
     response = api_module.telegram_webhook(
@@ -106,3 +111,53 @@ def test_duplicate_webhook_is_acknowledged_without_a_second_task(
     )
 
     assert response.status_code == 200
+
+
+def test_duplicate_webhook_redrives_existing_queued_update(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Переотправляет существующий queued update без новой строки."""
+
+    class QueuedRepository:
+        """Имитирует уже сохранённое recoverable обновление."""
+
+        def __init__(self, _: Any):
+            """Инициализирует тестовый repository."""
+
+        def enqueue_once(self, update_id: int, chat_id: str, payload: dict[str, Any]) -> bool:
+            """Сообщает, что update уже существует."""
+            return False
+
+        def get_status(self, update_id: int) -> str:
+            """Возвращает recoverable status."""
+            return "queued"
+
+    class Task:
+        """Имитирует Celery task для проверки re-drive."""
+
+        def __init__(self) -> None:
+            """Создаёт заглушку Celery-задачи для проверки повторной постановки."""
+            self.calls: list[int] = []
+
+        def delay(self, update_id: int) -> None:
+            """Запоминает повторную постановку update."""
+            self.calls.append(update_id)
+
+    task = Task()
+    monkeypatch.setattr(api_module, "SessionLocal", _SessionFactory())
+    monkeypatch.setattr(api_module, "UpdateRepository", QueuedRepository)
+    monkeypatch.setattr(
+        "restaurant_bot.workers.tasks.process_telegram_update",
+        task,
+    )
+
+    response = api_module.telegram_webhook(
+        {
+            "update_id": 43,
+            "message": {"chat": {"id": 7}, "from": {"id": 7}, "text": "сыр"},
+        },
+        "test-secret",
+    )
+
+    assert response.status_code == 200
+    assert task.calls == [43]

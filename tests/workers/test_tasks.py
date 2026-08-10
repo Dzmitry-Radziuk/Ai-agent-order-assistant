@@ -1,6 +1,8 @@
 from unittest.mock import MagicMock
 
+from restaurant_bot.integrations.cache import ChatLockBusyError
 from restaurant_bot.integrations.telegram import TELEGRAM_TRANSIENT_ERRORS
+from restaurant_bot.repositories.updates import UpdateSequenceDeferred
 from restaurant_bot.workers import tasks
 from restaurant_bot.workers.celery_app import celery_app
 
@@ -41,7 +43,11 @@ def test_process_update_task_delegates_to_orchestrator(mocker) -> None:  # type:
 
 def test_process_update_retries_only_transient_telegram_delivery_failures() -> None:
     """Не повторяет бизнес-логику после произвольной ошибки приложения."""
-    assert tasks.process_telegram_update.autoretry_for == TELEGRAM_TRANSIENT_ERRORS
+    assert tasks.process_telegram_update.autoretry_for == (
+        *TELEGRAM_TRANSIENT_ERRORS,
+        ChatLockBusyError,
+        UpdateSequenceDeferred,
+    )
     assert tasks.process_telegram_update.retry_kwargs == {
         "max_retries": tasks.UPDATE_DELIVERY_MAX_RETRIES
     }
@@ -84,6 +90,10 @@ def test_celery_configuration_preserves_delivery_guarantees() -> None:
     assert celery_app.conf.task_track_started is True
     assert celery_app.conf.task_serializer == "json"
     assert celery_app.conf.result_expires == 86400
+    assert celery_app.conf.beat_schedule["redrive-telegram-updates"] == {
+        "task": "restaurant_bot.redrive_telegram_updates",
+        "schedule": 60.0,
+    }
     assert (
         celery_app.conf.beat_schedule["cleanup-expired-audit-data"]["task"]
         == "restaurant_bot.cleanup_expired_audit_data"

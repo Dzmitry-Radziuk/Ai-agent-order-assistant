@@ -99,6 +99,10 @@ class CatalogCache:
         logger.info("catalog_cache_invalidated", spreadsheet_id=spreadsheet_id)
 
 
+class ChatLockBusyError(TimeoutError):
+    """Сообщает, что другой worker временно владеет блокировкой чата."""
+
+
 @contextmanager
 def chat_lock(redis: Redis[Any], chat_id: str, timeout: int = 120) -> Iterator[Lock]:
     """Последовательно обрабатывает сообщения одного чата."""
@@ -109,12 +113,16 @@ def chat_lock(redis: Redis[Any], chat_id: str, timeout: int = 120) -> Iterator[L
     )
     started_at = perf_counter()
     acquired = lock.acquire(blocking=True)
+    if not acquired:
+        logger.info(
+            "telegram_chat_lock_busy",
+            wait_ms=round((perf_counter() - started_at) * 1000),
+        )
+        raise ChatLockBusyError(f"Could not acquire lock for chat {chat_id}")
     logger.info(
         "telegram_chat_lock_acquired",
         wait_ms=round((perf_counter() - started_at) * 1000),
     )
-    if not acquired:
-        raise TimeoutError(f"Could not acquire lock for chat {chat_id}")
     try:
         yield lock
     finally:

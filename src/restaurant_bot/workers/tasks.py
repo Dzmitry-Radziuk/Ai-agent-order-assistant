@@ -1,21 +1,30 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from functools import lru_cache
 
+import structlog
 from redis import Redis
 
 from restaurant_bot.config import get_settings
 from restaurant_bot.db import SessionLocal
+from restaurant_bot.integrations.cache import ChatLockBusyError
 from restaurant_bot.integrations.google_sheets import GoogleSheetsGateway
 from restaurant_bot.integrations.openai_client import OpenAIService
 from restaurant_bot.integrations.telegram import TELEGRAM_TRANSIENT_ERRORS, TelegramClient
 from restaurant_bot.repositories.order_events import OrderEventRepository
+from restaurant_bot.repositories.updates import (
+    STALE_PROCESSING_AFTER,
+    UpdateRepository,
+    UpdateSequenceDeferred,
+)
 from restaurant_bot.services.orchestrator import UpdateOrchestrator
 from restaurant_bot.services.submission import SubmissionService
 from restaurant_bot.workers.celery_app import celery_app
 
 SUBMISSION_MAX_RETRIES = 8
 UPDATE_DELIVERY_MAX_RETRIES = 4
+logger = structlog.get_logger(__name__)
 
 
 @lru_cache(maxsize=1)
@@ -34,7 +43,7 @@ def dependencies() -> tuple[UpdateOrchestrator, SubmissionService]:
 
 @celery_app.task(
     bind=True,
-    autoretry_for=TELEGRAM_TRANSIENT_ERRORS,
+    autoretry_for=(*TELEGRAM_TRANSIENT_ERRORS, ChatLockBusyError, UpdateSequenceDeferred),
     retry_backoff=True,
     retry_jitter=True,
     retry_kwargs={"max_retries": UPDATE_DELIVERY_MAX_RETRIES},
@@ -43,7 +52,27 @@ def dependencies() -> tuple[UpdateOrchestrator, SubmissionService]:
 def process_telegram_update(self, update_id: int) -> None:  # type: ignore[no-untyped-def]
     """Обрабатывает сохранённое обновление Telegram."""
     orchestrator, _ = dependencies()
-    orchestrator.process(update_id)
+    try:
+        orchestrator.process(update_id)
+    except ChatLockBusyError:
+        logger.info("telegram_update_deferred_busy", update_id=update_id)
+        raise
+    except UpdateSequenceDeferred:
+        logger.info("telegram_update_deferred_sequence", update_id=update_id)
+        raise
+
+
+@celery_app.task(name="restaurant_bot.redrive_telegram_updates")
+def redrive_telegram_updates() -> int:
+    """Ставит recoverable обновления чатов обратно в обработку."""
+    stale_before = datetime.now(UTC) - STALE_PROCESSING_AFTER
+    with SessionLocal.begin() as db:
+        updates = UpdateRepository(db).recoverable_for_redrive(stale_before)
+        update_ids = [update.update_id for update in updates]
+    for update_id in update_ids:
+        process_telegram_update.delay(update_id)
+    logger.info("telegram_update_redriven", update_count=len(update_ids))
+    return len(update_ids)
 
 
 @celery_app.task(

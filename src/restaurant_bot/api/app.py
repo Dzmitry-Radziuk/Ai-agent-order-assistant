@@ -84,9 +84,13 @@ def telegram_webhook(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="missing update_id")
 
     with SessionLocal.begin() as db:
-        created = UpdateRepository(db).enqueue_once(event.update_id, event.chat_id, payload)
+        repository = UpdateRepository(db)
+        created = repository.enqueue_once(event.update_id, event.chat_id, payload)
+        existing_status = None if created else repository.get_status(event.update_id)
 
-    if created:
+    should_enqueue = created or existing_status in {"queued", "processing"}
+
+    if should_enqueue:
         from restaurant_bot.workers.tasks import process_telegram_update
 
         process_telegram_update.delay(event.update_id)
@@ -97,6 +101,7 @@ def telegram_webhook(
         input_type=event.input_type.value,
         text=event.text,
         has_file=bool(event.file_id),
-        enqueued=created,
+        enqueued=should_enqueue,
+        duplicate=not created,
     )
     return Response(status_code=status.HTTP_200_OK)

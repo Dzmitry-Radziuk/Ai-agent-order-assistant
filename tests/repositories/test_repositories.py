@@ -1,3 +1,5 @@
+from datetime import UTC, datetime, timedelta
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 from sqlalchemy.exc import IntegrityError
@@ -107,6 +109,96 @@ def test_update_repository_returns_locked_update() -> None:
     db.scalar.return_value = update
 
     assert UpdateRepository(db).get_for_update(7) is update
+
+
+def test_update_repository_reads_existing_status_for_duplicate_redrive() -> None:
+    """Читает статус существующего update для безопасного повторного запуска."""
+    db = MagicMock()
+    db.get.return_value = TelegramUpdate(update_id=7, chat_id="chat-1", payload={}, status="queued")
+
+    assert UpdateRepository(db).get_status(7) == "queued"
+
+
+def test_update_repository_detects_lower_unfinished_update() -> None:
+    """Находит более раннее незавершённое обновление того же чата."""
+    db = MagicMock()
+    db.scalar.return_value = 101
+
+    assert UpdateRepository(db).has_lower_unfinished("chat-1", 102) is True
+
+
+def test_update_repository_accepts_terminal_predecessor() -> None:
+    """Не блокирует новый update отсутствующим lower unfinished результатом."""
+    db = MagicMock()
+    db.scalar.return_value = None
+
+    assert UpdateRepository(db).has_lower_unfinished("chat-1", 102) is False
+
+
+def test_update_repository_redrive_chooses_oldest_recoverable_per_chat() -> None:
+    """Выбирает только первый recoverable update каждого чата."""
+    first = TelegramUpdate(
+        update_id=101,
+        chat_id="chat-a",
+        payload={},
+        status="queued",
+    )
+    second = TelegramUpdate(
+        update_id=102,
+        chat_id="chat-a",
+        payload={},
+        status="queued",
+    )
+    other = TelegramUpdate(
+        update_id=201,
+        chat_id="chat-b",
+        payload={},
+        status="processing",
+        updated_at=datetime.now(UTC) - timedelta(minutes=10),
+    )
+    db = MagicMock()
+    db.scalars.side_effect = [
+        SimpleNamespace(all=lambda: [first, second, other]),
+        SimpleNamespace(all=lambda: [first, second, other]),
+    ]
+
+    result = UpdateRepository(db).recoverable_for_redrive(datetime.now(UTC) - timedelta(minutes=5))
+
+    assert [row.update_id for row in result] == [101, 201]
+
+
+def test_update_repository_does_not_redrive_fresh_processing_row() -> None:
+    """Не ставит свежую обработку повторно и сохраняет порядок чата."""
+    now = datetime.now(UTC)
+    queued = TelegramUpdate(
+        update_id=301,
+        chat_id="chat-c",
+        payload={},
+        status="queued",
+    )
+    fresh = TelegramUpdate(
+        update_id=302,
+        chat_id="chat-c",
+        payload={},
+        status="processing",
+        updated_at=now,
+    )
+    stale = TelegramUpdate(
+        update_id=401,
+        chat_id="chat-d",
+        payload={},
+        status="processing",
+        updated_at=now - timedelta(minutes=10),
+    )
+    db = MagicMock()
+    db.scalars.side_effect = [
+        SimpleNamespace(all=lambda: [queued, fresh, stale]),
+        SimpleNamespace(all=lambda: [queued, fresh, stale]),
+    ]
+
+    result = UpdateRepository(db).recoverable_for_redrive(now - timedelta(minutes=5))
+
+    assert [row.update_id for row in result] == [301, 401]
 
 
 def test_submission_repository_returns_existing_record() -> None:

@@ -3876,3 +3876,24 @@ fencing (default TTL 120 s при vision timeout до 180 s), потеря ва�
 per-chat sequencing/contention handling и lease-expiry fencing. В этом этапе production
 код, тесты и миграции не менялись; `.env` не читался и не tracked; GitLab не использовался.
 Реализацию блоков не начинать автоматически.
+## CONCURRENCY BLOCK 1 — DONE
+
+Durable per-chat update sequencing and lock-contention recovery are active.
+`TelegramUpdate` is the durable sequence owner. Among unfinished rows in one
+chat, the smallest `update_id` is processed first; different chats still run
+concurrently. A row becomes `processing` only after the chat lock is acquired.
+Busy-lock and lower-sequence cases remain recoverable and are retried through
+explicit signals plus the minute-level `redrive_telegram_updates` task.
+Duplicate webhooks re-drive only unfinished rows, while existing checkpoints
+prevent duplicate state or side-effect application. Queued and stale
+processing rows are recoverable; fresh processing rows are not stolen.
+
+No database migration was needed; Alembic remains at `0008`. Lease expiry,
+heartbeat, and fencing remain explicitly outside this block.
+
+Focused Block 1 tests pass; the full-suite baseline remains the same 14 known
+failures after the new concurrency tests. H1–H3c behavior was not changed.
+
+## NEXT FUNCTIONAL STEP
+
+`CONCURRENCY BLOCK 2 — LEASE EXPIRY FENCING`

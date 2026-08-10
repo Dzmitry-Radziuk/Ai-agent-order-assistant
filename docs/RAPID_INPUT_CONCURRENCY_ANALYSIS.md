@@ -272,3 +272,27 @@ worker from corrupting state after ownership expiry.
 Application code, tests and migrations were not changed in this analysis.
 `.env` was not read and is not tracked (`git ls-files .env` returned empty).
 GitLab was not used.
+
+## CONCURRENCY BLOCK 1 — IMPLEMENTATION RESULT
+
+Block 1 is implemented at the webhook/repository/worker boundary. The durable
+`TelegramUpdate` row remains the source of accepted work; `UpdateRepository`
+enforces the smallest unfinished `update_id` per chat before a row is claimed.
+The row stays `queued` until the per-chat Redis lock is acquired, so ordinary
+lock contention cannot strand fresh work as `processing`.
+
+`ChatLockBusyError` and `UpdateSequenceDeferred` are explicit retry signals.
+Celery retries both signals, while `redrive_telegram_updates` runs every 60
+seconds and enqueues the oldest recoverable row per chat. Recoverable rows are
+`queued` rows and `processing` rows older than five minutes; fresh processing
+rows are not stolen. Duplicate webhooks re-drive only existing `queued` or
+`processing` rows; `done` and `ignored` rows are not replayed.
+
+The database row is committed before Celery dispatch and remains durable if the
+dispatch call fails, closing the commit-to-task gap through periodic re-drive.
+Existing state, reply, task, and side-effect checkpoints remain authoritative.
+No migration was required because the existing `TelegramUpdate` fields and
+indexes are sufficient; Alembic remains at `0008`.
+
+Block 2 is intentionally open: Redis lease expiry fencing/heartbeat is not
+implemented in this block.

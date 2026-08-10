@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 from collections import Counter
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from time import perf_counter
 from typing import Any
 from uuid import uuid4
@@ -36,7 +36,11 @@ from restaurant_bot.integrations.telegram import TELEGRAM_TRANSIENT_ERRORS, Tele
 from restaurant_bot.logging import sanitize_log_value
 from restaurant_bot.repositories.order_events import OrderEventRepository
 from restaurant_bot.repositories.sessions import SessionRepository
-from restaurant_bot.repositories.updates import UpdateRepository
+from restaurant_bot.repositories.updates import (
+    STALE_PROCESSING_AFTER,
+    UpdateRepository,
+    UpdateSequenceDeferred,
+)
 from restaurant_bot.services.conversation_handlers.comment_scope import comment_scope_items
 from restaurant_bot.services.conversation_handlers.state_compatibility import (
     CompatibilityAction,
@@ -123,7 +127,7 @@ class UpdateOrchestrator:
         """Обрабатывает одно обновление Telegram целиком."""
         started_at = perf_counter()
         timings: dict[str, int] = {}
-        claim = self._claim(update_id)
+        claim = self._claim(update_id, mark_processing=False)
         timings["claim_ms"] = round((perf_counter() - started_at) * 1000)
         if claim is None:
             return
@@ -160,6 +164,9 @@ class UpdateOrchestrator:
             ) as trace,
             chat_lock(self.redis, event.chat_id),
         ):
+            claim = self._claim(update_id)
+            if claim is None:
+                return
             processing_message_id: int | None = None
             analytics = {
                 "status": "done",
@@ -310,7 +317,9 @@ class UpdateOrchestrator:
                             self._all_suppliers_processing_reply(),
                         )
                     stage_started = perf_counter()
-                    review_command = command.intent in _REVIEW_INTENTS and not sheet_review_ambiguous
+                    review_command = (
+                        command.intent in _REVIEW_INTENTS and not sheet_review_ambiguous
+                    )
                     catalog_needed = False if review_command else self._needs_catalog(command)
                     fresh_catalog_required = (
                         False if review_command else self._requires_fresh_catalog(command)
@@ -1217,10 +1226,13 @@ class UpdateOrchestrator:
         review_command = self._parse_sheet_review_command(text, parsed, state)
         if review_command is not None:
             return review_command
-        if state.pending_comment_items and self.engine.state_compatibility_policy.should_try_contextual_fallback(
-            state,
-            parsed,
-            CompatibilityContext.COMMENT_SCOPE,
+        if (
+            state.pending_comment_items
+            and self.engine.state_compatibility_policy.should_try_contextual_fallback(
+                state,
+                parsed,
+                CompatibilityContext.COMMENT_SCOPE,
+            )
         ):
             return self._parse_pending_comment_scope(text, state)
         # Visible buttons are a contextual fallback after global parsing. A
@@ -1279,9 +1291,7 @@ class UpdateOrchestrator:
             return parsed.model_copy(update={"text": text})
 
         if parsed.intent in {Intent.REVIEW_SUBMIT, Intent.REVIEW_CANCEL}:
-            return parsed.model_copy(
-                update={"callback_target": state.review_token, "text": text}
-            )
+            return parsed.model_copy(update={"callback_target": state.review_token, "text": text})
         if parsed.intent in {Intent.SUBMIT_REQUEST, Intent.SUBMIT_AS_IS, Intent.CONFIRM} or (
             parsed.dialogue_response.value == "affirm"
         ):
@@ -1661,13 +1671,31 @@ class UpdateOrchestrator:
             catalog,
         )
 
-    def _claim(self, update_id: int) -> ClaimedUpdate | None:
+    def _claim(self, update_id: int, *, mark_processing: bool = True) -> ClaimedUpdate | None:
         """Берёт одно обновление из очереди в обработку."""
-        stale_before = datetime.now(UTC) - timedelta(minutes=5)
         with SessionLocal.begin() as db:
-            update = UpdateRepository(db).get_for_update(update_id)
+            repository = UpdateRepository(db)
+            update = repository.get_for_update(update_id)
             if update is None or update.status in {"done", "ignored"}:
                 return None
+            if not mark_processing:
+                return ClaimedUpdate(
+                    payload=dict(update.payload),
+                    result=dict(update.result) if update.result else None,
+                    state_applied=update.state_applied,
+                    reply_sent=update.reply_sent,
+                    tasks_enqueued=update.tasks_enqueued,
+                )
+            if repository.has_lower_unfinished(update.chat_id, update_id):
+                logger.info(
+                    "telegram_update_deferred_sequence",
+                    update_id=update_id,
+                    chat_id=update.chat_id,
+                )
+                raise UpdateSequenceDeferred(
+                    f"Update {update_id} is waiting for an earlier update in chat {update.chat_id}"
+                )
+            stale_before = datetime.now(UTC) - STALE_PROCESSING_AFTER
             if (
                 update.status == "processing"
                 and update.updated_at

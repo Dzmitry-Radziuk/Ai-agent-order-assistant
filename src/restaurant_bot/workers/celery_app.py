@@ -31,9 +31,13 @@ celery_app.conf.update(
     broker_connection_retry_on_startup=True,
     result_expires=86400,
     beat_schedule={
+        "redrive-telegram-updates": {
+            "task": "restaurant_bot.redrive_telegram_updates",
+            "schedule": 60.0,
+        },
         "cleanup-expired-audit-data": {
             "task": "restaurant_bot.cleanup_expired_audit_data",
             "schedule": crontab(hour=3, minute=15),
-        }
+        },
     },
 )
