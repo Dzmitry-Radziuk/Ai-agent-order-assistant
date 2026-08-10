@@ -15,7 +15,8 @@ AI помогает понять свободную речь и найти ка�
 
 - Репозиторий: `Dzmitry-Radziuk/test_bot`.
 - Ветка: `decompose_bot`.
-- Базовый SHA: `f6409891146fad3ce5c82c4329d808b83bc3440c`.
+- Semantic baseline: `f9cbc3195c0eae843de3208e488c3f46baa5a5ec`.
+- Текущий decomposition baseline перед Block 2B: `4a24f0d0106e48943865be507d6380ae1a8a94db`.
 - Единственный рабочий remote: GitHub `origin/decompose_bot`.
 - Автоматический baseline: `1362 collected / 1362 passed`.
 - `manual_smoke_forensic_logs.txt` — намеренный локальный untracked-файл
@@ -140,18 +141,33 @@ Block 2A завершён: из `products.py` вынесены три доказ
 `services/product_parser.py` удалён после полного import audit: callers старого
 пути не найдены.
 
+Block 2B завершён механически: text command parsing разделён по ответственностям
+в `parsing/commands/`, а `services/parser.py` стал facade/dispatcher на 224 строки.
+`parse_callback()` оставлен отдельным channel contract. Поведение подтверждено
+сравнением на 62 существующих случаях и полным baseline `1362 passed`.
+
 Постоянное правило: перед каждым `MOVE`/`MERGE`/`DELETE` выполняются
 repository-wide usage и duplicate audit. Мёртвый или дублирующий код не
 переносится; для одной ответственности остаётся одна реализация. Временный
 facade допустим только как явный re-export при подтверждённых callers.
 
-## 9. Следующий блок
+## 9. Block 2B
 
-Block 2B начат после проверки SHA `4a24f0d0106e48943865be507d6380ae1a8a94db`.
-Сначала отдельным documentation commit закрепляются долговременные правила
-платформы, channel-agnostic core, root-cause диагностики и usage audit. Затем
-будет выполнен механический перенос text command parsing по доказанным
-ответственностям. `parse_callback()` остаётся отдельным channel contract.
+Документационный commit с постоянными правилами создан отдельно. Text command
+parsing механически разделён по доказанным ответственностям в `parsing/commands/`.
+`services/parser.py` оставлен компактным facade/dispatcher: `infer_intent`,
+`parse_callback` и public compatibility exports. Callback mapping не смешан с
+channel-agnostic text parsing. Product parsing Block 2A не изменялся.
+
+До code commit выполнены повторные usage/duplicate/dead-code audit и semantic
+comparison на 62 существующих тестовых строках: расхождений нет. Полный
+regression baseline остаётся `1362 passed`; code migration прошёл все quality
+gates.
+
+## 10. Следующий блок
+
+После публикации Block 2B следующий архитектурный блок не начинается
+автоматически. Сначала требуется внешний review текущих command owners и callers.
 
 ## 10. Проверки
 

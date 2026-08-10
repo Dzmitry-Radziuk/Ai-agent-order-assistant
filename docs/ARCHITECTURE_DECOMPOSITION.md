@@ -32,7 +32,7 @@ contracts и проходит focused/full regression до следующего 
 | `services/orchestrator.py` | 2152 | Transaction pipeline и scheduling | Позже выделить application pipeline. |
 | `services/submission.py` | 2047 | Submission use cases и checkpoints | Разделять по внешним контрактам. |
 | `integrations/openai_parsing.py` | 1800 | Schemas и reconciliation | Сначала выделить schemas/reconciliation. |
-| `services/parser.py` | 1687 | Global commands и callback parsing | Следующий owner для command extraction. |
+| `services/parser.py` | 224 | Public text/callback facade и dispatcher | Callback остаётся channel contract. |
 | `services/replies.py` | 1017 | Cards, keyboards и UX contracts | Делить по экранным семействам. |
 | `integrations/openai_client.py` | 927 | Transport и AI use cases | Разделять только после контрактов. |
 | `integrations/google_sheets.py` | 884 | Несколько Sheets contracts | Сохранять единый gateway до доказанного split. |
@@ -42,6 +42,13 @@ contracts и проходит focused/full regression до следующего 
 | `parsing/quantities.py` | 57 | Quantity primitives | Самостоятельные короткие ответы количества. |
 | `parsing/packaging.py` | 187 | Фасовка и catalog measurements | Отдельный measurement owner. |
 | `parsing/comment_scope.py` | 52 | Explicit global comment scope | Только разбор области комментария. |
+| `parsing/commands/patterns.py` | 329 | Статические шаблоны text-команд | Один owner таблиц команд. |
+| `parsing/commands/normalization.py` | 85 | Нормализация и отрицание | Без state mutation. |
+| `parsing/commands/navigation.py` | 496 | Свободная навигация и статусы | Не смешивается с callback. |
+| `parsing/commands/item_commands.py` | 228 | Add/remove/edit item commands | Использует общие quantity primitives. |
+| `parsing/commands/comment_commands.py` | 162 | Изменение комментариев черновика | Не владеет comment scope parsing. |
+| `parsing/commands/dialogue.py` | 100 | Retry, quantity hint и dialogue metadata | Не меняет ConversationState. |
+| `parsing/commands/router.py` | 208 | Text command routing | Не принимает callback data. |
 
 ## 4. Карта владельцев
 
@@ -58,7 +65,8 @@ contracts и проходит focused/full regression до следующего 
 |---|---|
 | `services/input_normalizer.py` | Позже MOVE в `input/telegram.py`, временный facade. |
 | `services/input_recognition.py` | Позже MOVE в `input/recognition.py`. |
-| `services/parser.py` | Сейчас сохраняет global command facade; позже MOVE commands. |
+| `services/parser.py` | **Block 2B: FACADE** для text/callback public contract и dispatcher. |
+| `parsing/commands/` | **Block 2B: CREATE** owners text command parsing по responsibility. |
 | `parsing/products.py` | **Block 1/2A: MOVE** orchestration в parsing package; после extraction остаётся центральным entry point. |
 | `parsing/quantities.py` | **Block 2A: CREATE** quantity primitives. |
 | `parsing/packaging.py` | **Block 2A: CREATE** фасовка и каталожные измерения. |
@@ -211,7 +219,37 @@ usage/duplicate/dead-code audit до и после изменения. Для о
 остаётся один owner; facade возможен только как простой re-export при доказанных
 callers.
 
-## 10. Проверки Block 2A
+## 10. Block 2B — выполненный механический перенос text command parsing
+
+`services/parser.py` уменьшился с 1687 до 224 строк. В нём остались только
+public `infer_intent`, callback `parse_callback` и compatibility exports.
+Свободный текст теперь маршрутизируется через `parsing/commands/router.py`.
+
+```text
+parsing/commands/patterns.py
+  -> статические _COMMANDS и _NATURAL_COMMANDS
+parsing/commands/normalization.py
+  -> normalize_command_text и guards отрицания
+parsing/commands/navigation.py
+  -> свободная навигация и order-status navigation
+parsing/commands/item_commands.py
+  -> add/remove/edit item commands и target cleaning
+parsing/commands/comment_commands.py
+  -> edit comment command без мутации состояния
+parsing/commands/dialogue.py
+  -> retry, quantity hint и dialogue response
+parsing/commands/router.py
+  -> порядок text-only правил и ParsedCommand
+services/parser.py
+  -> text/callback dispatcher и обратная совместимость imports
+```
+
+`parse_callback()` намеренно не переносился: его mapping и revision являются
+контрактом кнопок канального адаптера. Product parsing Block 2A не менялся.
+Сравнение старой и новой реализации на 62 существующих тестовых строках дало
+нулевые расхождения по полной модели `ParsedCommand`.
+
+## 11. Проверки Block 2A и Block 2B
 
 Focused:
 
@@ -241,15 +279,14 @@ git diff --check
 repository-wide scan подтверждает отсутствие старого facade и второй
 реализации каждой перенесённой функции.
 
-## 10. Порядок следующих миграций
+## 12. Порядок следующих миграций
 
-1. Block 2B/Block 3: command parsing в `parsing/commands.py`.
-2. AI schemas/reconciliation.
-3. Catalog evidence/scoring/safety и resolver.
-4. Modal policy, handlers, draft/comments и затем engine.
-5. Input normalizer/recognition и application pipeline.
-6. Orders, submission, venues и внешние adapters.
-7. Только после контрактов уменьшать `engine.py` и `orchestrator.py`.
+1. AI schemas/reconciliation.
+2. Catalog evidence/scoring/safety и resolver.
+3. Modal policy, handlers, draft/comments и затем engine.
+4. Input normalizer/recognition и application pipeline.
+5. Orders, submission, venues и внешние adapters.
+6. Только после контрактов уменьшать `engine.py` и `orchestrator.py`.
 
 Следующий Block 2B/Block 3 не начинается автоматически после Block 2A и
 требует внешнего review.

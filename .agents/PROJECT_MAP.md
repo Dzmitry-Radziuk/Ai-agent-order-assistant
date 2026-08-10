@@ -49,6 +49,13 @@ flowchart LR
 | `services/engine.py` | Детерминированная state machine, приоритет незавершённых вопросов, команды, callback и переходы черновика |
 | `services/input_recognition.py` | Скачивание voice/photo, транскрибация с безопасным fallback и обновление карточки прогресса |
 | `services/parser.py` | Text intent facade, callback contract и временный dispatcher command parsing |
+| `parsing/commands/patterns.py` | Статические шаблоны text-команд |
+| `parsing/commands/normalization.py` | Нормализация команд и отрицание |
+| `parsing/commands/navigation.py` | Свободная навигация и order-status text commands |
+| `parsing/commands/item_commands.py` | Add/remove/edit item command parsing |
+| `parsing/commands/comment_commands.py` | Изменение комментариев существующих позиций |
+| `parsing/commands/dialogue.py` | Retry, quantity hint и dialogue response metadata |
+| `parsing/commands/router.py` | Порядок text command routing без callback contract |
 | `parsing/products.py` | Разбор товарных строк и сборка `ExtractedItem` без внешних эффектов |
 | `parsing/quantities.py` | Короткие quantity primitives |
 | `parsing/packaging.py` | Фасовка и каталожные measurement spans |
