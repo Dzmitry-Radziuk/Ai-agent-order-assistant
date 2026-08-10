@@ -726,7 +726,7 @@ def test_recalculation_invalid_json_is_not_treated_as_success(settings, monkeypa
 
 
 def test_recalculation_without_token_cannot_be_marked_successful(settings) -> None:  # type: ignore[no-untyped-def]
-    """Проверяет, что перерасчёт без токен не может be отмечается успешная."""
+    """Проверяет, что пересчёт без токена нельзя считать успешным."""
     settings.google_recalc_token = SecretStr("")
     with pytest.raises(GoogleSheetsError, match="GOOGLE_RECALC_TOKEN"):
         GoogleSheetsGateway(settings).trigger_recalculation("A-1", VENUE_SPREADSHEET_ID)

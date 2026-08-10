@@ -166,6 +166,7 @@ class SubmissionService:
                                 )
                                 return
                             self._mark_recalc_completed(pending.order_no)
+                            recalc_send_started = False
                             logger.info(
                                 "submission_recalculation_completed",
                                 chat_id=chat_id,

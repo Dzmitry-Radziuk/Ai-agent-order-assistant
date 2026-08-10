@@ -697,6 +697,50 @@ def test_recalculation_checkpoint_failure_blocks_follow_up_post(
     service._finalize.assert_not_called()
 
 
+def test_downstream_prepare_failure_does_not_reclassify_completed_recalc(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Относит сбой подготовки dispatch к последующему этапу."""
+    pending = _record(catalog_updated=True, recalc_done=False)
+    completed = _record(catalog_updated=True, recalc_done=True)
+    service = _cache_submission_service(
+        monkeypatch,
+        [pending, pending, completed],
+        invalidate_results=[None],
+        recalc_results=[None],
+    )
+    service.settings.google_order_submission_enabled = True
+    service.sheets.prepare_order_submission.side_effect = RuntimeError("dispatch prepare failed")
+
+    with pytest.raises(RuntimeError, match="dispatch prepare failed"):
+        service.submit("chat-1", report_failure=False)
+
+    service._mark_recalc_uncertain.assert_not_called()
+    service.sheets.send_recalculation.assert_called_once()
+    service._finalize.assert_not_called()
+
+
+def test_finalize_failure_does_not_reclassify_completed_recalc(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Относит сбой финализации к последующему этапу заявки."""
+    pending = _record(catalog_updated=True, recalc_done=False)
+    completed = _record(catalog_updated=True, recalc_done=True)
+    service = _cache_submission_service(
+        monkeypatch,
+        [pending, pending, completed],
+        invalidate_results=[None],
+        recalc_results=[None],
+    )
+    service._finalize.side_effect = RuntimeError("finalize failed")
+
+    with pytest.raises(RuntimeError, match="finalize failed"):
+        service.submit("chat-1", report_failure=False)
+
+    service._mark_recalc_uncertain.assert_not_called()
+    service.sheets.send_recalculation.assert_called_once()
+
+
 def _recovery_service(*verifications: CatalogMutationVerification) -> SubmissionService:
     """Создаёт сервис с контролируемым ответом проверки каталога."""
     service = object.__new__(SubmissionService)
