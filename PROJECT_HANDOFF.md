@@ -3828,10 +3828,10 @@ schema и migrations не менялись.
 - H3a-тест с повторным POST после ошибки пересчёта мигрирован на новый контракт:
   cache failure до `started` остаётся retryable, внешний unknown становится
   `uncertain` и не допускает второго POST.
-- H3b focused suite: **113 passed** (submission, Google Sheets, migration,
-  submission guards и H1/H2/H3a venue safety). Полный post-H3b запуск: **1301
-  collected / 1287 passed / 14 failed / 0 skipped / 0 xfailed / 0 errors**;
-  duration **16.53s**. Все 14 failure nodeids совпали с H3a baseline; новых
+- H3b focused suite: **116 passed** (submission, Google Sheets, migration,
+  submission guards и H1/H2/H3a venue safety). Полный post-H3b запуск: **1304
+  collected / 1290 passed / 14 failed / 0 skipped / 0 xfailed / 0 errors**;
+  duration **16.04s**. Все 14 failure nodeids совпали с H3a baseline; новых
   regressions нет.
 
 ## NEXT FUNCTIONAL STEP
