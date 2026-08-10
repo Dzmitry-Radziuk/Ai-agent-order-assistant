@@ -3767,9 +3767,38 @@ schema и migrations не менялись.
 - Baseline **1285 / 1271 / 14** и все 14 failures не изменялись. H1/H2 закрыты;
   H3 implementation, migration `0007`, H4, decomposition и MAX не начинались.
 
+## BLOCK H3a — DONE / CACHE REPAIR ACTIVE
+
+- Исправлен подтверждённый lifecycle bug: cache invalidation больше не зависит
+  от того, был ли catalog stage completed в начале конкретной попытки.
+- После подтверждения `catalog_updated` запись перечитывается. Если
+  `recalc_done == false`, сначала выполняется `CatalogCache.invalidate()`, затем
+  запускается recalc и только после него сохраняется `recalc_done`.
+- Если Redis DELETE падает, submission останавливается до recalc, dispatch и
+  finalize. Следующая попытка снова выполняет тот же DELETE; catalog plan не
+  готовится и Google Sheets mutation не повторяется. Повтор безопасен, потому
+  что DELETE по детерминированному ключу идемпотентен.
+- Если `recalc_done == true`, H3a не добавляет лишнюю cache repair операцию.
+  Recalc semantics, Apps Script POST, H3b и H3c не менялись. Отдельные поля,
+  миграции и пользовательские тексты не добавлялись; Alembic head — `0006`.
+- `UpdateOrchestrator` и `CatalogCache.invalidate()` не рефакторились; добавлен
+  прямой тест deterministic Redis key, а основной regression проверяет полный
+  `SubmissionService.submit()` lifecycle.
+- H3a focused suite: **106 passed**; H1/H2 submission safety tests остаются
+  зелёными. Добавлены regressions для cache failure/retry, repeated failure,
+  recalc failure и completed recalc.
+- Перед H3a в handoff был указан baseline **1285 / 1271 / 14**. Свежий полный
+  запуск после добавления H3a tests собрал **1295 / 1281 / 14**
+  (0 skipped / 0 xfailed / 0 errors). Все 14 failure nodeids совпадают с
+  прежним baseline; новых failure nodeids нет. Разница в collection отражает
+  новые тесты и ранее неточно зафиксированный collection accounting, а не
+  regression.
+- Ruff, format, mypy, markdown links, `git diff --check` и `alembic heads`
+  проходят. Следующий этап — H3b; H3c, H4, decomposition и MAX не начинались.
+
 ## NEXT FUNCTIONAL STEP
 
-`BLOCK H3a — cache repair после catalog completion` — отдельная implementation
-задача после подтверждения. H1/H2 safety gates остаются обязательными; recalc,
-Telegram notification, prompts, parser, matching, engine, state compatibility,
+`BLOCK H3b — recalc uncertainty gate` — отдельная implementation задача после
+подтверждения. H1/H2/H3a safety gates остаются обязательными; Telegram
+notification, prompts, parser, matching, engine, state compatibility,
 decomposition и MAX не входят в следующий патч автоматически.

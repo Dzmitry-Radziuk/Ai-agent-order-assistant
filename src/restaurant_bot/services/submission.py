@@ -132,11 +132,8 @@ class SubmissionService:
                         )
                     else:
                         stage_started = perf_counter()
-                        catalog_was_completed = self._catalog_status(record) == "completed"
                         if not self._run_catalog_update(chat_id, pending, record):
                             return
-                        if not catalog_was_completed:
-                            self.catalog_cache.invalidate(spreadsheet_id)
                         logger.info(
                             "submission_catalog_updated",
                             chat_id=chat_id,
@@ -145,6 +142,7 @@ class SubmissionService:
                         )
                         record = self._get_record(pending.order_no)
                         if not record.recalc_done:
+                            self.catalog_cache.invalidate(spreadsheet_id)
                             stage_started = perf_counter()
                             self.sheets.trigger_recalculation(
                                 pending.order_no,

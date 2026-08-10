@@ -462,6 +462,165 @@ def test_catalog_cache_failure_after_completion_does_not_reapply() -> None:
     service.sheets.apply_catalog_mutation.assert_called_once_with(plan)
 
 
+def _cache_submission_service(
+    monkeypatch: pytest.MonkeyPatch,
+    records: list[SimpleNamespace],
+    *,
+    invalidate_results: list[Exception | None],
+    recalc_results: list[Exception | None] | None = None,
+) -> SubmissionService:
+    """Создаёт сервис для проверки границы кэша и пересчёта."""
+    service = object.__new__(SubmissionService)
+    service.settings = SimpleNamespace(google_order_submission_enabled=False)
+    service.redis = MagicMock()
+    service.redis.lock.return_value = nullcontext()
+    service.telegram = MagicMock()
+    service.sheets = MagicMock()
+    service.catalog_cache = MagicMock()
+    service.catalog_cache.invalidate.side_effect = invalidate_results
+    if recalc_results is not None:
+        service.sheets.trigger_recalculation.side_effect = recalc_results
+    pending = PendingSubmission(order_no="ORDER-CACHE", spreadsheet_id="venue-sheet", rows=[])
+    service._load_pending = MagicMock(return_value=pending)  # type: ignore[method-assign]
+    service._record = MagicMock(return_value=records[0])  # type: ignore[method-assign]
+    service._get_record = MagicMock(side_effect=records)  # type: ignore[method-assign]
+    service._run_catalog_update = MagicMock(return_value=True)  # type: ignore[method-assign]
+    service._checkpoint = MagicMock()  # type: ignore[method-assign]
+    service._finalize = MagicMock(  # type: ignore[method-assign]
+        return_value=ConversationState(status="saved_locally")
+    )
+    service._send_local_completion = MagicMock()  # type: ignore[method-assign]
+    service._remember_transient_error = MagicMock()  # type: ignore[method-assign]
+    monkeypatch.setattr(submission_module, "chat_lock", lambda *_args, **_kwargs: nullcontext())
+    return service
+
+
+def test_completed_catalog_with_unfinished_recalc_invalidates_cache(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Инвалидирует кэш перед незавершённым пересчётом без новой записи каталога."""
+    record = _record(catalog_updated=True, recalc_done=False)
+    service = _cache_submission_service(
+        monkeypatch,
+        [record, record, _record(catalog_updated=True, recalc_done=True)],
+        invalidate_results=[None],
+        recalc_results=[None],
+    )
+
+    service.submit("chat-1", report_failure=False)
+
+    service.catalog_cache.invalidate.assert_called_once_with("venue-sheet")
+    service.sheets.trigger_recalculation.assert_called_once_with("ORDER-CACHE", "venue-sheet")
+    service.sheets.prepare_catalog_mutation.assert_not_called()
+    service.sheets.apply_catalog_mutation.assert_not_called()
+
+
+def test_cache_failure_after_catalog_completion_stops_before_recalc_and_dispatch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Останавливает submission до пересчёта и отправки при сбое кэша."""
+    record = _record(catalog_updated=True, recalc_done=False)
+    service = _cache_submission_service(
+        monkeypatch,
+        [record, record],
+        invalidate_results=[RuntimeError("cache unavailable")],
+        recalc_results=[None],
+    )
+
+    with pytest.raises(RuntimeError, match="cache unavailable"):
+        service.submit("chat-1", report_failure=False)
+
+    service.catalog_cache.invalidate.assert_called_once_with("venue-sheet")
+    service.sheets.trigger_recalculation.assert_not_called()
+    service.sheets.prepare_order_submission.assert_not_called()
+    service.sheets.send_order_submission.assert_not_called()
+    service._finalize.assert_not_called()
+
+
+def test_cache_failure_retry_invalidates_again_without_catalog_write(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Повторяет удаление кэша после сбоя без повторной мутации каталога."""
+    record = _record(catalog_updated=True, recalc_done=False)
+    service = _cache_submission_service(
+        monkeypatch,
+        [record, record, record, record, _record(catalog_updated=True, recalc_done=True)],
+        invalidate_results=[RuntimeError("cache unavailable"), None],
+        recalc_results=[None],
+    )
+
+    with pytest.raises(RuntimeError, match="cache unavailable"):
+        service.submit("chat-1", report_failure=False)
+    service.submit("chat-1", report_failure=False)
+
+    assert service.catalog_cache.invalidate.call_count == 2
+    service.sheets.trigger_recalculation.assert_called_once_with("ORDER-CACHE", "venue-sheet")
+    service.sheets.prepare_catalog_mutation.assert_not_called()
+    service.sheets.apply_catalog_mutation.assert_not_called()
+
+
+def test_repeated_cache_failure_never_reapplies_catalog_mutation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Не выполняет каталожную запись при повторных сбоях кэша."""
+    record = _record(catalog_updated=True, recalc_done=False)
+    service = _cache_submission_service(
+        monkeypatch,
+        [record, record, record, record],
+        invalidate_results=[RuntimeError("cache unavailable"), RuntimeError("cache unavailable")],
+        recalc_results=[None],
+    )
+
+    for _ in range(2):
+        with pytest.raises(RuntimeError, match="cache unavailable"):
+            service.submit("chat-1", report_failure=False)
+
+    assert service.catalog_cache.invalidate.call_count == 2
+    service.sheets.trigger_recalculation.assert_not_called()
+    service.sheets.prepare_catalog_mutation.assert_not_called()
+    service.sheets.apply_catalog_mutation.assert_not_called()
+
+
+def test_cache_success_then_recalc_failure_retries_cache_without_catalog_write(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Повторяет безопасное удаление кэша после сбоя пересчёта."""
+    record = _record(catalog_updated=True, recalc_done=False)
+    service = _cache_submission_service(
+        monkeypatch,
+        [record, record, record, record, _record(catalog_updated=True, recalc_done=True)],
+        invalidate_results=[None, None],
+        recalc_results=[RuntimeError("recalc unavailable"), None],
+    )
+
+    with pytest.raises(RuntimeError, match="recalc unavailable"):
+        service.submit("chat-1", report_failure=False)
+    service.submit("chat-1", report_failure=False)
+
+    assert service.catalog_cache.invalidate.call_count == 2
+    assert service.sheets.trigger_recalculation.call_count == 2
+    service.sheets.prepare_catalog_mutation.assert_not_called()
+    service.sheets.apply_catalog_mutation.assert_not_called()
+
+
+def test_completed_recalc_skips_unnecessary_cache_repair(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Не удаляет кэш повторно, если пересчёт уже завершён."""
+    record = _record(catalog_updated=True, recalc_done=True)
+    service = _cache_submission_service(
+        monkeypatch,
+        [record, record, record],
+        invalidate_results=[None],
+        recalc_results=[None],
+    )
+
+    service.submit("chat-1", report_failure=False)
+
+    service.catalog_cache.invalidate.assert_not_called()
+    service.sheets.trigger_recalculation.assert_not_called()
+
+
 def _recovery_service(*verifications: CatalogMutationVerification) -> SubmissionService:
     """Создаёт сервис с контролируемым ответом проверки каталога."""
     service = object.__new__(SubmissionService)

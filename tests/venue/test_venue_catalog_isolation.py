@@ -42,6 +42,16 @@ def test_catalog_cache_rejects_missing_venue_spreadsheet(settings) -> None:  # t
     sheets.load_catalog.assert_not_called()
 
 
+def test_catalog_cache_invalidate_deletes_deterministic_key(settings) -> None:  # type: ignore[no-untyped-def]
+    """Удаляет только детерминированный ключ каталога заведения."""
+    redis = MagicMock()
+    cache = CatalogCache(settings, redis, MagicMock())
+
+    cache.invalidate("sheet-a")
+
+    redis.delete.assert_called_once_with(cache._key("sheet-a"))
+
+
 def test_forced_catalog_refresh_bypasses_cached_order_values(settings) -> None:  # type: ignore[no-untyped-def]
     """При финальной проверке читает актуальные значения из Google Sheets."""
     redis = MagicMock()
