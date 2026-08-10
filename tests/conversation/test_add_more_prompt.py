@@ -56,9 +56,7 @@ def test_successful_addition_asks_whether_to_add_more(settings) -> None:  # type
     result = _add_syrup(settings)
 
     assert result.state.stage is SessionStage.AWAIT_ADD_MORE_CONFIRM
-    assert result.reply.text == (
-        "<i>Товар добавлен в черновик заказа</i>\n\nДобавить ещё товары?"
-    )
+    assert result.reply.text == ("<i>Товар добавлен в черновик заказа</i>\n\nДобавить ещё товары?")
     assert [[button.text, button.callback_data] for row in result.reply.rows for button in row] == [
         ["Да, добавить товары", "v2:add"],
         ["Нет, к черновику", "v2:back"],
@@ -171,7 +169,7 @@ def test_product_sent_from_add_more_prompt_opens_duplicate_in_collecting_stage(
     assert duplicate.state.stage is SessionStage.COLLECTING
     assert duplicate.state.current_item() is not None
     assert duplicate.state.current_item().status is ItemStatus.DUPLICATE_PENDING
-    assert "Товар уже в черновике" in duplicate.reply.text
+    assert "Товар уже есть в черновике" in duplicate.reply.text
 
     merged = engine.handle(
         _voice("Добавить", update_id=5),

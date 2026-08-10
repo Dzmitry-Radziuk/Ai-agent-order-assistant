@@ -210,6 +210,8 @@ def _clear_unknown_item_placeholders(items: list[dict[str, Any]]) -> None:
 
 def _query_is_already_represented(known_query: str, recovered_query: str) -> bool:
     """Сравнивает многословные названия с учётом разговорных окончаний."""
+    known_query = normalize_text(known_query).casefold()
+    recovered_query = normalize_text(recovered_query).casefold()
     if (
         known_query == recovered_query
         or known_query in recovered_query
@@ -257,6 +259,7 @@ _NON_PRODUCT_FRAGMENT_WORDS = (
 
 def _contains_product_query_word(value: str) -> bool:
     """Проверяет, содержит ли фрагмент самостоятельное название товара."""
+    value = _strip_conversational_product_leadin(value)
     words = re.findall(r"[a-zа-яё0-9]+", normalize_text(value), flags=re.I)
     return any(
         len(word) > 1
@@ -474,7 +477,7 @@ def remove_unsupported_query_qualifiers(
 
     for item in items:
         original_words = re.findall(
-            r"[a-zа-я0-9]+", clean_text(item.get("product_query")), flags=re.I
+            r"[a-zа-яё0-9]+", clean_text(item.get("product_query")), flags=re.I
         )
         normalized_words = [normalize_text(word) for word in original_words]
         supported: list[str] = []
@@ -1412,6 +1415,42 @@ def _restore_dropped_unclassified_terms(
             item["comment_source"] = CommentSource.NONE.value
 
 
+def _restore_omitted_explicit_items(
+    items: list[dict[str, Any]],
+    deterministic: list[ExtractedItem],
+    global_comment: str = "",
+) -> list[dict[str, Any]]:
+    """Добавляет только конкретные позиции, явно найденные детерминированным разбором."""
+    if not deterministic or len(deterministic) <= len(items):
+        return items
+
+    restored = list(items)
+    known_queries = [clean_text(item.get("product_query")) for item in restored]
+    normalized_global = normalize_text(global_comment).strip(" .,;:-—–")
+    for recovered in deterministic:
+        recovered_query = clean_text(recovered.product_query)
+        if not recovered_query or not _contains_product_query_word(recovered_query):
+            continue
+        normalized_query = normalize_text(recovered_query).strip(" .,;:-—–")
+        if normalized_global and (
+            normalized_query == normalized_global
+            or normalized_query in normalized_global
+            or normalized_global in normalized_query
+        ):
+            continue
+        if recovered.comment and not recovered.quantity:
+            continue
+        if any(
+            _query_is_already_represented(known_query, recovered_query)
+            for known_query in known_queries
+            if known_query
+        ):
+            continue
+        restored.append(recovered.model_dump())
+        known_queries.append(recovered_query)
+    return restored
+
+
 def recover_omitted_explicit_items(payload: dict[str, Any], source_text: str) -> dict[str, Any]:
     """Сохраняет результат ИИ и добавляет товары только при пустом ответе."""
     items = list(payload.get("items") or [])
@@ -1423,6 +1462,7 @@ def recover_omitted_explicit_items(payload: dict[str, Any], source_text: str) ->
         return payload
 
     deterministic = parse_product_lines(source_text)
+    remove_unsupported_query_qualifiers(items, source_text)
     global_comment = _strip_global_comment_scope(clean_text(payload.get("global_comment")))
     items = _apply_semantic_comment_bindings(payload, items, bindings, source_text)
     global_comment = _strip_global_comment_scope(clean_text(payload.get("global_comment")))
@@ -1455,6 +1495,7 @@ def recover_omitted_explicit_items(payload: dict[str, Any], source_text: str) ->
     restore_explicit_order_terms(items, source_text)
     _discard_unverified_item_comments(items, bindings, source_text, global_comment)
     _restore_dropped_unclassified_terms(items, deterministic, global_comment)
+    items = _restore_omitted_explicit_items(items, deterministic, global_comment)
     items = _collapse_shadow_item_projections(
         items, source_text, deterministic, global_comment, bindings
     )

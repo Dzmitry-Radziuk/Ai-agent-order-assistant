@@ -189,7 +189,7 @@ def test_late_global_comment_applies_to_existing_and_new_items_without_overlap(
             global_comment="желательно на завтра",
             items=[
                 ExtractedItem(
-                    product_query="срп роза",
+                    product_query="сироп рза",
                     quantity=1,
                     unit="шт",
                     comment="в банках и всё желательно на завтра",

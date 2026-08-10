@@ -56,7 +56,7 @@ def test_repeated_product_with_quantity_requires_explicit_merge(settings) -> Non
         ItemStatus.MATCHED,
         ItemStatus.DUPLICATE_PENDING,
     ]
-    assert "Товар уже в черновике" in duplicate.reply.text
+    assert "Товар уже есть в черновике" in duplicate.reply.text
     assert "Вы добавляете: 3 шт" in duplicate.reply.text
 
 

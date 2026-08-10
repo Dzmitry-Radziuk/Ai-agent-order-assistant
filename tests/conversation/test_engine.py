@@ -394,6 +394,6 @@ def test_manual_action_without_an_open_item_uses_source_recovery_card(settings) 
         == "ℹ️ <b>Нет товара для изменения</b>\n\nОткройте черновик или добавьте новый товар."
     )
     assert [[button.text, button.callback_data] for row in result.reply.rows for button in row] == [
-        ["📦 Показать черновик", "v2:back"],
-        ["➕ Добавить еще товары", "v2:add"],
+        ["Показать черновик", "v2:back"],
+        [" Добавить еще товары", "v2:add"],
     ]

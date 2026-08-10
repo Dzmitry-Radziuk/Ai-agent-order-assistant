@@ -3946,6 +3946,32 @@ attempt-safe defer. Миграции нет; Alembic остаётся на `0008
 
 `RESOLVE THE EXISTING 14 BASELINE FAILURES`
 
+## BASELINE FAILURE CLOSURE — DONE
+
+На HEAD `0d4c7bb8c361995cd21509da22af77f3e6d1556f` закрыты все 14 исторических
+падений baseline. Свежий полный запуск: **1345 collected / 1345 passed / 0 failed /
+0 skipped / 0 xfailed / 0 errors**.
+
+- Три parser-регрессии исправлены в source-evidence reconciliation: неподтверждённые
+  AI-квалификаторы удаляются только при отсутствии в исходной фразе, явно названные
+  товары восстанавливаются детерминированным разбором, а повторная обработка остаётся
+  идемпотентной.
+- Четыре устаревших UI-ожидания синхронизированы с текущими сообщениями без emoji;
+  typo в проверке позднего комментария заменён на поддерживаемую voice-опечатку.
+- Семь docs-падений устранены обновлением `SUB-08` и регенерацией Markdown/HTML
+  представлений из `docs/user-scenarios/scenarios.json`.
+- Blocks A–G, H1–H3c и Concurrency 1/1.1/2/2.1 не переоткрывались и не менялись
+  по контракту; Alembic head остаётся `0008`.
+
+Проверки: focused parser/conversation/docs suites green, Ruff check/format,
+mypy, markdown links и `git diff --check` green. `.env` не читается и не tracked;
+GitLab не использовался.
+
+## NEXT FUNCTIONAL STEP
+
+Не начинать новую функциональную задачу автоматически. Следующий этап выбирается
+отдельным запросом после review baseline closure.
+
 ## CONCURRENCY BLOCK 2.1 — DONE
 
 Каталожный submission-подпоток и финализация используют тот же `ChatLease`.
