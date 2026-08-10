@@ -64,7 +64,7 @@ def process_telegram_update(self, update_id: int) -> None:  # type: ignore[no-un
 
 @celery_app.task(name="restaurant_bot.redrive_telegram_updates")
 def redrive_telegram_updates() -> int:
-    """Ставит recoverable обновления чатов обратно в обработку."""
+    """Ставит доступные для восстановления обновления чатов обратно в обработку."""
     stale_before = datetime.now(UTC) - STALE_PROCESSING_AFTER
     with SessionLocal.begin() as db:
         updates = UpdateRepository(db).recoverable_for_redrive(stale_before)

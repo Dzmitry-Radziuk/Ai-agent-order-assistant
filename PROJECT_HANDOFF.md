@@ -3894,6 +3894,15 @@ heartbeat, and fencing remain explicitly outside this block.
 Focused Block 1 tests pass; the full-suite baseline remains the same 14 known
 failures after the new concurrency tests. H1–H3c behavior was not changed.
 
+## CONCURRENCY BLOCK 1.1 — DONE
+
+Duplicate webhook insertion now uses a nested transaction (SAVEPOINT). A
+duplicate `IntegrityError` rolls back only the insert savepoint; the outer
+managed transaction remains usable for the existing update status lookup.
+Sequencing, lock contention handling, redrive, and the Block 1 contract are
+unchanged. No migration was added; Alembic remains at `0008`. Block 2 lease
+expiry fencing is still open.
+
 ## NEXT FUNCTIONAL STEP
 
 `CONCURRENCY BLOCK 2 — LEASE EXPIRY FENCING`

@@ -100,7 +100,7 @@ class CatalogCache:
 
 
 class ChatLockBusyError(TimeoutError):
-    """Сообщает, что другой worker временно владеет блокировкой чата."""
+    """Сообщает, что другой обработчик временно владеет блокировкой чата."""
 
 
 @contextmanager

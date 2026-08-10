@@ -99,7 +99,22 @@ def test_update_repository_is_idempotent_on_integrity_error() -> None:
 
     db.flush.side_effect = IntegrityError("insert", {}, RuntimeError("duplicate"))
     assert repository.enqueue_once(1, "chat-1", {"update_id": 1}) is False
-    db.rollback.assert_called_once()
+    db.begin_nested.assert_called()
+    db.rollback.assert_not_called()
+
+
+def test_update_repository_duplicate_keeps_outer_transaction_usable() -> None:
+    """Сохраняет возможность чтения статуса после отката вложенной точки сохранения."""
+    db = MagicMock()
+    repository = UpdateRepository(db)
+    db.flush.side_effect = IntegrityError("insert", {}, RuntimeError("duplicate"))
+    existing = TelegramUpdate(update_id=1, chat_id="chat-1", payload={}, status="queued")
+    db.get.return_value = existing
+
+    assert repository.enqueue_once(1, "chat-1", {"update_id": 1}) is False
+    assert repository.get_status(1) == "queued"
+    db.begin_nested.assert_called_once()
+    db.rollback.assert_not_called()
 
 
 def test_update_repository_returns_locked_update() -> None:
@@ -112,7 +127,7 @@ def test_update_repository_returns_locked_update() -> None:
 
 
 def test_update_repository_reads_existing_status_for_duplicate_redrive() -> None:
-    """Читает статус существующего update для безопасного повторного запуска."""
+    """Читает статус существующего обновления для безопасного повторного запуска."""
     db = MagicMock()
     db.get.return_value = TelegramUpdate(update_id=7, chat_id="chat-1", payload={}, status="queued")
 
@@ -128,7 +143,7 @@ def test_update_repository_detects_lower_unfinished_update() -> None:
 
 
 def test_update_repository_accepts_terminal_predecessor() -> None:
-    """Не блокирует новый update отсутствующим lower unfinished результатом."""
+    """Не блокирует новое обновление при отсутствии незавершённого предшественника."""
     db = MagicMock()
     db.scalar.return_value = None
 
@@ -136,7 +151,7 @@ def test_update_repository_accepts_terminal_predecessor() -> None:
 
 
 def test_update_repository_redrive_chooses_oldest_recoverable_per_chat() -> None:
-    """Выбирает только первый recoverable update каждого чата."""
+    """Выбирает только первое доступное для восстановления обновление каждого чата."""
     first = TelegramUpdate(
         update_id=101,
         chat_id="chat-a",

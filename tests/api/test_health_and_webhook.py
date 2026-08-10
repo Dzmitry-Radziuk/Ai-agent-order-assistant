@@ -96,7 +96,7 @@ def test_duplicate_webhook_is_acknowledged_without_a_second_task(
             return False
 
         def get_status(self, update_id: int) -> str:
-            """Возвращает terminal status для проверки отсутствия replay."""
+            """Возвращает конечный статус для проверки отсутствия повтора."""
             assert update_id == 42
             return "done"
 
@@ -116,31 +116,31 @@ def test_duplicate_webhook_is_acknowledged_without_a_second_task(
 def test_duplicate_webhook_redrives_existing_queued_update(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Переотправляет существующий queued update без новой строки."""
+    """Переотправляет существующее ожидающее обновление без новой строки."""
 
     class QueuedRepository:
-        """Имитирует уже сохранённое recoverable обновление."""
+        """Имитирует уже сохранённое доступное для восстановления обновление."""
 
         def __init__(self, _: Any):
-            """Инициализирует тестовый repository."""
+            """Инициализирует тестовый репозиторий."""
 
         def enqueue_once(self, update_id: int, chat_id: str, payload: dict[str, Any]) -> bool:
-            """Сообщает, что update уже существует."""
+            """Сообщает, что обновление уже существует."""
             return False
 
         def get_status(self, update_id: int) -> str:
-            """Возвращает recoverable status."""
+            """Возвращает статус, допускающий восстановление."""
             return "queued"
 
     class Task:
-        """Имитирует Celery task для проверки re-drive."""
+        """Имитирует фоновую задачу для проверки повторной постановки."""
 
         def __init__(self) -> None:
             """Создаёт заглушку Celery-задачи для проверки повторной постановки."""
             self.calls: list[int] = []
 
         def delay(self, update_id: int) -> None:
-            """Запоминает повторную постановку update."""
+            """Запоминает повторную постановку обновления."""
             self.calls.append(update_id)
 
     task = Task()

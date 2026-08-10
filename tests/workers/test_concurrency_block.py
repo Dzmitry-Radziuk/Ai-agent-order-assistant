@@ -23,7 +23,7 @@ def test_chat_lock_reports_busy_as_explicit_concurrency_signal() -> None:
 
 
 def test_claim_defers_later_update_while_lower_update_is_unfinished(mocker) -> None:  # type: ignore[no-untyped-def]
-    """Не применяет поздний update до завершения более раннего."""
+    """Не применяет позднее обновление до завершения более раннего."""
     db = MagicMock()
     update = SimpleNamespace(
         update_id=102,
@@ -51,7 +51,7 @@ def test_claim_defers_later_update_while_lower_update_is_unfinished(mocker) -> N
 
 
 def test_claim_marks_later_update_after_predecessor_is_terminal(mocker) -> None:  # type: ignore[no-untyped-def]
-    """Передаёт update в обработку после исчезновения sequence blocker."""
+    """Передаёт обновление в обработку после исчезновения блокировки порядка."""
     db = MagicMock()
     update = SimpleNamespace(
         update_id=102,
@@ -79,7 +79,7 @@ def test_claim_marks_later_update_after_predecessor_is_terminal(mocker) -> None:
 
 
 def test_fresh_processing_update_is_not_reclaimed_by_duplicate_task(mocker) -> None:  # type: ignore[no-untyped-def]
-    """Не забирает свежий processing update повторной задачей."""
+    """Не забирает свежее обрабатываемое обновление повторной задачей."""
     db = MagicMock()
     update = SimpleNamespace(
         update_id=101,
@@ -124,7 +124,7 @@ def test_chat_lock_keys_are_scoped_per_chat() -> None:
 
 
 def test_redrive_enqueues_oldest_recoverable_updates(mocker) -> None:  # type: ignore[no-untyped-def]
-    """Переотправляет в Celery durable update, выбранные repository."""
+    """Переотправляет в фоновую обработку выбранные репозиторием обновления."""
     db = MagicMock()
     session_local = mocker.patch.object(tasks, "SessionLocal")
     session_local.begin.return_value.__enter__.return_value = db

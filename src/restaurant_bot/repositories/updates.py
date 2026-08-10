@@ -26,13 +26,13 @@ class UpdateRepository:
 
     def enqueue_once(self, update_id: int, chat_id: str, payload: dict[str, Any]) -> bool:
         """Ставит обновление Telegram в очередь только один раз."""
-        self.db.add(TelegramUpdate(update_id=update_id, chat_id=chat_id, payload=payload))
         try:
-            self.db.flush()
-            return True
+            with self.db.begin_nested():
+                self.db.add(TelegramUpdate(update_id=update_id, chat_id=chat_id, payload=payload))
+                self.db.flush()
         except IntegrityError:
-            self.db.rollback()
             return False
+        return True
 
     def get_status(self, update_id: int) -> str | None:
         """Возвращает статус сохранённого обновления без изменения записи."""
@@ -54,7 +54,7 @@ class UpdateRepository:
         return lower_id is not None
 
     def recoverable_for_redrive(self, stale_before: datetime) -> list[TelegramUpdate]:
-        """Выбирает самое раннее recoverable-обновление каждого чата."""
+        """Выбирает самое раннее доступное для восстановления обновление каждого чата."""
         rows = list(
             self.db.scalars(
                 select(TelegramUpdate)
