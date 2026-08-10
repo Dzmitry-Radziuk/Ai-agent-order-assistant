@@ -6,8 +6,9 @@
 migration block переносит существующий owner механически, сохраняет public
 contracts и проходит focused/full regression до следующего блока.
 
-Текущий checkout: `decompose_bot`, baseline
-`f6409891146fad3ce5c82c4329d808b83bc3440c`, автоматический baseline
+Текущий checkout: `decompose_bot`, semantic baseline
+`f9cbc3195c0eae843de3208e488c3f46baa5a5ec`, decomposition HEAD
+`b09f7ea34993f127f67ab49fd63184e7afb1184f`, автоматический baseline
 `1362 collected / 1362 passed`. Локальный
 `manual_smoke_forensic_logs.txt` не является частью проекта.
 

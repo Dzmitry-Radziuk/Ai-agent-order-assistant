@@ -55,7 +55,7 @@
 - Контекст: остаток товарного названия и справочное примечание каталога могли ошибочно попасть в новую заявку как инструкция поставщику.
 - Решение: комментарий хранит provenance `semantic` или `explicit_marker`; `catalog` хранится отдельно. Необозначенный остаток фразы остаётся частью `product_query`, а не восстанавливается вычитанием слов.
 - Последствия: неоднозначный признак товара может привести к уточнению каталога, но не станет скрытой инструкцией поставщику. Старые сериализованные черновики поддерживаются и очищаются при обновлении данных каталога.
-- Реализация: `domain/models.py`, `services/comment_policy.py`, `services/product_parser.py`, `integrations/openai_parsing.py`, `services/engine.py`, `tests/conversation/test_comment_handling.py` и `tests/input/test_voice_input_contract.py`.
+- Реализация: `domain/models.py`, `services/comment_policy.py`, `parsing/products.py`, `parsing/comment_scope.py`, `integrations/openai_parsing.py`, `services/engine.py`, `tests/conversation/test_comment_handling.py` и `tests/input/test_voice_input_contract.py`.
 
 ### ADR-009 — Каталоговый resolver не изменяет состояние диалога
 
