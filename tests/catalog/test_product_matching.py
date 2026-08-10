@@ -32,6 +32,18 @@ def test_safe_catalog_name_equivalence_accepts_inflection_and_word_order() -> No
     assert is_safe_catalog_name_equivalent("филе форели", "Форель филе, кг")
 
 
+def test_safe_equivalence_accepts_spoken_range_and_latin_brand_variant() -> None:
+    """Сопоставляет словесный диапазон и транслитерированный бренд с каталогом."""
+    assert is_safe_catalog_name_equivalent(
+        "Утиные ножки триста пятьдесят-триста восемьдесят грамм",
+        "Утиные ножки 350-380гр",
+    )
+    assert is_safe_catalog_name_equivalent(
+        "Огурцы 40 на 45 Майер",
+        "Огурцы Мар. 40/45 Maier 10л",
+    )
+
+
 def test_safe_catalog_name_equivalence_rejects_related_different_products() -> None:
     """Не подменяет товар похожей категорией или другим видом продукта."""
     assert not is_safe_catalog_name_equivalent(
@@ -67,6 +79,78 @@ def test_exact_product_is_auto_selected_but_category_query_is_not() -> None:
 
     assert can_auto_select(rank_candidates("сироп роза", catalog))
     assert not can_auto_select(rank_candidates("сироп", catalog))
+
+
+def test_catalog_abbreviation_and_transliteration_support_unseen_product() -> None:
+    """Поддерживает сокращение и транслитерацию без словаря конкретных товаров."""
+    product = CatalogProduct(
+        product_id="unseen-cucumber",
+        name="Овощи Мар. 60/80 Nordika",
+        unit="кг",
+    )
+    query = "овощи маринованные 60 на 80 Нордика"
+
+    candidates = rank_candidates(query, [product])
+
+    assert candidates and candidates[0].product_id == product.product_id
+    assert is_safe_catalog_name_equivalent(query, product.name)
+
+
+def test_specific_brand_evidence_beats_broad_category_without_product_rules() -> None:
+    """Редкий бренд выбирает строку, а общий запрос остаётся неоднозначным."""
+    catalog = [
+        CatalogProduct(product_id="endaksi", name="Нут ENDAKSI 450 г", unit="шт"),
+        CatalogProduct(product_id="mistral", name="Нут Мистраль 450 г", unit="шт"),
+    ]
+
+    specific = rank_candidates("нут Эндакси пачка 450 грамм", catalog)
+    broad = rank_candidates("нут", catalog)
+
+    assert specific[0].product_id == "endaksi"
+    assert can_auto_select(specific)
+    assert not can_auto_select(broad)
+
+
+@pytest.mark.parametrize(
+    ("query", "catalog_name"),
+    [
+        (
+            "форель филе 0.8-1.2 кг 20-22 кг в коробке",
+            "Форель Филе свежее 0,8-1,2кг 20-22 кг/кор",
+        ),
+        ("орех миндаль лепестки", "Орех миндаль Лепестки (кг)"),
+        (
+            "сметана 15 процентов Залесский фермер 5 кг",
+            "Сметана 15% Залесский фермер 5 кг",
+        ),
+    ],
+)
+def test_catalog_variants_with_ranges_and_brand_are_generic(
+    query: str,
+    catalog_name: str,
+) -> None:
+    """Сопоставляет диапазоны, формы и бренд без специальных названий товаров."""
+    candidates = rank_candidates(
+        query,
+        [CatalogProduct(product_id="expected", name=catalog_name, unit="кг")],
+    )
+
+    assert candidates and candidates[0].product_id == "expected"
+    assert can_auto_select(candidates)
+
+
+def test_unrelated_distractors_do_not_change_strong_winner_or_ai_bound() -> None:
+    """Большое число нерелевантных строк не меняет победителя и shortlist bounded."""
+    target = CatalogProduct(product_id="target", name="Киноа красная Nordika 500 г", unit="шт")
+    distractors = [
+        CatalogProduct(product_id=f"noise-{index}", name=f"Товар случайный {index}", unit="шт")
+        for index in range(1000)
+    ]
+
+    candidates = rank_candidates("киноа красная Nordika 500 грамм", [*distractors, target])
+
+    assert candidates[0].product_id == target.product_id
+    assert len(candidates) <= 5
 
 
 def test_size_range_requires_an_equivalent_catalog_row(settings: Settings) -> None:
@@ -301,6 +385,28 @@ def test_catalog_product_facts_are_not_saved_as_supplier_comments(settings: Sett
 
     assert white_wine.comment == ""
     assert cuvee.comment == ""
+
+
+def test_catalog_backed_multiword_descriptor_comment_is_not_retained(
+    settings: Settings,
+) -> None:
+    """Уже подтверждённые каталогом описательные слова не дублируются в комментарии."""
+    engine = ConversationEngine(settings)
+    source_query = "Ребрышки барбекю крупные куски охлажденная вакуумная упаковка ОСТАНКИНО"
+    item = CartItem(
+        id="ribs",
+        source_query=source_query,
+        source_line=f"{source_query} на 5 кг",
+        comment="крупные куски охлажденная вакуумная упаковка",
+        quantity=5,
+        unit="кг",
+    )
+    product = CatalogProduct(product_id="ribs", name=source_query, unit="кг")
+
+    engine._match_item(item, [product])
+
+    assert item.catalog_product_id == "ribs"
+    assert item.comment == ""
 
 
 def test_asr_product_residue_is_not_saved_as_supplier_comment(settings: Settings) -> None:

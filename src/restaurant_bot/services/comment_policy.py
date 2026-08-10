@@ -23,6 +23,10 @@ _STRONG_COMMENT_START_RE = re.compile(
     r")\b",
     flags=re.I,
 )
+_COMMENT_POLITENESS_PREFIX_RE = re.compile(
+    r"^(?:желательно|обязательно|пожалуйста|просьба|главное)\s+",
+    flags=re.I,
+)
 
 
 def explicit_supplier_comment(value: str) -> str:
@@ -45,3 +49,13 @@ def supplier_comment_start(words: list[str]) -> int | None:
         if explicit_supplier_comment(" ".join(normalized[index:])):
             return index
     return None
+
+
+def comment_semantic_key(value: str) -> str:
+    """Возвращает ключ для дедупликации одной инструкции поставщику."""
+    normalized = normalize_text(value).strip(" .,;:-—–")
+    while True:
+        stripped = _COMMENT_POLITENESS_PREFIX_RE.sub("", normalized, count=1).strip()
+        if stripped == normalized:
+            return normalized
+        normalized = stripped

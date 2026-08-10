@@ -15,8 +15,8 @@ from restaurant_bot.domain.models import (
     ParsedCommand,
     SessionStage,
 )
+from restaurant_bot.services.comment_policy import comment_semantic_key
 from restaurant_bot.services.replies import cart_reply, comment_scope_clarification_reply
-from restaurant_bot.services.text import normalize_text
 
 
 @dataclass(frozen=True, slots=True)
@@ -148,7 +148,7 @@ class CommentScopeHandler:
         for value in values:
             for part in str(value or "").split(";"):
                 cleaned = part.strip(" .,;")
-                key = normalize_text(cleaned)
+                key = comment_semantic_key(cleaned)
                 if cleaned and key not in seen:
                     result.append(cleaned)
                     seen.add(key)

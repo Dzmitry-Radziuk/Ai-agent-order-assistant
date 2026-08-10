@@ -56,16 +56,18 @@ from restaurant_bot.services.engine import ConversationEngine
 from restaurant_bot.services.input_normalizer import normalize_telegram_update
 from restaurant_bot.services.input_recognition import InputRecognitionService
 from restaurant_bot.services.matching import (
+    canonical_search_query,
     has_compatible_numeric_characteristics,
     has_conflicting_catalog_qualifiers,
     has_unscoped_product_variant_qualifier,
     is_broad_category_query,
     is_safe_catalog_name_equivalent,
+    query_evidence_tokens,
     unverified_product_terms,
 )
 from restaurant_bot.services.order_review import OrderReviewService
 from restaurant_bot.services.parser import infer_intent
-from restaurant_bot.services.text import clean_text, normalize_text
+from restaurant_bot.services.text import clean_text, normalize_text, remove_phrase_overlap
 from restaurant_bot.services.venue_registration import (
     RegistrationResult,
     VenueContext,
@@ -1741,6 +1743,35 @@ class UpdateOrchestrator:
                 [candidate.model_dump() for candidate in item.candidates],
                 item.comment,
             )
+            search_query = remove_phrase_overlap(item.source_query, item.comment)
+            logger.info(
+                "catalog_matching_shortlist",
+                input_type=event.input_type.value,
+                ai_query=item.source_query,
+                reconciled_query=item.source_query,
+                search_query=search_query,
+                source_query=item.source_query,
+                canonical_search_query=canonical_search_query(search_query),
+                quantity=item.quantity,
+                unit=item.unit,
+                comment_source=item.comment_source.value,
+                packaging={
+                    "text": item.packaging_text,
+                    "role": item.packaging_role,
+                    "confidence": item.packaging_confidence,
+                },
+                candidates=[
+                    {
+                        "product_id": candidate.product_id,
+                        "title": candidate.name,
+                        "score": candidate.score,
+                        "evidence": sorted(
+                            query_evidence_tokens(item.source_query, candidate.name)
+                        ),
+                    }
+                    for candidate in item.candidates[:5]
+                ],
+            )
             selected = next(
                 (
                     candidate
@@ -1764,6 +1795,50 @@ class UpdateOrchestrator:
                 and not has_unscoped_product_variant_qualifier(item.comment)
                 and item.packaging_role != "ambiguous"
                 and not unverified_product_terms(item.source_query, selected.name)
+            )
+            winner_score = selected.score if selected is not None else None
+            runner_up_score = item.candidates[1].score if len(item.candidates) > 1 else None
+            winner_margin = (
+                winner_score - runner_up_score
+                if winner_score is not None and runner_up_score is not None
+                else None
+            )
+            gate_reasons: list[str] = []
+            if decision.action != "select":
+                gate_reasons.append("ai_action_not_select")
+            if selected is None:
+                gate_reasons.append("selected_candidate_missing")
+            elif selected.score < _AI_MATCH_MIN_SCORE:
+                gate_reasons.append("score_below_minimum")
+            if decision.contradictions:
+                gate_reasons.append("catalog_contradiction")
+            if item.packaging_role == "ambiguous":
+                gate_reasons.append("ambiguous_packaging")
+            unresolved_terms = (
+                unverified_product_terms(item.source_query, selected.name)
+                if selected is not None
+                else []
+            )
+            if unresolved_terms:
+                gate_reasons.append("unresolved_product_terms")
+            logger.info(
+                "catalog_matching_gate",
+                source_query=item.source_query,
+                selected_product_id=decision.selected_product_id,
+                ai_action=decision.action,
+                ai_confidence=decision.confidence,
+                auto_select_allowed=can_select,
+                winner_score=winner_score,
+                runner_up_score=runner_up_score,
+                winner_margin=winner_margin,
+                contradictions=decision.contradictions,
+                unresolved_product_terms=unresolved_terms,
+                gate_reasons=gate_reasons,
+                quantity=item.quantity,
+                unit=item.unit,
+                comment_source=item.comment_source.value,
+                packaging_role=item.packaging_role,
+                packaging_text=item.packaging_text,
             )
             if can_select and selected is not None:
                 self.engine._apply_catalog(item, selected, catalog)

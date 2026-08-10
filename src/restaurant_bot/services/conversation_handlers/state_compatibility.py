@@ -131,7 +131,7 @@ class StateCompatibilityPolicy:
         ):
             return CompatibilityDecision(CompatibilityAction.NOT_APPLICABLE)
 
-        if command.intent is Intent.ADD_ITEMS and self._has_concrete_new_items(command):
+        if command.intent is Intent.ADD_ITEMS and self._has_product_items(command):
             return CompatibilityDecision(CompatibilityAction.INTERRUPT)
         if command.intent in self._INTERRUPT_INTENTS:
             return CompatibilityDecision(CompatibilityAction.INTERRUPT)

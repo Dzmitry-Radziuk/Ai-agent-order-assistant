@@ -1,5 +1,6 @@
 from restaurant_bot.domain.models import (
     CartItem,
+    CatalogProduct,
     ConversationState,
     ExtractedItem,
     InputKind,
@@ -140,3 +141,45 @@ def test_quantity_state_ignores_unrelated_text(settings) -> None:  # type: ignor
 
     assert result.state.cart[0].status is ItemStatus.MISSING_QTY
     assert result.state.cart[0].quantity is None
+
+
+def test_new_product_without_quantity_preempts_then_resumes_old_pending_item(settings) -> None:  # type: ignore[no-untyped-def]
+    """Сначала уточняет новый товар, затем возвращается к старому quantity-вопросу."""
+    engine = ConversationEngine(settings)
+    mustard = _missing_quantity_state().cart[0]
+    mustard.source_query = "Горчица дижонская"
+    mustard.catalog_product_id = "mustard"
+    mustard.catalog_name = "Горчица дижонская"
+    state = ConversationState(
+        cart=[mustard],
+        current_issue_item_id=mustard.id,
+        stage=SessionStage.AWAIT_UNIT_QUANTITY,
+    )
+    catalog = [
+        CatalogProduct(product_id="mustard", name="Горчица дижонская", unit="шт"),
+        CatalogProduct(product_id="horseradish", name="Хрен столовый домашний", unit="шт"),
+    ]
+    add_horseradish = ParsedCommand(
+        intent=Intent.ADD_ITEMS,
+        text="Хрен столовый домашний",
+        items=[ExtractedItem(product_query="Хрен столовый домашний")],
+    )
+
+    pending = engine.handle(_event(add_horseradish.text), add_horseradish, state, catalog)
+
+    assert pending.state.cart[0].status is ItemStatus.MISSING_QTY
+    horseradish = next(item for item in pending.state.cart if item.catalog_product_id == "horseradish")
+    assert horseradish.status is ItemStatus.MISSING_QTY
+    assert pending.state.current_issue_item_id == horseradish.id
+
+    quantity = ParsedCommand(
+        intent=Intent.EDIT_QUANTITY,
+        text="4 штуки",
+        edit_quantity=4,
+        edit_unit="шт",
+    )
+    resumed = engine.handle(_event(quantity.text), quantity, pending.state, catalog)
+
+    assert horseradish.status is ItemStatus.MATCHED
+    assert horseradish.quantity == 4
+    assert resumed.state.current_issue_item_id == mustard.id

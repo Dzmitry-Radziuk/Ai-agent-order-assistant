@@ -678,6 +678,39 @@ def test_existing_comment_shadow_is_removed_from_persisted_draft(settings) -> No
     )
 
     engine._remove_cart_comment_shadows(state)
-
     assert [item.id for item in state.cart] == [owner.id]
     assert state.current_issue_item_id == ""
+
+
+def test_catalog_facts_are_not_saved_as_user_comment_on_single_candidate(settings) -> None:
+    """Не сохраняет характеристики каталога как комментарий даже для одной строки."""
+    engine = ConversationEngine(settings)
+    query = "Ребрышки барбекю крупные куски охлажденная вакуумная упаковка"
+    item = CartItem(
+        id="ribs",
+        source_query=query,
+        quantity=5,
+        unit="кг",
+        comment="крупные куски охлажденная вакуумная упаковка",
+        source_line=f"{query} 5 кг",
+    )
+    catalog = [
+        CatalogProduct(
+            product_id="ribs",
+            name="Ребрышки барбекю крупные куски охлажденная вакуумная упаковка",
+            unit="кг",
+        )
+    ]
+
+    engine._match_item(item, catalog)
+
+    assert item.catalog_product_id == "ribs"
+    assert item.comment == ""
+
+
+def test_comment_semantic_dedupe_ignores_politeness_prefix(settings) -> None:  # type: ignore[no-untyped-def]
+    """Не дублирует одну доставочную инструкцию с разными вежливыми вводными."""
+    assert ConversationEngine(settings)._merge_comments(
+        "желательно привезти завтра",
+        "привезти завтра",
+    ) == "желательно привезти завтра"

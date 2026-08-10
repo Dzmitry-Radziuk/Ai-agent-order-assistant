@@ -29,7 +29,7 @@ from restaurant_bot.domain.models import (
     TelegramEvent,
 )
 from restaurant_bot.services.catalog_resolver import CatalogDecision, CatalogResolver
-from restaurant_bot.services.comment_policy import supplier_comment_start
+from restaurant_bot.services.comment_policy import comment_semantic_key, supplier_comment_start
 from restaurant_bot.services.conversation_handlers.candidate_selection import (
     CandidateSelectionHandler,
 )
@@ -441,15 +441,16 @@ class ConversationEngine:
         # contextual selection while the candidate card is open.  Do not turn
         # a weak category match (for example, just "сироп") into a silent
         # selection: only one strictly best candidate may be selected.
+        candidate_decision = self.state_compatibility_policy.evaluate(
+            command,
+            state,
+            CompatibilityContext.CANDIDATE_SELECTION,
+        )
         if (
             current
             and current.status == ItemStatus.AMBIGUOUS
             and not new_order_interrupted
-            and self.state_compatibility_policy.evaluate(
-                command,
-                state,
-                CompatibilityContext.CANDIDATE_SELECTION,
-            ).action
+            and candidate_decision.action
             in {CompatibilityAction.CONTINUE, CompatibilityAction.AMBIGUOUS}
             and command.intent in {Intent.UNKNOWN, Intent.ADD_ITEMS}
         ):
@@ -472,6 +473,12 @@ class ConversationEngine:
                     # is a possible choice, never a new product.  Keeping the
                     # same card is safer than polluting the draft with a bad
                     # transcription such as "Был вариант".
+                    command = ParsedCommand(
+                        intent=Intent.CONTINUE_CURRENT, text=event.text or command.text
+                    )
+                elif candidate_decision.action is CompatibilityAction.AMBIGUOUS:
+                    # A tied category-like phrase is contextual clarification,
+                    # not a second product line and not an implicit candidate.
                     command = ParsedCommand(
                         intent=Intent.CONTINUE_CURRENT, text=event.text or command.text
                     )
@@ -790,6 +797,7 @@ class ConversationEngine:
                     self._match_item(current, catalog)
                     return self._advance(state)
             selected_supplier = state.supplier_hint_context
+            newly_unresolved_ids: list[str] = []
             for extracted in command.items:
                 if selected_supplier:
                     extracted = extracted.model_copy(update={"supplier_hint": selected_supplier})
@@ -831,12 +839,27 @@ class ConversationEngine:
                     item.duplicate_existing_quantity = duplicate.quantity or 0
                     item.duplicate_existing_unit = duplicate.unit or duplicate.catalog_unit
                 state.cart.append(item)
+                if item.status in {
+                    ItemStatus.DUPLICATE_PENDING,
+                    ItemStatus.UNIT_MISMATCH,
+                    ItemStatus.MISSING_QTY,
+                    ItemStatus.AMBIGUOUS,
+                    ItemStatus.NOT_FOUND,
+                    ItemStatus.NEW,
+                    ItemStatus.AI_PENDING,
+                }:
+                    newly_unresolved_ids.append(item.id)
             # `v2:minsumadd` scopes exactly the next incoming product message
             # in n8n. Retaining this context would incorrectly lock every
             # later product to the same supplier.
             if selected_supplier:
                 state.supplier_hint_context = ""
-            return self._advance(state, added_count=len(command.items))
+            preferred_issue_item_id = next(iter(newly_unresolved_ids), "")
+            return self._advance(
+                state,
+                added_count=len(command.items),
+                preferred_issue_item_id=preferred_issue_item_id,
+            )
 
         if event.input_type == InputKind.VOICE:
             return EngineResult(state=state, reply=unrecognized_voice_reply(state))
@@ -2238,7 +2261,7 @@ class ConversationEngine:
             item.source_query,
             product_name,
             source_line=item.source_line,
-            include_source_query=True,
+            include_source_query=False,
         )
         if not item.comment:
             item.comment_source = CommentSource.NONE
@@ -2259,6 +2282,7 @@ class ConversationEngine:
         if product is None:
             item.status = ItemStatus.NOT_FOUND
             return
+        self._sanitize_catalog_facts_before_resolution(item, candidate)
         item.catalog_product_id = product.product_id
         item.catalog_name = product.name
         item.supplier = product.supplier
@@ -2417,7 +2441,7 @@ class ConversationEngine:
         for value in values:
             for part in str(value or "").split(";"):
                 comment = " ".join(part.split()).strip(" .,;")
-                key = comment.casefold()
+                key = comment_semantic_key(comment)
                 if comment and key not in seen:
                     result.append(comment)
                 seen.add(key)
@@ -2673,8 +2697,16 @@ class ConversationEngine:
             if is_quantity_only_part(part_words):
                 continue
             normalized_part = normalize_text(cleaned)
+            if re.search(
+                r"(?:^|\s)(?:без|не|только|желательно|обязательно|если|привез\w*|достав\w*|полож\w*)\b",
+                normalized_part,
+                flags=re.IGNORECASE,
+            ):
+                kept.append(cleaned)
+                continue
             if (
-                source_line
+                include_source_query
+                and source_line
                 and normalized_part
                 and f" {normalized_part} " in f" {normalize_text(source_line)} "
                 and f" {normalized_part} " in f" {normalize_text(source_query)} "
@@ -2715,11 +2747,37 @@ class ConversationEngine:
         """Возвращает приоритетную нерешённую позицию."""
         return first_unresolved_item(state)
 
-    def _advance(self, state: ConversationState, added_count: int = 0) -> EngineResult:
+    def _advance(
+        self,
+        state: ConversationState,
+        added_count: int = 0,
+        preferred_issue_item_id: str = "",
+    ) -> EngineResult:
         """Переходит к следующей нерешённой позиции."""
         if added_count:
             state.pending_added_items_count = added_count
         unresolved = self._first_unresolved(state)
+        if preferred_issue_item_id:
+            preferred = next(
+                (
+                    item
+                    for item in state.cart
+                    if item.id == preferred_issue_item_id
+                    and item.status
+                    in {
+                        ItemStatus.DUPLICATE_PENDING,
+                        ItemStatus.UNIT_MISMATCH,
+                        ItemStatus.MISSING_QTY,
+                        ItemStatus.AMBIGUOUS,
+                        ItemStatus.NOT_FOUND,
+                        ItemStatus.NEW,
+                        ItemStatus.AI_PENDING,
+                    }
+                ),
+                None,
+            )
+            if preferred is not None:
+                unresolved = preferred
         if unresolved:
             state.current_issue_item_id = unresolved.id
             state.current_issue_kind = {

@@ -56,7 +56,7 @@ def test_successful_addition_asks_whether_to_add_more(settings) -> None:  # type
     result = _add_syrup(settings)
 
     assert result.state.stage is SessionStage.AWAIT_ADD_MORE_CONFIRM
-    assert result.reply.text == ("<i>Товар добавлен в черновик заказа</i>\n\nДобавить ещё товары?")
+    assert result.reply.text == ("<b>Товар добавлен в черновик заказа</b>\n\nДобавить ещё товары?")
     assert [[button.text, button.callback_data] for row in result.reply.rows for button in row] == [
         ["Да, добавить товары", "v2:add"],
         ["Нет, к черновику", "v2:back"],
