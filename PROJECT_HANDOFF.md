@@ -3945,3 +3945,15 @@ attempt-safe defer. Миграции нет; Alembic остаётся на `0008
 ## NEXT FUNCTIONAL STEP
 
 `RESOLVE THE EXISTING 14 BASELINE FAILURES`
+
+## CONCURRENCY BLOCK 2.1 — DONE
+
+Каталожный submission-подпоток и финализация используют тот же `ChatLease`.
+Проверки стоят до и после apply/read-back, controlled recovery, checkpoint,
+конфликтных/неопределённых изменений и сохранения финального состояния.
+Добавлены детерминированные тесты потери lease для каталога, финализации,
+пересчёта, dispatch и H3c. Миграций нет, Alembic остаётся на `0008`.
+
+## NEXT FUNCTIONAL STEP
+
+`RESOLVE THE EXISTING 14 BASELINE FAILURES`

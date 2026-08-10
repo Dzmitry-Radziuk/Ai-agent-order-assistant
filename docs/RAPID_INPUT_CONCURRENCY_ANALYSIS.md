@@ -334,3 +334,14 @@ indexes are sufficient; Alembic remains at `0008`.
 
 Block 2 is intentionally open: Redis lease expiry fencing/heartbeat is not
 implemented in this block.
+
+## CONCURRENCY BLOCK 2.1 — DONE
+
+The catalog submission subtree now carries the same `ChatLease` through
+prepare/apply/read-back, controlled recovery, catalog checkpoints and result
+replies. A stale owner cannot continue verification, controlled apply or
+conflict/uncertain mutation after lease loss. Finalization fences state save
+and `SubmissionRecord.finalized` internally. Deterministic submission tests
+cover catalog apply/read-back loss, controlled-apply blocking, finalize,
+recalculation, dispatch and H3c notification behavior. No migration was
+added; Alembic remains at `0008`.

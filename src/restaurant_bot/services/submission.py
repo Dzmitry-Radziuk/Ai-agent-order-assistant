@@ -56,6 +56,17 @@ from restaurant_bot.services.venue_registration import VenueRegistrationService
 logger = structlog.get_logger(__name__)
 
 
+def _ensure_lease(lease: ChatLease | None) -> None:
+    """Проверяет владение чатом перед авторитетным действием."""
+    if lease is not None:
+        lease.ensure_owned()
+
+
+def _lease_kwargs(lease: ChatLease | None) -> dict[str, Any]:
+    """Возвращает именованный lease только для реального контекста блокировки."""
+    return {"lease": lease} if lease is not None else {}
+
+
 class SubmissionService:
     """Управляет надёжной отправкой заявок."""
 
@@ -154,7 +165,12 @@ class SubmissionService:
                         if lease is not None:
                             lease.ensure_owned()
                         stage_started = perf_counter()
-                        if not self._run_catalog_update(chat_id, pending, record):
+                        if not self._run_catalog_update(
+                            chat_id,
+                            pending,
+                            record,
+                            **_lease_kwargs(lease),
+                        ):
                             return
                         logger.info(
                             "submission_catalog_updated",
@@ -292,6 +308,7 @@ class SubmissionService:
                     self._send_dispatch_uncertain_once(
                         chat_id,
                         pending.order_no,
+                        **_lease_kwargs(lease),
                     )
                     return
                 was_dispatched = dispatch_enabled or record.dispatch_completed
@@ -302,6 +319,7 @@ class SubmissionService:
                         chat_id,
                         pending.order_no,
                         external_order_no,
+                        **_lease_kwargs(lease),
                     )
                 else:
                     final_state = self._finalize(
@@ -309,6 +327,7 @@ class SubmissionService:
                         pending.order_no,
                         external_order_no,
                         dispatched=False,
+                        **_lease_kwargs(lease),
                     )
                 finalized = True
                 if was_dispatched:
@@ -1223,55 +1242,123 @@ class SubmissionService:
         chat_id: str,
         pending: PendingSubmission,
         record: SubmissionRecord,
+        *,
+        lease: ChatLease | None = None,
     ) -> bool:
         """Выполняет план каталога с проверкой ячеек перед безопасным восстановлением."""
+        _ensure_lease(lease)
         status = self._catalog_status(record)
         if status == "completed":
             return True
         if status == "conflict":
-            self._send_catalog_conflict_reply(chat_id, pending.order_no)
+            self._send_catalog_conflict_reply(
+                chat_id,
+                pending.order_no,
+                **_lease_kwargs(lease),
+            )
             return False
         if status == "pending":
             operation_id = f"catalog:{pending.order_no}"
+            _ensure_lease(lease)
             plan = self.sheets.prepare_catalog_mutation(
                 pending.rows,
                 pending.spreadsheet_id,
                 operation_id=operation_id,
                 order_no=pending.order_no,
             )
+            _ensure_lease(lease)
             validation_error = self._catalog_plan_validation_error(plan, pending, record)
             if validation_error:
-                self._mark_catalog_conflict(chat_id, pending.order_no, validation_error)
-                self._send_catalog_conflict_reply(chat_id, pending.order_no)
+                _ensure_lease(lease)
+                self._mark_catalog_conflict(
+                    chat_id,
+                    pending.order_no,
+                    validation_error,
+                    **_lease_kwargs(lease),
+                )
+                self._send_catalog_conflict_reply(
+                    chat_id,
+                    pending.order_no,
+                    **_lease_kwargs(lease),
+                )
                 return False
             if not plan["mutations"]:
-                self._persist_catalog_completed(pending.order_no, plan)
+                self._persist_catalog_completed(
+                    pending.order_no,
+                    plan,
+                    **_lease_kwargs(lease),
+                )
                 return True
-            self._persist_catalog_started(pending.order_no, plan)
-            return self._apply_initial_catalog_plan(chat_id, pending.order_no, plan)
+            self._persist_catalog_started(
+                pending.order_no,
+                plan,
+                **_lease_kwargs(lease),
+            )
+            return self._apply_initial_catalog_plan(
+                chat_id,
+                pending.order_no,
+                plan,
+                **_lease_kwargs(lease),
+            )
 
         plan = record.catalog_update_plan
+        _ensure_lease(lease)
         validation_error = self._catalog_plan_validation_error(plan, pending, record)
         if validation_error:
-            self._mark_catalog_conflict(chat_id, pending.order_no, validation_error)
-            self._send_catalog_conflict_reply(chat_id, pending.order_no)
+            _ensure_lease(lease)
+            self._mark_catalog_conflict(
+                chat_id,
+                pending.order_no,
+                validation_error,
+                **_lease_kwargs(lease),
+            )
+            self._send_catalog_conflict_reply(
+                chat_id,
+                pending.order_no,
+                **_lease_kwargs(lease),
+            )
             return False
+        _ensure_lease(lease)
         verification = self.sheets.verify_catalog_mutation(plan)
+        _ensure_lease(lease)
         if verification is CatalogMutationVerification.APPLIED:
-            self._checkpoint(pending.order_no, "catalog_updated")
+            self._checkpoint(
+                pending.order_no,
+                "catalog_updated",
+                **_lease_kwargs(lease),
+            )
             return True
         if verification is CatalogMutationVerification.NOT_APPLIED:
-            return self._controlled_catalog_apply(chat_id, pending.order_no, plan)
+            return self._controlled_catalog_apply(
+                chat_id,
+                pending.order_no,
+                plan,
+                **_lease_kwargs(lease),
+            )
         if verification is CatalogMutationVerification.CONFLICT:
-            self._mark_catalog_conflict(chat_id, pending.order_no, "Значения каталога изменились.")
-            self._send_catalog_conflict_reply(chat_id, pending.order_no)
+            self._mark_catalog_conflict(
+                chat_id,
+                pending.order_no,
+                "Значения каталога изменились.",
+                **_lease_kwargs(lease),
+            )
+            self._send_catalog_conflict_reply(
+                chat_id,
+                pending.order_no,
+                **_lease_kwargs(lease),
+            )
             return False
         self._mark_catalog_uncertain(
             chat_id,
             pending.order_no,
             record.last_error or "Не удалось прочитать каталог.",
+            **_lease_kwargs(lease),
         )
-        self._send_catalog_uncertain_reply(chat_id, pending.order_no)
+        self._send_catalog_uncertain_reply(
+            chat_id,
+            pending.order_no,
+            **_lease_kwargs(lease),
+        )
         return False
 
     def _apply_initial_catalog_plan(
@@ -1279,39 +1366,92 @@ class SubmissionService:
         chat_id: str,
         order_no: str,
         plan: dict[str, Any],
+        *,
+        lease: ChatLease | None = None,
     ) -> bool:
         """Применяет первый план и запускает ограниченное восстановление по read-back."""
+        _ensure_lease(lease)
         try:
             self.sheets.apply_catalog_mutation(plan)
+        except ChatLeaseLostError:
+            raise
         except Exception as exc:
+            _ensure_lease(lease)
             verification = self.sheets.verify_catalog_mutation(plan)
+            _ensure_lease(lease)
             if verification is CatalogMutationVerification.APPLIED:
-                self._checkpoint(order_no, "catalog_updated")
+                self._checkpoint(order_no, "catalog_updated", **_lease_kwargs(lease))
                 return True
             if verification is CatalogMutationVerification.NOT_APPLIED:
-                return self._controlled_catalog_apply(chat_id, order_no, plan)
+                return self._controlled_catalog_apply(
+                    chat_id,
+                    order_no,
+                    plan,
+                    **_lease_kwargs(lease),
+                )
             if verification is CatalogMutationVerification.CONFLICT:
-                self._mark_catalog_conflict(chat_id, order_no, str(exc) or type(exc).__name__)
-                self._send_catalog_conflict_reply(chat_id, order_no)
+                self._mark_catalog_conflict(
+                    chat_id,
+                    order_no,
+                    str(exc) or type(exc).__name__,
+                    **_lease_kwargs(lease),
+                )
+                self._send_catalog_conflict_reply(
+                    chat_id,
+                    order_no,
+                    **_lease_kwargs(lease),
+                )
                 return False
-            self._mark_catalog_uncertain(chat_id, order_no, str(exc) or type(exc).__name__)
-            self._send_catalog_uncertain_reply(chat_id, order_no)
+            self._mark_catalog_uncertain(
+                chat_id,
+                order_no,
+                str(exc) or type(exc).__name__,
+                **_lease_kwargs(lease),
+            )
+            self._send_catalog_uncertain_reply(
+                chat_id,
+                order_no,
+                **_lease_kwargs(lease),
+            )
             return False
 
+        _ensure_lease(lease)
         verification = self.sheets.verify_catalog_mutation(plan)
+        _ensure_lease(lease)
         if verification is CatalogMutationVerification.APPLIED:
-            self._checkpoint(order_no, "catalog_updated")
+            self._checkpoint(order_no, "catalog_updated", **_lease_kwargs(lease))
             return True
         if verification is CatalogMutationVerification.NOT_APPLIED:
-            return self._controlled_catalog_apply(chat_id, order_no, plan)
+            return self._controlled_catalog_apply(
+                chat_id,
+                order_no,
+                plan,
+                **_lease_kwargs(lease),
+            )
         if verification is CatalogMutationVerification.CONFLICT:
-            self._mark_catalog_conflict(chat_id, order_no, "Значения каталога изменились.")
-            self._send_catalog_conflict_reply(chat_id, order_no)
+            self._mark_catalog_conflict(
+                chat_id,
+                order_no,
+                "Значения каталога изменились.",
+                **_lease_kwargs(lease),
+            )
+            self._send_catalog_conflict_reply(
+                chat_id,
+                order_no,
+                **_lease_kwargs(lease),
+            )
             return False
         self._mark_catalog_uncertain(
-            chat_id, order_no, "Не удалось проверить результат записи каталога."
+            chat_id,
+            order_no,
+            "Не удалось проверить результат записи каталога.",
+            **_lease_kwargs(lease),
         )
-        self._send_catalog_uncertain_reply(chat_id, order_no)
+        self._send_catalog_uncertain_reply(
+            chat_id,
+            order_no,
+            **_lease_kwargs(lease),
+        )
         return False
 
     def _controlled_catalog_apply(
@@ -1319,35 +1459,78 @@ class SubmissionService:
         chat_id: str,
         order_no: str,
         plan: dict[str, Any],
+        *,
+        lease: ChatLease | None = None,
     ) -> bool:
         """Разрешает одну запись только после подтверждения состояния before."""
+        _ensure_lease(lease)
         try:
             self.sheets.apply_catalog_mutation(plan)
+        except ChatLeaseLostError:
+            raise
         except Exception as exc:
+            _ensure_lease(lease)
             verification = self.sheets.verify_catalog_mutation(plan)
+            _ensure_lease(lease)
             if verification is CatalogMutationVerification.APPLIED:
-                self._checkpoint(order_no, "catalog_updated")
+                self._checkpoint(order_no, "catalog_updated", **_lease_kwargs(lease))
                 return True
             if verification is CatalogMutationVerification.CONFLICT:
-                self._mark_catalog_conflict(chat_id, order_no, str(exc) or type(exc).__name__)
-                self._send_catalog_conflict_reply(chat_id, order_no)
+                self._mark_catalog_conflict(
+                    chat_id,
+                    order_no,
+                    str(exc) or type(exc).__name__,
+                    **_lease_kwargs(lease),
+                )
+                self._send_catalog_conflict_reply(
+                    chat_id,
+                    order_no,
+                    **_lease_kwargs(lease),
+                )
                 return False
-            self._mark_catalog_uncertain(chat_id, order_no, str(exc) or type(exc).__name__)
-            self._send_catalog_uncertain_reply(chat_id, order_no)
+            self._mark_catalog_uncertain(
+                chat_id,
+                order_no,
+                str(exc) or type(exc).__name__,
+                **_lease_kwargs(lease),
+            )
+            self._send_catalog_uncertain_reply(
+                chat_id,
+                order_no,
+                **_lease_kwargs(lease),
+            )
             return False
 
+        _ensure_lease(lease)
         verification = self.sheets.verify_catalog_mutation(plan)
+        _ensure_lease(lease)
         if verification is CatalogMutationVerification.APPLIED:
-            self._checkpoint(order_no, "catalog_updated")
+            self._checkpoint(order_no, "catalog_updated", **_lease_kwargs(lease))
             return True
         if verification is CatalogMutationVerification.CONFLICT:
-            self._mark_catalog_conflict(chat_id, order_no, "Значения каталога изменились.")
-            self._send_catalog_conflict_reply(chat_id, order_no)
+            self._mark_catalog_conflict(
+                chat_id,
+                order_no,
+                "Значения каталога изменились.",
+                **_lease_kwargs(lease),
+            )
+            self._send_catalog_conflict_reply(
+                chat_id,
+                order_no,
+                **_lease_kwargs(lease),
+            )
             return False
         self._mark_catalog_uncertain(
-            chat_id, order_no, "Не удалось подтвердить повторную запись каталога."
+            chat_id,
+            order_no,
+            "Не удалось подтвердить повторную запись каталога.",
+            **_lease_kwargs(lease),
         )
-        self._send_catalog_uncertain_reply(chat_id, order_no)
+        self._send_catalog_uncertain_reply(
+            chat_id,
+            order_no,
+            **_lease_kwargs(lease),
+        )
         return False
 
     @staticmethod
@@ -1373,10 +1556,17 @@ class SubmissionService:
             return "Таблица в плане каталога не совпадает с таблицей заведения."
         return ""
 
-    def _persist_catalog_started(self, order_no: str, plan: dict[str, Any]) -> None:
+    def _persist_catalog_started(
+        self,
+        order_no: str,
+        plan: dict[str, Any],
+        *,
+        lease: ChatLease | None = None,
+    ) -> None:
         """Сохраняет неизменяемый план и статус started до вызова Google Sheets."""
         from sqlalchemy import select
 
+        _ensure_lease(lease)
         with SessionLocal.begin() as db:
             record = db.scalar(
                 select(SubmissionRecord)
@@ -1385,6 +1575,7 @@ class SubmissionService:
             )
             if record is None:
                 raise RuntimeError(f"Submission record {order_no} not found")
+            _ensure_lease(lease)
             record.catalog_update_plan = plan
             record.catalog_update_operation_id = plan["operation_id"]
             record.catalog_update_status = "started"
@@ -1400,10 +1591,17 @@ class SubmissionService:
                 idempotency_key=f"order:{order_no}:catalog-update-started",
             )
 
-    def _persist_catalog_completed(self, order_no: str, plan: dict[str, Any]) -> None:
+    def _persist_catalog_completed(
+        self,
+        order_no: str,
+        plan: dict[str, Any],
+        *,
+        lease: ChatLease | None = None,
+    ) -> None:
         """Фиксирует пустой план как completed без внешней записи."""
         from sqlalchemy import select
 
+        _ensure_lease(lease)
         with SessionLocal.begin() as db:
             record = db.scalar(
                 select(SubmissionRecord)
@@ -1412,6 +1610,7 @@ class SubmissionService:
             )
             if record is None:
                 raise RuntimeError(f"Submission record {order_no} not found")
+            _ensure_lease(lease)
             record.catalog_update_plan = plan
             record.catalog_update_operation_id = plan["operation_id"]
             record.catalog_update_status = "completed"
@@ -1426,19 +1625,29 @@ class SubmissionService:
                 idempotency_key=f"order:{order_no}:catalog_updated",
             )
 
-    def _mark_catalog_uncertain(self, chat_id: str, order_no: str, error: str) -> None:
+    def _mark_catalog_uncertain(
+        self,
+        chat_id: str,
+        order_no: str,
+        error: str,
+        *,
+        lease: ChatLease | None = None,
+    ) -> None:
         """Фиксирует неизвестный результат и запрещает повторную запись в таблицу."""
         from sqlalchemy import select
 
+        _ensure_lease(lease)
         with SessionLocal.begin() as db:
             sessions = SessionRepository(db)
             row, state = sessions.get_for_update(chat_id)
+            _ensure_lease(lease)
             state.stage = SessionStage.SUBMISSION_FAILED
             state.status = "catalog_update_uncertain"
             if state.pending_submission:
                 state.pending_submission.failed_stage = "catalog_update_uncertain"
                 state.pending_submission.last_error = error[:1000]
             sessions.save(chat_id, state, row)
+            _ensure_lease(lease)
             record = db.scalar(
                 select(SubmissionRecord)
                 .where(SubmissionRecord.order_no == order_no)
@@ -1446,6 +1655,7 @@ class SubmissionService:
             )
             if record is None:
                 raise RuntimeError(f"Submission record {order_no} not found")
+            _ensure_lease(lease)
             record.catalog_update_status = "uncertain"
             record.catalog_updated = False
             record.last_error = error[:4000]
@@ -1459,28 +1669,46 @@ class SubmissionService:
                 details={"error": error},
             )
 
-    def _send_catalog_uncertain_reply(self, chat_id: str, order_no: str) -> None:
+    def _send_catalog_uncertain_reply(
+        self,
+        chat_id: str,
+        order_no: str,
+        *,
+        lease: ChatLease | None = None,
+    ) -> None:
         """Показывает спокойное сообщение без технических терминов и повторной записи."""
+        _ensure_lease(lease)
         with SessionLocal() as db:
             _, state = SessionRepository(db).get_for_update(chat_id)
+        _ensure_lease(lease)
         self.telegram.send_reply(
             chat_id,
             submission_catalog_uncertain_reply(state, order_no),
         )
 
-    def _mark_catalog_conflict(self, chat_id: str, order_no: str, error: str) -> None:
+    def _mark_catalog_conflict(
+        self,
+        chat_id: str,
+        order_no: str,
+        error: str,
+        *,
+        lease: ChatLease | None = None,
+    ) -> None:
         """Фиксирует конфликт каталога и запрещает автоматическую перезапись."""
         from sqlalchemy import select
 
+        _ensure_lease(lease)
         with SessionLocal.begin() as db:
             sessions = SessionRepository(db)
             row, state = sessions.get_for_update(chat_id)
+            _ensure_lease(lease)
             state.stage = SessionStage.SUBMISSION_FAILED
             state.status = "catalog_update_conflict"
             if state.pending_submission:
                 state.pending_submission.failed_stage = "catalog_update_conflict"
                 state.pending_submission.last_error = error[:1000]
             sessions.save(chat_id, state, row)
+            _ensure_lease(lease)
             record = db.scalar(
                 select(SubmissionRecord)
                 .where(SubmissionRecord.order_no == order_no)
@@ -1488,6 +1716,7 @@ class SubmissionService:
             )
             if record is None:
                 raise RuntimeError(f"Submission record {order_no} not found")
+            _ensure_lease(lease)
             record.catalog_update_status = "conflict"
             record.catalog_updated = False
             record.last_error = error[:4000]
@@ -1501,19 +1730,34 @@ class SubmissionService:
                 details={"error": error},
             )
 
-    def _send_catalog_conflict_reply(self, chat_id: str, order_no: str) -> None:
+    def _send_catalog_conflict_reply(
+        self,
+        chat_id: str,
+        order_no: str,
+        *,
+        lease: ChatLease | None = None,
+    ) -> None:
         """Показывает понятное сообщение без кнопки опасного повтора."""
+        _ensure_lease(lease)
         with SessionLocal() as db:
             _, state = SessionRepository(db).get_for_update(chat_id)
+        _ensure_lease(lease)
         self.telegram.send_reply(
             chat_id,
             submission_catalog_conflict_reply(state, order_no),
         )
 
-    def _checkpoint(self, order_no: str, field: str) -> None:
+    def _checkpoint(
+        self,
+        order_no: str,
+        field: str,
+        *,
+        lease: ChatLease | None = None,
+    ) -> None:
         """Отмечает завершение этапа отправки заявки."""
         from sqlalchemy import select
 
+        _ensure_lease(lease)
         with SessionLocal.begin() as db:
             record = db.scalar(
                 select(SubmissionRecord)
@@ -1522,6 +1766,7 @@ class SubmissionService:
             )
             if record is None:
                 raise RuntimeError(f"Submission record {order_no} not found")
+            _ensure_lease(lease)
             setattr(record, field, True)
             if field == "catalog_updated":
                 record.catalog_update_status = "completed"
@@ -1643,18 +1888,31 @@ class SubmissionService:
                 details={"error": error},
             )
 
-    def _send_dispatch_uncertain_once(self, chat_id: str, order_no: str) -> None:
+    def _send_dispatch_uncertain_once(
+        self,
+        chat_id: str,
+        order_no: str,
+        *,
+        lease: ChatLease | None = None,
+    ) -> None:
         """Один раз предупреждает пользователя и не предлагает повторную отправку."""
+        _ensure_lease(lease)
         record = self._get_record(order_no)
         if record.dispatch_uncertain_notified:
             return
         with SessionLocal() as db:
             _, state = SessionRepository(db).get_for_update(chat_id)
+        _ensure_lease(lease)
         self.telegram.send_reply(
             chat_id,
             submission_dispatch_uncertain_reply(state, order_no),
         )
-        self._checkpoint(order_no, "dispatch_uncertain_notified")
+        _ensure_lease(lease)
+        self._checkpoint(
+            order_no,
+            "dispatch_uncertain_notified",
+            **_lease_kwargs(lease),
+        )
 
     def _finalize(
         self,
@@ -1663,18 +1921,22 @@ class SubmissionService:
         external_order_no: str,
         *,
         dispatched: bool = True,
+        lease: ChatLease | None = None,
     ) -> ConversationState:
         """Финализирует записанную заявку с учётом внешней отправки."""
         from sqlalchemy import select
 
+        _ensure_lease(lease)
         with SessionLocal.begin() as db:
             sessions = SessionRepository(db)
             row, state = sessions.get_for_update(chat_id)
+            _ensure_lease(lease)
             self._apply_successful_submission_state(
                 state,
                 external_order_no,
                 status="submitted" if dispatched else "saved_locally",
             )
+            _ensure_lease(lease)
             sessions.save(chat_id, state, row)
             record = db.scalar(
                 select(SubmissionRecord)
@@ -1682,6 +1944,7 @@ class SubmissionService:
                 .with_for_update()
             )
             if record:
+                _ensure_lease(lease)
                 record.finalized = True
                 record.last_error = None
                 pending = PendingSubmission.model_validate(record.payload)
