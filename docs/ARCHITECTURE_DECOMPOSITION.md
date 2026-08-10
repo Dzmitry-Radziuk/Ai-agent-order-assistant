@@ -143,7 +143,7 @@ Celery/DB/Sheets; `repositories` не импортируют services/integratio
 Facade не содержит второго алгоритма, не меняет serialization, prompt, UX или
 внешний контракт.
 
-## 8. Block 1 — выполненная документационная подготовка
+## 8. Block 1 — выполненный механический перенос
 
 До кода нужно было подтвердить реальные callers product parser:
 
@@ -152,11 +152,11 @@ Facade не содержит второго алгоритма, не меняе�
 - отдельные private symbols нужны parser facade/reconciliation path и должны
   остаться совместимыми.
 
-Текущий Block 1 переносит цельный owner:
+Block 1 перенёс цельный owner без изменения алгоритма:
 
 ```text
 services/product_parser.py
-  -> parsing/products.py       MOVE реализации выполнен после code commit
+  -> parsing/products.py       MOVE реализации выполнен
 services/product_parser.py
   -> явный compatibility facade
 services/parser.py
@@ -166,6 +166,9 @@ services/parser.py
 Внутри `products.py` сохраняются все constants, regex и private helpers:
 quantity, packaging, ranges, spoken measurements, product-line splitting и
 comment scope. Новые `quantities.py`, `packaging.py`, `helpers.py` не создаются.
+
+Побайтное сравнение реализации после нормализации переводов строк с исходным
+файлом из baseline совпало. Focused и полный regression baseline проходят.
 
 ## 9. Проверки Block 1
 

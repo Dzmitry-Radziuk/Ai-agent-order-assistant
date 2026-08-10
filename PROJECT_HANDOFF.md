@@ -128,18 +128,19 @@ GitLab не используется. В этой задаче разрешён 
 Block 0 завершён: зафиксированы владельцы, dependency rules, compatibility
 facades и порядок миграции в `docs/ARCHITECTURE_DECOMPOSITION.md`.
 
-Block 1 (текущая задача) — механический перенос реализации product parser в
-`parsing/products.py`. Поведение, prompts, state machine, matching, UX,
-persistence и deployment не меняются.
+Block 1 завершён механически: реализация product parser находится в
+`parsing/products.py`, а `services/parser.py` импортирует её напрямую.
+Поведение, prompts, state machine, matching, UX, persistence и deployment не
+менялись. Focused и полный regression baseline проходят.
 
 После переноса `services/product_parser.py` остаётся тонким фасадом и
 кандидатом на удаление только после следующего repository-wide import audit.
 
 ## 9. Следующий блок
 
-После успешного Block 1 следующий блок — перенос command parsing из
-`services/parser.py` в `parsing/commands.py`. Его нельзя начинать в рамках
-текущей задачи.
+Следующий блок — перенос command parsing из `services/parser.py` в
+`parsing/commands.py`. Его нельзя начинать автоматически в рамках текущей
+задачи.
 
 ## 10. Проверки
 

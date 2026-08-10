@@ -4,14 +4,14 @@ import re
 from collections.abc import Sequence
 
 from restaurant_bot.domain.models import DialogueResponse, ExtractedItem, Intent, ParsedCommand
-from restaurant_bot.services.product_parser import _extract_global_comment
-from restaurant_bot.services.product_parser import (
+from restaurant_bot.parsing.products import _extract_global_comment
+from restaurant_bot.parsing.products import (
     has_explicit_global_comment_scope as _has_explicit_global_comment_scope,
 )
-from restaurant_bot.services.product_parser import (
+from restaurant_bot.parsing.products import (
     parse_product_lines as _parse_product_lines,
 )
-from restaurant_bot.services.product_parser import (
+from restaurant_bot.parsing.products import (
     parse_quantity_unit as _parse_quantity_unit,
 )
 from restaurant_bot.services.text import (
@@ -992,9 +992,7 @@ def _build_edit_comment(
     comment = clean_text(comment).strip(" ,;:-—–.!?")
     if scope == "item" and not target:
         return None
-    if action == "add" and (
-        not comment or (require_wish and not _COMMENT_WISH_RE.search(comment))
-    ):
+    if action == "add" and (not comment or (require_wish and not _COMMENT_WISH_RE.search(comment))):
         return None
     if action == "remove":
         comment = ""
@@ -1180,7 +1178,11 @@ def has_explicit_add_items(text: str, items: Sequence[object] | None = None) -> 
     """Определяет явную команду добавления новой товарной позиции."""
     if items is not None:
         has_product = any(
-            (item.get("product_query", "") if isinstance(item, dict) else getattr(item, "product_query", "")).strip()
+            (
+                item.get("product_query", "")
+                if isinstance(item, dict)
+                else getattr(item, "product_query", "")
+            ).strip()
             for item in items
         )
         if not has_product:
@@ -1246,9 +1248,7 @@ def _standalone_quantity_hint(text: str) -> tuple[float | None, str]:
         return None, ""
     tokens = normalized.replace(",", " ").split()
     allowed = set(UNIT_ALIASES) | set(NUMBER_WORDS) | _QUANTITY_HINT_LEADINS
-    if not all(
-        token in allowed or re.fullmatch(r"\d+(?:\.\d+)?", token) for token in tokens
-    ):
+    if not all(token in allowed or re.fullmatch(r"\d+(?:\.\d+)?", token) for token in tokens):
         return None, ""
     return quantity, normalize_unit(unit)
 
@@ -1437,7 +1437,7 @@ def infer_intent(text: str, callback_data: str = "") -> ParsedCommand:
                 text or command.text,
                 command.intent,
                 command.items,
-            )
+            ),
         }
     )
 
