@@ -3734,9 +3734,42 @@ schema и migrations не менялись.
 - Проверки: Ruff check/format, mypy (`52 source files`), markdown links,
   `git diff --check` и `alembic heads` проходят. H3 и migration `0007` не начаты.
 
+## BLOCK H3 ANALYSIS — READY
+
+- Анализ вынесен в [docs/SUBMISSION_H3_PLAN.md](docs/SUBMISSION_H3_PLAN.md).
+  Production code, tests, prompts, user-facing texts, migrations и decomposition
+  не менялись.
+- **Cache:** `Redis DELETE` идемпотентен, но подтверждён bug: если удаление
+  кэша падает после `catalog_updated`, следующий submit видит уже завершённый
+  catalog stage и пропускает повторное удаление. Риск — устаревший каталог до
+  TTL; migration не нужна. Рекомендуется H3a: повторяемый cache repair перед
+  recalc, без повторной Sheets mutation.
+- **Recalculation:** POST отправляет token, `sheetName` и `spreadsheetId` на
+  внешний Apps Script; endpoint source отсутствует, поэтому идемпотентность
+  **не доказана**. После потерянного ответа или DB checkpoint failure текущий
+  `recalc_done=false` допускает blind повторный POST. Это наивысший H3
+  production risk. Рекомендуется H3b: durable `started/uncertain` gate и запрет
+  blind retry; для этого потребуется будущая migration `0007` и проверка
+  внешнего контракта.
+- **Telegram completion:** отправка идёт до `completion_notified`; при принятом
+  Telegram сообщении и потерянном ответе/checkpoint следующая попытка может
+  отправить дубль. Это только **MEDIUM/LOW UX risk**: заявка и количество уже
+  завершены. `TelegramClient` умеет edit по message ID, но completion ID не
+  сохраняется и presenter не использует upsert. Рекомендуется H3c: at-most-once
+  после uncertain результата; возможный message-ID upsert — отдельное усиление.
+- Existing tests: dispatch safety — VALID; recalc tests покрывают только body и
+  ошибку до POST, unknown/retry coverage отсутствует; cache test не моделирует
+  submit retry; completion tests фиксируют порядок и текущий resend, но не
+  предотвращают duplicate window.
+- Implementation order: H3a cache repair, H3b recalc uncertainty gate, H3c
+  completion notification policy. Первый implementation step — **H3a cache
+  repair**; H3b остаётся самым высоким по severity.
+- Baseline **1285 / 1271 / 14** и все 14 failures не изменялись. H1/H2 закрыты;
+  H3 implementation, migration `0007`, H4, decomposition и MAX не начинались.
+
 ## NEXT FUNCTIONAL STEP
 
-`BLOCK H3 — recalc/cache/notification hardening` — только после отдельного
-подтверждения. H1/H2 safety gates остаются обязательными; prompts, parser,
-matching, engine, state compatibility, decomposition и MAX не входят в следующий
-патч автоматически.
+`BLOCK H3a — cache repair после catalog completion` — отдельная implementation
+задача после подтверждения. H1/H2 safety gates остаются обязательными; recalc,
+Telegram notification, prompts, parser, matching, engine, state compatibility,
+decomposition и MAX не входят в следующий патч автоматически.
