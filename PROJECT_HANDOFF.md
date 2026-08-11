@@ -16,7 +16,7 @@ AI помогает понять свободную речь и найти ка�
 - Репозиторий: `Dzmitry-Radziuk/test_bot`.
 - Ветка: `decompose_bot`.
 - Semantic baseline: `f9cbc3195c0eae843de3208e488c3f46baa5a5ec`.
-- Текущий decomposition baseline перед Block 2B: `4a24f0d0106e48943865be507d6380ae1a8a94db`.
+- Текущий decomposition HEAD после Block 2B: `bad8d98cce2138691bd40bc6cb7221d210ec68ac`.
 - Единственный рабочий remote: GitHub `origin/decompose_bot`.
 - Автоматический baseline: `1362 collected / 1362 passed`.
 - `manual_smoke_forensic_logs.txt` — намеренный локальный untracked-файл
@@ -119,7 +119,7 @@ GitLab не используется. В этой задаче разрешён 
 
 ## 7. Известные ручные acceptance-проблемы
 
-Эти сценарии не исправляются в Block 2A:
+Это текущие нерешённые acceptance-проблемы:
 
 - после вопроса о количестве для «хлеб» фраза «новый товар» не должна стать
   количеством хлеба;
@@ -166,10 +166,11 @@ gates.
 
 ## 10. Следующий блок
 
-После публикации Block 2B следующий архитектурный блок не начинается
-автоматически. Сначала требуется внешний review текущих command owners и callers.
+Следующий блок — AI schemas/reconciliation. Перед переносом необходимо
+провести полный audit callers, зависимостей, дубликатов и порядка reconciliation.
+После Block 3 — catalog evidence/scoring/safety и resolver.
 
-## 10. Проверки
+## 11. Проверки
 
 Для Block 2A обязательны:
 
@@ -202,3 +203,9 @@ git diff --check
 выводить `.env`. После каждого блока обновлять этот короткий handoff одной
 актуальной записью и отдельно указывать подтверждённые факты, ограничения и
 следующий блок.
+
+Критическое состояние проекта не должно существовать только в истории ChatGPT
+или Codex-сессии. Для восстановления работы достаточно AGENTS.md,
+PROJECT_HANDOFF.md, `.agents/DECISIONS.md`, `.agents/PROJECT_MAP.md`,
+архитектурной документации, тестов и текущего Git state. История обсуждений
+в handoff не копируется.

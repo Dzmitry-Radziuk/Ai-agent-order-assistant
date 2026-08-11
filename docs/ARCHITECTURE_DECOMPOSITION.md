@@ -7,8 +7,8 @@ migration block переносит существующий owner механич
 contracts и проходит focused/full regression до следующего блока.
 
 Текущий checkout: `decompose_bot`, semantic baseline
-`f9cbc3195c0eae843de3208e488c3f46baa5a5ec`, decomposition HEAD
-`b09f7ea34993f127f67ab49fd63184e7afb1184f`, автоматический baseline
+`f9cbc3195c0eae843de3208e488c3f46baa5a5ec`, текущий decomposition HEAD
+`bad8d98cce2138691bd40bc6cb7221d210ec68ac`, автоматический baseline
 `1362 collected / 1362 passed`. Локальный
 `manual_smoke_forensic_logs.txt` не является частью проекта.
 
@@ -108,7 +108,14 @@ contracts и проходит focused/full regression до следующего 
 restaurant_bot/
   parsing/
     text.py
-    commands.py
+    commands/
+      patterns.py
+      normalization.py
+      navigation.py
+      item_commands.py
+      comment_commands.py
+      dialogue.py
+      router.py
     products.py
     ai/{schemas.py,reconciliation.py}
   catalog/{evidence.py,scoring.py,safety.py,resolver.py}
@@ -128,8 +135,8 @@ restaurant_bot/
 ```
 
 После Block 2A пакет `parsing/` содержит `products.py`, `quantities.py`,
-`packaging.py` и `comment_scope.py`. `commands.py` и `text.py` пока не
-создаются.
+`packaging.py` и `comment_scope.py`. После Block 2B text command parsing
+находится в `parsing/commands/`; отдельный `text.py` пока не создаётся.
 
 ## 6. Правила зависимостей
 

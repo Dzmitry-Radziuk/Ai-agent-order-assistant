@@ -121,6 +121,24 @@
   parsing не смешивается с channel-agnostic text parsing.
 - Реализация: `AGENTS.md`, `.agents/DEVELOPMENT_PROCESS.md` и отчёт каждого блока.
 
+### ADR-014 — Каталог масштабируется через searchable projection
+
+- Дата: 2026-08-11.
+- Статус: действует как целевое направление.
+- Контекст: текущий каталог хранится в Google Sheets, а будущий объём потребует
+  ограниченного venue-scoped retrieval вместо передачи полного каталога в AI.
+- Решение: Google Sheets остаётся source of truth. Будущая синхронизация создаёт
+  в PostgreSQL локальную searchable/indexed projection с безопасным upsert.
+  Retrieval начинается с venue scope и может объединять exact, normalized,
+  lexical, trigram/full-text и только при доказанной необходимости vector search.
+  В AI передаётся bounded top-N shortlist; catalog evidence, scoring и
+  deterministic safety gate остаются обязательными до AUTO_SELECT/CLARIFY.
+- Последствия: PostgreSQL не становится source of truth автоматически. Индексы,
+  таблицы, embeddings и pgvector выбираются только после benchmark реального
+  объёма, запросов, EXPLAIN/ANALYZE, latency и recall.
+- Реализация: будущие design blocks для catalog sync и searchable projection;
+  Block 3 не меняет БД, migrations, Docker или Sheets sync.
+
 ## Шаблон новой записи
 
 ```markdown
