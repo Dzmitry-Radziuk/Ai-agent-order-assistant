@@ -47,6 +47,8 @@ flowchart LR
 |---|---|
 | `services/orchestrator.py` | Транзакционный pipeline: claim update, регистрация и доступ, блокировка чата, загрузка состояния, текстовая маршрутизация, каталог, engine, сохранение, задачи и доставка ответа |
 | `services/engine.py` | Детерминированная state machine, приоритет незавершённых вопросов, команды, callback и переходы черновика |
+| `conversation/comments.py` | Channel-neutral операции подтверждённых комментариев, comment scope, provenance-нормализация и comment shadows |
+| `conversation/draft.py` | Channel-neutral операции целостности черновика и слияния подтверждённых дублей |
 | `services/input_recognition.py` | Скачивание voice/photo, транскрибация с безопасным fallback и обновление карточки прогресса |
 | `services/parser.py` | Text intent facade, callback contract и временный dispatcher command parsing |
 | `parsing/commands/patterns.py` | Статические шаблоны text-команд |
@@ -74,6 +76,13 @@ flowchart LR
 | `services/conversation_handlers/state_compatibility.py` | Compatibility re-export facade для `conversation/routing/state_compatibility.py` |
 | `services/conversation_handlers/modal_routing.py` | Compatibility re-export facade для `conversation/routing/modal_routing.py` |
 | `services/conversation_handlers/state.py` | Compatibility re-export facade для `conversation/state/queries.py` |
+
+После Block 5B `conversation/comments.py` и `conversation/draft.py` являются
+единственными владельцами перечисленных core-операций. `comment_scope.py`
+сохраняет handler и делегирует им выполнение; Telegram/presentation handlers
+не переносятся механически. Исторически разные функции объединения комментариев
+сохранены раздельно, потому что engine нормализует внутренние пробелы, а
+CommentScopeHandler их сохраняет.
 | `services/input_normalizer.py` | Приведение Telegram payload к единому `TelegramEvent` |
 | `catalog/evidence.py` | Каноническое представление, токены, query/catalog evidence и supplier hint matching |
 | `catalog/scoring.py` | Детерминированная оценка одного каталожного товара |

@@ -1,5 +1,6 @@
 import pytest
 
+from restaurant_bot.conversation.comments import merge_comments, remove_cart_comment_shadows
 from restaurant_bot.domain.models import (
     CartItem,
     CatalogProduct,
@@ -22,10 +23,8 @@ def _event() -> TelegramEvent:
 
 def test_catalog_and_user_comments_are_joined_once_in_source_order(settings) -> None:  # type: ignore[no-untyped-def]
     """Проверяет, что каталог и пользователь комментарии являются слитное один раз в исходный заказ."""
-    engine = ConversationEngine(settings)
-
     assert (
-        engine._merge_comments("доставка утром", "охлаждённым", "Доставка утром.")
+        merge_comments("доставка утром", "охлаждённым", "Доставка утром.")
         == "доставка утром; охлаждённым"
     )
 
@@ -677,7 +676,7 @@ def test_existing_comment_shadow_is_removed_from_persisted_draft(settings) -> No
         current_issue_item_id=shadow.id,
     )
 
-    engine._remove_cart_comment_shadows(state)
+    remove_cart_comment_shadows(state)
     assert [item.id for item in state.cart] == [owner.id]
     assert state.current_issue_item_id == ""
 
@@ -710,7 +709,10 @@ def test_catalog_facts_are_not_saved_as_user_comment_on_single_candidate(setting
 
 def test_comment_semantic_dedupe_ignores_politeness_prefix(settings) -> None:  # type: ignore[no-untyped-def]
     """Не дублирует одну доставочную инструкцию с разными вежливыми вводными."""
-    assert ConversationEngine(settings)._merge_comments(
-        "желательно привезти завтра",
-        "привезти завтра",
-    ) == "желательно привезти завтра"
+    assert (
+        merge_comments(
+            "желательно привезти завтра",
+            "привезти завтра",
+        )
+        == "желательно привезти завтра"
+    )

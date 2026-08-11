@@ -13,6 +13,22 @@ from restaurant_bot.catalog.evidence import (
 from restaurant_bot.catalog.resolver import CatalogDecision, CatalogResolver
 from restaurant_bot.catalog.safety import has_compatible_numeric_characteristics
 from restaurant_bot.config import Settings
+from restaurant_bot.conversation.comments import (
+    apply_global_comment,
+    clear_pending_comment,
+    comment_scope_items,
+    merge_comments,
+    prune_pending_comment_item_ids,
+    remove_cart_comment_shadows,
+    remove_catalog_fact_comments,
+    remove_exact_comment_fragments,
+    remove_global_comment_overlap,
+)
+from restaurant_bot.conversation.draft import (
+    find_duplicate,
+    has_active_draft_items,
+    remove_exact_cart_duplicates,
+)
 from restaurant_bot.conversation.routing.contracts import (
     CompatibilityAction,
     CompatibilityContext,
@@ -50,14 +66,11 @@ from restaurant_bot.domain.models import (
     SessionStage,
     TelegramEvent,
 )
-from restaurant_bot.services.comment_policy import comment_semantic_key, supplier_comment_start
+from restaurant_bot.services.comment_policy import supplier_comment_start
 from restaurant_bot.services.conversation_handlers.candidate_selection import (
     CandidateSelectionHandler,
 )
-from restaurant_bot.services.conversation_handlers.comment_scope import (
-    CommentScopeHandler,
-    comment_scope_items,
-)
+from restaurant_bot.services.conversation_handlers.comment_scope import CommentScopeHandler
 from restaurant_bot.services.conversation_handlers.final_review import FinalReviewHandler
 from restaurant_bot.services.conversation_handlers.navigation import (
     OrderStatusHandler,
@@ -121,7 +134,6 @@ from restaurant_bot.services.text import (
     normalize_unit,
     numeric_range_spans,
     parse_number_words,
-    remove_global_comment_overlap,
     remove_phrase_overlap,
 )
 
@@ -338,8 +350,8 @@ class ConversationEngine:
         ):
             return EngineResult(state=state, reply=unknown_intent_reply(state))
         self._remove_navigation_command_items(state)
-        self._remove_cart_comment_shadows(state)
-        self._remove_exact_cart_duplicates(state)
+        remove_cart_comment_shadows(state)
+        remove_exact_cart_duplicates(state)
 
         # The source n8n workflow accepts voice phrases such as "отправь
         # запрос снабженцу" in any word order while a not-found/candidate card
@@ -536,7 +548,7 @@ class ConversationEngine:
             state.cart_page = self._cart_page(command, state)
             return EngineResult(state=state, reply=cart_reply(state))
         if command.intent == Intent.START_NEW_ORDER:
-            if state.stage == SessionStage.SUBMITTED or not self._has_active_draft_items(state):
+            if state.stage == SessionStage.SUBMITTED or not has_active_draft_items(state):
                 return self._start_new_order(state)
             state.pending_new_order_confirmation = True
             return EngineResult(state=state, reply=new_order_confirmation_reply(state))
@@ -769,7 +781,7 @@ class ConversationEngine:
 
         if command.intent == Intent.ADD_ITEMS:
             if command.global_comment:
-                self._apply_global_comment(state, command.global_comment)
+                apply_global_comment(state, command.global_comment)
             if command.global_comment and not command.items:
                 active_count = sum(item.status != ItemStatus.SKIPPED for item in state.cart)
                 return EngineResult(
@@ -834,7 +846,7 @@ class ConversationEngine:
                         same_missing.status = ItemStatus.MATCHED
                     state.current_issue_item_id = same_missing.id
                     continue
-                duplicate = self._find_duplicate(state, item)
+                duplicate = find_duplicate(state, item)
                 if duplicate and item.status in {
                     ItemStatus.MATCHED,
                     ItemStatus.MISSING_QTY,
@@ -885,11 +897,6 @@ class ConversationEngine:
         assert outcome.reprocess_command is not None
         safe_event = event.model_copy(update={"text": ""}) if outcome.clear_event_text else event
         return self.handle(safe_event, outcome.reprocess_command, state, catalog)
-
-    @staticmethod
-    def _clear_pending_comment(state: ConversationState) -> None:
-        """Удаляет временные данные уточнения, не затрагивая черновик."""
-        CommentScopeHandler.clear_pending(state)
 
     @staticmethod
     def _remove_navigation_command_items(state: ConversationState) -> None:
@@ -943,7 +950,7 @@ class ConversationEngine:
     def _build_item(self, extracted: ExtractedItem, global_comment: str = "") -> CartItem:
         """Создаёт позицию черновика из распознанного товара."""
         item_comment = extracted.comment or extracted.user_comment_to_supplier
-        item_comment = self._remove_global_comment_overlap(item_comment, global_comment)
+        item_comment = remove_global_comment_overlap(item_comment, global_comment)
         comment_source = extracted.comment_source if item_comment else CommentSource.NONE
         if global_comment:
             comment_source = CommentSource.SEMANTIC
@@ -978,7 +985,7 @@ class ConversationEngine:
             or self.settings.default_department,
             department_quantities=extracted.department_quantities.model_copy(deep=True),
             supplier_hint=extracted.supplier_hint,
-            comment=self._merge_comments(item_comment, global_comment),
+            comment=merge_comments(item_comment, global_comment),
             comment_source=comment_source,
         )
 
@@ -1673,11 +1680,6 @@ class ConversationEngine:
         return command
 
     @staticmethod
-    def _has_active_draft_items(state: ConversationState) -> bool:
-        """Проверяет наличие позиций, которые пользователь ещё может потерять."""
-        return any(item.status != ItemStatus.SKIPPED for item in state.cart)
-
-    @staticmethod
     def _fresh_order_state(state: ConversationState) -> ConversationState:
         """Создаёт пустую заявку, сохраняя регистрацию и историю пользователя."""
         return ConversationState(
@@ -2066,7 +2068,7 @@ class ConversationEngine:
         state.unit_item_index = None
         state.edit_multiple_index = None
         state.pending_added_items_count = 0
-        ConversationEngine._clear_pending_comment(state)
+        clear_pending_comment(state)
         clear_product_add_pending(state)
 
     @staticmethod
@@ -2169,7 +2171,7 @@ class ConversationEngine:
                 candidates,
             )
             if split is not None:
-                item.comment = self._merge_comments(item.comment, split.supplier_comment)
+                item.comment = merge_comments(item.comment, split.supplier_comment)
                 item.comment_source = CommentSource.EXPLICIT_MARKER
                 item.source_query = split.product_query
                 search_query = remove_phrase_overlap(item.source_query, item.comment)
@@ -2259,7 +2261,7 @@ class ConversationEngine:
             ):
                 item.quantity = None
                 item.unit = ""
-        item.comment = self._remove_catalog_fact_comments(
+        item.comment = remove_catalog_fact_comments(
             item.comment,
             item.source_query,
             product_name,
@@ -2360,7 +2362,7 @@ class ConversationEngine:
                     CommentSource.EXPLICIT_MARKER,
                 }
             ):
-                item.comment = self._remove_exact_comment_fragments(item.comment, product.comment)
+                item.comment = remove_exact_comment_fragments(item.comment, product.comment)
             if not item.comment:
                 item.comment_source = CommentSource.NONE
 
@@ -2435,316 +2437,6 @@ class ConversationEngine:
         if valid_total is None:
             return None
         return round(valid_total - item.existing_quantity, 6)
-
-    @staticmethod
-    def _merge_comments(*values: str) -> str:
-        """Объединяет подтверждённые комментарии пользователя."""
-        result: list[str] = []
-        seen: set[str] = set()
-        for value in values:
-            for part in str(value or "").split(";"):
-                comment = " ".join(part.split()).strip(" .,;")
-                key = comment_semantic_key(comment)
-                if comment and key not in seen:
-                    result.append(comment)
-                seen.add(key)
-        return "; ".join(result)
-
-    @staticmethod
-    def _remove_exact_comment_fragments(comment: str, excluded: str) -> str:
-        """Отделяет старое примечание каталога от комментария заявки."""
-        excluded_parts = {
-            normalize_text(part).strip(" .,;")
-            for part in str(excluded or "").split(";")
-            if normalize_text(part).strip(" .,;")
-        }
-        kept = [
-            part.strip(" .,;")
-            for part in str(comment or "").split(";")
-            if part.strip(" .,;") and normalize_text(part).strip(" .,;") not in excluded_parts
-        ]
-        return "; ".join(kept)
-
-    @staticmethod
-    def _remove_global_comment_overlap(item_comment: str, global_comment: str) -> str:
-        """Удаляет общую часть, которую ИИ также включил в комментарий позиции."""
-        return remove_global_comment_overlap(item_comment, global_comment)
-
-    @staticmethod
-    def _apply_global_comment(state: ConversationState, global_comment: str) -> None:
-        """Добавляет общий комментарий один раз ко всем активным товарам заявки."""
-        for item in state.cart:
-            if item.status != ItemStatus.SKIPPED:
-                item.comment = ConversationEngine._merge_comments(
-                    item.comment,
-                    global_comment,
-                )
-                item.comment_source = CommentSource.SEMANTIC
-
-    @staticmethod
-    def _remove_cart_comment_shadows(state: ConversationState) -> None:
-        """Удаляет ложные позиции, созданные из комментариев."""
-        shadow_ids: set[str] = set()
-        for owner in state.cart:
-            comments = {
-                normalize_text(part).strip(" .,;")
-                for part in owner.comment.split(";")
-                if normalize_text(part).strip(" .,;")
-            }
-            if not comments:
-                continue
-            for shadow in state.cart:
-                if shadow.id == owner.id or shadow.catalog_product_id:
-                    continue
-                if normalize_text(shadow.source_query).strip(" .,;") not in comments:
-                    continue
-                if owner.quantity is None and shadow.quantity is not None:
-                    owner.quantity = shadow.quantity
-                    owner.unit = shadow.unit or owner.unit
-                shadow_ids.add(shadow.id)
-        if not shadow_ids:
-            return
-        state.cart = [item for item in state.cart if item.id not in shadow_ids]
-        if state.current_issue_item_id in shadow_ids:
-            state.current_issue_item_id = ""
-
-    @staticmethod
-    def _normalize_existing_catalog_comments(state: ConversationState) -> None:
-        """Очищает ошибки нормализации в уже сохранённом черновике.
-
-        Старый черновик мог быть создан до обновления парсера и содержать
-        фасовку, страну или остаток названия в поле комментария. Повторная
-        обработка удаляет только подтверждённые факты каталога и фразы,
-        состоящие исключительно из количества и единицы измерения; реальные
-        инструкции поставщику сохраняются.
-        """
-        for item in state.cart:
-            if not item.catalog_name or not item.comment:
-                continue
-            item.comment = ConversationEngine._remove_catalog_fact_comments(
-                item.comment,
-                item.source_query,
-                item.catalog_name,
-                include_source_query=True,
-            )
-            if not item.comment:
-                item.comment_source = CommentSource.NONE
-
-    @staticmethod
-    def _remove_exact_cart_duplicates(state: ConversationState) -> None:
-        """Объединяет подтверждённые дубликаты позиций черновика."""
-        owners: dict[tuple[str, str, str], CartItem] = {}
-        duplicate_ids: set[str] = set()
-        for item in state.cart:
-            # A pending duplicate is a confirmation card, not extraction noise.
-            # Only duplicate rows that were already accepted may be collapsed.
-            if not item.catalog_product_id or item.status != ItemStatus.MATCHED:
-                continue
-            key = (
-                item.catalog_product_id,
-                normalize_unit(item.unit or item.catalog_unit),
-                item.department,
-            )
-            owner = owners.get(key)
-            if owner is None:
-                owners[key] = item
-                continue
-            # Одинаковые количества обычно означают повтор одной операции
-            # доставки или дубль распознавания, поэтому не удваиваем их.
-            # Разные количества — это уже две добавленные партии одного товара;
-            # пользователь должен видеть их одной суммарной строкой.
-            if owner.quantity != item.quantity:
-                owner.quantity = (owner.quantity or 0) + (item.quantity or 0)
-            owner.comment = ConversationEngine._merge_comments(owner.comment, item.comment)
-            if item.comment and owner.comment_source is CommentSource.NONE:
-                owner.comment_source = item.comment_source
-            duplicate_ids.add(item.id)
-
-        if not duplicate_ids:
-            return
-        state.cart = [item for item in state.cart if item.id not in duplicate_ids]
-        if state.current_issue_item_id in duplicate_ids:
-            state.current_issue_item_id = ""
-
-    @staticmethod
-    def _comment_left_after_catalog_match(query: str, product_name: str) -> str:
-        """Извлекает комментарий, оставшийся после поиска товара."""
-        query_words = re.findall(r"[a-zа-я0-9]+", normalize_text(query), flags=re.I)
-        product_words = re.findall(r"[a-zа-я0-9]+", normalize_text(product_name), flags=re.I)
-        if not query_words or not product_words:
-            return ""
-
-        matched_query_indexes: set[int] = set()
-        next_query_index = 0
-        for product_word in product_words:
-            match_index = next(
-                (
-                    index
-                    for index in range(next_query_index, len(query_words))
-                    if query_words[index] == product_word
-                ),
-                None,
-            )
-            if match_index is None:
-                continue
-            matched_query_indexes.add(match_index)
-            next_query_index = match_index + 1
-
-        # Two matching words are strong evidence for a multiword product.  A
-        # one-word catalog name is allowed only when that sole word matched.
-        required_matches = min(2, len(product_words))
-        if len(matched_query_indexes) < required_matches:
-            return ""
-
-        remainder = [
-            word for index, word in enumerate(query_words) if index not in matched_query_indexes
-        ]
-        return " ".join(remainder).strip(" .,;")
-
-    @staticmethod
-    def _remove_catalog_fact_comments(
-        comment: str,
-        source_query: str,
-        product_name: str,
-        *,
-        source_line: str = "",
-        include_source_query: bool = False,
-    ) -> str:
-        """Убирает из комментария характеристики, уже подтверждённые каталогом.
-
-        ИИ иногда оставляет часть названия отдельным комментарием: например,
-        «белое» у вина или «номер один» у позиции «№1». Такие слова не являются
-        пожеланием поставщику и не должны записываться в колонку комментария.
-        Явные пожелания («желательно завтра», «без кожи») сохраняются целиком.
-        """
-
-        def canonical_words(value: str) -> list[str]:
-            """Канонизирует числа и подпись «номер» для сравнения с каталогом."""
-            words = re.findall(r"[a-zа-яё0-9]+", normalize_text(value), flags=re.I)
-            result: list[str] = []
-            index = 0
-            while index < len(words):
-                word = words[index]
-                if word == "номер" and index + 1 < len(words):
-                    number = NUMBER_WORDS.get(words[index + 1])
-                    if number is not None and float(number).is_integer():
-                        result.append(str(int(number)))
-                        index += 2
-                        continue
-                if word in NUMBER_WORDS and float(NUMBER_WORDS[word]).is_integer():
-                    result.append(str(int(NUMBER_WORDS[word])))
-                else:
-                    result.append(word)
-                index += 1
-            return result
-
-        def compact_words(value: str) -> set[str]:
-            """Возвращает компактные формы для «д/п», «дп» и похожих записей."""
-            compact = {
-                re.sub(r"[^a-zа-яё0-9]", "", word)
-                for word in canonical_words(value)
-                if re.sub(r"[^a-zа-яё0-9]", "", word)
-            }
-            compact.update(
-                re.sub(r"[^a-zа-яё0-9]", "", group)
-                for group in re.findall(
-                    r"[a-zа-яё0-9]+(?:[/.-][a-zа-яё0-9]+)+",
-                    normalize_text(value),
-                    flags=re.I,
-                )
-            )
-            return compact
-
-        catalog_facts = set(canonical_words(product_name))
-        query_facts = set(canonical_words(source_query)) if include_source_query else set()
-        compact_catalog_facts = compact_words(product_name)
-        compact_query_facts = compact_words(source_query) if include_source_query else set()
-        packaging_aliases = {
-            "коробка": "кор",
-            "коробке": "кор",
-            "коробки": "кор",
-            "короб": "кор",
-        }
-        normalized_unit_words = {normalize_text(alias) for alias in UNIT_ALIASES} | {
-            normalize_text(unit) for unit in UNIT_ALIASES.values()
-        }
-        normalized_unit_values = {normalize_text(unit) for unit in UNIT_ALIASES.values()}
-
-        def is_quantity_only_part(words: list[str]) -> bool:
-            """Определяет остаток количества, который не является пожеланием."""
-            has_number = False
-            has_unit = False
-            for word in words:
-                if word == "и":
-                    continue
-                if re.fullmatch(r"\d+(?:[.,]\d+)?", word) or word in NUMBER_WORDS:
-                    has_number = True
-                    continue
-                if (
-                    word in normalized_unit_words
-                    or normalize_text(normalize_unit(word)) in normalized_unit_values
-                ):
-                    has_unit = True
-                    continue
-                return False
-            return bool(words) and has_number and has_unit
-
-        kept: list[str] = []
-        for part in re.split(r"[;,]", str(comment or "")):
-            cleaned = " ".join(part.split()).strip(" .,;")
-            if not cleaned:
-                continue
-            part_words = canonical_words(cleaned)
-            normalized_part_words = [packaging_aliases.get(word, word) for word in part_words]
-            part_compact = compact_words(cleaned)
-            if is_quantity_only_part(part_words):
-                continue
-            normalized_part = normalize_text(cleaned)
-            if re.search(
-                r"(?:^|\s)(?:без|не|только|желательно|обязательно|если|привез\w*|достав\w*|полож\w*)\b",
-                normalized_part,
-                flags=re.IGNORECASE,
-            ):
-                kept.append(cleaned)
-                continue
-            if (
-                include_source_query
-                and source_line
-                and normalized_part
-                and f" {normalized_part} " in f" {normalize_text(source_line)} "
-                and f" {normalized_part} " in f" {normalize_text(source_query)} "
-            ):
-                kept.append(cleaned)
-                continue
-            all_catalog_facts = all(
-                word in catalog_facts
-                or word in query_facts
-                or word in {"в", "на", "из", "по"}
-                or packaging_aliases.get(word, word) in catalog_facts
-                for word in normalized_part_words
-            )
-            compact_catalog_match = bool(part_compact) and all(
-                word in compact_catalog_facts or word in compact_query_facts
-                for word in part_compact
-            )
-            if part_words and (all_catalog_facts or compact_catalog_match):
-                continue
-            kept.append(cleaned)
-        return "; ".join(kept)
-
-    def _find_duplicate(self, state: ConversationState, item: CartItem) -> CartItem | None:
-        """Находит дубликат товарной позиции."""
-        if not item.catalog_product_id:
-            return None
-        return next(
-            (
-                existing
-                for existing in state.cart
-                if existing.status != ItemStatus.SKIPPED
-                and existing.catalog_product_id == item.catalog_product_id
-            ),
-            None,
-        )
 
     def _first_unresolved(self, state: ConversationState) -> CartItem | None:
         """Возвращает приоритетную нерешённую позицию."""
@@ -2851,7 +2543,7 @@ class ConversationEngine:
         assert outcome.item is not None and outcome.candidate is not None
         item = outcome.item
         self._apply_catalog(item, outcome.candidate, catalog)
-        duplicate = self._find_duplicate(
+        duplicate = find_duplicate(
             ConversationState(cart=[current for current in state.cart if current.id != item.id]),
             item,
         )
@@ -3011,7 +2703,7 @@ class ConversationEngine:
         target = normalize_text(target_query)
         if not target and state.current_item():
             state.current_item().status = ItemStatus.SKIPPED  # type: ignore[union-attr]
-            self._prune_pending_comment_item_ids(state)
+            prune_pending_comment_item_ids(state)
             return self._advance(state)
         item = self._find_cart_item(state, target_query)
         if item is not None:
@@ -3020,7 +2712,7 @@ class ConversationEngine:
             if was_current:
                 state.current_issue_item_id = ""
                 state.current_issue_kind = None
-            self._prune_pending_comment_item_ids(state)
+            prune_pending_comment_item_ids(state)
             return EngineResult(state=state, reply=cart_reply(state, title="Позиция удалена"))
         pending_matches = sorted(
             [
@@ -3043,16 +2735,6 @@ class ConversationEngine:
             state.pending_comment_items.remove(pending_item)
             return EngineResult(state=state, reply=cart_reply(state, title="Позиция удалена"))
         return EngineResult(state=state, reply=BotReply(text="Не нашёл такую позицию в черновике."))
-
-    @staticmethod
-    def _prune_pending_comment_item_ids(state: ConversationState) -> None:
-        """Удаляет из pending scope идентификаторы пропущенных позиций."""
-        if not state.pending_comment_existing_item_ids:
-            return
-        active_ids = {item.id for item in state.cart if item.status is not ItemStatus.SKIPPED}
-        state.pending_comment_existing_item_ids = [
-            item_id for item_id in state.pending_comment_existing_item_ids if item_id in active_ids
-        ]
 
     @staticmethod
     def _contains_score(target: str, candidate: str) -> int:
@@ -3123,7 +2805,7 @@ class ConversationEngine:
                     state=state,
                     reply=cart_reply(state, notice="Не указан текст общего комментария"),
                 )
-            self._apply_global_comment(state, comment)
+            apply_global_comment(state, comment)
             return EngineResult(state=state, reply=cart_reply(state, notice="Комментарий добавлен"))
 
         if command.comment_action == "remove":
@@ -3153,7 +2835,7 @@ class ConversationEngine:
             item.comment_source = CommentSource.NONE
             notice = "Комментарий удалён"
         else:
-            item.comment = self._merge_comments(item.comment, comment)
+            item.comment = merge_comments(item.comment, comment)
             item.comment_source = CommentSource.SEMANTIC
             notice = "Комментарий добавлен"
         return EngineResult(state=state, reply=cart_reply(state, notice=notice))

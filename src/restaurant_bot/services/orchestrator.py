@@ -26,6 +26,7 @@ from restaurant_bot.catalog.safety import (
     is_safe_catalog_name_equivalent,
 )
 from restaurant_bot.config import Settings
+from restaurant_bot.conversation.comments import comment_scope_items
 from restaurant_bot.conversation.routing.contracts import (
     CompatibilityAction,
     CompatibilityContext,
@@ -65,7 +66,6 @@ from restaurant_bot.repositories.updates import (
     UpdateRepository,
     UpdateSequenceDeferred,
 )
-from restaurant_bot.services.conversation_handlers.comment_scope import comment_scope_items
 from restaurant_bot.services.engine import ConversationEngine
 from restaurant_bot.services.input_normalizer import normalize_telegram_update
 from restaurant_bot.services.input_recognition import InputRecognitionService

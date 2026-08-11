@@ -1,6 +1,7 @@
 import pytest
 
 from restaurant_bot.config import Settings
+from restaurant_bot.conversation.comments import normalize_existing_catalog_comments
 from restaurant_bot.domain.models import (
     Candidate,
     CartItem,
@@ -501,7 +502,7 @@ def test_saved_catalog_comment_is_normalized_when_draft_is_reopened() -> None:
     )
     state = ConversationState(cart=[item])
 
-    ConversationEngine._normalize_existing_catalog_comments(state)
+    normalize_existing_catalog_comments(state)
 
     assert state.cart[0].comment == ""
 

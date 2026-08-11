@@ -232,8 +232,8 @@ functions; coordinator передаёт им необходимые зависи
 Block 5A не меняет engine workflow, parser, catalog, prompts, comments,
 quantity semantics, database, Docker, Sheets или Telegram UX. Focused modal
 suite, полный baseline и quality gates подтверждают сохранение routing behavior.
-Следующий функциональный этап — review
-новой routing boundary и только затем отдельный Block 5B по handlers/draft.
+После review этой границы выполнен отдельный Block 5B по core-операциям draft и
+comments; Telegram/presentation handlers в нём не переносились.
 
 Постоянное правило: перед каждым `MOVE`/`MERGE`/`DELETE` выполняются
 repository-wide usage и duplicate audit. Мёртвый или дублирующий код не
@@ -253,12 +253,35 @@ comparison на 62 существующих тестовых строках: р�
 regression baseline остаётся `1362 passed`; code migration прошёл все quality
 gates.
 
-## 10. Следующий блок
+## 10. Block 5B — выделение conversation draft и comments
 
-Следующий блок назначается только после review завершённого Block 4. Новая
-декомпозиция или изменение поведения каталога автоматически не начинаются.
+Block 5B выполняется как поведенчески нейтральное выделение channel-neutral
+операций из `services/engine.py`. Владельцами становятся:
 
-## 11. Проверки
+- `conversation/comments.py` — подтверждённые комментарии, comment scope,
+  provenance-нормализация и удаление comment shadows;
+- `conversation/draft.py` — наличие активного черновика, поиск дублей и
+  слияние только подтверждённых одинаковых строк.
+
+`services/comment_policy.py` остаётся единым владельцем лексических и
+provenance-примитивов. `services/conversation_handlers/comment_scope.py`
+сохраняет presentation/state handler и делегирует core-операции новым
+модулям. Две исторически разные семантики объединения комментариев сохранены:
+`merge_comments()` нормализует внутренние пробелы как прежний engine, а
+`merge_scope_comments()` сохраняет пробелы как прежний CommentScopeHandler.
+Ни один обработчик Telegram, prompt, parser, matching, state-machine workflow
+или внешний контракт в этом блоке не изменяется.
+
+Сравнение старой и новой реализаций на corpus состояний и строк дало
+`MISMATCHES=0`; полный regression baseline — `1362 collected / 1362 passed`.
+
+## 11. Следующий функциональный блок
+
+После review Block 5B отдельно назначается следующий этап декомпозиции. До
+такого решения нельзя автоматически переносить остальные handlers, уменьшать
+`engine.py` или менять поведение state machine.
+
+## 12. Проверки
 
 Для Block 4 подтверждены focused catalog/resolver/supplier/AI suite `89 passed`
 и полный baseline `1362 collected / 1362 passed`. Также пройдены:
@@ -275,7 +298,7 @@ git diff --check
 импортов не обнаружено. `.env` и `manual_smoke_forensic_logs.txt` в commit не
 входят.
 
-## 12. Правила передачи
+## 13. Правила передачи
 
 Текущий код, тесты и Git-diff важнее старых заметок. Не удалять пользовательские
 файлы, не использовать destructive Git commands и force push. Не читать и не

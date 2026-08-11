@@ -5,6 +5,7 @@ from unittest.mock import Mock
 
 import pytest
 
+from restaurant_bot.conversation.comments import comment_scope_items
 from restaurant_bot.domain.models import (
     CartItem,
     ConversationState,
@@ -17,7 +18,6 @@ from restaurant_bot.domain.models import (
     TelegramEvent,
 )
 from restaurant_bot.integrations.openai_client import CommentScopeDecision
-from restaurant_bot.services.conversation_handlers.comment_scope import comment_scope_items
 from restaurant_bot.services.conversation_handlers.state_compatibility import (
     CompatibilityAction,
     CompatibilityContext,
@@ -68,39 +68,51 @@ def test_comment_scope_policy_classifies_contextual_and_independent_commands() -
     policy = StateCompatibilityPolicy()
     state = _pending_state()
 
-    assert policy.evaluate(
-        ParsedCommand(
-            intent=Intent.ADD_ITEMS,
-            comment_scope_action="items",
-            comment_target_indexes=[0],
-            confidence=0.99,
-        ),
-        state,
-        CompatibilityContext.COMMENT_SCOPE,
-    ).action is CompatibilityAction.CONTINUE
-    assert policy.evaluate(
-        ParsedCommand(
-            intent=Intent.ADD_ITEMS,
-            text="пармезан 3 кг",
-            items=[ExtractedItem(product_query="пармезан", quantity=3, unit="кг")],
-        ),
-        state,
-        CompatibilityContext.COMMENT_SCOPE,
-    ).action is CompatibilityAction.INTERRUPT
-    assert policy.evaluate(
-        ParsedCommand(
-            intent=Intent.ADD_ITEMS,
-            text="пармезан",
-            items=[ExtractedItem(product_query="пармезан")],
-        ),
-        state,
-        CompatibilityContext.COMMENT_SCOPE,
-    ).action is CompatibilityAction.INTERRUPT
-    assert policy.evaluate(
-        ParsedCommand(intent=Intent.UNKNOWN, text="не знаю"),
-        state,
-        CompatibilityContext.COMMENT_SCOPE,
-    ).action is CompatibilityAction.AMBIGUOUS
+    assert (
+        policy.evaluate(
+            ParsedCommand(
+                intent=Intent.ADD_ITEMS,
+                comment_scope_action="items",
+                comment_target_indexes=[0],
+                confidence=0.99,
+            ),
+            state,
+            CompatibilityContext.COMMENT_SCOPE,
+        ).action
+        is CompatibilityAction.CONTINUE
+    )
+    assert (
+        policy.evaluate(
+            ParsedCommand(
+                intent=Intent.ADD_ITEMS,
+                text="пармезан 3 кг",
+                items=[ExtractedItem(product_query="пармезан", quantity=3, unit="кг")],
+            ),
+            state,
+            CompatibilityContext.COMMENT_SCOPE,
+        ).action
+        is CompatibilityAction.INTERRUPT
+    )
+    assert (
+        policy.evaluate(
+            ParsedCommand(
+                intent=Intent.ADD_ITEMS,
+                text="пармезан",
+                items=[ExtractedItem(product_query="пармезан")],
+            ),
+            state,
+            CompatibilityContext.COMMENT_SCOPE,
+        ).action
+        is CompatibilityAction.INTERRUPT
+    )
+    assert (
+        policy.evaluate(
+            ParsedCommand(intent=Intent.UNKNOWN, text="не знаю"),
+            state,
+            CompatibilityContext.COMMENT_SCOPE,
+        ).action
+        is CompatibilityAction.AMBIGUOUS
+    )
 
 
 @pytest.mark.parametrize(

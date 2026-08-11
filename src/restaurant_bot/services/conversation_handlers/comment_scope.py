@@ -4,18 +4,21 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from restaurant_bot.conversation.comments import (
+    clear_pending_comment,
+    comment_scope_existing_items,
+    comment_scope_items,
+    merge_scope_comments,
+)
 from restaurant_bot.domain.models import (
-    CartItem,
     CommentSource,
     ConversationState,
     EngineResult,
-    ExtractedItem,
     Intent,
     ItemStatus,
     ParsedCommand,
     SessionStage,
 )
-from restaurant_bot.services.comment_policy import comment_semantic_key
 from restaurant_bot.services.replies import cart_reply, comment_scope_clarification_reply
 
 
@@ -38,13 +41,13 @@ class CommentScopeHandler:
     ) -> CommentScopeOutcome:
         """Проверяет confidence и применяет комментарий к выбранной области."""
         if command.intent in {Intent.CLEAR_CART, Intent.START_NEW_ORDER}:
-            self.clear_pending(state)
+            clear_pending_comment(state)
             return CommentScopeOutcome(reprocess_command=command)
         if (
             command.intent in {Intent.BACK, Intent.CANCEL}
             or command.comment_scope_action == "cancel"
         ):
-            self.clear_pending(state)
+            clear_pending_comment(state)
             state.stage = (
                 SessionStage.REVIEW
                 if any(item.status != ItemStatus.SKIPPED for item in state.cart)
@@ -99,16 +102,16 @@ class CommentScopeHandler:
         comment = state.pending_comment_text
         global_comment = state.pending_comment_global_comment
         if action == "order":
-            global_comment = self.merge_comments(global_comment, comment)
+            global_comment = merge_scope_comments(global_comment, comment)
         else:
             for index in valid_indexes:
                 if index < existing_count:
                     existing_item = existing_items[index]
-                    existing_item.comment = self.merge_comments(existing_item.comment, comment)
+                    existing_item.comment = merge_scope_comments(existing_item.comment, comment)
                     existing_item.comment_source = CommentSource.SEMANTIC
                     continue
                 pending_index = index - existing_count
-                merged = self.merge_comments(
+                merged = merge_scope_comments(
                     pending_items[pending_index].comment,
                     pending_items[pending_index].user_comment_to_supplier,
                     comment,
@@ -120,7 +123,7 @@ class CommentScopeHandler:
                         "comment_source": CommentSource.SEMANTIC,
                     }
                 )
-        self.clear_pending(state)
+        clear_pending_comment(state)
         state.stage = SessionStage.COLLECTING
         state.status = "collecting"
         return CommentScopeOutcome(
@@ -131,52 +134,3 @@ class CommentScopeHandler:
             ),
             clear_event_text=True,
         )
-
-    @staticmethod
-    def clear_pending(state: ConversationState) -> None:
-        """Удаляет временные данные выбора области комментария."""
-        state.pending_comment_items = []
-        state.pending_comment_existing_item_ids = []
-        state.pending_comment_text = ""
-        state.pending_comment_global_comment = ""
-
-    @staticmethod
-    def merge_comments(*values: str) -> str:
-        """Объединяет части комментария без повторов."""
-        result: list[str] = []
-        seen: set[str] = set()
-        for value in values:
-            for part in str(value or "").split(";"):
-                cleaned = part.strip(" .,;")
-                key = comment_semantic_key(cleaned)
-                if cleaned and key not in seen:
-                    result.append(cleaned)
-                    seen.add(key)
-        return "; ".join(result)
-
-
-def comment_scope_existing_items(state: ConversationState) -> list[CartItem]:
-    """Возвращает сохранённые позиции черновика в порядке показа уточнения."""
-    by_id = {item.id: item for item in state.cart if item.status is not ItemStatus.SKIPPED}
-    return [
-        by_id[item_id]
-        for item_id in state.pending_comment_existing_item_ids
-        if item_id in by_id
-    ]
-
-
-def comment_scope_items(state: ConversationState) -> list[ExtractedItem]:
-    """Объединяет позиции черновика и новые позиции для выбора области комментария."""
-    existing = [
-        ExtractedItem(
-            product_query=item.catalog_name or item.source_query,
-            quantity=item.quantity,
-            unit=item.unit or item.catalog_unit,
-            comment=item.comment,
-            user_comment_to_supplier=item.comment,
-            comment_source=item.comment_source,
-            source_line=item.source_line,
-        )
-        for item in comment_scope_existing_items(state)
-    ]
-    return existing + [item.model_copy(deep=True) for item in state.pending_comment_items]

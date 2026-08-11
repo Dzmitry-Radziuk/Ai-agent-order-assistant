@@ -376,11 +376,33 @@ Focused modal suite и полный baseline подтверждают нулев
 расхождения; следующий блок — только после отдельного review этого routing
 boundary.
 
+### Block 5B — выделение conversation draft и comments
+
+`services/engine.py` остаётся владельцем orchestration state machine, а
+channel-neutral операции черновика и комментариев вынесены без изменения
+контрактов:
+
+```text
+conversation/comments.py
+  -> merge_comments и merge_scope_comments с сохранением двух прежних семантик
+  -> comment scope, provenance cleanup, catalog-fact cleanup и comment shadows
+conversation/draft.py
+  -> active draft predicate, duplicate lookup и слияние подтверждённых дублей
+services/conversation_handlers/comment_scope.py
+  -> presentation/state handler, делегирующий core-операции
+```
+
+`services/comment_policy.py` не переносился: он остаётся единым владельцем
+лексических и provenance-примитивов. Telegram-зависимые handlers, parser,
+matching, prompts и state-machine workflow не менялись. Все production callers
+переведены на новые owners; старые private engine methods удалены после audit.
+Сравнение старой и новой реализации на строковом и state corpus дало
+`MISMATCHES=0`, полный baseline — `1362 collected / 1362 passed`.
+
 ## 12. Порядок следующих миграций
 
-1. Conversation routing/state policy — Block 5A выполнен; следующий этап
-   утверждается после review текущей границы.
-2. Conversation handlers, draft и comments — только после caller audit.
+1. Conversation routing/state policy — Block 5A выполнен; граница проверена.
+2. Conversation draft и comments — Block 5B выполнен с caller/dead-code audit.
 3. Engine decomposition без изменения state-machine semantics.
 4. Input/channel-neutral boundary и application pipeline.
 5. Orders, submission, venues и внешние adapters.

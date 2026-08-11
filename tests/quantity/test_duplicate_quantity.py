@@ -1,5 +1,6 @@
 import pytest
 
+from restaurant_bot.conversation.draft import remove_exact_cart_duplicates
 from restaurant_bot.domain.models import (
     CatalogProduct,
     ConversationState,
@@ -274,7 +275,7 @@ def test_identical_resolved_voice_duplicates_are_collapsed_without_doubling(sett
     second.comment = "только мраморная"
     state = ConversationState(cart=[first, second])
 
-    engine._remove_exact_cart_duplicates(state)
+    remove_exact_cart_duplicates(state)
 
     assert len(state.cart) == 1
     assert state.cart[0].quantity == 10
@@ -299,7 +300,7 @@ def test_resolved_same_product_quantities_are_combined_into_one_row(settings) ->
     second.comment = "для кухни"
     state = ConversationState(cart=[first, second])
 
-    engine._remove_exact_cart_duplicates(state)
+    remove_exact_cart_duplicates(state)
 
     assert len(state.cart) == 1
     assert state.cart[0].quantity == 5
