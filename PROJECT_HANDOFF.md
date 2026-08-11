@@ -311,3 +311,24 @@ git diff --check
 PROJECT_HANDOFF.md, `.agents/DECISIONS.md`, `.agents/PROJECT_MAP.md`,
 архитектурной документации, тестов и текущего Git state. История обсуждений
 в handoff не копируется.
+
+## 14. Block 5C — conversation selection core
+
+Block 5C завершён как поведенчески нейтральное выделение выбора позиции
+черновика и кандидата. Новый channel-neutral owner —
+`conversation/selection.py`: в нём находятся `contains_score`,
+`tokens_share_stem`, `find_cart_item` и `resolve_candidate_selection` с малым
+структурированным результатом `CandidateSelectionResult`.
+
+`CandidateSelectionHandler` теперь остаётся presentation-адаптером: он только
+преобразует результат ядра в прежние `EngineResult` и пользовательские ответы.
+`ConversationEngine` напрямую делегирует поиск позиции и score новому owner;
+`_contains_score`, `_tokens_share_stem` и `_find_cart_item` удалены. Голосовой
+`InputRecognitionService` также использует единый score owner. Catalog matching,
+routing, comments, quantity, parser, prompts, database, Docker и Sheets не
+изменялись.
+
+Сравнение старой реализации из исходного `HEAD` с новой дало ноль расхождений:
+score — `0`, targeting — `0`, candidate selection — `0`. Полный baseline:
+`1362 collected / 1362 passed`. Следующий архитектурный seam назначается только
+после external review этого блока.

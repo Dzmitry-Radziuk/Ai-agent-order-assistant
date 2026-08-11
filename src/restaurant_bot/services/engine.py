@@ -41,6 +41,7 @@ from restaurant_bot.conversation.routing.modal_routing import (
 from restaurant_bot.conversation.routing.state_compatibility import (
     StateCompatibilityPolicy,
 )
+from restaurant_bot.conversation.selection import contains_score, find_cart_item
 from restaurant_bot.conversation.state.queries import (
     first_unresolved as first_unresolved_item,
 )
@@ -2705,7 +2706,7 @@ class ConversationEngine:
             state.current_item().status = ItemStatus.SKIPPED  # type: ignore[union-attr]
             prune_pending_comment_item_ids(state)
             return self._advance(state)
-        item = self._find_cart_item(state, target_query)
+        item = find_cart_item(state, target_query)
         if item is not None:
             was_current = item.id == state.current_issue_item_id
             item.status = ItemStatus.SKIPPED
@@ -2717,9 +2718,7 @@ class ConversationEngine:
         pending_matches = sorted(
             [
                 (
-                    CandidateSelectionHandler.contains_score(
-                        target, normalize_text(pending.product_query)
-                    ),
+                    contains_score(target, normalize_text(pending.product_query)),
                     pending,
                 )
                 for pending in state.pending_comment_items
@@ -2735,54 +2734,6 @@ class ConversationEngine:
             state.pending_comment_items.remove(pending_item)
             return EngineResult(state=state, reply=cart_reply(state, title="Позиция удалена"))
         return EngineResult(state=state, reply=BotReply(text="Не нашёл такую позицию в черновике."))
-
-    @staticmethod
-    def _contains_score(target: str, candidate: str) -> int:
-        """Оценивает совпадение названий с учётом пунктуации и окончаний."""
-        return CandidateSelectionHandler.contains_score(target, candidate)
-
-    @staticmethod
-    def _tokens_share_stem(left: str, right: str) -> bool:
-        """Сравнивает формы одного слова без агрессивного морфологического угадывания."""
-        return CandidateSelectionHandler.tokens_share_stem(left, right)
-
-    def _find_cart_item(
-        self,
-        state: ConversationState,
-        target_query: str,
-    ) -> CartItem | None:
-        """Находит только однозначно названную позицию черновика."""
-        if not target_query:
-            return None
-        active_rows = [row for row in state.cart if row.status != ItemStatus.SKIPPED]
-        by_id = next((row for row in active_rows if row.id == target_query), None)
-        if by_id is not None:
-            return by_id
-
-        target = normalize_text(target_query)
-        scored = sorted(
-            (
-                (
-                    max(
-                        CandidateSelectionHandler.contains_score(
-                            target, normalize_text(row.source_query)
-                        ),
-                        CandidateSelectionHandler.contains_score(
-                            target, normalize_text(row.catalog_name)
-                        ),
-                    ),
-                    row,
-                )
-                for row in active_rows
-            ),
-            key=lambda pair: pair[0],
-            reverse=True,
-        )
-        if not scored or scored[0][0] <= 0:
-            return None
-        if len(scored) > 1 and scored[0][0] == scored[1][0]:
-            return None
-        return scored[0][1]
 
     def _edit_existing_comment(
         self, command: ParsedCommand, state: ConversationState
@@ -2821,7 +2772,7 @@ class ConversationEngine:
                     text="⚠️ Укажите товар и комментарий, например: «к батону — желательно крупный»."
                 ),
             )
-        item = self._find_cart_item(state, target)
+        item = find_cart_item(state, target)
         if item is None:
             return EngineResult(
                 state=state,
@@ -2847,7 +2798,7 @@ class ConversationEngine:
         target = normalize_text(command.target_query)
         item = state.current_item()
         if target:
-            item = self._find_cart_item(state, command.target_query)
+            item = find_cart_item(state, command.target_query)
         if item is None:
             return EngineResult(
                 state=state, reply=BotReply(text="Позиция для изменения не найдена.")

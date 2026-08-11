@@ -183,3 +183,13 @@ CommentScopeHandler их сохраняет.
 | `tests/docs/`, `tests/ci/` | Сценарии, docstring, ссылки и документационные контракты |
 
 Канонический каталог пользовательских сценариев: `docs/user-scenarios/scenarios.json`. Markdown и HTML генерируются из него, поэтому вручную редактировать производные файлы нельзя.
+
+## Block 5C — selection owner
+
+`conversation/selection.py` — единый channel-neutral владелец выбора позиции
+черновика и кандидата: `contains_score`, `tokens_share_stem`,
+`find_cart_item`, `resolve_candidate_selection` и
+`CandidateSelectionResult`. Presentation handler формирует только ответы
+`EngineResult`, а engine и input recognition используют общий owner. Внутри
+engine удалены дублирующие score/targeting wrappers. Catalog matching и routing
+не входят в этот модуль и не изменялись.

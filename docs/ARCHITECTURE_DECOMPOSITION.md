@@ -399,6 +399,22 @@ matching, prompts и state-machine workflow не менялись. Все produc
 Сравнение старой и новой реализации на строковом и state corpus дало
 `MISMATCHES=0`, полный baseline — `1362 collected / 1362 passed`.
 
+### Block 5C — conversation selection core
+
+Выполнено поведенчески нейтральное выделение общего selection owner в
+`conversation/selection.py`. Модуль не зависит от Telegram, EngineResult,
+replies, orchestrator, Celery, Sheets или репозиториев. Он владеет только
+детерминированным score названий, stem compatibility, однозначным поиском
+активной позиции черновика и выбором кандидата по индексу либо query.
+
+`services/conversation_handlers/candidate_selection.py` оставлен тонким
+presentation-адаптером. `services/engine.py` больше не содержит собственных
+score/targeting wrappers и делегирует `contains_score` и `find_cart_item` новому
+owner; `services/input_recognition.py` использует тот же score. Алгоритмы
+catalog и state routing не переносились и не менялись. Старые и новые
+реализации сравнены на score, draft targeting и candidate selection: все
+`MISMATCHES=0`.
+
 ## 12. Порядок следующих миграций
 
 1. Conversation routing/state policy — Block 5A выполнен; граница проверена.

@@ -10,6 +10,7 @@ from time import perf_counter
 import structlog
 from openai import APIConnectionError, APITimeoutError, RateLimitError
 
+from restaurant_bot.conversation.selection import contains_score
 from restaurant_bot.domain.models import (
     BotReply,
     ConversationState,
@@ -22,9 +23,6 @@ from restaurant_bot.domain.models import (
 )
 from restaurant_bot.integrations.openai_client import OpenAIService
 from restaurant_bot.integrations.telegram import TelegramClient
-from restaurant_bot.services.conversation_handlers.candidate_selection import (
-    CandidateSelectionHandler,
-)
 from restaurant_bot.services.parser import infer_intent, parse_quantity_unit
 from restaurant_bot.services.text import normalize_text, normalize_unit
 
@@ -326,7 +324,7 @@ class InputRecognitionService:
         if command.intent not in {Intent.UNKNOWN, Intent.ADD_ITEMS}:
             return False
         scores = [
-            CandidateSelectionHandler.contains_score(normalized, normalize_text(candidate.name))
+            contains_score(normalized, normalize_text(candidate.name))
             for candidate in current.candidates
         ]
         return max(scores, default=0) < 2
