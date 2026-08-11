@@ -18,12 +18,14 @@ AI помогает понять свободную речь и найти ка�
 - Semantic baseline: `f9cbc3195c0eae843de3208e488c3f46baa5a5ec`.
 - Accepted Block 3 code baseline: `e4fb29e4d2d0ba906c91beef5c02d3e87d7a0b09`.
 - Block 3C correction baseline: `21358755ebbc36b95b9fb6b4799021027a2158e7`.
+- Accepted Block 4 code baseline: `1583d0ee17f94948f6bc110ebcc03a5463a18af9`.
 - Текущий Git HEAD всегда определяется командой `git rev-parse HEAD`, а не
   фиксируется в handoff после каждого commit.
 - Единственный рабочий remote: GitHub `origin/decompose_bot`.
 - Автоматический baseline: `1362 collected / 1362 passed`.
-- `manual_smoke_forensic_logs.txt` — намеренный локальный untracked-файл
-  диагностики. Его нельзя добавлять в commit.
+- `manual_smoke_forensic_logs.txt` — необязательный локальный diagnostic artifact,
+  не tracked-файл репозитория. Если он существует локально, его нельзя менять,
+  удалять или добавлять в commit; отсутствие файла нормально.
 
 ## 3. Основной pipeline
 
@@ -80,17 +82,20 @@ Telegram update
 
 ### Каталог и диалог
 
-- `catalog/evidence.py` — канонизация, токены, provenance/evidence и проверка
-  подтверждённых числовых характеристик.
+- `catalog/evidence.py` — каноническое представление, токены, query/catalog
+  evidence и сопоставление supplier hint.
 - `catalog/scoring.py` — детерминированная оценка одного товара.
 - `catalog/retrieval.py` — bounded in-memory enumeration, admission и порядок
   кандидатов.
-- `catalog/safety.py` — hard gates, категории, варианты, numeric/qualifier
-  safety и auto-select.
+- `catalog/safety.py` — конфликты квалификаторов, numeric compatibility, safe
+  equivalence, broad-category policy и auto-select safety.
 - `catalog/resolver.py` — поиск в supplier scope и чистое решение
   `CatalogDecision` без изменения `ConversationState`.
-- `services/matching.py` и `services/catalog_resolver.py` — тонкие
-  compatibility re-export facades для подтверждённых старых callers.
+- `services/matching.py` — transitional compatibility path: catalog symbols
+  re-exported, а `nearest_valid_multiple()` остаётся legacy non-catalog
+  реализацией помощника кратности заказа.
+- `services/catalog_resolver.py` — чистый compatibility re-export facade для
+  `catalog/resolver.py`.
 - `services/conversation_handlers/` — quantity, candidate, comment scope,
   review, navigation и единая StateCompatibilityPolicy.
 - `services/engine.py` — текущая state machine, применение решения каталога,
@@ -175,13 +180,28 @@ AI предлагает структуру, source phrase подтверждае
 Block 4 завершён механически: смешанный catalog matching разделён на owners
 `catalog/evidence.py` (323 строки), `catalog/scoring.py` (103),
 `catalog/retrieval.py` (53), `catalog/safety.py` (385) и
-`catalog/resolver.py` (199). Старые service-пути оставлены только как
-re-export facades; `nearest_valid_multiple()` сохранён в matching facade как
-quantity helper, потому что он не относится к каталогу. Production callers
+`catalog/resolver.py` (199). `services/matching.py` оставлен transitional
+compatibility module: каталоговые symbols re-exported, а
+`nearest_valid_multiple()` сохранён как единственная legacy non-catalog
+реализация помощника кратности, потому что он не относится к каталогу.
+`services/catalog_resolver.py` остаётся чистым re-export facade. Production callers
 переведены на новые owners. Сравнение старого и нового pipeline на 18
 представительных corpus-классах дало `0 mismatches`; полный baseline —
 `1362 collected / 1362 passed`. Retrieval остался bounded in-memory; PostgreSQL,
 pgvector, embeddings, catalog migrations и Sheets sync в Block 4 не добавлялись.
+
+Block 4C review подтвердил: `catalog/retrieval.py` — текущий in-memory retrieval
+seam, который позднее можно заменить searchable projection PostgreSQL с
+лексическими/full-text или `pg_trgm` индексами и, только после benchmark,
+`pgvector`, не меняя evidence, safety, ConversationEngine и channel adapters.
+Реализация PostgreSQL, индексов, embeddings, миграций и Sheets sync не входит
+в этот блок. `catalog/resolver.py` сохраняет существующие transitional imports
+`services/comment_policy` и `services/text`; это остаточная зависимость будущего
+parsing/conversation cleanup, а не дублирующая реализация.
+Repository-wide audit подтвердил одного owner для catalog responsibilities,
+отсутствие циклов и workflow-изменений в engine/orchestrator; единственный
+production caller `nearest_valid_multiple()` остаётся в engine через
+`services/matching.py`. Conversation Block не начинался.
 
 Постоянное правило: перед каждым `MOVE`/`MERGE`/`DELETE` выполняются
 repository-wide usage и duplicate audit. Мёртвый или дублирующий код не

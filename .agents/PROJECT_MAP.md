@@ -70,12 +70,12 @@ flowchart LR
 | `catalog/resolver.py` | Область поиска поставщика, кандидаты и hard veto безопасного автосопоставления |
 | `services/conversation_handlers/` | Изолированные переходы количества, выбора товара, области комментария, финальной проверки, статусов и пассивной навигации |
 | `services/input_normalizer.py` | Приведение Telegram payload к единому `TelegramEvent` |
-| `catalog/evidence.py` | Канонизация, токены и доказательства совпадения товара |
+| `catalog/evidence.py` | Каноническое представление, токены, query/catalog evidence и supplier hint matching |
 | `catalog/scoring.py` | Детерминированная оценка одного каталожного товара |
 | `catalog/retrieval.py` | Ограниченный in-memory поиск, admission и порядок кандидатов |
-| `catalog/safety.py` | Hard gates, варианты, категории, numeric safety и auto-select |
-| `services/matching.py` | Compatibility facade; quantity helper `nearest_valid_multiple` |
-| `services/catalog_resolver.py` | Compatibility facade для `catalog/resolver.py` |
+| `catalog/safety.py` | Конфликты квалификаторов, numeric compatibility, safe equivalence, broad-category policy и auto-select safety |
+| `services/matching.py` | Compatibility path для catalog re-export; transitional quantity helper `nearest_valid_multiple` остаётся единственной legacy non-catalog реализацией |
+| `services/catalog_resolver.py` | Чистый compatibility re-export facade для `catalog/resolver.py` |
 | `services/replies.py` | Пользовательские карточки и клавиатуры основного диалога |
 | `services/submission.py` | Контрольные точки записи, пересчёта, опциональной отправки и чтения статусов |
 | `services/submission_presenter.py` | Тексты и кнопки завершения заявки и истории заказов |

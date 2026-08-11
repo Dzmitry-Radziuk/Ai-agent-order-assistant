@@ -95,8 +95,15 @@ contracts и проходит focused/full regression до следующего 
   каждый модуль имеет одну каталожную ответственность.
 - `catalog/resolver.py` — **Block 4 MOVE** из `services/catalog_resolver.py`;
   resolver не меняет state.
-- `services/matching.py` и `services/catalog_resolver.py` — **Block 4 FACADE**;
-  в них не осталось второй реализации matching/resolver.
+- `services/matching.py` — **Block 4 compatibility path**: каталожные symbols
+  re-exported, но transitional `nearest_valid_multiple()` остаётся единственной
+  legacy non-catalog реализацией.
+- `services/catalog_resolver.py` — **Block 4 pure re-export facade**;
+  второй реализации resolver в нём нет.
+- `catalog/evidence.py` владеет canonical representation, tokens,
+  query/catalog evidence и supplier hint matching; `catalog/safety.py` владеет
+  qualifier conflicts, numeric compatibility, safe equivalence, broad-category
+  policy и auto-select safety.
 - `engine.py` позднее оставляет orchestration, а применение draft выделяется
   отдельно.
 
@@ -307,6 +314,24 @@ git diff --check
 `restaurant_bot.parsing.comment_scope` и `restaurant_bot.services.parser`;
 repository-wide scan подтверждает отсутствие старого facade и второй
 реализации каждой перенесённой функции.
+
+### Block 4C review
+
+`catalog/retrieval.py` — текущий in-memory retrieval seam. В будущем его можно
+заменить searchable projection PostgreSQL с lexical/full-text или `pg_trgm`
+индексами и, после benchmark, `pgvector`, сохранив контракты evidence, safety,
+ConversationEngine и channel adapters. PostgreSQL, embeddings, индексы,
+миграции и Sheets sync в этом блоке не реализуются.
+
+`catalog/resolver.py` сохраняет существующие imports `services/comment_policy`
+и `services/text`. Это transitional residue для будущей очистки
+parsing/conversation, а не дублирование алгоритмов. Audit catalog-модулей
+подтвердил отсутствие циклов, dead duplicate algorithms и зависимостей от
+engine/orchestrator/Telegram/Celery/Sheets. `engine.py` и `orchestrator.py`
+сохраняют workflow; engine использует только catalog owners и legacy helper
+`nearest_valid_multiple()` через compatibility path. `services/matching.py`
+остаётся временным владельцем этого helper, потому что отдельного естественного
+owner сейчас нет; новая папка ради одной функции не создаётся.
 
 ## 12. Порядок следующих миграций
 
