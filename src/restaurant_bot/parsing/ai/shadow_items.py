@@ -1,4 +1,4 @@
-"""Содержит схлопывание теневых проекций AI и ссылочных дублей."""
+"""Содержит схлопывание теневых проекций ИИ и ссылочных дублей."""
 
 from __future__ import annotations
 
@@ -75,10 +75,10 @@ def collapse_comment_shadow_items(
                 shadow_indexes.add(shadow_index)
                 continue
 
-            # The model can duplicate a boundary between two spoken items:
-            # "желательно холодным. И говядина".  The first half is already
-            # owned by the syrup comment and the second half is already the
-            # next product, so the combined third item carries no new fact.
+            # Модель может продублировать границу между двумя произнесёнными позициями:
+            # «желательно холодным. И говядина». Первая часть уже относится к
+            # комментарию сиропа, вторая — к следующему товару, поэтому объединённая
+            # третья позиция не содержит нового подтверждённого факта.
             for comment in owner_comments:
                 if not shadow_query.startswith(comment):
                     continue
@@ -218,7 +218,7 @@ def _has_source_product_anchor(left: str, right: str) -> bool:
 
 
 def _has_shared_query_prefix(left: str, right: str, minimum_tokens: int = 3) -> bool:
-    """Проверяет общий длинный префикс вариантов одной source occurrence."""
+    """Проверяет общий длинный префикс вариантов одного появления в источнике."""
     left_words = re.findall(r"[a-zа-яё0-9]+", normalize_text(left), flags=re.I)
     right_words = re.findall(r"[a-zа-яё0-9]+", normalize_text(right), flags=re.I)
     prefix_length = 0
@@ -230,7 +230,7 @@ def _has_shared_query_prefix(left: str, right: str, minimum_tokens: int = 3) -> 
 
 
 def _query_covers_reference(query: str, reference: str) -> bool:
-    """Проверяет reference query с допустимым хвостом количества заказа."""
+    """Проверяет ссылочный запрос с допустимым хвостом количества заказа."""
     normalized_query = normalize_text(query).strip(" .,;:-—–")
     normalized_reference = normalize_text(reference).strip(" .,;:-—–")
     if normalized_query == normalized_reference:
@@ -249,7 +249,7 @@ def _collapse_source_reference_variants(
     deterministic: list[ExtractedItem],
     source_text: str = "",
 ) -> list[dict[str, Any]]:
-    """Удаляет варианты одной подтверждённой source occurrence."""
+    """Удаляет варианты одного подтверждённого появления в источнике."""
     if len(items) < 2 or len(deterministic) > 1:
         return items
     if len(deterministic) == 1:
@@ -264,9 +264,9 @@ def _collapse_source_reference_variants(
         }
         if len(source_keys) != 1 or not normalized_source:
             return items
-        # ???? ????????????????? ?????? ?? ????? ????????? ????????? ?????? ? ????????,
-        # ??????? ????? ??????? ???????? ???????????? ?????????? ?????? ?????????.
-        # ???????? ? ????? ???????? ?? ???????? ? ?????? ?? ?????????.
+        # Если детерминированный разбор не разделил строку с фасовкой,  # noqa: RUF003
+        # длинный общий префикс — единственная безопасная опора исходной позиции.
+        # Короткие и общие префиксы оставляем для последующего уточнения.
         for candidate in items:
             for other in items:
                 if candidate is other:
@@ -332,7 +332,7 @@ def _collapse_shadow_item_projections(
     global_comment: str,
     bindings: list[dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
-    """Удаляет доказанные shadow projections после Block A."""
+    """Удаляет подтверждённые теневые проекции после блока A."""
     root_target_indexes: set[int] | None = None
     normalized_source = normalize_text(source_text)
     processing_match = _TRAILING_ROOT_PROCESSING_RE.search(clean_text(source_text))

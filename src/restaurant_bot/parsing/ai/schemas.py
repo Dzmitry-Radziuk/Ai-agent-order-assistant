@@ -1,4 +1,4 @@
-"""Содержит схемы structured output OpenAI."""
+"""Содержит схемы структурированного ответа OpenAI."""
 
 from __future__ import annotations
 

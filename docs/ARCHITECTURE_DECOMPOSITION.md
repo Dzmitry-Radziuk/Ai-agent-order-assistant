@@ -8,7 +8,7 @@ contracts и проходит focused/full regression до следующего 
 
 Текущий checkout: `decompose_bot`, semantic baseline
 `f9cbc3195c0eae843de3208e488c3f46baa5a5ec`, текущий decomposition HEAD
-`bad8d98cce2138691bd40bc6cb7221d210ec68ac`, автоматический baseline
+`e4fb29e4d2d0ba906c91beef5c02d3e87d7a0b09`, автоматический baseline
 `1362 collected / 1362 passed`. Локальный
 `manual_smoke_forensic_logs.txt` не является частью проекта.
 
@@ -79,7 +79,7 @@ contracts и проходит focused/full regression до следующего 
 | `parsing/packaging.py` | **Block 2A: CREATE** фасовка и каталожные измерения. |
 | `parsing/comment_scope.py` | **Block 2A: CREATE** явная область общего комментария. |
 | `services/text.py` | Позже MOVE в `parsing/text.py`, после миграции callers. |
-| `integrations/openai_parsing.py` | Позже SPLIT schemas и reconciliation. |
+| `integrations/openai_parsing.py` | Compatibility re-export facade; алгоритмов нет. |
 | `integrations/openai_prompts.py` | Позже MOVE prompt contract без изменения текста. |
 | `integrations/openai_client.py` | Позже SPLIT transport и AI facade в `application/ai_service.py`. |
 
@@ -302,17 +302,16 @@ repository-wide scan подтверждает отсутствие старог�
 
 ## 12. Порядок следующих миграций
 
-1. AI schemas/reconciliation.
-2. Catalog evidence/scoring/safety и resolver.
-3. Modal policy, handlers, draft/comments и затем engine.
-4. Input normalizer/recognition и application pipeline.
-5. Orders, submission, venues и внешние adapters.
-6. Только после контрактов уменьшать `engine.py` и `orchestrator.py`.
+1. Catalog evidence/scoring/safety и resolver.
+2. Modal policy, handlers, draft/comments и затем engine.
+3. Input normalizer/recognition и application pipeline.
+4. Orders, submission, venues и внешние adapters.
+5. Только после контрактов уменьшать `engine.py` и `orchestrator.py`.
 
 Следующий каталоговый блок не начинается автоматически после Block 3 и
 требует отдельного внешнего review.
 
-## 11. Запреты текущего блока
+## 13. Запреты текущего блока
 
 Не менять prompts, state machine, matching, quantity/comment semantics, UX,
 persistence, migrations, DB schema, Docker/deploy, workers, API entrypoints,

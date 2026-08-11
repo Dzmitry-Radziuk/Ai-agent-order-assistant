@@ -1,4 +1,4 @@
-"""Содержит проверку, связывание и восстановление комментариев AI."""
+"""Содержит проверку, связывание и восстановление комментариев ИИ."""
 
 from __future__ import annotations
 
@@ -74,31 +74,6 @@ _COMMENT_SCOPE_POSITION_RE = re.compile(
     r"\d+\s*[-–—]?\s*(?:й|я|е|ю))\b",
     flags=re.I,
 )
-
-_MIXED_SCRIPT_TOKEN_RE = re.compile(r"[A-Za-zА-Яа-яЁё]+")
-
-_SAFE_LATIN_TO_CYRILLIC = str.maketrans(
-    {
-        "A": "А",
-        "a": "а",
-        "C": "С",
-        "c": "с",
-        "E": "Е",
-        "e": "е",
-        "K": "К",
-        "k": "к",
-        "M": "М",
-        "m": "м",
-        "O": "О",
-        "o": "о",
-        "P": "П",
-        "p": "п",
-        "T": "Т",
-        "t": "т",
-    }
-)
-
-_SAFE_MIXED_LATIN_LETTERS = frozenset("AaCcEeKkMmOoPpTt")
 
 _TRAILING_ROOT_PROCESSING_RE = re.compile(
     r"(?P<instruction>"
@@ -529,8 +504,8 @@ def _apply_semantic_comment_bindings(
             continue
 
         if scope == "group" and not explicit_group_scope:
-            # ??????????? ????????? ????????? ? ????????? ???????. ?????? ?? ????? ?????????
-            # ??? ??????? ??? ????? ???? ????????????.
+            # Пожелание в конце относится к последней позиции. Модель не может расширить
+            # эту область без явных слов пользователя.
             target_indexes = [max(target_indexes)]
 
         for index in target_indexes:

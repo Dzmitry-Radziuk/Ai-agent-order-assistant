@@ -1,4 +1,4 @@
-"""Содержит очистку AI-товаров и восстановление пропущенных позиций."""
+"""Содержит очистку позиций ИИ и восстановление пропущенных товаров."""
 
 from __future__ import annotations
 
@@ -8,9 +8,6 @@ from typing import Any
 
 from restaurant_bot.domain.models import CommentSource, ExtractedItem, ParsedCommand
 from restaurant_bot.parsing.ai.comment_reconciliation import (
-    _MIXED_SCRIPT_TOKEN_RE,
-    _SAFE_LATIN_TO_CYRILLIC,
-    _SAFE_MIXED_LATIN_LETTERS,
     _append_local_item_comment,
     _strip_conversational_product_leadin,
 )
@@ -22,6 +19,31 @@ from restaurant_bot.services.text import (
     normalize_text,
     to_float,
 )
+
+_MIXED_SCRIPT_TOKEN_RE = re.compile(r"[A-Za-zА-Яа-яЁё]+")
+
+_SAFE_LATIN_TO_CYRILLIC = str.maketrans(
+    {
+        "A": "А",
+        "a": "а",
+        "C": "С",
+        "c": "с",
+        "E": "Е",
+        "e": "е",
+        "K": "К",
+        "k": "к",
+        "M": "М",
+        "m": "м",
+        "O": "О",
+        "o": "о",
+        "P": "П",
+        "p": "п",
+        "T": "Т",
+        "t": "т",
+    }
+)
+
+_SAFE_MIXED_LATIN_LETTERS = frozenset("AaCcEeKkMmOoPpTt")
 
 _EMPTY_AI_VALUES = {
     "unknown",

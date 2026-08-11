@@ -1,4 +1,4 @@
-"""Содержит orchestration чистой reconciliation structured output OpenAI."""
+"""Содержит координацию чистой сверки структурированного ответа OpenAI."""
 
 from __future__ import annotations
 
@@ -45,7 +45,7 @@ def recover_omitted_explicit_items(payload: dict[str, Any], source_text: str) ->
     global_comment = _strip_global_comment_scope(clean_text(payload.get("global_comment")))
 
     # ИИ иногда дублирует локальную привязку в global_comment. Такой текст
-    # уже записан в конкретную позицию и не должен распространяться engine на
+    # уже записан в конкретную позицию и не должен распространяться движком на
     # ранее собранную корзину.
     if global_comment and items and not has_explicit_global_comment_scope(source_text):
         normalized_global = normalize_text(global_comment).strip(" .,;:-—–")
@@ -60,7 +60,7 @@ def recover_omitted_explicit_items(payload: dict[str, Any], source_text: str) ->
             _append_local_item_comment(items[-1], global_comment)
             global_comment = ""
 
-    # Fallback нужен только когда ИИ действительно не вернул ни одной позиции.
+    # Запасной путь нужен только когда ИИ действительно не вернул ни одной позиции.
     # Нельзя повторно разбирать исходную фразу поверх уже распознанных товаров:
     # это создаёт дубликаты и затирает комментарии.
     if not items and deterministic:

@@ -16,7 +16,7 @@ AI помогает понять свободную речь и найти ка�
 - Репозиторий: `Dzmitry-Radziuk/test_bot`.
 - Ветка: `decompose_bot`.
 - Semantic baseline: `f9cbc3195c0eae843de3208e488c3f46baa5a5ec`.
-- Текущий decomposition HEAD после Block 2B: `bad8d98cce2138691bd40bc6cb7221d210ec68ac`.
+- Текущий decomposition HEAD после Block 3: `e4fb29e4d2d0ba906c91beef5c02d3e87d7a0b09`.
 - Единственный рабочий remote: GitHub `origin/decompose_bot`.
 - Автоматический baseline: `1362 collected / 1362 passed`.
 - `manual_smoke_forensic_logs.txt` — намеренный локальный untracked-файл
@@ -66,8 +66,13 @@ Telegram update
 - `parsing/packaging.py` — фасовка, диапазоны и catalog measurement parsing.
 - `parsing/comment_scope.py` — явная область общего комментария.
 - `services/text.py` — лексическая нормализация, единицы, числа и диапазоны.
-- `integrations/openai_parsing.py` — structured schemas и reconciliation
-  источника, комментариев, количеств и shadow items.
+- `parsing/ai/schemas.py` — structured AI schemas без алгоритмов.
+- `parsing/ai/quantity_reconciliation.py` — reconciliation количеств, фасовки и диапазонов.
+- `parsing/ai/comment_reconciliation.py` — provenance и comment bindings.
+- `parsing/ai/item_reconciliation.py` — source qualifier cleanup и восстановление позиций.
+- `parsing/ai/shadow_items.py` — shadow projections и ссылочные дубли.
+- `parsing/ai/reconciliation.py` — единый порядок AI reconciliation.
+- `integrations/openai_parsing.py` — compatibility re-export facade без алгоритмов.
 - `integrations/openai_prompts.py` — неизменяемые prompt-контракты.
 
 ### Каталог и диалог
@@ -182,18 +187,10 @@ gates.
 
 ## 11. Проверки
 
-Для Block 2A обязательны:
+Для Block 3 подтверждены focused AI/conversation suite `220 passed` и полный
+baseline `1362 collected / 1362 passed`. Также пройдены:
 
 ```text
-focused pytest:
-tests/input/test_parser.py
-tests/input/test_input_edge_cases.py
-tests/input/test_voice_quantity_recovery.py
-tests/conversation/test_comment_handling.py
-tests/quantity/test_quantity_contract.py
-tests/conversation/test_quantity_state_preemption.py
-
-full pytest: python -m pytest -q --tb=short
 ruff check src tests
 ruff format --check <изменённые Python-файлы>
 mypy src
@@ -201,12 +198,10 @@ python scripts/check_markdown_links.py
 git diff --check
 ```
 
-Также проверяются импорты `restaurant_bot.parsing.products`,
-`restaurant_bot.parsing.quantities`, `restaurant_bot.parsing.packaging`,
-`restaurant_bot.parsing.comment_scope`, `restaurant_bot.services.parser` и
-отсутствие циклических импортов.
+Импортированы все модули `parsing.ai`, compatibility facade и
+`integrations.openai_client`; циклических импортов не обнаружено.
 
-## 11. Правила передачи
+## 12. Правила передачи
 
 Текущий код, тесты и Git-diff важнее старых заметок. Не удалять пользовательские
 файлы, не использовать destructive Git commands и force push. Не читать и не
