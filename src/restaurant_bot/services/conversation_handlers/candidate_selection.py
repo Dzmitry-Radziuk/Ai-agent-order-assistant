@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
+from restaurant_bot.conversation.state.queries import item_index
 from restaurant_bot.domain.models import (
     Candidate,
     CartItem,
@@ -13,7 +14,6 @@ from restaurant_bot.domain.models import (
     ItemStatus,
     ParsedCommand,
 )
-from restaurant_bot.services.conversation_handlers.state import item_index
 from restaurant_bot.services.replies import cart_reply, issue_reply
 from restaurant_bot.services.text import normalize_text
 
@@ -57,9 +57,7 @@ class CandidateSelectionHandler:
             ]
             best_score = max(scores, default=0)
             candidate_index = (
-                scores.index(best_score)
-                if best_score > 0 and scores.count(best_score) == 1
-                else -1
+                scores.index(best_score) if best_score > 0 and scores.count(best_score) == 1 else -1
             )
         if candidate_index < 0 or candidate_index >= len(item.candidates):
             return CandidateSelectionOutcome(

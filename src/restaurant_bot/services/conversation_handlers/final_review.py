@@ -4,6 +4,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from restaurant_bot.conversation.state.queries import (
+    first_unresolved,
+    item_index,
+)
 from restaurant_bot.domain.models import (
     ConversationState,
     EngineResult,
@@ -11,10 +15,6 @@ from restaurant_bot.domain.models import (
     ItemStatus,
     ParsedCommand,
     SessionStage,
-)
-from restaurant_bot.services.conversation_handlers.state import (
-    first_unresolved,
-    item_index,
 )
 from restaurant_bot.services.replies import empty_draft_reply, final_review_reply, issue_reply
 

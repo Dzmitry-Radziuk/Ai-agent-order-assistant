@@ -203,6 +203,31 @@ Repository-wide audit подтвердил одного owner для catalog res
 production caller `nearest_valid_multiple()` остаётся в engine через
 `services/matching.py`. Conversation Block не начинался.
 
+Block 5A выполнен как поведенчески нейтральная декомпозиция conversation
+routing/state policy. Новые channel-neutral owners находятся в
+`conversation/routing/`: `contracts.py`, `item_resolution.py`, `order_flow.py`,
+`comment_scope.py`, `state_compatibility.py` и `modal_routing.py`. Чистые
+state-query функции находятся в `conversation/state/queries.py`. Production
+imports переведены на новые owners, а старые
+`services/conversation_handlers/state_compatibility.py`, `modal_routing.py` и
+`state.py` оставлены только как re-export facades.
+
+`StateCompatibilityPolicy` сохранила public methods `evaluate`, `context_for`,
+`should_try_contextual_fallback` и `submission_failure_mode`, все enum/decision
+contracts, context priority и mode values. `has_named_product_items` имеет
+одного channel-neutral owner в `conversation/routing/item_resolution.py`;
+`PendingQuantityHandler` делегирует ему, поэтому routing больше не импортирует
+handler. `PendingQuantityHandler.handle` и `OrderStatusHandler.handle` намеренно
+остались в legacy services-пакете: они принимают TelegramEvent или
+presentation-зависимые ответы и будут перенесены только вместе с input/
+application boundary.
+
+Block 5A не меняет engine workflow, parser, catalog, prompts, comments,
+quantity semantics, database, Docker, Sheets или Telegram UX. Focused modal
+suite, полный baseline и quality gates подтверждают сохранение routing behavior.
+Следующий функциональный этап — review
+новой routing boundary и только затем отдельный Block 5B по handlers/draft.
+
 Постоянное правило: перед каждым `MOVE`/`MERGE`/`DELETE` выполняются
 repository-wide usage и duplicate audit. Мёртвый или дублирующий код не
 переносится; для одной ответственности остаётся одна реализация. Временный

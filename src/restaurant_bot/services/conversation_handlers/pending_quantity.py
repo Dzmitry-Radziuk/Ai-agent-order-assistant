@@ -5,10 +5,10 @@ from __future__ import annotations
 import re
 from enum import StrEnum
 
+from restaurant_bot.conversation.routing.item_resolution import has_named_product_items
 from restaurant_bot.domain.models import (
     ConversationState,
     InputKind,
-    Intent,
     ItemStatus,
     ParsedCommand,
     SessionStage,
@@ -175,33 +175,4 @@ class PendingQuantityHandler:
     @staticmethod
     def has_named_product_items(command: ParsedCommand, text: str) -> bool:
         """Отличает товарный запрос от короткого ответа количеством."""
-        if command.intent != Intent.ADD_ITEMS or not command.items:
-            return False
-        normalized_text = normalize_text(text or command.text)
-        response_word_stems = (
-            "давай",
-            "добав",
-            "закаж",
-            "измен",
-            "исправ",
-            "колич",
-            "мне",
-            "надо",
-            "нуж",
-            "постав",
-            "пусть",
-            "сдел",
-            "укаж",
-            "вес",
-            "возьм",
-        )
-        for item in command.items:
-            query = normalize_text(item.product_query)
-            if not query or query == normalized_text:
-                continue
-            query_words = re.findall(r"[a-zа-яё]+", query, flags=re.I)
-            if query_words and any(
-                not word.startswith(response_word_stems) for word in query_words
-            ):
-                return True
-        return False
+        return has_named_product_items(command, text)

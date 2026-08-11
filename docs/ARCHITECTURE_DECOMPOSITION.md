@@ -109,10 +109,14 @@ contracts и проходит focused/full regression до следующего 
 
 ### Conversation
 
-- `state_compatibility.py` остаётся единой policy; нельзя дублировать список
-  сильных intent в engine/orchestrator/handlers.
-- Existing handlers позднее переносятся в `conversation/handlers`, а
-  routing — в `conversation/routing`.
+- Block 5A: channel-neutral routing policy находится в
+  `conversation/routing/`; список сильных intent не дублируется в
+  engine/orchestrator/handlers.
+- `services/conversation_handlers/state_compatibility.py`, `modal_routing.py`
+  и `state.py` оставлены только как compatibility facades с доказанными
+  callers.
+- TelegramEvent-зависимые handlers остаются в legacy-пакете до отдельного
+  input/application блока; переносить их ради дерева нельзя.
 - `engine.py` в финале должен координировать pipeline, а не владеть каждым
   сценарием.
 
@@ -147,11 +151,14 @@ restaurant_bot/
       reconciliation.py
   catalog/{evidence.py,scoring.py,retrieval.py,safety.py,resolver.py}
   conversation/
-    engine.py
-    draft.py
-    comments.py
+    routing/
+      contracts.py
+      state_compatibility.py
+      item_resolution.py
+      order_flow.py
+      comment_scope.py
+      modal_routing.py
     state/queries.py
-    routing/{state_compatibility.py,modal_routing.py,visible_actions.py}
     handlers/
   orders/{review.py,product_add.py}
   submission/{service.py,checkpoints.py,catalog.py,status.py,presenter.py}
@@ -333,16 +340,51 @@ engine/orchestrator/Telegram/Celery/Sheets. `engine.py` и `orchestrator.py`
 остаётся временным владельцем этого helper, потому что отдельного естественного
 owner сейчас нет; новая папка ради одной функции не создаётся.
 
+### Block 5A review
+
+Routing policy механически разделена по связным ответственностям без изменения
+контрактов и порядка переходов:
+
+```text
+conversation/routing/contracts.py
+  -> CompatibilityAction, CompatibilityContext, CompatibilityDecision
+conversation/routing/item_resolution.py
+  -> quantity, manual/product-add details, candidate, not-found,
+     duplicate и unit-mismatch policies; общий predicate товарной позиции
+conversation/routing/order_flow.py
+  -> sheet review, new-order, add-more, submit-confirm и submission-failed
+conversation/routing/comment_scope.py
+  -> pending comment scope policy
+conversation/routing/state_compatibility.py
+  -> единый public StateCompatibilityPolicy, context_for и dispatch
+conversation/routing/modal_routing.py
+  -> channel-neutral агрегатор ModalRoutingDecision
+conversation/state/queries.py
+  -> чистые first_unresolved и item_index
+```
+
+Production imports переведены на новых owners. Старые пути оставлены только как
+re-export facades. `PendingQuantityHandler.handle` и
+`OrderStatusHandler.handle` не переносились: они принимают TelegramEvent или
+presentation-зависимые ответы. Policy больше не импортирует
+`PendingQuantityHandler`; чистый `has_named_product_items` имеет одного owner в
+`conversation/routing/item_resolution.py`, а legacy handler делегирует ему.
+Focused modal suite и полный baseline должны подтверждать нулевые поведенческие
+расхождения; следующий блок — только после отдельного review этого routing
+boundary.
+
 ## 12. Порядок следующих миграций
 
-1. Catalog evidence/scoring/safety и resolver.
-2. Modal policy, handlers, draft/comments и затем engine.
-3. Input normalizer/recognition и application pipeline.
-4. Orders, submission, venues и внешние adapters.
-5. Только после контрактов уменьшать `engine.py` и `orchestrator.py`.
+1. Conversation routing/state policy — Block 5A выполнен; следующий этап
+   утверждается после review текущей границы.
+2. Conversation handlers, draft и comments — только после caller audit.
+3. Engine decomposition без изменения state-machine semantics.
+4. Input/channel-neutral boundary и application pipeline.
+5. Orders, submission, venues и внешние adapters.
+6. Только после контрактов уменьшать `engine.py` и `orchestrator.py`.
 
-Следующий каталоговый блок не начинается автоматически после Block 3 и
-требует отдельного внешнего review.
+Порядок ориентировочный: фактические зависимости и подтверждённые контракты
+имеют приоритет. Catalog Block 4 уже принят и не является следующим этапом.
 
 ## 13. Запреты текущего блока
 

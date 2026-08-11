@@ -68,7 +68,12 @@ flowchart LR
 | `parsing/ai/reconciliation.py` | Сохраняемый порядок общей AI reconciliation pipeline |
 | `services/comment_policy.py` | Единая policy явных пожеланий поставщику для детерминированного и AI-разбора |
 | `catalog/resolver.py` | Область поиска поставщика, кандидаты и hard veto безопасного автосопоставления |
-| `services/conversation_handlers/` | Изолированные переходы количества, выбора товара, области комментария, финальной проверки, статусов и пассивной навигации |
+| `conversation/routing/` | Channel-neutral contracts и StateCompatibilityPolicy, сгруппированные по item resolution, order/review и comment scope; modal routing остаётся агрегатором |
+| `conversation/state/queries.py` | Чистые запросы `first_unresolved` и `item_index` без мутации состояния |
+| `services/conversation_handlers/` | Legacy Telegram/presentation handlers: количество, выбор товара, область комментария, финальная проверка, статусы и пассивная навигация |
+| `services/conversation_handlers/state_compatibility.py` | Compatibility re-export facade для `conversation/routing/state_compatibility.py` |
+| `services/conversation_handlers/modal_routing.py` | Compatibility re-export facade для `conversation/routing/modal_routing.py` |
+| `services/conversation_handlers/state.py` | Compatibility re-export facade для `conversation/state/queries.py` |
 | `services/input_normalizer.py` | Приведение Telegram payload к единому `TelegramEvent` |
 | `catalog/evidence.py` | Каноническое представление, токены, query/catalog evidence и supplier hint matching |
 | `catalog/scoring.py` | Детерминированная оценка одного каталожного товара |

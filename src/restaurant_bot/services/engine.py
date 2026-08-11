@@ -13,6 +13,22 @@ from restaurant_bot.catalog.evidence import (
 from restaurant_bot.catalog.resolver import CatalogDecision, CatalogResolver
 from restaurant_bot.catalog.safety import has_compatible_numeric_characteristics
 from restaurant_bot.config import Settings
+from restaurant_bot.conversation.routing.contracts import (
+    CompatibilityAction,
+    CompatibilityContext,
+    CompatibilityDecision,
+)
+from restaurant_bot.conversation.routing.item_resolution import has_named_product_items
+from restaurant_bot.conversation.routing.modal_routing import (
+    evaluate_modal_routing,
+)
+from restaurant_bot.conversation.routing.state_compatibility import (
+    StateCompatibilityPolicy,
+)
+from restaurant_bot.conversation.state.queries import (
+    first_unresolved as first_unresolved_item,
+)
+from restaurant_bot.conversation.state.queries import item_index as state_item_index
 from restaurant_bot.domain.models import (
     BotReply,
     Button,
@@ -43,9 +59,6 @@ from restaurant_bot.services.conversation_handlers.comment_scope import (
     comment_scope_items,
 )
 from restaurant_bot.services.conversation_handlers.final_review import FinalReviewHandler
-from restaurant_bot.services.conversation_handlers.modal_routing import (
-    evaluate_modal_routing,
-)
 from restaurant_bot.services.conversation_handlers.navigation import (
     OrderStatusHandler,
     PassiveIntentHandler,
@@ -53,16 +66,6 @@ from restaurant_bot.services.conversation_handlers.navigation import (
 from restaurant_bot.services.conversation_handlers.pending_quantity import (
     PendingQuantityAction,
     PendingQuantityHandler,
-)
-from restaurant_bot.services.conversation_handlers.state import (
-    first_unresolved as first_unresolved_item,
-)
-from restaurant_bot.services.conversation_handlers.state import item_index as state_item_index
-from restaurant_bot.services.conversation_handlers.state_compatibility import (
-    CompatibilityAction,
-    CompatibilityContext,
-    CompatibilityDecision,
-    StateCompatibilityPolicy,
 )
 from restaurant_bot.services.matching import nearest_valid_multiple
 from restaurant_bot.services.parser import (
@@ -271,7 +274,10 @@ class ConversationEngine:
                 state.stage = SessionStage.REVIEW
                 state.status = "review"
                 return EngineResult(state=state, reply=cart_reply(state))
-            elif command.intent is Intent.CANCEL or command.dialogue_response is DialogueResponse.DECLINE:
+            elif (
+                command.intent is Intent.CANCEL
+                or command.dialogue_response is DialogueResponse.DECLINE
+            ):
                 state.stage = SessionStage.REVIEW
                 state.status = "review"
                 return EngineResult(
@@ -968,7 +974,8 @@ class ConversationEngine:
             packaging_confidence=extracted.packaging_confidence,
             quantity=quantity,
             unit=unit,
-            department=normalize_department(extracted.department) or self.settings.default_department,
+            department=normalize_department(extracted.department)
+            or self.settings.default_department,
             department_quantities=extracted.department_quantities.model_copy(deep=True),
             supplier_hint=extracted.supplier_hint,
             comment=self._merge_comments(item_comment, global_comment),
@@ -1066,7 +1073,7 @@ class ConversationEngine:
 
     def _has_named_product_items(self, command: ParsedCommand, text: str) -> bool:
         """Отличает полноценный товарный запрос от короткого ответа количеством."""
-        return self.pending_quantity_handler.has_named_product_items(command, text)
+        return has_named_product_items(command, text)
 
     def _contextual_quantity_command(
         self,
@@ -1706,11 +1713,7 @@ class ConversationEngine:
         item = state.cart[index] if index is not None and 0 <= index < len(state.cart) else None
         request_id = state.pending_product_add_request_id or new_product_add_request_id(item)
         existing = next(
-            (
-                row
-                for row in state.product_add_requests
-                if row.get("request_id") == request_id
-            ),
+            (row for row in state.product_add_requests if row.get("request_id") == request_id),
             None,
         )
         if existing is None:
@@ -2821,11 +2824,7 @@ class ConversationEngine:
             return EngineResult(state=state, reply=final_review_reply(state))
         if state.stage is SessionStage.AWAIT_PRODUCT_ADD_DETAILS:
             index = state.pending_product_add_item_index
-            item = (
-                state.cart[index]
-                if index is not None and 0 <= index < len(state.cart)
-                else None
-            )
+            item = state.cart[index] if index is not None and 0 <= index < len(state.cart) else None
             if item is not None:
                 return EngineResult(state=state, reply=BotReply(text=product_add_prompt(item)))
         current = state.current_item()
@@ -3050,13 +3049,9 @@ class ConversationEngine:
         """Удаляет из pending scope идентификаторы пропущенных позиций."""
         if not state.pending_comment_existing_item_ids:
             return
-        active_ids = {
-            item.id for item in state.cart if item.status is not ItemStatus.SKIPPED
-        }
+        active_ids = {item.id for item in state.cart if item.status is not ItemStatus.SKIPPED}
         state.pending_comment_existing_item_ids = [
-            item_id
-            for item_id in state.pending_comment_existing_item_ids
-            if item_id in active_ids
+            item_id for item_id in state.pending_comment_existing_item_ids if item_id in active_ids
         ]
 
     @staticmethod
@@ -3107,7 +3102,9 @@ class ConversationEngine:
             return None
         return scored[0][1]
 
-    def _edit_existing_comment(self, command: ParsedCommand, state: ConversationState) -> EngineResult:
+    def _edit_existing_comment(
+        self, command: ParsedCommand, state: ConversationState
+    ) -> EngineResult:
         """Изменяет комментарий только у однозначно найденного товара черновика."""
         target = clean_command_target(command.comment_target_query)
         comment = " ".join(command.comment_text.split()).strip(" .,;:-—–")
