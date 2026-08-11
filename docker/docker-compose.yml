@@ -37,7 +37,7 @@ services:
     restart: unless-stopped
     env_file:
       - .env
-      - .env-proxy
+#      - .env-proxy
     environment:
       NO_PROXY: "localhost,127.0.0.1,api,worker,beat,migrate,redis,host.docker.internal"
       no_proxy: "localhost,127.0.0.1,api,worker,beat,migrate,redis,host.docker.internal"
