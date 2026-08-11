@@ -7,8 +7,10 @@ migration block переносит существующий owner механич
 contracts и проходит focused/full regression до следующего блока.
 
 Текущий checkout: `decompose_bot`, semantic baseline
-`f9cbc3195c0eae843de3208e488c3f46baa5a5ec`, текущий decomposition HEAD
-`e4fb29e4d2d0ba906c91beef5c02d3e87d7a0b09`, автоматический baseline
+`f9cbc3195c0eae843de3208e488c3f46baa5a5ec`. Accepted Block 3 code baseline:
+`e4fb29e4d2d0ba906c91beef5c02d3e87d7a0b09`; Block 3C correction baseline:
+`21358755ebbc36b95b9fb6b4799021027a2158e7`. Текущий Git HEAD определяется
+через `git rev-parse HEAD`, автоматический baseline
 `1362 collected / 1362 passed`. Локальный
 `manual_smoke_forensic_logs.txt` не является частью проекта.
 
@@ -43,7 +45,11 @@ contracts и проходит focused/full regression до следующего 
 | `services/replies.py` | 1017 | Cards, keyboards и UX contracts | Делить по экранным семействам. |
 | `integrations/openai_client.py` | 927 | Transport и AI use cases | Разделять только после контрактов. |
 | `integrations/google_sheets.py` | 884 | Несколько Sheets contracts | Сохранять единый gateway до доказанного split. |
-| `services/matching.py` | 830 | Evidence, scoring, ranking и safety | Разделить на catalog owners без изменения правил. |
+| `catalog/evidence.py` | 323 | Канонизация, токены и evidence | Block 4 owner; чистые преобразования и доказательства. |
+| `catalog/scoring.py` | 103 | Оценка одного товара | Block 4 owner; формулы сохранены 1:1. |
+| `catalog/retrieval.py` | 53 | Bounded in-memory candidate retrieval | Block 4 owner; лимит и порядок сохранены. |
+| `catalog/safety.py` | 385 | Safety gates, qualifiers и numeric compatibility | Block 4 owner; auto-select precision guard. |
+| `catalog/resolver.py` | 199 | Supplier scope и CatalogDecision | Block 4 owner; state/persistence не импортирует. |
 | `services/venue_registration.py` | 808 | Directory, access и registration | Разделять после базовых миграций. |
 | `parsing/products.py` | 511 | Orchestration товарных строк | Текущий owner после Block 2A. |
 | `parsing/quantities.py` | 57 | Quantity primitives | Самостоятельные короткие ответы количества. |
@@ -85,10 +91,12 @@ contracts и проходит focused/full regression до следующего 
 
 ### Каталог
 
-- `services/matching.py` позднее разделяется на `catalog/evidence.py`,
-  `catalog/scoring.py`, `catalog/safety.py`.
-- `services/catalog_resolver.py` позднее переносится в
-  `catalog/resolver.py`; resolver не меняет state.
+- `catalog/{evidence,scoring,retrieval,safety}.py` — **Block 4 CREATE/MOVE**;
+  каждый модуль имеет одну каталожную ответственность.
+- `catalog/resolver.py` — **Block 4 MOVE** из `services/catalog_resolver.py`;
+  resolver не меняет state.
+- `services/matching.py` и `services/catalog_resolver.py` — **Block 4 FACADE**;
+  в них не осталось второй реализации matching/resolver.
 - `engine.py` позднее оставляет orchestration, а применение draft выделяется
   отдельно.
 
@@ -130,7 +138,7 @@ restaurant_bot/
       item_reconciliation.py
       shadow_items.py
       reconciliation.py
-  catalog/{evidence.py,scoring.py,safety.py,resolver.py}
+  catalog/{evidence.py,scoring.py,retrieval.py,safety.py,resolver.py}
   conversation/
     engine.py
     draft.py

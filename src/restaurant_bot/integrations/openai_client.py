@@ -8,6 +8,7 @@ from typing import Any, cast
 import structlog
 from openai import APIConnectionError, APITimeoutError, OpenAI, RateLimitError
 
+from restaurant_bot.catalog.safety import has_product_variant_qualifier
 from restaurant_bot.config import Settings
 from restaurant_bot.domain.models import ExtractedItem, Intent, ParsedCommand
 from restaurant_bot.integrations.openai_prompts import (
@@ -35,7 +36,6 @@ from restaurant_bot.parsing.ai.schemas import (
     ProductMatchDecision,
     VisibleActionDecision,
 )
-from restaurant_bot.services.matching import has_product_variant_qualifier
 from restaurant_bot.services.parser import (
     dialogue_response_for,
     has_explicit_add_items,

@@ -16,7 +16,10 @@ AI помогает понять свободную речь и найти ка�
 - Репозиторий: `Dzmitry-Radziuk/test_bot`.
 - Ветка: `decompose_bot`.
 - Semantic baseline: `f9cbc3195c0eae843de3208e488c3f46baa5a5ec`.
-- Текущий decomposition HEAD после Block 3: `e4fb29e4d2d0ba906c91beef5c02d3e87d7a0b09`.
+- Accepted Block 3 code baseline: `e4fb29e4d2d0ba906c91beef5c02d3e87d7a0b09`.
+- Block 3C correction baseline: `21358755ebbc36b95b9fb6b4799021027a2158e7`.
+- Текущий Git HEAD всегда определяется командой `git rev-parse HEAD`, а не
+  фиксируется в handoff после каждого commit.
 - Единственный рабочий remote: GitHub `origin/decompose_bot`.
 - Автоматический baseline: `1362 collected / 1362 passed`.
 - `manual_smoke_forensic_logs.txt` — намеренный локальный untracked-файл
@@ -77,10 +80,17 @@ Telegram update
 
 ### Каталог и диалог
 
-- `services/matching.py` — canonical tokens, evidence, scoring, ranking и
-  safety gates.
-- `services/catalog_resolver.py` — поиск кандидатов в пределах заведения и
-  чистое решение CatalogDecision без изменения ConversationState.
+- `catalog/evidence.py` — канонизация, токены, provenance/evidence и проверка
+  подтверждённых числовых характеристик.
+- `catalog/scoring.py` — детерминированная оценка одного товара.
+- `catalog/retrieval.py` — bounded in-memory enumeration, admission и порядок
+  кандидатов.
+- `catalog/safety.py` — hard gates, категории, варианты, numeric/qualifier
+  safety и auto-select.
+- `catalog/resolver.py` — поиск в supplier scope и чистое решение
+  `CatalogDecision` без изменения `ConversationState`.
+- `services/matching.py` и `services/catalog_resolver.py` — тонкие
+  compatibility re-export facades для подтверждённых старых callers.
 - `services/conversation_handlers/` — quantity, candidate, comment scope,
   review, navigation и единая StateCompatibilityPolicy.
 - `services/engine.py` — текущая state machine, применение решения каталога,
@@ -162,6 +172,17 @@ pgvector, catalog migrations и Sheets sync в Block 3 не реализовыв
 AI предлагает структуру, source phrase подтверждает, catalog уточняет,
 детерминированный код выполняет действие.
 
+Block 4 завершён механически: смешанный catalog matching разделён на owners
+`catalog/evidence.py` (323 строки), `catalog/scoring.py` (103),
+`catalog/retrieval.py` (53), `catalog/safety.py` (385) и
+`catalog/resolver.py` (199). Старые service-пути оставлены только как
+re-export facades; `nearest_valid_multiple()` сохранён в matching facade как
+quantity helper, потому что он не относится к каталогу. Production callers
+переведены на новые owners. Сравнение старого и нового pipeline на 18
+представительных corpus-классах дало `0 mismatches`; полный baseline —
+`1362 collected / 1362 passed`. Retrieval остался bounded in-memory; PostgreSQL,
+pgvector, embeddings, catalog migrations и Sheets sync в Block 4 не добавлялись.
+
 Постоянное правило: перед каждым `MOVE`/`MERGE`/`DELETE` выполняются
 repository-wide usage и duplicate audit. Мёртвый или дублирующий код не
 переносится; для одной ответственности остаётся одна реализация. Временный
@@ -182,13 +203,13 @@ gates.
 
 ## 10. Следующий блок
 
-Следующий функционально-архитектурный блок — catalog evidence/scoring/safety
-и resolver. Он начинается только после отдельного review завершённого Block 3.
+Следующий блок назначается только после review завершённого Block 4. Новая
+декомпозиция или изменение поведения каталога автоматически не начинаются.
 
 ## 11. Проверки
 
-Для Block 3 подтверждены focused AI/conversation suite `220 passed` и полный
-baseline `1362 collected / 1362 passed`. Также пройдены:
+Для Block 4 подтверждены focused catalog/resolver/supplier/AI suite `89 passed`
+и полный baseline `1362 collected / 1362 passed`. Также пройдены:
 
 ```text
 ruff check src tests
@@ -198,8 +219,9 @@ python scripts/check_markdown_links.py
 git diff --check
 ```
 
-Импортированы все модули `parsing.ai`, compatibility facade и
-`integrations.openai_client`; циклических импортов не обнаружено.
+Импортированы новые catalog owners и compatibility facades; циклических
+импортов не обнаружено. `.env` и `manual_smoke_forensic_logs.txt` в commit не
+входят.
 
 ## 12. Правила передачи
 

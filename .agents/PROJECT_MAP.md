@@ -67,10 +67,15 @@ flowchart LR
 | `parsing/ai/shadow_items.py` | Shadow projections, connector fragments и source variants |
 | `parsing/ai/reconciliation.py` | Сохраняемый порядок общей AI reconciliation pipeline |
 | `services/comment_policy.py` | Единая policy явных пожеланий поставщику для детерминированного и AI-разбора |
-| `services/catalog_resolver.py` | Область поиска поставщика, кандидаты и hard veto безопасного автосопоставления |
+| `catalog/resolver.py` | Область поиска поставщика, кандидаты и hard veto безопасного автосопоставления |
 | `services/conversation_handlers/` | Изолированные переходы количества, выбора товара, области комментария, финальной проверки, статусов и пассивной навигации |
 | `services/input_normalizer.py` | Приведение Telegram payload к единому `TelegramEvent` |
-| `services/matching.py` | Поиск кандидатов, безопасность автосопоставления, категории и похожие товары |
+| `catalog/evidence.py` | Канонизация, токены и доказательства совпадения товара |
+| `catalog/scoring.py` | Детерминированная оценка одного каталожного товара |
+| `catalog/retrieval.py` | Ограниченный in-memory поиск, admission и порядок кандидатов |
+| `catalog/safety.py` | Hard gates, варианты, категории, numeric safety и auto-select |
+| `services/matching.py` | Compatibility facade; quantity helper `nearest_valid_multiple` |
+| `services/catalog_resolver.py` | Compatibility facade для `catalog/resolver.py` |
 | `services/replies.py` | Пользовательские карточки и клавиатуры основного диалога |
 | `services/submission.py` | Контрольные точки записи, пересчёта, опциональной отправки и чтения статусов |
 | `services/submission_presenter.py` | Тексты и кнопки завершения заявки и истории заказов |

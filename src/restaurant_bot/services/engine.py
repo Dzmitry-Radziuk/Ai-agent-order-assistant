@@ -6,6 +6,12 @@ from copy import deepcopy
 from datetime import UTC, datetime
 from uuid import uuid4
 
+from restaurant_bot.catalog.evidence import (
+    has_complete_query_evidence,
+    query_evidence_tokens,
+)
+from restaurant_bot.catalog.resolver import CatalogDecision, CatalogResolver
+from restaurant_bot.catalog.safety import has_compatible_numeric_characteristics
 from restaurant_bot.config import Settings
 from restaurant_bot.domain.models import (
     BotReply,
@@ -28,7 +34,6 @@ from restaurant_bot.domain.models import (
     SessionStage,
     TelegramEvent,
 )
-from restaurant_bot.services.catalog_resolver import CatalogDecision, CatalogResolver
 from restaurant_bot.services.comment_policy import comment_semantic_key, supplier_comment_start
 from restaurant_bot.services.conversation_handlers.candidate_selection import (
     CandidateSelectionHandler,
@@ -59,12 +64,7 @@ from restaurant_bot.services.conversation_handlers.state_compatibility import (
     CompatibilityDecision,
     StateCompatibilityPolicy,
 )
-from restaurant_bot.services.matching import (
-    has_compatible_numeric_characteristics,
-    has_complete_query_evidence,
-    nearest_valid_multiple,
-    query_evidence_tokens,
-)
+from restaurant_bot.services.matching import nearest_valid_multiple
 from restaurant_bot.services.parser import (
     clean_command_target,
     dialogue_response_for,

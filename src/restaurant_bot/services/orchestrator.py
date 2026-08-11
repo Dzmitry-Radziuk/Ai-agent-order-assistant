@@ -13,6 +13,18 @@ from openai import APIConnectionError, APITimeoutError, RateLimitError
 from redis import Redis
 from structlog.contextvars import bound_contextvars
 
+from restaurant_bot.catalog.evidence import (
+    canonical_search_query,
+    query_evidence_tokens,
+    unverified_product_terms,
+)
+from restaurant_bot.catalog.safety import (
+    has_compatible_numeric_characteristics,
+    has_conflicting_catalog_qualifiers,
+    has_unscoped_product_variant_qualifier,
+    is_broad_category_query,
+    is_safe_catalog_name_equivalent,
+)
 from restaurant_bot.config import Settings
 from restaurant_bot.db import SessionLocal
 from restaurant_bot.domain.models import (
@@ -55,16 +67,6 @@ from restaurant_bot.services.conversation_handlers.state_compatibility import (
 from restaurant_bot.services.engine import ConversationEngine
 from restaurant_bot.services.input_normalizer import normalize_telegram_update
 from restaurant_bot.services.input_recognition import InputRecognitionService
-from restaurant_bot.services.matching import (
-    canonical_search_query,
-    has_compatible_numeric_characteristics,
-    has_conflicting_catalog_qualifiers,
-    has_unscoped_product_variant_qualifier,
-    is_broad_category_query,
-    is_safe_catalog_name_equivalent,
-    query_evidence_tokens,
-    unverified_product_terms,
-)
 from restaurant_bot.services.order_review import OrderReviewService
 from restaurant_bot.services.parser import infer_intent
 from restaurant_bot.services.text import clean_text, normalize_text, remove_phrase_overlap
