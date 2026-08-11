@@ -349,27 +349,30 @@ Routing policy механически разделена по связным о�
 conversation/routing/contracts.py
   -> CompatibilityAction, CompatibilityContext, CompatibilityDecision
 conversation/routing/item_resolution.py
-  -> quantity, manual/product-add details, candidate, not-found,
-     duplicate и unit-mismatch policies; общий predicate товарной позиции
+  -> чистые quantity, manual/product-add details, candidate, not-found,
+     duplicate и unit-mismatch functions; общий predicate товарной позиции
 conversation/routing/order_flow.py
-  -> sheet review, new-order, add-more, submit-confirm и submission-failed
+  -> чистые sheet review, new-order, add-more, submit-confirm и
+     submission-failed functions
 conversation/routing/comment_scope.py
-  -> pending comment scope policy
+  -> чистая pending comment scope function
 conversation/routing/state_compatibility.py
-  -> единый public StateCompatibilityPolicy, context_for и dispatch
+  -> единый public StateCompatibilityPolicy, context_for и явный dispatch
 conversation/routing/modal_routing.py
   -> channel-neutral агрегатор ModalRoutingDecision
 conversation/state/queries.py
   -> чистые first_unresolved и item_index
 ```
 
-Production imports переведены на новых owners. Старые пути оставлены только как
+Production imports переведены на новых owners. После Block 5AC leaf policy
+модули не содержат mixin-классов: `StateCompatibilityPolicy` явно вызывает
+их module-level functions и передаёт необходимые зависимости. Старые пути оставлены только как
 re-export facades. `PendingQuantityHandler.handle` и
 `OrderStatusHandler.handle` не переносились: они принимают TelegramEvent или
 presentation-зависимые ответы. Policy больше не импортирует
 `PendingQuantityHandler`; чистый `has_named_product_items` имеет одного owner в
 `conversation/routing/item_resolution.py`, а legacy handler делегирует ему.
-Focused modal suite и полный baseline должны подтверждать нулевые поведенческие
+Focused modal suite и полный baseline подтверждают нулевые поведенческие
 расхождения; следующий блок — только после отдельного review этого routing
 boundary.
 

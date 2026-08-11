@@ -222,6 +222,13 @@ handler. `PendingQuantityHandler.handle` и `OrderStatusHandler.handle` наме
 presentation-зависимые ответы и будут перенесены только вместе с input/
 application boundary.
 
+После Block 5AC `StateCompatibilityPolicy` остаётся единым public coordinator,
+но больше не наследует routing mixin-классы. `item_resolution.py`,
+`order_flow.py` и `comment_scope.py` содержат явные чистые module-level policy
+functions; coordinator передаёт им необходимые зависимости. Скрытая связь
+через members будущего subclass и `type: ignore[attr-defined]` устранена без
+изменения context priority, action/mode contracts или engine workflow.
+
 Block 5A не меняет engine workflow, parser, catalog, prompts, comments,
 quantity semantics, database, Docker, Sheets или Telegram UX. Focused modal
 suite, полный baseline и quality gates подтверждают сохранение routing behavior.

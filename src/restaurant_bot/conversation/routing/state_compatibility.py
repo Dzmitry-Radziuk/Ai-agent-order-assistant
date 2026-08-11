@@ -2,14 +2,31 @@
 
 from __future__ import annotations
 
-from restaurant_bot.conversation.routing.comment_scope import CommentScopePolicyMixin
+from restaurant_bot.conversation.routing.comment_scope import evaluate_comment_scope
 from restaurant_bot.conversation.routing.contracts import (
     CompatibilityAction,
     CompatibilityContext,
     CompatibilityDecision,
 )
-from restaurant_bot.conversation.routing.item_resolution import ItemResolutionPolicyMixin
-from restaurant_bot.conversation.routing.order_flow import OrderFlowPolicyMixin
+from restaurant_bot.conversation.routing.item_resolution import (
+    evaluate_candidate_selection,
+    evaluate_duplicate_pending,
+    evaluate_manual_details,
+    evaluate_not_found,
+    evaluate_product_add_details,
+    evaluate_unit_mismatch,
+    has_product_items,
+)
+from restaurant_bot.conversation.routing.order_flow import (
+    can_use_add_more_context,
+    can_use_submit_confirm_context,
+    evaluate_add_more_confirm,
+    evaluate_new_order_confirmation,
+    evaluate_sheet_review,
+    evaluate_submission_failed,
+    evaluate_submit_confirm,
+    submission_failure_mode,
+)
 from restaurant_bot.domain.models import (
     ConversationState,
     Intent,
@@ -19,9 +36,7 @@ from restaurant_bot.domain.models import (
 )
 
 
-class StateCompatibilityPolicy(
-    ItemResolutionPolicyMixin, OrderFlowPolicyMixin, CommentScopePolicyMixin
-):
+class StateCompatibilityPolicy:
     """Определяет совместимость intent с поддержанным modal state."""
 
     _QUANTITY_STAGES = frozenset({SessionStage.AWAIT_UNIT_QUANTITY})
@@ -62,29 +77,29 @@ class StateCompatibilityPolicy(
         """Возвращает решение для поддержанного modal-контекста."""
         context = context or self.context_for(state)
         if context is CompatibilityContext.COMMENT_SCOPE:
-            return self._evaluate_comment_scope(command, state)
+            return evaluate_comment_scope(command, state)
         if context is CompatibilityContext.MANUAL_DETAILS:
-            return self._evaluate_manual_details(command, state)
+            return evaluate_manual_details(command, state, self._INTERRUPT_INTENTS)
         if context is CompatibilityContext.PRODUCT_ADD_DETAILS:
-            return self._evaluate_product_add_details(command, state)
+            return evaluate_product_add_details(command, state, self._INTERRUPT_INTENTS)
         if context is CompatibilityContext.ADD_MORE_CONFIRM:
-            return self._evaluate_add_more_confirm(command, state)
+            return evaluate_add_more_confirm(command, state, self.context_for)
         if context is CompatibilityContext.SUBMIT_CONFIRM:
-            return self._evaluate_submit_confirm(command, state)
+            return evaluate_submit_confirm(command, state)
         if context is CompatibilityContext.SUBMISSION_FAILED:
-            return self._evaluate_submission_failed(command, state)
+            return evaluate_submission_failed(command, state)
         if context is CompatibilityContext.NEW_ORDER_CONFIRMATION:
-            return self._evaluate_new_order_confirmation(command, state)
+            return evaluate_new_order_confirmation(command, state)
         if context is CompatibilityContext.SHEET_REVIEW:
-            return self._evaluate_sheet_review(command, state)
+            return evaluate_sheet_review(command, state)
         if context is CompatibilityContext.CANDIDATE_SELECTION:
-            return self._evaluate_candidate_selection(command, state)
+            return evaluate_candidate_selection(command, state)
         if context is CompatibilityContext.NOT_FOUND:
-            return self._evaluate_not_found(command, state)
+            return evaluate_not_found(command, state, self._INTERRUPT_INTENTS)
         if context is CompatibilityContext.DUPLICATE_PENDING:
-            return self._evaluate_duplicate_pending(command, state)
+            return evaluate_duplicate_pending(command, state, self._INTERRUPT_INTENTS)
         if context is CompatibilityContext.UNIT_MISMATCH:
-            return self._evaluate_unit_mismatch(command, state)
+            return evaluate_unit_mismatch(command, state, self._INTERRUPT_INTENTS)
         if context is not CompatibilityContext.QUANTITY:
             return CompatibilityDecision(CompatibilityAction.NOT_APPLICABLE)
 
@@ -96,7 +111,7 @@ class StateCompatibilityPolicy(
         ):
             return CompatibilityDecision(CompatibilityAction.NOT_APPLICABLE)
 
-        if command.intent is Intent.ADD_ITEMS and self._has_product_items(command):
+        if command.intent is Intent.ADD_ITEMS and has_product_items(command):
             return CompatibilityDecision(CompatibilityAction.INTERRUPT)
         if command.intent in self._INTERRUPT_INTENTS:
             return CompatibilityDecision(CompatibilityAction.INTERRUPT)
@@ -119,6 +134,11 @@ class StateCompatibilityPolicy(
             CompatibilityAction.CONTINUE,
             CompatibilityAction.AMBIGUOUS,
         }
+
+    @staticmethod
+    def submission_failure_mode(state: ConversationState) -> str:
+        """Возвращает режим обработки сохранённой ошибки отправки."""
+        return submission_failure_mode(state)
 
     @staticmethod
     def context_for(state: ConversationState) -> CompatibilityContext | None:
@@ -159,8 +179,8 @@ class StateCompatibilityPolicy(
             and state.stage in StateCompatibilityPolicy._QUANTITY_STAGES
         ):
             return CompatibilityContext.QUANTITY
-        if StateCompatibilityPolicy._can_use_add_more_context(state):
+        if can_use_add_more_context(state):
             return CompatibilityContext.ADD_MORE_CONFIRM
-        if StateCompatibilityPolicy._can_use_submit_confirm_context(state):
+        if can_use_submit_confirm_context(state):
             return CompatibilityContext.SUBMIT_CONFIRM
         return None
