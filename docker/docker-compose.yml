@@ -37,10 +37,10 @@ services:
     restart: unless-stopped
     env_file:
       - .env
-#      - .env-proxy
-    environment:
-      NO_PROXY: "localhost,127.0.0.1,api,worker,beat,migrate,redis,host.docker.internal"
-      no_proxy: "localhost,127.0.0.1,api,worker,beat,migrate,redis,host.docker.internal"
+      # - .env-proxy
+    # environment:
+    #   NO_PROXY: "localhost,127.0.0.1,api,worker,beat,migrate,redis,host.docker.internal"
+    #   no_proxy: "localhost,127.0.0.1,api,worker,beat,migrate,redis,host.docker.internal"
     volumes:
       - ./secrets/google-service-account.json:/run/secrets/google-service-account.json:ro
     command: ["celery", "-A", "restaurant_bot.workers.celery_app.celery_app", "worker", "-l", "INFO", "--concurrency=${CELERY_CONCURRENCY:-10}"]
