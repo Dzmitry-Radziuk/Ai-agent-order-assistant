@@ -32,7 +32,13 @@ contracts и проходит focused/full regression до следующего 
 | `integrations/openai_prompts.py` | 2378 | Prompt contracts | Переносить как единый внешний контракт. |
 | `services/orchestrator.py` | 2152 | Transaction pipeline и scheduling | Позже выделить application pipeline. |
 | `services/submission.py` | 2047 | Submission use cases и checkpoints | Разделять по внешним контрактам. |
-| `integrations/openai_parsing.py` | 1800 | Schemas и reconciliation | Сначала выделить schemas/reconciliation. |
+| `integrations/openai_parsing.py` | 39 | Совместимый re-export facade | Не содержит алгоритмов; удаление — отдельный шаг после audit callers. |
+| `parsing/ai/schemas.py` | 67 | Declarative structured-output schemas | Не зависит от transport, state и внешних эффектов. |
+| `parsing/ai/quantity_reconciliation.py` | 431 | Source quantity и packaging reconciliation | Использует существующие quantity/product primitives. |
+| `parsing/ai/comment_reconciliation.py` | 616 | Comment provenance, scope и bindings | Не смешивается с command comment parsing. |
+| `parsing/ai/item_reconciliation.py` | 332 | Source evidence, qualifier cleanup и item recovery | Не меняет state и persistence. |
+| `parsing/ai/shadow_items.py` | 363 | Shadow projections, fragments и source variants | Только чистые преобразования AI payload. |
+| `parsing/ai/reconciliation.py` | 89 | Порядок общей reconciliation pipeline | Единственная orchestration-точка AI postprocessing. |
 | `services/parser.py` | 224 | Public text/callback facade и dispatcher | Callback остаётся channel contract. |
 | `services/replies.py` | 1017 | Cards, keyboards и UX contracts | Делить по экранным семействам. |
 | `integrations/openai_client.py` | 927 | Transport и AI use cases | Разделять только после контрактов. |
@@ -117,7 +123,13 @@ restaurant_bot/
       dialogue.py
       router.py
     products.py
-    ai/{schemas.py,reconciliation.py}
+    ai/
+      schemas.py
+      quantity_reconciliation.py
+      comment_reconciliation.py
+      item_reconciliation.py
+      shadow_items.py
+      reconciliation.py
   catalog/{evidence.py,scoring.py,safety.py,resolver.py}
   conversation/
     engine.py
@@ -136,7 +148,8 @@ restaurant_bot/
 
 После Block 2A пакет `parsing/` содержит `products.py`, `quantities.py`,
 `packaging.py` и `comment_scope.py`. После Block 2B text command parsing
-находится в `parsing/commands/`; отдельный `text.py` пока не создаётся.
+находится в `parsing/commands/`. После Block 3 structured AI contracts и
+reconciliation находятся в `parsing/ai/`; transport остаётся в integrations.
 
 ## 6. Правила зависимостей
 
@@ -296,8 +309,8 @@ repository-wide scan подтверждает отсутствие старог�
 5. Orders, submission, venues и внешние adapters.
 6. Только после контрактов уменьшать `engine.py` и `orchestrator.py`.
 
-Следующий Block 2B/Block 3 не начинается автоматически после Block 2A и
-требует внешнего review.
+Следующий каталоговый блок не начинается автоматически после Block 3 и
+требует отдельного внешнего review.
 
 ## 11. Запреты текущего блока
 

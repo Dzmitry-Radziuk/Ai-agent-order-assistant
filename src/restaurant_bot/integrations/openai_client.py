@@ -10,25 +10,6 @@ from openai import APIConnectionError, APITimeoutError, OpenAI, RateLimitError
 
 from restaurant_bot.config import Settings
 from restaurant_bot.domain.models import ExtractedItem, Intent, ParsedCommand
-from restaurant_bot.integrations.openai_parsing import (
-    _CONVERSATIONAL_PRODUCT_LEADIN_RE,
-    _LARGE_ORDER_LIST_CHUNK_SIZE,
-    _LARGE_ORDER_LIST_MIN_LINES,
-    CommentScopeDecision,
-    ParsedInputSchema,
-    ProductMatchDecision,
-    VisibleActionDecision,
-    _comment_scope_has_explicit_anchor,
-    _quantities_with_units,
-    _repair_command_mixed_script_queries,
-    recover_omitted_explicit_items,
-)
-from restaurant_bot.integrations.openai_parsing import (
-    CommentBindingSchema as CommentBindingSchema,
-)
-from restaurant_bot.integrations.openai_parsing import (
-    restore_explicit_order_terms as restore_explicit_order_terms,
-)
 from restaurant_bot.integrations.openai_prompts import (
     _COMMENT_SCOPE_SYSTEM,
     _MATCH_SYSTEM,
@@ -37,6 +18,23 @@ from restaurant_bot.integrations.openai_prompts import (
     _VISIBLE_ACTION_SYSTEM,
 )
 from restaurant_bot.observability import Tracer
+from restaurant_bot.parsing.ai.comment_reconciliation import (
+    _CONVERSATIONAL_PRODUCT_LEADIN_RE,
+    _comment_scope_has_explicit_anchor,
+)
+from restaurant_bot.parsing.ai.item_reconciliation import _repair_command_mixed_script_queries
+from restaurant_bot.parsing.ai.quantity_reconciliation import (
+    _quantities_with_units,
+    restore_explicit_order_terms,
+)
+from restaurant_bot.parsing.ai.reconciliation import recover_omitted_explicit_items
+from restaurant_bot.parsing.ai.schemas import (
+    CommentBindingSchema,
+    CommentScopeDecision,
+    ParsedInputSchema,
+    ProductMatchDecision,
+    VisibleActionDecision,
+)
 from restaurant_bot.services.matching import has_product_variant_qualifier
 from restaurant_bot.services.parser import (
     dialogue_response_for,
@@ -53,6 +51,20 @@ from restaurant_bot.services.text import (
     numeric_range_spans,
     to_float,
 )
+
+__all__ = [
+    "CommentBindingSchema",
+    "CommentScopeDecision",
+    "OpenAIService",
+    "ParsedInputSchema",
+    "ProductMatchDecision",
+    "VisibleActionDecision",
+    "recover_omitted_explicit_items",
+    "restore_explicit_order_terms",
+]
+
+_LARGE_ORDER_LIST_MIN_LINES = 10
+_LARGE_ORDER_LIST_CHUNK_SIZE = 8
 
 logger = structlog.get_logger(__name__)
 

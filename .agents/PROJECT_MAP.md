@@ -60,6 +60,12 @@ flowchart LR
 | `parsing/quantities.py` | Короткие quantity primitives |
 | `parsing/packaging.py` | Фасовка и каталожные measurement spans |
 | `parsing/comment_scope.py` | Явная область общего комментария во входной товарной строке |
+| `parsing/ai/schemas.py` | Declarative Pydantic-схемы structured output без алгоритмов |
+| `parsing/ai/quantity_reconciliation.py` | Проверка количества заказа, фасовки и диапазонов по source evidence |
+| `parsing/ai/comment_reconciliation.py` | Provenance, scope и comment bindings structured AI output |
+| `parsing/ai/item_reconciliation.py` | Source qualifier cleanup, omitted item и mixed-script recovery |
+| `parsing/ai/shadow_items.py` | Shadow projections, connector fragments и source variants |
+| `parsing/ai/reconciliation.py` | Сохраняемый порядок общей AI reconciliation pipeline |
 | `services/comment_policy.py` | Единая policy явных пожеланий поставщику для детерминированного и AI-разбора |
 | `services/catalog_resolver.py` | Область поиска поставщика, кандидаты и hard veto безопасного автосопоставления |
 | `services/conversation_handlers/` | Изолированные переходы количества, выбора товара, области комментария, финальной проверки, статусов и пассивной навигации |
@@ -78,7 +84,7 @@ flowchart LR
 |---|---|
 | `integrations/telegram.py` | Telegram Bot API, скачивание файлов, ответы, edit/delete и callback acknowledgement |
 | `integrations/openai_client.py` | Транскрибация, разбор текста и фото, AI-сопоставление и наблюдаемость |
-| `integrations/openai_parsing.py` | Pydantic-схемы и детерминированная постобработка structured output без сетевых вызовов |
+| `integrations/openai_parsing.py` | Временный re-export facade для доказанных старых import paths; алгоритмов нет |
 | `integrations/openai_prompts.py` | Системные промпты текста, фото, сопоставления и выбора действий |
 | `integrations/google_sheets.py` | Каталог, лист заказа, пересчёт, лист добавления товара, история и опциональная центральная отправка |
 | `integrations/cache.py` | Redis-кэш каталога, chat lock и lock по таблице заведения |

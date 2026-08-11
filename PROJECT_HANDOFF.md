@@ -146,6 +146,17 @@ Block 2B завершён механически: text command parsing разд�
 `parse_callback()` оставлен отдельным channel contract. Поведение подтверждено
 сравнением на 62 существующих случаях и полным baseline `1362 passed`.
 
+Block 3 завершён механически: structured AI schemas и reconciliation разделены
+по ответственности в `parsing/ai/`. `integrations/openai_parsing.py` оставлен
+совместимым re-export facade на 39 строк; OpenAI transport остаётся в
+`integrations/openai_client.py`. Поведение подтверждено focused AI suite
+`220 passed` и полным baseline `1362 passed`.
+
+Сохранены инварианты: Google Sheets остаётся source of truth; PostgreSQL,
+pgvector, catalog migrations и Sheets sync в Block 3 не реализовывались.
+AI предлагает структуру, source phrase подтверждает, catalog уточняет,
+детерминированный код выполняет действие.
+
 Постоянное правило: перед каждым `MOVE`/`MERGE`/`DELETE` выполняются
 repository-wide usage и duplicate audit. Мёртвый или дублирующий код не
 переносится; для одной ответственности остаётся одна реализация. Временный
@@ -166,9 +177,8 @@ gates.
 
 ## 10. Следующий блок
 
-Следующий блок — AI schemas/reconciliation. Перед переносом необходимо
-провести полный audit callers, зависимостей, дубликатов и порядка reconciliation.
-После Block 3 — catalog evidence/scoring/safety и resolver.
+Следующий функционально-архитектурный блок — catalog evidence/scoring/safety
+и resolver. Он начинается только после отдельного review завершённого Block 3.
 
 ## 11. Проверки
 
