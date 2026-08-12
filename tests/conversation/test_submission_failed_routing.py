@@ -3,6 +3,14 @@ from __future__ import annotations
 import pytest
 
 from restaurant_bot.config import Settings
+from restaurant_bot.conversation.routing.contracts import (
+    CompatibilityAction,
+    CompatibilityContext,
+)
+from restaurant_bot.conversation.routing.modal_routing import evaluate_modal_routing
+from restaurant_bot.conversation.routing.state_compatibility import (
+    StateCompatibilityPolicy,
+)
 from restaurant_bot.domain.models import (
     CartItem,
     ConversationState,
@@ -12,12 +20,6 @@ from restaurant_bot.domain.models import (
     PendingSubmission,
     SessionStage,
     TelegramEvent,
-)
-from restaurant_bot.services.conversation_handlers.modal_routing import evaluate_modal_routing
-from restaurant_bot.services.conversation_handlers.state_compatibility import (
-    CompatibilityAction,
-    CompatibilityContext,
-    StateCompatibilityPolicy,
 )
 from restaurant_bot.services.engine import ConversationEngine
 from restaurant_bot.services.parser import infer_intent
@@ -106,7 +108,9 @@ def test_retryable_failure_retries_existing_snapshot_for_text_and_voice(
     assert result.state.cart[0].quantity == 2
 
 
-@pytest.mark.parametrize("phrase", ["пармезан 3 кг", "добавь укроп 2 кг", "убери сыр", "измени количество на 9"])
+@pytest.mark.parametrize(
+    "phrase", ["пармезан 3 кг", "добавь укроп 2 кг", "убери сыр", "измени количество на 9"]
+)
 def test_retryable_failure_rejects_cart_mutations(settings: Settings, phrase: str) -> None:
     """Recovery lock не позволяет изменить cart и старый pending snapshot."""
     state = _state()
@@ -123,7 +127,9 @@ def test_retryable_failure_rejects_cart_mutations(settings: Settings, phrase: st
 
 
 @pytest.mark.parametrize("phrase", ["покажи черновик", "назад", "спасибо", "помощь", "ну"])
-def test_retryable_failure_read_only_commands_preserve_recovery(settings: Settings, phrase: str) -> None:
+def test_retryable_failure_read_only_commands_preserve_recovery(
+    settings: Settings, phrase: str
+) -> None:
     """Read-only и пассивные ответы сохраняют stage и pending snapshot."""
     state = _state()
     result = _run(settings, state, phrase)
@@ -136,7 +142,15 @@ def test_retryable_failure_read_only_commands_preserve_recovery(settings: Settin
 
 @pytest.mark.parametrize(
     "phrase",
-    ["повтори", "повтори отправку", "отправь ещё раз", "попробуй снова", "отправляй", "да", "пармезан 3 кг"],
+    [
+        "повтори",
+        "повтори отправку",
+        "отправь ещё раз",
+        "попробуй снова",
+        "отправляй",
+        "да",
+        "пармезан 3 кг",
+    ],
 )
 def test_dispatch_uncertain_never_retries_or_mutates(settings: Settings, phrase: str) -> None:
     """После начала внешнего POST ни одна retry-like команда не запускает новый POST."""

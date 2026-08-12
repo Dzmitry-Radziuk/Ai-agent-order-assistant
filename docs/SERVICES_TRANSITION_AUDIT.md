@@ -1,4 +1,4 @@
-# Аудит переходного слоя services/ и результат Block 5I
+# Аудит переходного слоя services/ и результат Block 5J
 
 ## Границы
 
@@ -13,21 +13,20 @@ cli.py; динамические границы проверены по orchestr
 
 ## Состав пакета
 
-Файлы верхнего уровня: catalog_resolver.py, engine.py, input_normalizer.py,
-input_recognition.py, matching.py, orchestrator.py, order_review.py, parser.py,
+Файлы верхнего уровня: engine.py, input_normalizer.py, input_recognition.py,
+orchestrator.py, order_review.py, parser.py,
 product_add_flow.py, replies.py, submission_presenter.py, submission.py, text.py,
 venue_registration.py.
 
 conversation_handlers/: candidate_selection.py, comment_scope.py, final_review.py,
-modal_routing.py, navigation.py, pending_quantity.py, state.py,
-state_compatibility.py, __init__.py.
+navigation.py, pending_quantity.py, __init__.py.
 
 ## Классификация файлов
 
 | МОДУЛЬ | ТЕКУЩИЙ ВЛАДЕЛЕЦ / ВЫЗОВЫ | ЭФФЕКТЫ / СВЯЗНОСТЬ | СТАТУС | ЦЕЛЬ / ДЕЙСТВИЕ | ПРИОРИТЕТ |
 |---|---|---|---|---|---|
-| catalog_resolver.py | Re-export catalog API; production callers нет, тестовый caller test_catalog_resolver.py | Только catalog; внешних эффектов нет | Compatibility facade | catalog.resolver / DELETE_CANDIDATE | P2 |
-| matching.py | Re-export catalog API и nearest_valid_multiple; production callers нет, только тестовые callers | Только core; мутаций нет | Compatibility facade | catalog/* и conversation quantity / DELETE_CANDIDATE | P2 |
+| catalog_resolver.py | Удалён в Block 5J после нулевого caller-аудита | Только catalog; внешних эффектов не было | Удалённый compatibility facade | catalog.resolver / DONE | P2 |
+| matching.py | Удалён в Block 5J после нулевого caller-аудита | Только core; мутаций не было | Удалённый compatibility facade | catalog/* и conversation quantity / DONE | P2 |
 | services/comment_policy.py | Удалён в Block 5I; до переноса callers: catalog, conversation, parsing, AI, engine | Чистая parsing/evidence policy, внешних эффектов нет | Удалён после audit | parsing/comment_policy.py / DONE | P1 |
 | engine.py | ConversationEngine: handle, routing, modal actions, duplicate/comment/product-add/submission preparation, catalog callers | Изменяет ConversationState/CartItem; строит replies | Смешанный координатор state-machine; catalog core перенесён в 5G | application/conversation и owners conversation / SPLIT | P4 |
 | input_normalizer.py | Telegram payload в TelegramEvent; callers: api и orchestrator | Связь с Telegram/raw update; внешних эффектов нет | Адаптер input | input/telegram.py / MOVE | P3 |
@@ -44,12 +43,12 @@ state_compatibility.py, __init__.py.
 | handlers/candidate_selection.py | Adapter к conversation.selection; callers engine/tests | Читает state, возвращает EngineResult/reply | Корректный adapter | conversation routing / KEEP_TEMP | P3 |
 | handlers/comment_scope.py | Проверка и применение pending scope; callers engine/tests | Мутирует comments/stage, строит replies | State/presentation adapter; core в conversation/comments | conversation routing / KEEP_TEMP | P3 |
 | handlers/final_review.py | Final guards и подготовка submission | Мутирует stage/issue, строит reply | Адаптер review | conversation/review / MOVE later | P4 |
-| handlers/modal_routing.py | Re-export; production callers нет, только tests | Эффектов нет | Неиспользуемый facade | conversation.routing / DELETE_CANDIDATE | P2 |
+| handlers/modal_routing.py | Удалён в Block 5J после перевода тестового import | Эффектов не было | Удалённый compatibility facade | conversation.routing / DONE | P2 |
 | handlers/navigation.py | Passive replies и paging истории | Мутирует history view state, ставит async request | Смешанный navigation/history adapter | conversation navigation + history use case / SPLIT | P4 |
 | handlers/pending_quantity.py | Parser ответа количеством и мутация CartItem | Мутация modal state, зависимости parser/text | Адаптер state количества | conversation quantity flow / MOVE later | P3 |
-| handlers/state.py | Re-export state queries; production callers нет, только tests | Эффектов нет | Неиспользуемый facade | conversation.state.queries / DELETE_CANDIDATE | P2 |
-| handlers/state_compatibility.py | Re-export policy/contracts; production callers нет, только tests | Эффектов нет | Неиспользуемый facade | conversation.routing / DELETE_CANDIDATE | P2 |
-| handlers/__init__.py | Пустой маркер пакета | Нет | Маркер compatibility-пакета | Оставить до удаления legacy imports / KEEP_TEMP | P4 |
+| handlers/state.py | Удалён в Block 5J после нулевого caller-аудита | Эффектов не было | Удалённый compatibility facade | conversation.state.queries / DONE | P2 |
+| handlers/state_compatibility.py | Удалён в Block 5J после перевода тестовых imports | Эффектов не было | Удалённый compatibility facade | conversation.routing / DONE | P2 |
+| handlers/__init__.py | Пустой маркер legacy handlers-пакета | Нет | Маркер пакета | Оставить для действующих handlers / KEEP | P4 |
 
 ## Граф зависимостей
 
@@ -142,21 +141,24 @@ Re-export и динамических callers для этого модуля н�
 | Input voice/photo | input_recognition.py | input/recognition + channel progress / SPLIT | Смешаны provider и Telegram effects |
 | Replies renderers | replies.py | presentation/telegram / SPLIT | UX/callback contract |
 
-## Facade и кандидаты на удаление
+## Результат удаления obsolete facades в Block 5J
 
-У catalog_resolver.py и matching.py нет production callers, и они не содержат
-алгоритмов; единственное препятствие — test imports, которые сами по себе не
-являются постоянной архитектурной причиной. modal_routing.py, state.py и
-state_compatibility.py также являются re-export только для тестов. parser.py не
-является facade целиком: infer_intent и parse_callback остаются public owners до
-отдельного callback/text contract block.
+До удаления все пять кандидатов были проверены repository-wide: production и
+dynamic/importlib callers отсутствуют, callbacks и monkeypatch paths к ним не
+обращаются. Тестовые imports переведены на реальные owners, assertions не
+изменялись. Удалены `catalog_resolver.py`, `matching.py`,
+`conversation_handlers/modal_routing.py`, `state.py` и
+`state_compatibility.py`. `parser.py` не является facade целиком: `infer_intent`
+и `parse_callback` остаются public owners до отдельного callback/text contract
+block.
 
 ## План следующих переносов
 
 ### СЕЙЧАС
 
-Сохранить текущие services adapters/facades и всех owners Block 5G. Block 5I
-выполнил только comment-policy seam; другие production-переносы не выполняются.
+Сохранить текущие services adapters и owners Block 5G. Block 5I выполнил
+comment-policy seam, Block 5J — только удаление доказанных test-only facades;
+другие production-переносы не выполняются.
 
 ### NEXT — только после external review
 
@@ -173,15 +175,15 @@ reliability-sensitive orchestrator/submission/venue seams.
 
 ### ФИНАЛЬНАЯ ОЧИСТКА
 
-После доказанных переносов удалить obsolete facades catalog_resolver.py,
-matching.py и modal/state facades. `services/comment_policy.py` уже удалён после
-нулевого caller-аудита. Не удалять services искусственно: application coordinator,
-adapters и доказанные facades могут временно остаться.
+Obsolete facades catalog_resolver.py, matching.py и modal/state facades удалены
+в Block 5J после нулевого caller-аудита. `services/comment_policy.py` удалён
+ранее в Block 5I. Не удалять services искусственно: application coordinator,
+adapters и доказанные public facades могут временно оставаться.
 
 ## Что намеренно не делалось
 
-В Block 5I изменены только новый owner `parsing/comment_policy.py`, шесть
-production imports и удаление `services/comment_policy.py`. Алгоритмы callers,
+В Block 5J изменены только тестовые imports, удалены пять re-export модулей и
+обновлены audit-документы. Алгоритмы callers,
 services/text.py, prompts, catalog thresholds, AI, callbacks, DB, Sheets, Docker,
-workers, tests и UX не менялись. Block 5G не переоткрывался; новый ADR не
+workers и UX не менялись. Block 5I и Block 5G не переоткрывались; новый ADR не
 добавлялся.

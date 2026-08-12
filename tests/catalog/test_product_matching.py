@@ -1,5 +1,13 @@
 import pytest
 
+from restaurant_bot.catalog.evidence import has_complete_query_evidence, unverified_product_terms
+from restaurant_bot.catalog.retrieval import rank_candidates
+from restaurant_bot.catalog.safety import (
+    can_auto_select,
+    has_conflicting_catalog_qualifiers,
+    is_broad_category_query,
+    is_safe_catalog_name_equivalent,
+)
 from restaurant_bot.config import Settings
 from restaurant_bot.conversation.comments import normalize_existing_catalog_comments
 from restaurant_bot.domain.models import (
@@ -10,15 +18,6 @@ from restaurant_bot.domain.models import (
     ItemStatus,
 )
 from restaurant_bot.services.engine import ConversationEngine
-from restaurant_bot.services.matching import (
-    can_auto_select,
-    has_complete_query_evidence,
-    has_conflicting_catalog_qualifiers,
-    is_broad_category_query,
-    is_safe_catalog_name_equivalent,
-    rank_candidates,
-    unverified_product_terms,
-)
 
 
 def test_complete_query_evidence_rejects_category_only_match() -> None:

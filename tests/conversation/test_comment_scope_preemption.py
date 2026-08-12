@@ -6,6 +6,13 @@ from unittest.mock import Mock
 import pytest
 
 from restaurant_bot.conversation.comments import comment_scope_items
+from restaurant_bot.conversation.routing.contracts import (
+    CompatibilityAction,
+    CompatibilityContext,
+)
+from restaurant_bot.conversation.routing.state_compatibility import (
+    StateCompatibilityPolicy,
+)
 from restaurant_bot.domain.models import (
     CartItem,
     ConversationState,
@@ -18,11 +25,6 @@ from restaurant_bot.domain.models import (
     TelegramEvent,
 )
 from restaurant_bot.integrations.openai_client import CommentScopeDecision
-from restaurant_bot.services.conversation_handlers.state_compatibility import (
-    CompatibilityAction,
-    CompatibilityContext,
-    StateCompatibilityPolicy,
-)
 from restaurant_bot.services.engine import ConversationEngine
 from restaurant_bot.services.orchestrator import UpdateOrchestrator
 

@@ -1,3 +1,10 @@
+from restaurant_bot.conversation.routing.contracts import (
+    CompatibilityAction,
+    CompatibilityContext,
+)
+from restaurant_bot.conversation.routing.state_compatibility import (
+    StateCompatibilityPolicy,
+)
 from restaurant_bot.domain.models import (
     Candidate,
     CartItem,
@@ -8,11 +15,6 @@ from restaurant_bot.domain.models import (
     ParsedCommand,
     SessionStage,
     TelegramEvent,
-)
-from restaurant_bot.services.conversation_handlers.state_compatibility import (
-    CompatibilityAction,
-    CompatibilityContext,
-    StateCompatibilityPolicy,
 )
 from restaurant_bot.services.engine import ConversationEngine
 from restaurant_bot.services.parser import infer_intent

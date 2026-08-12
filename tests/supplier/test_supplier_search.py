@@ -1,5 +1,5 @@
+from restaurant_bot.catalog.retrieval import rank_candidates
 from restaurant_bot.domain.models import CatalogProduct
-from restaurant_bot.services.matching import rank_candidates
 
 
 def test_supplier_hint_limits_candidate_catalog() -> None:

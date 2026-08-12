@@ -1,3 +1,4 @@
+from restaurant_bot.catalog.retrieval import rank_candidates
 from restaurant_bot.domain.models import (
     Candidate,
     CartItem,
@@ -10,7 +11,6 @@ from restaurant_bot.domain.models import (
 )
 from restaurant_bot.integrations.openai_client import ProductMatchDecision
 from restaurant_bot.services.engine import ConversationEngine
-from restaurant_bot.services.matching import rank_candidates
 from restaurant_bot.services.orchestrator import UpdateOrchestrator
 from restaurant_bot.services.replies import issue_reply
 

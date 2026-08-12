@@ -97,10 +97,6 @@ contracts и проходит focused/full regression до следующего 
   resolver не меняет state.
 - `conversation/quantity_resolution.py` — **Block 5E owner** channel-neutral
   политики кратности, рекомендации количества и предупреждений.
-- `services/matching.py` — **Block 4 compatibility path**: каталожные symbols
-  re-exported и совместимый `nearest_valid_multiple()`.
-- `services/catalog_resolver.py` — **Block 4 pure re-export facade**;
-  второй реализации resolver в нём нет.
 - `catalog/evidence.py` владеет canonical representation, tokens,
   query/catalog evidence и supplier hint matching; `catalog/safety.py` владеет
   qualifier conflicts, numeric compatibility, safe equivalence, broad-category
@@ -135,9 +131,10 @@ contracts и проходит focused/full regression до следующего 
 - `orders/catalog_resolution.py` — channel-neutral owner применения каталожного
   результата к позиции заказа и refresh каталожных значений черновика; не знает
   Telegram, ParsedCommand, engine или persistence.
-- `services/conversation_handlers/state_compatibility.py`, `modal_routing.py`
-  и `state.py` оставлены только как compatibility facades с доказанными
-  callers.
+- После Block 5J канонические routing/state owners используются напрямую;
+  obsolete compatibility facades `services/conversation_handlers/state_compatibility.py`,
+  `modal_routing.py`, `state.py`, а также `services/matching.py` и
+  `services/catalog_resolver.py` удалены после нулевого caller-аудита.
 - TelegramEvent-зависимые handlers остаются в legacy-пакете до отдельного
   input/application блока; переносить их ради дерева нельзя.
 - `engine.py` в финале должен координировать pipeline, а не владеть каждым
@@ -362,8 +359,9 @@ parsing/conversation, а не дублирование алгоритмов. Aud
 подтвердил отсутствие циклов, dead duplicate algorithms и зависимостей от
 engine/orchestrator/Telegram/Celery/Sheets. `engine.py` и `orchestrator.py`
 сохраняют workflow; engine использует catalog owners и
-`conversation/quantity_resolution.py`. `services/matching.py` остаётся
-compatibility facade для старого импорта `nearest_valid_multiple()`.
+`conversation/quantity_resolution.py`. Старый compatibility facade
+`services/matching.py` удалён в Block 5J, поэтому quantity owner используется
+напрямую.
 
 ### Block 5A review
 
@@ -391,8 +389,8 @@ conversation/state/queries.py
 
 Production imports переведены на новых owners. После Block 5AC leaf policy
 модули не содержат mixin-классов: `StateCompatibilityPolicy` явно вызывает
-их module-level functions и передаёт необходимые зависимости. Старые пути оставлены только как
-re-export facades. `PendingQuantityHandler.handle` и
+их module-level functions и передаёт необходимые зависимости. После Block 5J
+старые test-only re-export facades удалены. `PendingQuantityHandler.handle` и
 `OrderStatusHandler.handle` не переносились: они принимают TelegramEvent или
 presentation-зависимые ответы. Policy больше не импортирует
 `PendingQuantityHandler`; чистый `has_named_product_items` имеет одного owner в
@@ -425,12 +423,18 @@ workflow не менялись. Все production callers переведены �
 лексическом corpus дало `MISMATCHES=0`, полный baseline —
 `1362 collected / 1362 passed`.
 
+В Block 5J удалены пять test-only compatibility facades после проверки
+production, dynamic и test callers. Тестовые imports переведены на канонические
+owners без изменения assertions и поведения; полный regression baseline
+сохранён.
+
 ## 12. Порядок следующих миграций
 
 1. Conversation routing/state policy — Block 5A выполнен; граница проверена.
 2. Conversation draft и comments — Block 5B выполнен с caller/dead-code audit.
-3. Comment policy — Block 5I выполнен; новый seam до внешнего review не назначать.
-4. После external review выбрать следующий доказанный seam; `services/text.py` —
+3. Comment policy — Block 5I выполнен.
+4. Compatibility cleanup — Block 5J выполнен; после external review выбрать
+   следующий доказанный seam; `services/text.py` —
    только кандидат, не начатый этап.
 5. Engine decomposition без изменения state-machine semantics.
 6. Input/channel-neutral boundary, orders, submission, venues и внешние adapters.

@@ -4,6 +4,13 @@ from __future__ import annotations
 
 import pytest
 
+from restaurant_bot.conversation.routing.contracts import (
+    CompatibilityAction,
+    CompatibilityContext,
+)
+from restaurant_bot.conversation.routing.state_compatibility import (
+    StateCompatibilityPolicy,
+)
 from restaurant_bot.domain.models import (
     Candidate,
     CartItem,
@@ -16,11 +23,6 @@ from restaurant_bot.domain.models import (
     ParsedCommand,
     SessionStage,
     TelegramEvent,
-)
-from restaurant_bot.services.conversation_handlers.state_compatibility import (
-    CompatibilityAction,
-    CompatibilityContext,
-    StateCompatibilityPolicy,
 )
 from restaurant_bot.services.engine import ConversationEngine
 from restaurant_bot.services.parser import infer_intent
@@ -113,10 +115,7 @@ def test_manual_details_context_has_priority_over_not_found() -> None:
     """Выбирает semantic manual context раньше status-based NOT_FOUND."""
     state = _not_found_state(SessionStage.AWAIT_MANUAL_DETAILS)
 
-    assert (
-        StateCompatibilityPolicy().context_for(state)
-        is CompatibilityContext.MANUAL_DETAILS
-    )
+    assert StateCompatibilityPolicy().context_for(state) is CompatibilityContext.MANUAL_DETAILS
 
 
 def test_manual_details_policy_interrupts_concrete_add() -> None:
@@ -135,16 +134,11 @@ def test_ambiguous_manual_context_has_priority_over_candidates() -> None:
     """Не подменяет ручное название выбором старого кандидата."""
     state = _ambiguous_manual_state()
 
-    assert (
-        StateCompatibilityPolicy().context_for(state)
-        is CompatibilityContext.MANUAL_DETAILS
-    )
+    assert StateCompatibilityPolicy().context_for(state) is CompatibilityContext.MANUAL_DETAILS
 
 
 @pytest.mark.parametrize("input_type", [InputKind.TEXT, InputKind.VOICE])
-def test_manual_concrete_add_interrupts_without_data_leak(
-    settings, input_type: InputKind
-) -> None:  # type: ignore[no-untyped-def]
+def test_manual_concrete_add_interrupts_without_data_leak(settings, input_type: InputKind) -> None:  # type: ignore[no-untyped-def]
     """Создаёт новую строку вместо перезаписи manual item."""
     state = _not_found_state(SessionStage.AWAIT_MANUAL_DETAILS)
     text = "пармезан три килограмма" if input_type is InputKind.VOICE else "пармезан 3 кг"
@@ -177,9 +171,7 @@ def test_manual_explicit_add_leadin_creates_new_item(settings) -> None:  # type:
         items=[ExtractedItem(product_query="укроп", quantity=2, unit="кг")],
     )
 
-    result = ConversationEngine(settings).handle(
-        _event(text), command, state, _catalog()
-    )
+    result = ConversationEngine(settings).handle(_event(text), command, state, _catalog())
 
     assert len(result.state.cart) == 2
     assert result.state.cart[0].source_query == "манго"
@@ -196,9 +188,7 @@ def test_ambiguous_manual_answer_renames_selected_item(settings) -> None:  # typ
         items=[ExtractedItem(product_query="пармезан")],
     )
 
-    result = ConversationEngine(settings).handle(
-        _event("пармезан"), command, state, _catalog()
-    )
+    result = ConversationEngine(settings).handle(_event("пармезан"), command, state, _catalog())
 
     item = result.state.cart[0]
     assert len(result.state.cart) == 1

@@ -100,10 +100,9 @@ Telegram update
 - `orders/catalog_resolution.py` — единый channel-neutral владелец применения
   результата `CatalogResolver` к `CartItem`: каталожные поля, quantity
   reconciliation, comment provenance, статусы и refresh черновика.
-- `services/matching.py` — transitional compatibility path: catalog symbols
-  и совместимый re-export `nearest_valid_multiple`.
-- `services/catalog_resolver.py` — чистый compatibility re-export facade для
-  `catalog/resolver.py`.
+- `catalog/evidence.py`, `catalog/retrieval.py`, `catalog/safety.py` и
+  `catalog/scoring.py` — канонические владельцы catalog matching; прежние
+  `services/matching.py` и `services/catalog_resolver.py` удалены в Block 5J.
 - `conversation/selection.py` — channel-neutral score, targeting и выбор
   кандидата; не знает о ParsedCommand или callback semantics.
 - `conversation/progression.py` — channel-neutral progression core: выбор
@@ -196,13 +195,11 @@ AI предлагает структуру, source phrase подтверждае
 Block 4 завершён механически: смешанный catalog matching разделён на owners
 `catalog/evidence.py` (323 строки), `catalog/scoring.py` (103),
 `catalog/retrieval.py` (53), `catalog/safety.py` (385) и
-`catalog/resolver.py` (199). `services/matching.py` оставлен transitional
-compatibility module: каталоговые symbols re-exported, а
-`nearest_valid_multiple()` оставлен совместимым re-export из
-`conversation/quantity_resolution.py`, который теперь является владельцем
-non-catalog политики кратности.
-`services/catalog_resolver.py` остаётся чистым re-export facade. Production callers
-переведены на новые owners. Сравнение старого и нового pipeline на 18
+`catalog/resolver.py` (199). После Block 5J канонические catalog owners и
+`conversation/quantity_resolution.py` используются напрямую; старые
+compatibility facades `services/matching.py` и `services/catalog_resolver.py`
+удалены после caller-аудита. Production callers переведены на новые owners.
+Сравнение старого и нового pipeline на 18
 представительных corpus-классах дало `0 mismatches`; полный baseline —
 `1362 collected / 1362 passed`. Retrieval остался bounded in-memory; PostgreSQL,
 pgvector, embeddings, catalog migrations и Sheets sync в Block 4 не добавлялись.
@@ -217,9 +214,8 @@ seam, который позднее можно заменить searchable proje
 parsing/conversation cleanup, а не дублирующая реализация.
 Repository-wide audit подтвердил одного owner для catalog responsibilities,
 отсутствие циклов и workflow-изменений в engine/orchestrator; единственный
-политика кратности вынесена в `conversation/quantity_resolution.py`, а
-`services/matching.py` сохраняет только compatibility re-export. Conversation
-Block не начинался.
+политика кратности вынесена в `conversation/quantity_resolution.py`.
+Conversation Block не начинался.
 
 Block 5A выполнен как поведенчески нейтральная декомпозиция conversation
 routing/state policy. Новые channel-neutral owners находятся в
@@ -227,9 +223,9 @@ routing/state policy. Новые channel-neutral owners находятся в
 `comment_scope.py`, `state_compatibility.py` и `modal_routing.py`. Чистые
 canonical unresolved membership/priority и state-query функции находятся в
 `conversation/state/queries.py`. Production
-imports переведены на новые owners, а старые
+imports переведены на новые owners; старые
 `services/conversation_handlers/state_compatibility.py`, `modal_routing.py` и
-`state.py` оставлены только как re-export facades.
+`state.py` удалены в Block 5J после нулевого caller-аудита.
 
 `StateCompatibilityPolicy` сохранила public methods `evaluate`, `context_for`,
 `should_try_contextual_fallback` и `submission_failure_mode`, все enum/decision
@@ -314,6 +310,13 @@ Block 5I завершил механический перенос `services/comm
 Старый модуль удалён после repository-wide audit; production/test imports старого
 пути отсутствуют. Следующий code seam до external review не назначать;
 `services/text.py` остаётся только предложенным кандидатом в отдельном обсуждении.
+
+Block 5J завершил удаление пяти obsolete test-only compatibility facades:
+`services/catalog_resolver.py`, `services/matching.py` и трёх старых
+`conversation_handlers` путей. Все тестовые imports переведены на канонические
+owners (`catalog/*`, `conversation/routing/*`, `conversation/state/queries.py`);
+production и dynamic caller-ы отсутствовали. Поведение и assertions не менялись,
+полный baseline сохранён: `1362 collected / 1362 passed`.
 
 ## 12. Проверки
 

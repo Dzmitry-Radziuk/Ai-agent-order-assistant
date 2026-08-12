@@ -5,6 +5,14 @@ from typing import Any
 import pytest
 
 from restaurant_bot.config import Settings
+from restaurant_bot.conversation.routing.contracts import (
+    CompatibilityAction,
+    CompatibilityContext,
+)
+from restaurant_bot.conversation.routing.modal_routing import evaluate_modal_routing
+from restaurant_bot.conversation.routing.state_compatibility import (
+    StateCompatibilityPolicy,
+)
 from restaurant_bot.domain.models import (
     CartItem,
     ConversationState,
@@ -16,14 +24,6 @@ from restaurant_bot.domain.models import (
     ParsedCommand,
     SessionStage,
     TelegramEvent,
-)
-from restaurant_bot.services.conversation_handlers.modal_routing import (
-    evaluate_modal_routing,
-)
-from restaurant_bot.services.conversation_handlers.state_compatibility import (
-    CompatibilityAction,
-    CompatibilityContext,
-    StateCompatibilityPolicy,
 )
 from restaurant_bot.services.engine import ConversationEngine
 from restaurant_bot.services.parser import infer_intent, parse_callback
@@ -152,9 +152,7 @@ def test_add_items_interrupts_submit_confirmation_without_metadata_leak(settings
         items=[ExtractedItem(product_query="пармезан", quantity=3, unit="кг")],
     )
 
-    result = ConversationEngine(settings).handle(
-        _event(command.text), command, _state(), []
-    )
+    result = ConversationEngine(settings).handle(_event(command.text), command, _state(), [])
 
     assert result.state.stage is SessionStage.REVIEW
     assert result.enqueue_submission is False

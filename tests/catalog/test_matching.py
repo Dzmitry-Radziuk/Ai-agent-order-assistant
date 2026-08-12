@@ -1,9 +1,7 @@
+from restaurant_bot.catalog.evidence import has_catalog_search_evidence
+from restaurant_bot.catalog.retrieval import rank_candidates
+from restaurant_bot.catalog.safety import can_auto_select
 from restaurant_bot.domain.models import CatalogProduct
-from restaurant_bot.services.matching import (
-    can_auto_select,
-    has_catalog_search_evidence,
-    rank_candidates,
-)
 from restaurant_bot.services.text import remove_phrase_overlap
 
 
@@ -154,9 +152,7 @@ def test_constraints_cannot_create_cross_category_candidates() -> None:
     ]
     assert rank_candidates("лук зеленый", catalog) == []
     assert rank_candidates("сыр сливочный", catalog) == []
-    assert not has_catalog_search_evidence(
-        search_query, catalog[1]
-    )
+    assert not has_catalog_search_evidence(search_query, catalog[1])
 
 
 def test_core_candidates_keep_single_word_and_preparation_queries() -> None:
@@ -173,4 +169,6 @@ def test_core_candidates_keep_single_word_and_preparation_queries() -> None:
     ]
     assert [candidate.product_id for candidate in rank_candidates("укроп", catalog)] == ["dill"]
     assert [candidate.product_id for candidate in rank_candidates("лук порей", catalog)] == ["leek"]
-    assert [candidate.product_id for candidate in rank_candidates("картофель", catalog)] == ["potato"]
+    assert [candidate.product_id for candidate in rank_candidates("картофель", catalog)] == [
+        "potato"
+    ]

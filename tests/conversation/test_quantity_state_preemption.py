@@ -1,5 +1,9 @@
 from types import SimpleNamespace
 
+from restaurant_bot.conversation.routing.contracts import CompatibilityAction
+from restaurant_bot.conversation.routing.state_compatibility import (
+    StateCompatibilityPolicy,
+)
 from restaurant_bot.domain.models import (
     CartItem,
     CatalogProduct,
@@ -11,10 +15,6 @@ from restaurant_bot.domain.models import (
     ParsedCommand,
     SessionStage,
     TelegramEvent,
-)
-from restaurant_bot.services.conversation_handlers.state_compatibility import (
-    CompatibilityAction,
-    StateCompatibilityPolicy,
 )
 from restaurant_bot.services.engine import ConversationEngine
 from restaurant_bot.services.orchestrator import UpdateOrchestrator

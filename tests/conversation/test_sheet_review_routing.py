@@ -2,6 +2,13 @@ from __future__ import annotations
 
 import pytest
 
+from restaurant_bot.conversation.routing.contracts import (
+    CompatibilityAction,
+    CompatibilityContext,
+)
+from restaurant_bot.conversation.routing.state_compatibility import (
+    StateCompatibilityPolicy,
+)
 from restaurant_bot.domain.models import (
     ConversationState,
     DialogueResponse,
@@ -9,11 +16,6 @@ from restaurant_bot.domain.models import (
     Intent,
     ParsedCommand,
     SessionStage,
-)
-from restaurant_bot.services.conversation_handlers.state_compatibility import (
-    CompatibilityAction,
-    CompatibilityContext,
-    StateCompatibilityPolicy,
 )
 from restaurant_bot.services.orchestrator import UpdateOrchestrator
 
@@ -46,9 +48,9 @@ def test_sheet_review_is_the_only_review_compatibility_context() -> None:
     policy = StateCompatibilityPolicy()
 
     assert policy.context_for(_state()) is CompatibilityContext.SHEET_REVIEW
-    assert policy.context_for(
-        ConversationState(stage=SessionStage.REVIEW, review_mode="cart")
-    ) is None
+    assert (
+        policy.context_for(ConversationState(stage=SessionStage.REVIEW, review_mode="cart")) is None
+    )
     assert (
         policy.evaluate(
             _command(Intent.SHOW_CART),

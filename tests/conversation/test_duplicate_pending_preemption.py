@@ -2,6 +2,13 @@ from __future__ import annotations
 
 import pytest
 
+from restaurant_bot.conversation.routing.contracts import (
+    CompatibilityAction,
+    CompatibilityContext,
+)
+from restaurant_bot.conversation.routing.state_compatibility import (
+    StateCompatibilityPolicy,
+)
 from restaurant_bot.domain.models import (
     CartItem,
     CatalogProduct,
@@ -12,11 +19,6 @@ from restaurant_bot.domain.models import (
     ItemStatus,
     ParsedCommand,
     TelegramEvent,
-)
-from restaurant_bot.services.conversation_handlers.state_compatibility import (
-    CompatibilityAction,
-    CompatibilityContext,
-    StateCompatibilityPolicy,
 )
 from restaurant_bot.services.engine import ConversationEngine
 

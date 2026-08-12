@@ -78,14 +78,11 @@ flowchart LR
 | `conversation/routing/` | Channel-neutral contracts и StateCompatibilityPolicy, сгруппированные по item resolution, order/review и comment scope; modal routing остаётся агрегатором |
 | `conversation/state/queries.py` | Канонические unresolved membership/priority, `first_unresolved` и `item_index` без мутации состояния |
 | `services/conversation_handlers/` | Legacy Telegram/presentation handlers: количество, выбор товара, область комментария, финальная проверка, статусы и пассивная навигация |
-| `services/conversation_handlers/state_compatibility.py` | Compatibility re-export facade для `conversation/routing/state_compatibility.py` |
-| `services/conversation_handlers/modal_routing.py` | Compatibility re-export facade для `conversation/routing/modal_routing.py` |
-| `services/conversation_handlers/state.py` | Compatibility re-export facade для `conversation/state/queries.py` |
 
-Полный audit transitional `services/`, callers и выполненный migration seam
-зафиксированы в `docs/SERVICES_TRANSITION_AUDIT.md`. Production-код в audit-only
-блоке не изменяется; `services/comment_policy.py` удалён после подтверждённого
-отсутствия callers.
+Полный audit transitional `services/`, callers и выполненные migration seams
+зафиксированы в `docs/SERVICES_TRANSITION_AUDIT.md`. После Block 5J obsolete
+compatibility facades удалены после подтверждённого нулевого caller-аудита;
+реальные owners находятся в `catalog/` и `conversation/`.
 
 После Block 5B `conversation/comments.py` и `conversation/draft.py` являются
 единственными владельцами перечисленных core-операций. `comment_scope.py`
@@ -98,8 +95,6 @@ CommentScopeHandler их сохраняет.
 | `catalog/scoring.py` | Детерминированная оценка одного каталожного товара |
 | `catalog/retrieval.py` | Ограниченный in-memory поиск, admission и порядок кандидатов |
 | `catalog/safety.py` | Конфликты квалификаторов, numeric compatibility, safe equivalence, broad-category policy и auto-select safety |
-| `services/matching.py` | Compatibility path для catalog re-export и совместимый re-export `nearest_valid_multiple` |
-| `services/catalog_resolver.py` | Чистый compatibility re-export facade для `catalog/resolver.py` |
 | `services/replies.py` | Пользовательские карточки и клавиатуры основного диалога |
 | `services/submission.py` | Контрольные точки записи, пересчёта, опциональной отправки и чтения статусов |
 | `services/submission_presenter.py` | Тексты и кнопки завершения заявки и истории заказов |

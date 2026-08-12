@@ -1,5 +1,5 @@
+from restaurant_bot.catalog.resolver import CatalogDecision, CatalogResolver
 from restaurant_bot.domain.models import CatalogProduct, SearchScope
-from restaurant_bot.services.catalog_resolver import CatalogDecision, CatalogResolver
 from restaurant_bot.services.text import remove_phrase_overlap
 
 

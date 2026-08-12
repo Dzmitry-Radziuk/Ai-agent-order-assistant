@@ -2,6 +2,13 @@ from __future__ import annotations
 
 import pytest
 
+from restaurant_bot.conversation.routing.contracts import (
+    CompatibilityAction,
+    CompatibilityContext,
+)
+from restaurant_bot.conversation.routing.state_compatibility import (
+    StateCompatibilityPolicy,
+)
 from restaurant_bot.domain.models import (
     CatalogProduct,
     ConversationState,
@@ -12,11 +19,6 @@ from restaurant_bot.domain.models import (
     ParsedCommand,
     SessionStage,
     TelegramEvent,
-)
-from restaurant_bot.services.conversation_handlers.state_compatibility import (
-    CompatibilityAction,
-    CompatibilityContext,
-    StateCompatibilityPolicy,
 )
 from restaurant_bot.services.engine import ConversationEngine
 
@@ -100,11 +102,7 @@ def test_independent_add_does_not_rewrite_old_unit_item(
     """Добавляет новый товар отдельно для текста и голоса."""
     engine = ConversationEngine(settings)
     state = _unit_state(engine)
-    phrase = (
-        "Пармезан 3 кг"
-        if input_kind is InputKind.TEXT
-        else "Пармезан три килограмма"
-    )
+    phrase = "Пармезан 3 кг" if input_kind is InputKind.TEXT else "Пармезан три килограмма"
     result = engine.handle(
         _event(phrase, input_kind),
         _add_command(phrase, "Пармезан"),
