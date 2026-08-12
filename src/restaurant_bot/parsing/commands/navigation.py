@@ -6,7 +6,7 @@ import re
 
 from restaurant_bot.domain.models import Intent, ParsedCommand
 from restaurant_bot.parsing.commands.normalization import _has_word_stem, has_negation
-from restaurant_bot.services.text import UNIT_ALIASES
+from restaurant_bot.domain.units import UNIT_ALIASES
 
 
 def _looks_like_generic_add_navigation(normalized: str, words: list[str]) -> bool:

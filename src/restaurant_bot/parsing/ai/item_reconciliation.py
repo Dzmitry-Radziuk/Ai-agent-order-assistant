@@ -12,11 +12,8 @@ from restaurant_bot.parsing.ai.comment_reconciliation import (
     _strip_conversational_product_leadin,
 )
 from restaurant_bot.parsing.products import parse_product_lines
-from restaurant_bot.services.text import (
-    NUMBER_WORDS,
-    UNIT_ALIASES,
-    to_float,
-)
+from restaurant_bot.domain.units import UNIT_ALIASES
+from restaurant_bot.services.text import NUMBER_WORDS, to_float
 from restaurant_bot.text_normalization import clean_text, normalize_text
 
 _MIXED_SCRIPT_TOKEN_RE = re.compile(r"[A-Za-zА-Яа-яЁё]+")

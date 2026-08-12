@@ -130,13 +130,9 @@ from restaurant_bot.services.replies import (
     unknown_intent_reply,
     unrecognized_voice_reply,
 )
-from restaurant_bot.services.text import (
-    NUMBER_WORDS,
-    UNIT_ALIASES,
-    convert_quantity,
-    normalize_department,
-    normalize_unit,
-)
+from restaurant_bot.domain.unit_conversion import convert_quantity
+from restaurant_bot.domain.units import UNIT_ALIASES, normalize_unit
+from restaurant_bot.services.text import NUMBER_WORDS, normalize_department
 from restaurant_bot.text_normalization import normalize_text
 
 

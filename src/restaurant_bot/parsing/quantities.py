@@ -4,13 +4,8 @@ from __future__ import annotations
 
 import re
 
-from restaurant_bot.services.text import (
-    NUMBER_WORDS,
-    UNIT_ALIASES,
-    normalize_unit,
-    numeric_range_spans,
-    parse_number_words,
-)
+from restaurant_bot.domain.units import UNIT_ALIASES, normalize_unit
+from restaurant_bot.services.text import NUMBER_WORDS, numeric_range_spans, parse_number_words
 from restaurant_bot.text_normalization import normalize_text
 
 _EXPLICIT_ORDER_QUANTITY_RE = re.compile(

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from restaurant_bot.conversation.comments import merge_comments
 from restaurant_bot.domain.models import CartItem, CommentSource, ConversationState, ItemStatus
-from restaurant_bot.services.text import normalize_unit
+from restaurant_bot.domain.units import normalize_unit
 
 
 def has_active_draft_items(state: ConversationState) -> bool:

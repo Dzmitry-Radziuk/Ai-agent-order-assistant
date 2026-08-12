@@ -18,11 +18,8 @@ from restaurant_bot.services.parser import (
     parse_product_lines,
     parse_quantity_unit,
 )
-from restaurant_bot.services.text import (
-    UNIT_ALIASES,
-    normalize_unit,
-    parse_number_words,
-)
+from restaurant_bot.domain.units import UNIT_ALIASES, normalize_unit
+from restaurant_bot.services.text import parse_number_words
 from restaurant_bot.text_normalization import normalize_text
 
 _SINGLE_CONTAINER_UNITS = {

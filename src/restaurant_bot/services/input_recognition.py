@@ -28,7 +28,7 @@ from restaurant_bot.input.voice_transcript_policy import (
 from restaurant_bot.integrations.openai_client import OpenAIService
 from restaurant_bot.integrations.telegram import TelegramClient
 from restaurant_bot.services.parser import infer_intent, parse_quantity_unit
-from restaurant_bot.services.text import normalize_unit
+from restaurant_bot.domain.units import normalize_unit
 from restaurant_bot.text_normalization import normalize_text
 
 logger = structlog.get_logger(__name__)
