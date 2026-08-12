@@ -235,3 +235,7 @@ Product-add owners: `orders/product_add.py`, `conversation/product_add.py` и
 `services/replies.py` удалены. `services/text.py` по-прежнему содержит только
 `to_float`, потому что Sheets и AI-reconciliation контракты пока не имеют
 доказанного единого нового owner.
+
+Эта секция имеет приоритет над историческими строками таблиц ниже, где пути
+`services/replies.py` и `services/product_add_flow.py` ещё отражают состояние до
+Block 5T.

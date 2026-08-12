@@ -323,3 +323,5 @@ Production imports старых `services.parser`, `services.replies` и
 `services.product_add_flow` отсутствуют. Динамических ссылок на удалённые
 facades не найдено. Остальные большие application/use-case модули не дробились.
 Полный baseline до и после — `1366 collected / 1366 passed`.
+Старые списки зависимостей и таблица ниже сохранены как история предыдущих
+аудитов; для текущего дерева применяются owners и edges из этой секции.
