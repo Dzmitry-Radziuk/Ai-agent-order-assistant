@@ -22,7 +22,7 @@ AI помогает понять свободную речь и найти ка�
 - Текущий Git HEAD всегда определяется командой `git rev-parse HEAD`, а не
   фиксируется в handoff после каждого commit.
 - Единственный рабочий remote: GitHub `origin/decompose_bot`.
-- Автоматический baseline: `1362 collected / 1362 passed`.
+- Текущий полный baseline: `1366 collected / 1366 passed`.
 - `manual_smoke_forensic_logs.txt` — необязательный локальный diagnostic artifact,
   не tracked-файл репозитория. Если он существует локально, его нельзя менять,
   удалять или добавлять в commit; отсутствие файла нормально.

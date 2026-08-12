@@ -318,7 +318,7 @@ visible-action matching и progress presentation. Он также сохрани
 
 - starting local/remote SHA: совпадают на `9c19f784ef88a0721c8be99bb8cece80ae4ebfe4`;
 - `tests/input/test_voice_processing_card.py`: `24` collected, green;
-- полный pytest в этом audit не обязателен при нулевом Python diff;
+- полный pytest после audit: `1366 collected / 1366 passed`;
 - обязательные AST cycle/import проверки должны быть выполнены перед docs commit;
 - инвариант Block 5K сохраняется: `services.orchestrator → workers.tasks = 0`;
 - `manual_smoke_forensic_logs.txt` необязателен и не изменяется;
