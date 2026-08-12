@@ -44,7 +44,8 @@ from restaurant_bot.services.parser import (
     retry_requested_for,
 )
 from restaurant_bot.domain.units import UNIT_ALIASES, normalize_unit
-from restaurant_bot.services.text import numeric_range_spans, to_float
+from restaurant_bot.parsing.numeric_ranges import numeric_range_spans
+from restaurant_bot.services.text import to_float
 from restaurant_bot.text_normalization import clean_text, normalize_text
 
 __all__ = [

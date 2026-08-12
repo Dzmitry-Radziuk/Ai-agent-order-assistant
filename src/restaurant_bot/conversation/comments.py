@@ -13,8 +13,8 @@ from restaurant_bot.domain.models import (
 )
 from restaurant_bot.parsing.comment_policy import comment_semantic_key
 from restaurant_bot.domain.units import UNIT_ALIASES, normalize_unit
+from restaurant_bot.parsing.number_words import NUMBER_WORDS
 from restaurant_bot.services.text import (
-    NUMBER_WORDS,
     remove_global_comment_overlap as text_remove_global_comment_overlap,
 )
 from restaurant_bot.text_normalization import normalize_text

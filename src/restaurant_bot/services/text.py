@@ -6,57 +6,7 @@ import re
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
-from restaurant_bot.domain.units import UNIT_ALIASES
 from restaurant_bot.text_normalization import clean_text, normalize_text
-
-NUMBER_WORDS: dict[str, float] = {
-    "ноль": 0,
-    "один": 1,
-    "одна": 1,
-    "одно": 1,
-    "одну": 1,
-    "раз": 1,
-    "два": 2,
-    "две": 2,
-    "три": 3,
-    "четыре": 4,
-    "пять": 5,
-    "шесть": 6,
-    "семь": 7,
-    "восемь": 8,
-    "девять": 9,
-    "десять": 10,
-    "одиннадцать": 11,
-    "двенадцать": 12,
-    "тринадцать": 13,
-    "четырнадцать": 14,
-    "пятнадцать": 15,
-    "шестнадцать": 16,
-    "семнадцать": 17,
-    "восемнадцать": 18,
-    "девятнадцать": 19,
-    "двадцать": 20,
-    "тридцать": 30,
-    "сорок": 40,
-    "пятьдесят": 50,
-    "шестьдесят": 60,
-    "семьдесят": 70,
-    "восемьдесят": 80,
-    "девяносто": 90,
-    "сто": 100,
-    "двести": 200,
-    "триста": 300,
-    "четыреста": 400,
-    "пятьсот": 500,
-    "шестьсот": 600,
-    "семьсот": 700,
-    "восемьсот": 800,
-    "девятьсот": 900,
-    "полтора": 1.5,
-    "полторы": 1.5,
-    "половина": 0.5,
-    "четверть": 0.25,
-}
 
 
 def remove_global_comment_overlap(item_comment: str, global_comment: str) -> str:
@@ -104,55 +54,6 @@ def remove_phrase_overlap(source_text: str, phrase: str) -> str:
         replacement = clean_text(f"{left} {right}")
         return replacement or source
     return source
-
-
-def numeric_range_spans(value: Any) -> list[tuple[int, int]]:
-    """Находит цифровые и словесные диапазоны характеристик товара."""
-    text = clean_text(value)
-    if not text:
-        return []
-    unit_pattern = "|".join(
-        sorted((re.escape(unit) for unit in UNIT_ALIASES), key=len, reverse=True)
-    )
-    pattern = re.compile(
-        rf"(?<!\w)\d+(?:[,.]\d+)?\s*(?:--|[-–—]|/|на|x|х)\s*\d+(?:[,.]\d+)?"
-        rf"(?:\s*(?:{unit_pattern}))?\b",
-        flags=re.IGNORECASE,
-    )
-    spans = [match.span() for match in pattern.finditer(text)]
-    number_word = "|".join(
-        sorted((re.escape(word) for word in NUMBER_WORDS), key=len, reverse=True)
-    )
-    word_phrase = rf"(?:{number_word})(?:\s+(?:{number_word}))*"
-    spoken_pattern = re.compile(
-        rf"(?<!\w){word_phrase}\s*[-–—]\s*{word_phrase}"
-        rf"(?:\s*(?:{unit_pattern}))?\b",
-        flags=re.IGNORECASE,
-    )
-    spans.extend(match.span() for match in spoken_pattern.finditer(text))
-    return sorted(spans)
-
-
-def parse_number_words(tokens: list[str], start: int) -> tuple[float, int] | None:
-    """Преобразует числительное словами в число."""
-    if start >= len(tokens):
-        return None
-    raw = tokens[start].replace(",", ".")
-    if re.fullmatch(r"\d+(?:\.\d+)?", raw):
-        return float(raw), start + 1
-    total = 0.0
-    used = False
-    index = start
-    while index < len(tokens):
-        token = tokens[index].replace("ё", "е")
-        if token not in NUMBER_WORDS:
-            break
-        total += NUMBER_WORDS[token]
-        used = True
-        index += 1
-    if not used or total <= 0:
-        return None
-    return total, index
 
 
 def to_float(value: Any) -> float | None:

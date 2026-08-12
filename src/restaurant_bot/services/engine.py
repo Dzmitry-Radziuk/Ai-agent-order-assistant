@@ -133,7 +133,7 @@ from restaurant_bot.services.replies import (
 from restaurant_bot.domain.unit_conversion import convert_quantity
 from restaurant_bot.domain.departments import normalize_department
 from restaurant_bot.domain.units import UNIT_ALIASES, normalize_unit
-from restaurant_bot.services.text import NUMBER_WORDS
+from restaurant_bot.parsing.number_words import NUMBER_WORDS
 from restaurant_bot.text_normalization import normalize_text
 
 

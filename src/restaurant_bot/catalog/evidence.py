@@ -7,7 +7,8 @@ from difflib import SequenceMatcher
 
 from restaurant_bot.domain.models import CatalogProduct
 from restaurant_bot.domain.units import UNIT_ALIASES, normalize_unit
-from restaurant_bot.services.text import NUMBER_WORDS, parse_number_words
+from restaurant_bot.parsing.number_words import NUMBER_WORDS, parse_number_words
+from restaurant_bot.parsing.numeric_ranges import numeric_range_spans
 from restaurant_bot.text_normalization import clean_text, normalize_text
 
 _STOP_WORDS = {

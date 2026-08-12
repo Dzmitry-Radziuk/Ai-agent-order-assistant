@@ -18,7 +18,8 @@ from restaurant_bot.parsing.ai.item_reconciliation import (
 )
 from restaurant_bot.parsing.comment_scope import has_explicit_global_comment_scope
 from restaurant_bot.domain.units import UNIT_ALIASES, normalize_unit
-from restaurant_bot.services.text import NUMBER_WORDS, to_float
+from restaurant_bot.parsing.number_words import NUMBER_WORDS
+from restaurant_bot.services.text import to_float
 from restaurant_bot.text_normalization import clean_text, normalize_text
 
 
