@@ -9,6 +9,7 @@ from restaurant_bot.conversation.selection import (
     resolve_candidate_selection,
 )
 from restaurant_bot.conversation.state.queries import item_index
+from restaurant_bot.conversation.state.transitions import normalize_cart_page
 from restaurant_bot.domain.models import (
     Candidate,
     CartItem,
@@ -47,6 +48,7 @@ class CandidateSelectionHandler:
             selection_query=command.selection_query,
         )
         if selection.failure is SelectionFailure.NO_CURRENT_ITEM:
+            normalize_cart_page(state)
             return CandidateSelectionOutcome(
                 result=EngineResult(state=state, reply=cart_reply(state))
             )

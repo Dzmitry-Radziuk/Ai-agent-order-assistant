@@ -8,6 +8,7 @@ import structlog
 from redis import Redis
 
 from restaurant_bot.config import Settings
+from restaurant_bot.conversation.state.transitions import normalize_cart_page
 from restaurant_bot.db import SessionLocal
 from restaurant_bot.db_models import SubmissionRecord
 from restaurant_bot.domain.models import (
@@ -945,6 +946,7 @@ class SubmissionService:
             lease.ensure_owned()
 
         state.ui_revision += 1
+        normalize_cart_page(state)
         draft = cart_reply(state)
         suffix = f":r{state.ui_revision}"
         for row in draft.rows:

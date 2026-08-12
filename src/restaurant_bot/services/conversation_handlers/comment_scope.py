@@ -10,6 +10,7 @@ from restaurant_bot.conversation.comments import (
     comment_scope_items,
     merge_scope_comments,
 )
+from restaurant_bot.conversation.state.transitions import normalize_cart_page
 from restaurant_bot.domain.models import (
     CommentSource,
     ConversationState,
@@ -57,6 +58,7 @@ class CommentScopeHandler:
                 else SessionStage.COLLECTING
             )
             state.status = state.stage.value
+            normalize_cart_page(state)
             return CommentScopeOutcome(
                 result=EngineResult(
                     state=state,

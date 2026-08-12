@@ -51,6 +51,7 @@ from restaurant_bot.conversation.state.queries import (
     first_unresolved as first_unresolved_item,
 )
 from restaurant_bot.conversation.state.queries import item_index as state_item_index
+from restaurant_bot.conversation.state.transitions import normalize_cart_page
 from restaurant_bot.domain.departments import normalize_department
 from restaurant_bot.domain.models import (
     BotReply,
@@ -97,7 +98,6 @@ from restaurant_bot.presentation.telegram.formatting import escape
 from restaurant_bot.presentation.telegram.product_add import product_add_prompt
 from restaurant_bot.presentation.telegram.replies import (
     added_items_question_reply,
-    cart_reply,
     comment_scope_clarification_reply,
     final_review_reply,
     issue_reply,
@@ -114,6 +114,9 @@ from restaurant_bot.presentation.telegram.replies import (
     supplier_warning_details_reply,
     unknown_intent_reply,
     unrecognized_voice_reply,
+)
+from restaurant_bot.presentation.telegram.replies import (
+    cart_reply as render_cart_reply,
 )
 from restaurant_bot.presentation.telegram.submission import (
     submission_dispatch_uncertain_reply,
@@ -135,6 +138,16 @@ from restaurant_bot.services.conversation_handlers.pending_quantity import (
     PendingQuantityHandler,
 )
 from restaurant_bot.text_normalization import normalize_text
+
+
+def cart_reply(
+    state: ConversationState,
+    title: str = "Черновик заявки",
+    notice: str = "",
+) -> BotReply:
+    """Нормализует страницу в state boundary и делегирует Telegram-рендеринг."""
+    normalize_cart_page(state)
+    return render_cart_reply(state, title=title, notice=notice)
 
 
 class ConversationEngine:
