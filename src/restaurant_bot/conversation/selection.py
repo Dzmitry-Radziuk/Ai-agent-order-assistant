@@ -11,7 +11,6 @@ from restaurant_bot.domain.models import (
     CartItem,
     ConversationState,
     ItemStatus,
-    ParsedCommand,
 )
 from restaurant_bot.services.text import normalize_text
 
@@ -104,22 +103,22 @@ def find_cart_item(state: ConversationState, target_query: str) -> CartItem | No
 
 
 def resolve_candidate_selection(
-    command: ParsedCommand,
     state: ConversationState,
+    *,
+    target_item_index: int | None = None,
+    selected_candidate_number: int | None = None,
+    selection_query: str = "",
 ) -> CandidateSelectionResult:
     """Однозначно выбирает кандидата без формирования пользовательского ответа."""
     item = state.current_item()
-    if command.callback_target.isdigit():
-        selected_item_index = int(command.callback_target)
-        item = (
-            state.cart[selected_item_index] if 0 <= selected_item_index < len(state.cart) else None
-        )
+    if target_item_index is not None:
+        item = state.cart[target_item_index] if 0 <= target_item_index < len(state.cart) else None
     if item is None or item.status is not ItemStatus.AMBIGUOUS:
         return CandidateSelectionResult(failure=SelectionFailure.NO_CURRENT_ITEM)
 
-    candidate_index = (command.selected_index or 0) - 1
-    if command.selection_query:
-        query = normalize_text(command.selection_query)
+    candidate_index = (selected_candidate_number or 0) - 1
+    if selection_query:
+        query = normalize_text(selection_query)
         scores = [
             contains_score(query, normalize_text(candidate.name)) for candidate in item.candidates
         ]

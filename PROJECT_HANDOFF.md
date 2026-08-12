@@ -96,6 +96,8 @@ Telegram update
   реализацией помощника кратности заказа.
 - `services/catalog_resolver.py` — чистый compatibility re-export facade для
   `catalog/resolver.py`.
+- `conversation/selection.py` — channel-neutral score, targeting и выбор
+  кандидата; не знает о ParsedCommand или callback semantics.
 - `services/conversation_handlers/` — quantity, candidate, comment scope,
   review, navigation и единая StateCompatibilityPolicy.
 - `services/engine.py` — текущая state machine, применение решения каталога,
@@ -233,7 +235,10 @@ Block 5A не меняет engine workflow, parser, catalog, prompts, comments,
 quantity semantics, database, Docker, Sheets или Telegram UX. Focused modal
 suite, полный baseline и quality gates подтверждают сохранение routing behavior.
 После review этой границы выполнен отдельный Block 5B по core-операциям draft и
-comments; Telegram/presentation handlers в нём не переносились.
+comments; Telegram/presentation handlers в нём не переносились. Block 5C также
+завершён: `conversation/selection.py` владеет channel-neutral selection core,
+а `CandidateSelectionHandler` остаётся presentation-only адаптером. Engine и
+input recognition используют этот общий owner.
 
 Постоянное правило: перед каждым `MOVE`/`MERGE`/`DELETE` выполняются
 repository-wide usage и duplicate audit. Мёртвый или дублирующий код не
@@ -275,9 +280,13 @@ provenance-примитивов. `services/conversation_handlers/comment_scope.p
 Сравнение старой и новой реализаций на corpus состояний и строк дало
 `MISMATCHES=0`; полный regression baseline — `1362 collected / 1362 passed`.
 
+Текущий selection core не импортирует `ParsedCommand`: handler преобразует
+callback target и поля команды в нейтральные аргументы core. Это сохраняет
+channel boundary без изменения callback format и пользовательского поведения.
+
 ## 11. Следующий функциональный блок
 
-После review Block 5B отдельно назначается следующий этап декомпозиции. До
+После review Block 5C отдельно назначается следующий этап декомпозиции. До
 такого решения нельзя автоматически переносить остальные handlers, уменьшать
 `engine.py` или менять поведение state machine.
 
@@ -311,24 +320,3 @@ git diff --check
 PROJECT_HANDOFF.md, `.agents/DECISIONS.md`, `.agents/PROJECT_MAP.md`,
 архитектурной документации, тестов и текущего Git state. История обсуждений
 в handoff не копируется.
-
-## 14. Block 5C — conversation selection core
-
-Block 5C завершён как поведенчески нейтральное выделение выбора позиции
-черновика и кандидата. Новый channel-neutral owner —
-`conversation/selection.py`: в нём находятся `contains_score`,
-`tokens_share_stem`, `find_cart_item` и `resolve_candidate_selection` с малым
-структурированным результатом `CandidateSelectionResult`.
-
-`CandidateSelectionHandler` теперь остаётся presentation-адаптером: он только
-преобразует результат ядра в прежние `EngineResult` и пользовательские ответы.
-`ConversationEngine` напрямую делегирует поиск позиции и score новому owner;
-`_contains_score`, `_tokens_share_stem` и `_find_cart_item` удалены. Голосовой
-`InputRecognitionService` также использует единый score owner. Catalog matching,
-routing, comments, quantity, parser, prompts, database, Docker и Sheets не
-изменялись.
-
-Сравнение старой реализации из исходного `HEAD` с новой дало ноль расхождений:
-score — `0`, targeting — `0`, candidate selection — `0`. Полный baseline:
-`1362 collected / 1362 passed`. Следующий архитектурный seam назначается только
-после external review этого блока.

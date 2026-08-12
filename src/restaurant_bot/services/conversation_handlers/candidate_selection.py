@@ -37,7 +37,15 @@ class CandidateSelectionHandler:
         state: ConversationState,
     ) -> CandidateSelectionOutcome:
         """Выбирает кандидата и формирует прежний ответ при ошибке."""
-        selection = resolve_candidate_selection(command, state)
+        target_item_index = (
+            int(command.callback_target) if command.callback_target.isdigit() else None
+        )
+        selection = resolve_candidate_selection(
+            state,
+            target_item_index=target_item_index,
+            selected_candidate_number=command.selected_index,
+            selection_query=command.selection_query,
+        )
         if selection.failure is SelectionFailure.NO_CURRENT_ITEM:
             return CandidateSelectionOutcome(
                 result=EngineResult(state=state, reply=cart_reply(state))
