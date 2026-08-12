@@ -84,6 +84,10 @@ services сохраняется только через text и требует �
 
 ## Карта ответственности text.py
 
+Полный symbol-level caller/duplicate audit Block 5L вынесен в
+[`docs/SERVICES_TEXT_AUDIT.md`](SERVICES_TEXT_AUDIT.md). Он не переносит production-код
+и назначает ровно один следующий seam только для `clean_text` и `normalize_text`.
+
 - Общая очистка: clean_text, normalize_text; lower/core callers в parsing/catalog/conversation.
 - Очистка поиска и комментариев: remove_phrase_overlap, remove_global_comment_overlap; catalog и conversation evidence.
 - Единицы: UNIT_ALIASES, normalize_unit, convert_quantity; primitives количества в domain/parsing.
@@ -169,9 +173,11 @@ comment-policy seam, Block 5J — только удаление доказанн
 
 ### NEXT — только после external review
 
-Следующий code seam не назначен до external review. Наиболее вероятный кандидат
-по прошлому audit — targeted split services/text.py, но его нельзя считать
-утверждённым этапом и нельзя начинать без отдельного caller/duplicate audit.
+Block 5L завершил отдельный caller/duplicate audit. Следующий seam назначен только
+как предложение, без реализации: совместный перенос `clean_text` и `normalize_text`
+в semantic-neutral `text/normalization.py` с временным re-export из `services/text.py`.
+Полная таблица callers, риски и исключение старого варианта `parsing/text.py`
+зафиксированы в [`docs/SERVICES_TEXT_AUDIT.md`](SERVICES_TEXT_AUDIT.md).
 Block 5I стартовал с SHA 1a6bf0da753976303b196c57f65a36316bc15685.
 
 ### ПОЗДНЕЕ

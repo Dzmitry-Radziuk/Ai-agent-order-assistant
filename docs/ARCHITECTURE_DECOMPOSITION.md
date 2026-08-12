@@ -86,7 +86,7 @@ contracts и проходит focused/full regression до следующего 
 | `parsing/quantities.py` | **Block 2A: CREATE** quantity primitives. |
 | `parsing/packaging.py` | **Block 2A: CREATE** фасовка и каталожные измерения. |
 | `parsing/comment_scope.py` | **Block 2A: CREATE** явная область общего комментария. |
-| `services/text.py` | Позже MOVE в `parsing/text.py`, после миграции callers. |
+| `services/text.py` | Block 5L: read-only caller/duplicate audit; единственный предложенный следующий seam — `clean_text` и `normalize_text` в semantic-neutral `text/normalization.py`, с временным re-export. |
 | `integrations/openai_parsing.py` | Compatibility re-export facade; алгоритмов нет. |
 | `integrations/openai_prompts.py` | Позже MOVE prompt contract без изменения текста. |
 | `integrations/openai_client.py` | Позже SPLIT transport и AI facade в `application/ai_service.py`. |

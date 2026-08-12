@@ -316,7 +316,11 @@ Block 5I завершил механический перенос `services/comm
 `1a6bf0da753976303b196c57f65a36316bc15685`.
 Старый модуль удалён после repository-wide audit; production/test imports старого
 пути отсутствуют. Следующий code seam до external review не назначать;
-`services/text.py` остаётся только предложенным кандидатом в отдельном обсуждении.
+Block 5L завершил read-only audit `services/text.py`. Production-код и тесты не
+менялись. Полный symbol/caller/duplicate audit находится в
+[`docs/SERVICES_TEXT_AUDIT.md`](docs/SERVICES_TEXT_AUDIT.md). Единственный
+предложенный следующий seam — совместный перенос `clean_text` и `normalize_text`
+в semantic-neutral `text/normalization.py`; реализация не начиналась.
 
 Block 5J завершил удаление пяти obsolete test-only compatibility facades:
 `services/catalog_resolver.py`, `services/matching.py` и трёх старых
