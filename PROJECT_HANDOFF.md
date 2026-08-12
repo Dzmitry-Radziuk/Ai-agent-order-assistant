@@ -217,7 +217,7 @@ seam, который позднее можно заменить searchable proje
 `pgvector`, не меняя evidence, safety, ConversationEngine и channel adapters.
 Реализация PostgreSQL, индексов, embeddings, миграций и Sheets sync не входит
 в этот блок. `catalog/resolver.py` сохраняет transitional imports
-`parsing/comment_policy` и `services/text`; это остаточная зависимость будущего
+`parsing/comment_policy` и `text_normalization`; это остаточная зависимость будущего
 parsing/conversation cleanup, а не дублирующая реализация.
 Repository-wide audit подтвердил одного owner для catalog responsibilities,
 отсутствие циклов и workflow-изменений в engine/orchestrator; единственный

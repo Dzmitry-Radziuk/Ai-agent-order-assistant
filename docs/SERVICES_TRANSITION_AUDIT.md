@@ -10,26 +10,40 @@ cli.py; динамические границы проверены по orchestr
 Этот SHA обозначает исходную ревизию аудита. d8fbced775aeb0685a49e2ae52be53e74c1ecaf8
 остаётся принятым audit baseline; фактический starting SHA Block 5I:
 1a6bf0da753976303b196c57f65a36316bc15685.
+Документ уточнён в Block 5NC после Block 5N; starting SHA этой коррекции:
+c2119d1adcad543d3833f3818e3cf9c9442ebcbc. Python-код и тесты в коррекции не
+изменяются.
 
 ## Состав пакета
 
-Файлы верхнего уровня: engine.py, input/telegram.py, input_recognition.py,
-orchestrator.py, order_review.py, parser.py,
+Файлы верхнего уровня внутри `src/restaurant_bot/services/`:
+engine.py, input_recognition.py, orchestrator.py, order_review.py, parser.py,
 product_add_flow.py, replies.py, submission_presenter.py, submission.py, text.py,
 venue_registration.py.
 
-conversation_handlers/: candidate_selection.py, comment_scope.py, final_review.py,
-navigation.py, pending_quantity.py, __init__.py.
+`src/restaurant_bot/services/conversation_handlers/`:
+__init__.py, candidate_selection.py, comment_scope.py, final_review.py,
+navigation.py, pending_quantity.py.
+
+Вне `services/` уже находятся канонические владельцы `input/telegram.py` и
+`parsing/comment_policy.py`; `catalog/resolver.py` и остальные модули `catalog/`
+также являются действующими owners своих catalog-ответственностей. В бывших
+переходных путях obsolete facades удалены: `services/comment_policy.py`,
+`services/catalog_resolver.py`, `services/matching.py` и старые
+`services/conversation_handlers/{modal_routing,state,state_compatibility}.py`.
 
 ## Классификация файлов
 
 | МОДУЛЬ | ТЕКУЩИЙ ВЛАДЕЛЕЦ / ВЫЗОВЫ | ЭФФЕКТЫ / СВЯЗНОСТЬ | СТАТУС | ЦЕЛЬ / ДЕЙСТВИЕ | ПРИОРИТЕТ |
 |---|---|---|---|---|---|
-| catalog_resolver.py | Удалён в Block 5J после нулевого caller-аудита | Только catalog; внешних эффектов не было | Удалённый compatibility facade | catalog.resolver / DONE | P2 |
-| matching.py | Удалён в Block 5J после нулевого caller-аудита | Только core; мутаций не было | Удалённый compatibility facade | catalog/* и conversation quantity / DONE | P2 |
+| services/catalog_resolver.py | Удалён в Block 5J после нулевого caller-аудита | Только catalog; внешних эффектов не было | Удалённый compatibility facade | catalog.resolver / DONE | P2 |
+| services/matching.py | Удалён в Block 5J после нулевого caller-аудита | Только core; мутаций не было | Удалённый compatibility facade | catalog/* и conversation quantity / DONE | P2 |
 | services/comment_policy.py | Удалён в Block 5I; до переноса callers: catalog, conversation, parsing, AI, engine | Чистая parsing/evidence policy, внешних эффектов нет | Удалён после audit | parsing/comment_policy.py / DONE | P1 |
+| catalog/resolver.py | Канонический resolver; callers: engine и catalog pipeline | Чистый catalog resolution, без Telegram effects | DONE вне services | Сохранять owner; не возвращать facade | P2 |
+| catalog/evidence.py, retrieval.py, scoring.py, safety.py | Канонические catalog-этапы retrieval/evidence/scoring/safety | Чистый catalog core | DONE вне services | Сохранять разделение этапов | P2 |
+| parsing/comment_policy.py | Каноническая supplier-comment policy; callers parsing, catalog, conversation, AI, engine | Чистый parsing/evidence policy | DONE вне services | Сохранять единственного owner | P1 |
 | engine.py | ConversationEngine: handle, routing, modal actions, duplicate/comment/product-add/submission preparation, catalog callers | Изменяет ConversationState/CartItem; строит replies | Смешанный координатор state-machine; catalog core перенесён в 5G | application/conversation и owners conversation / SPLIT | P4 |
-| input/telegram.py | Telegram raw payload в TelegramEvent; callers: api и orchestrator | Связь с Telegram/raw update; внешних эффектов нет | Канонический input adapter | DONE | P3 |
+| input/telegram.py (вне services/) | Telegram raw payload в TelegramEvent; callers: api и orchestrator | Связь с Telegram/raw update; внешних эффектов нет | Канонический input adapter | DONE | P3 |
 | input_recognition.py | Скачивание файла, OpenAI voice/photo recognition, visible actions, progress | Telegram + provider + state-aware prompts и побочные progress effects | Смешанный input adapter | input/recognition и channel progress / SPLIT | P3 |
 | orchestrator.py | Claim/lease, access, session, recognition, parsing, catalog, engine, checkpoints, delivery, review/analytics | DB/Redis/Sheets/OpenAI/Telegram/Celery effects | Координатор application смешан с use cases | application/update_pipeline и use cases / SPLIT | P5 |
 | order_review.py | Review snapshot, stale token, preview, submit handoff | Redis/DB/Sheets/Telegram | Review use case смешан с presentation | submission/review и presentation / SPLIT | P4 |
@@ -40,39 +54,64 @@ navigation.py, pending_quantity.py, __init__.py.
 | submission.py | Submit, read-back, checkpoints, catalog/recalc, dispatch fencing, completion, product-add write | DB/Redis/Sheets/Telegram effects | Смешанный сервис с safety-критичными операциями | submission/service, catalog, dispatch / SPLIT | P5 |
 | text.py | Cleanup, normalization, units/departments, ranges, number words, conversion, numeric parse, HTML/number formatting | Pure, но с большим fan-in в lower layers и presentation | Смешанный core/presentation primitive owner | parsing text, domain units, presentation formatting / SPLIT | P2 |
 | venue_registration.py | Directory, invite, access registry, binding, context, replies | HTTP/Redis/DB/Sheets и access mutation | Смешанный venue service | venues/directory, access, registration / SPLIT | P5 |
-| handlers/candidate_selection.py | Adapter к conversation.selection; callers engine/tests | Читает state, возвращает EngineResult/reply | Корректный adapter | conversation routing / KEEP_TEMP | P3 |
-| handlers/comment_scope.py | Проверка и применение pending scope; callers engine/tests | Мутирует comments/stage, строит replies | State/presentation adapter; core в conversation/comments | conversation routing / KEEP_TEMP | P3 |
-| handlers/final_review.py | Final guards и подготовка submission | Мутирует stage/issue, строит reply | Адаптер review | conversation/review / MOVE later | P4 |
-| handlers/modal_routing.py | Удалён в Block 5J после перевода тестового import | Эффектов не было | Удалённый compatibility facade | conversation.routing / DONE | P2 |
-| handlers/navigation.py | Passive replies и paging истории | Мутирует history view state, ставит async request | Смешанный navigation/history adapter | conversation navigation + history use case / SPLIT | P4 |
-| handlers/pending_quantity.py | Parser ответа количеством и мутация CartItem | Мутация modal state, зависимости parser/text | Адаптер state количества | conversation quantity flow / MOVE later | P3 |
-| handlers/state.py | Удалён в Block 5J после нулевого caller-аудита | Эффектов не было | Удалённый compatibility facade | conversation.state.queries / DONE | P2 |
-| handlers/state_compatibility.py | Удалён в Block 5J после перевода тестовых imports | Эффектов не было | Удалённый compatibility facade | conversation.routing / DONE | P2 |
-| handlers/__init__.py | Пустой маркер legacy handlers-пакета | Нет | Маркер пакета | Оставить для действующих handlers / KEEP | P4 |
+| services/conversation_handlers/candidate_selection.py | Adapter к conversation.selection; callers engine/tests | Читает state, возвращает EngineResult/reply | Корректный adapter | conversation routing / KEEP_TEMP | P3 |
+| services/conversation_handlers/comment_scope.py | Проверка и применение pending scope; callers engine/tests | Мутирует comments/stage, строит replies | State/presentation adapter; core в conversation/comments | conversation routing / KEEP_TEMP | P3 |
+| services/conversation_handlers/final_review.py | Final guards и подготовка submission | Мутирует stage/issue, строит reply | Адаптер review | conversation/review / MOVE later | P4 |
+| services/conversation_handlers/modal_routing.py | Удалён в Block 5J после перевода тестового import | Эффектов не было | Удалённый compatibility facade | conversation.routing / DONE | P2 |
+| services/conversation_handlers/navigation.py | Passive replies и paging истории | Мутирует history view state, ставит async request | Смешанный navigation/history adapter | conversation navigation + history use case / SPLIT | P4 |
+| services/conversation_handlers/pending_quantity.py | Parser ответа количеством и мутация CartItem | Мутация modal state, зависимости parser/text | Адаптер state количества | conversation quantity flow / MOVE later | P3 |
+| services/conversation_handlers/state.py | Удалён в Block 5J после нулевого caller-аудита | Эффектов не было | Удалённый compatibility facade | conversation.state.queries / DONE | P2 |
+| services/conversation_handlers/state_compatibility.py | Удалён в Block 5J после перевода тестовых imports | Эффектов не было | Удалённый compatibility facade | conversation.routing / DONE | P2 |
+| services/conversation_handlers/__init__.py | Маркер действующего handlers-пакета | Нет | Маркер пакета | Оставить для действующих handlers / KEEP | P4 |
 
 ## Граф зависимостей
 
-Production-импорты из services:
-workers/tasks → orchestrator и application/background_tasks;
-api/app → input/telegram; orchestrator → engine,
-input, order_review, parser, text, venue; engine → parser, product_add_flow,
-replies, submission, submission_presenter, handlers;
-order_review → replies, text, venue; submission → replies, submission_presenter,
-text, venue; cli → venue_registration; openai_client → parser, text.
+Production-импорты из `services/` (точные прямые edges текущего дерева):
 
-Зависимости lower/core → services:
-catalog/resolver → parsing/comment_policy, text;
-catalog/evidence, scoring, safety → text;
-orders/catalog_resolution → text;
-conversation/comments, draft, selection, routing/item_resolution → parsing/comment_policy/text;
-parsing и parsing/ai → parsing/comment_policy/text;
-integrations/google_sheets → text.
-parsing/comment_policy → services/text;
+- `workers/tasks.py` → `services/orchestrator.py`, `services/submission.py`;
+- `cli.py` → `services/venue_registration.py`;
+- `integrations/openai_client.py` → `services/parser.py`, `services/text.py`;
+- `services/engine.py` → `services/conversation_handlers/*`, `parser.py`,
+  `product_add_flow.py`, `replies.py`, `submission_presenter.py`, `text.py`;
+- `services/input_recognition.py` → `services/parser.py`, `services/text.py`;
+- `services/orchestrator.py` → `services/engine.py`, `input_recognition.py`,
+  `order_review.py`, `parser.py`, `text.py`, `venue_registration.py`;
+- `services/order_review.py` → `services/replies.py`, `text.py`,
+  `venue_registration.py`;
+- `services/replies.py` → `services/text.py`;
+- `services/submission.py` → `services/replies.py`,
+  `submission_presenter.py`, `text.py`, `venue_registration.py`;
+- `services/submission_presenter.py` → `services/text.py`;
+- `services/venue_registration.py` → `services/text.py`;
+- `services/conversation_handlers/*` → соответствующие `services/replies.py`,
+  `services/parser.py`, `services/text.py`.
 
-Это не означает, что каждый импорт является отдельной ошибкой. `services/text.py`
-остаётся временным владельцем общих primitives, а `parsing/comment_policy.py`
-теперь является владельцем comment policy. Остаточная зависимость lower/core от
-services сохраняется только через text и требует отдельного audit.
+Отдельно от этого графа: `api/app.py` → `input/telegram.py`. Это внешний
+канонический input-адаптер и не зависимость `api` от переходного пакета
+`services/`. `services/orchestrator.py` также импортирует `input.telegram` для
+общего TelegramEvent-контракта; этот edge не считается импортом из `services/`.
+
+Фактические прямые зависимости lower/core → `services/`:
+
+- `catalog/evidence.py`, `catalog/safety.py` → `services/text.py`;
+- `conversation/comments.py`, `conversation/draft.py` → `services/text.py`;
+- `orders/catalog_resolution.py` → `services/text.py`;
+- `parsing/ai/{comment_reconciliation,item_reconciliation,quantity_reconciliation,shadow_items}.py`
+  → `services/text.py`;
+- `parsing/commands/{dialogue,item_commands,navigation,router}.py` →
+  `services/text.py`;
+- `parsing/{packaging,products,quantities}.py` → `services/text.py`;
+- `integrations/google_sheets.py` → `services/text.py`;
+- `integrations/openai_client.py` → `services/parser.py`, `services/text.py`.
+
+`catalog/resolver.py` импортирует `parsing/comment_policy.py` и
+`text_normalization.py`, а `parsing/comment_policy.py` импортирует
+`restaurant_bot.text_normalization`; утверждение `parsing/comment_policy →
+services/text` для текущего дерева ложно. Остаточная нижнеуровневая зависимость
+от `services` сохраняется через перечисленные callers `services/text.py` и
+требует отдельного audit. `services/orchestrator.py` не импортирует
+`workers.tasks`; AST-проверка подтверждает `services.orchestrator →
+workers.tasks = 0`.
 Зависимости presentation от старых services use cases допустимы до отдельного
 блока application/presentation.
 

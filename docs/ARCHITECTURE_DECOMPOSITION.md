@@ -365,7 +365,7 @@ repository-wide scan подтверждает отсутствие старог�
 ConversationEngine и channel adapters. PostgreSQL, embeddings, индексы,
 миграции и Sheets sync в этом блоке не реализуются.
 
-`catalog/resolver.py` импортирует `parsing/comment_policy` и `services/text`.
+`catalog/resolver.py` импортирует `parsing/comment_policy` и `text_normalization`.
 Это transitional residue для будущей очистки
 parsing/conversation, а не дублирование алгоритмов. Audit catalog-модулей
 подтвердил отсутствие циклов, dead duplicate algorithms и зависимостей от
