@@ -14,10 +14,7 @@ from restaurant_bot.domain.models import (
 from restaurant_bot.parsing.comment_policy import comment_semantic_key
 from restaurant_bot.domain.units import UNIT_ALIASES, normalize_unit
 from restaurant_bot.parsing.number_words import NUMBER_WORDS
-from restaurant_bot.services.text import (
-    remove_global_comment_overlap as text_remove_global_comment_overlap,
-)
-from restaurant_bot.text_normalization import normalize_text
+from restaurant_bot.text_normalization import clean_text, normalize_text
 
 
 def merge_comments(*values: str) -> str:
@@ -64,8 +61,29 @@ def remove_exact_comment_fragments(comment: str, excluded: str) -> str:
 
 
 def remove_global_comment_overlap(item_comment: str, global_comment: str) -> str:
-    """Удаляет общую часть, которую ИИ также включил в комментарий позиции."""
-    return text_remove_global_comment_overlap(item_comment, global_comment)
+    """Удаляет общую часть и разговорные слова охвата из локального комментария."""
+    item_text = clean_text(item_comment).strip(" .,;")
+    global_text = clean_text(global_comment).strip(" .,;")
+    if not item_text or not global_text:
+        return item_text
+    match = re.search(re.escape(global_text), item_text, flags=re.I)
+    if match is None:
+        return item_text
+    remaining = f"{item_text[: match.start()]} {item_text[match.end() :]}"
+    scope_residue = (
+        r"(?:(?:все|всё|всем)"
+        r"(?:\s+(?:это(?:\s+дело)?|эти\w*"
+        r"(?:\s+(?:товар\w*|позици\w*))?|товар\w*|позици\w*))?"
+        r"|для\s+всех(?:\s+(?:товар\w*|позици\w*))?)"
+    )
+    remaining = re.sub(
+        rf"(?:\b(?:и|а)\s+)?{scope_residue}\s*(?=$|[,;:—–-])",
+        " ",
+        remaining,
+        flags=re.I,
+    )
+    remaining = re.sub(r"\s+", " ", remaining)
+    return remaining.strip(" .,;:-—–")
 
 
 def apply_global_comment(state: ConversationState, global_comment: str) -> None:

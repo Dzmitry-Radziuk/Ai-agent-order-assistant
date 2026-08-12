@@ -7,6 +7,7 @@ import re
 from restaurant_bot.catalog.evidence import (
     has_complete_query_evidence,
     query_evidence_tokens,
+    remove_phrase_overlap,
 )
 from restaurant_bot.catalog.resolver import CatalogDecision, CatalogResolver
 from restaurant_bot.catalog.safety import has_compatible_numeric_characteristics
@@ -33,7 +34,6 @@ from restaurant_bot.parsing.quantities import (
     parse_quantity_unit,
 )
 from restaurant_bot.domain.units import UNIT_ALIASES, normalize_unit
-from restaurant_bot.services.text import remove_phrase_overlap
 from restaurant_bot.text_normalization import normalize_text
 
 

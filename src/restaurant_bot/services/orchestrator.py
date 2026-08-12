@@ -17,6 +17,7 @@ from restaurant_bot.application.background_tasks import BackgroundTaskDispatcher
 from restaurant_bot.catalog.evidence import (
     canonical_search_query,
     query_evidence_tokens,
+    remove_phrase_overlap,
     unverified_product_terms,
 )
 from restaurant_bot.catalog.safety import (
@@ -72,7 +73,6 @@ from restaurant_bot.services.engine import ConversationEngine
 from restaurant_bot.services.input_recognition import InputRecognitionService
 from restaurant_bot.services.order_review import OrderReviewService
 from restaurant_bot.services.parser import infer_intent
-from restaurant_bot.services.text import remove_phrase_overlap
 from restaurant_bot.services.venue_registration import (
     RegistrationResult,
     VenueContext,

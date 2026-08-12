@@ -8,7 +8,6 @@ from difflib import SequenceMatcher
 from restaurant_bot.domain.models import CatalogProduct
 from restaurant_bot.domain.units import UNIT_ALIASES, normalize_unit
 from restaurant_bot.parsing.number_words import NUMBER_WORDS, parse_number_words
-from restaurant_bot.parsing.numeric_ranges import numeric_range_spans
 from restaurant_bot.text_normalization import clean_text, normalize_text
 
 _STOP_WORDS = {
@@ -137,6 +136,27 @@ def canonical_search_query(value: str) -> str:
     for start, end, replacement in reversed(replacements):
         normalized = f"{normalized[:start]}{replacement}{normalized[end:]}"
     return normalized
+
+
+def remove_phrase_overlap(source_text: str, phrase: str) -> str:
+    """Убирает подтверждённую фразу из временного поискового запроса."""
+    source = clean_text(source_text)
+    phrase_tokens = [
+        normalize_text(token)
+        for token in re.findall(r"[a-zа-яё0-9%]+", normalize_text(phrase), flags=re.I)
+    ]
+    source_matches = list(re.finditer(r"[a-zа-яё0-9%]+", source, flags=re.I))
+    source_tokens = [normalize_text(match.group()) for match in source_matches]
+    if not source_tokens or not phrase_tokens or len(phrase_tokens) > len(source_tokens):
+        return source
+    for start in range(len(source_tokens) - len(phrase_tokens) + 1):
+        if source_tokens[start : start + len(phrase_tokens)] != phrase_tokens:
+            continue
+        left = source[: source_matches[start].start()].strip()
+        right = source[source_matches[start + len(phrase_tokens) - 1].end() :].strip()
+        replacement = clean_text(f"{left} {right}")
+        return replacement or source
+    return source
 
 
 def tokens(value: str) -> set[str]:
