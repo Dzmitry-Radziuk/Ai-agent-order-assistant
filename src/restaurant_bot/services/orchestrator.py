@@ -14,6 +14,7 @@ from redis import Redis
 from structlog.contextvars import bound_contextvars
 
 from restaurant_bot.application.background_tasks import BackgroundTaskDispatcher
+from restaurant_bot.application.order_review.token import new_review_token
 from restaurant_bot.catalog.evidence import (
     canonical_search_query,
     query_evidence_tokens,
@@ -64,6 +65,7 @@ from restaurant_bot.integrations.openai_client import OpenAIService
 from restaurant_bot.integrations.telegram import TELEGRAM_TRANSIENT_ERRORS, TelegramClient
 from restaurant_bot.logging import sanitize_log_value
 from restaurant_bot.parsing.commands.api import enrich_command, infer_intent
+from restaurant_bot.presentation.telegram.order_review import preview_reply
 from restaurant_bot.repositories.order_events import OrderEventRepository
 from restaurant_bot.repositories.sessions import SessionRepository
 from restaurant_bot.repositories.updates import (
@@ -668,7 +670,7 @@ class UpdateOrchestrator:
                 telegram_chat_id=event.chat_id,
             )
             snapshot = self.order_review.snapshot(context)
-            token = self.order_review.new_token()
+            token = new_review_token()
             state.review_token = token
             state.review_snapshot_hash = snapshot.fingerprint
             state.review_venue_code = state.venue_code
@@ -678,7 +680,7 @@ class UpdateOrchestrator:
             state.status = "review"
             return EngineResult(
                 state=state,
-                reply=self.order_review.preview_reply(
+                reply=preview_reply(
                     snapshot,
                     token,
                     edit_message_id=event.callback_message_id,
@@ -726,7 +728,7 @@ class UpdateOrchestrator:
             )
             current = self.order_review.snapshot(context)
             if current.fingerprint != state.review_snapshot_hash:
-                refreshed_token = self.order_review.new_token()
+                refreshed_token = new_review_token()
                 state.review_token = refreshed_token
                 state.review_snapshot_hash = current.fingerprint
                 state.review_submission_in_progress = False
@@ -734,7 +736,7 @@ class UpdateOrchestrator:
                 state.status = "review"
                 return EngineResult(
                     state=state,
-                    reply=self.order_review.preview_reply(
+                    reply=preview_reply(
                         current,
                         refreshed_token,
                         changed=True,

@@ -1,3 +1,4 @@
+from restaurant_bot.application.order_review.contracts import ReviewSnapshot
 from restaurant_bot.domain.models import (
     ConversationState,
     ExtractedItem,
@@ -11,7 +12,6 @@ from restaurant_bot.input.telegram import normalize_telegram_update
 from restaurant_bot.input.telegram_callbacks import parse_callback
 from restaurant_bot.parsing.commands.api import enrich_command, infer_intent
 from restaurant_bot.services.orchestrator import UpdateOrchestrator
-from restaurant_bot.services.order_review import ReviewSnapshot
 
 
 def test_bot_suffix_is_removed_from_slash_command_before_routing() -> None:

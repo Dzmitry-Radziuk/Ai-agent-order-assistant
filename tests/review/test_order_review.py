@@ -1,6 +1,9 @@
+import re
 from unittest.mock import MagicMock
 
+from restaurant_bot.application.order_review.token import new_review_token
 from restaurant_bot.domain.models import CatalogProduct, DepartmentQuantities
+from restaurant_bot.presentation.telegram.order_review import preview_reply
 from restaurant_bot.services.order_review import OrderReviewService
 from restaurant_bot.services.venue_registration import VenueContext
 
@@ -58,13 +61,20 @@ def test_snapshot_reads_every_department_quantity_and_ignores_empty_rows(setting
         ("Сливки 33%", 3),
     ]
     assert snapshot.supplier_count == 2
-    assert snapshot.fingerprint
+    assert (
+        snapshot.fingerprint == "2cf4923d6b54886fbbfed4e62af8e0311598acdcf420aaa3881dbf7173e18ea2"
+    )
+
+
+def test_review_token_keeps_the_short_hex_contract() -> None:
+    """Проверяет формат одноразового токена карточки проверки."""
+    assert re.fullmatch(r"[0-9a-f]{20}", new_review_token())
 
 
 def test_preview_lists_each_product_and_has_confirmation_buttons(settings) -> None:  # type: ignore[no-untyped-def]
     """Проверяет понятную карточку с товарами и единственным подтверждением заявки."""
     service = _service(settings)
-    reply = service.preview_reply(service.snapshot(_context()), "token")
+    reply = preview_reply(service.snapshot(_context()), "token")
 
     assert "Товаров: 2" in reply.text
     assert "Сироп роза, 1 л" in reply.text
@@ -80,7 +90,7 @@ def test_preview_groups_products_by_supplier(settings) -> None:  # type: ignore[
     """Проверяет, что карточка разделяет позиции по поставщикам и сохраняет комментарии."""
     service = _service(settings)
 
-    reply = service.preview_reply(service.snapshot(_context()), "token")
+    reply = preview_reply(service.snapshot(_context()), "token")
 
     assert reply.text.index("МБР") < reply.text.index("Сироп роза")
     assert reply.text.index("Метро") < reply.text.index("Сливки 33%")
