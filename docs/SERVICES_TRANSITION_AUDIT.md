@@ -191,6 +191,19 @@ Re-export и динамических callers для этого модуля н�
 | Input voice/photo | input_recognition.py | input/recognition + channel progress / SPLIT | Смешаны provider и Telegram effects |
 | Replies renderers | replies.py | presentation/telegram / SPLIT | UX/callback contract |
 
+## Block 5O — результат targeted audit input recognition
+
+Полный symbol/caller/effect audit `services/input_recognition.py` зафиксирован в
+[`docs/INPUT_RECOGNITION_AUDIT.md`](INPUT_RECOGNITION_AUDIT.md). Весь класс не
+переносится целиком: он одновременно содержит Telegram download/cleanup, OpenAI
+voice/photo, state-aware retry, visible actions и progress presentation.
+
+Ровно один следующий code seam — чистая voice transcript acceptance policy:
+`has_supported_voice_letters` и `select_transcription_result` в
+`input/voice_transcript_policy.py`. `requires_high_accuracy_transcription`,
+`voice_transcription_prompt`, visible actions, progress и provider calls в этот
+seam не входят. Production code в Block 5O не изменялся.
+
 ## Результат удаления obsolete facades в Block 5J
 
 До удаления все пять кандидатов были проверены repository-wide: production и

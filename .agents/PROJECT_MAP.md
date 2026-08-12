@@ -53,7 +53,7 @@ flowchart LR
 | `conversation/quantity_resolution.py` | Channel-neutral расчёт кратности, рекомендуемого количества и выбор предупреждений без изменения черновика |
 | `orders/supplier_minimums.py` | Channel-neutral агрегация минимальных сумм поставщиков и предупреждений без изменения состояния |
 | `orders/catalog_resolution.py` | Channel-neutral применение результата `CatalogResolver` к `CartItem`: каталожные поля, quantity/comment provenance, статусы и refresh черновика |
-| `services/input_recognition.py` | Скачивание voice/photo, транскрибация с безопасным fallback и обновление карточки прогресса |
+| `services/input_recognition.py` | Transitional voice/photo recognition: Telegram transport, OpenAI calls, state-aware retry, visible actions и progress; Block 5O назначил единственный следующий transcript-policy seam, полный MOVE не принят |
 | `services/parser.py` | Text intent facade, callback contract и временный dispatcher command parsing |
 | `parsing/commands/patterns.py` | Статические шаблоны text-команд |
 | `parsing/commands/normalization.py` | Нормализация команд и отрицание |

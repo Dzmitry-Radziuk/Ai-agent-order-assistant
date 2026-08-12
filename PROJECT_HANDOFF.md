@@ -63,7 +63,9 @@ Telegram update
 ### Ввод и разбор
 
 - `input/telegram.py` — канонический адаптер Telegram raw update -> `TelegramEvent`.
-- `services/input_recognition.py` — voice/photo, транскрибация и visible actions.
+- `services/input_recognition.py` — transitional voice/photo recognition; Block 5O
+  подтвердил смешение transport/provider/policy/presentation и назначил единственный
+  следующий seam `input/voice_transcript_policy.py` для transcript selection.
 - `services/parser.py` — глобальный intent/callback parser и совместимый фасад.
 - `parsing/products.py` — orchestration разбора товарных строк и сборка
   итогового списка `ExtractedItem`.
@@ -321,7 +323,8 @@ Block 5L завершил read-only audit `services/text.py`, а Block 5M мех
 `clean_text` и `normalize_text` в `restaurant_bot.text_normalization`. Production-код
 поведения и тесты не менялись. Полный symbol/caller/duplicate audit находится в
 [`docs/SERVICES_TEXT_AUDIT.md`](docs/SERVICES_TEXT_AUDIT.md). Единственный
-завершённый seam — этот перенос; следующий migration seam до external review не назначен.
+завершённый seam — этот перенос; Block 5O отдельно назначил следующий доказанный
+transcript-policy seam после audit `services/input_recognition.py`.
 
 Block 5J завершил удаление пяти obsolete test-only compatibility facades:
 `services/catalog_resolver.py`, `services/matching.py` и трёх старых
@@ -336,6 +339,15 @@ Block 5N завершил механический перенос Telegram raw-u
 `TelegramEvent` contract используют новый owner. Старый services-модуль удалён
 после repository-wide caller-аудита; `input_recognition.py` и остальные services
 не изменялись.
+
+Block 5O выполнен как audit-only проверка `services/input_recognition.py` на SHA
+`9c19f784ef88a0721c8be99bb8cece80ae4ebfe4`. Полный MOVE класса в
+`input/recognition.py` не принят: внутри смешаны Telegram download/cleanup,
+OpenAI voice/photo, state-aware retry, visible actions и progress presentation.
+Единственный следующий code seam — чистая transcript policy
+`has_supported_voice_letters` + `select_transcription_result` в
+`input/voice_transcript_policy.py`; production Python и tests в Block 5O не
+изменялись. Полный отчёт: [`docs/INPUT_RECOGNITION_AUDIT.md`](docs/INPUT_RECOGNITION_AUDIT.md).
 
 ## 12. Проверки
 
