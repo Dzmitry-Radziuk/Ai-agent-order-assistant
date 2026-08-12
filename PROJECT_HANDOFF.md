@@ -211,7 +211,8 @@ Block 5A выполнен как поведенчески нейтральная
 routing/state policy. Новые channel-neutral owners находятся в
 `conversation/routing/`: `contracts.py`, `item_resolution.py`, `order_flow.py`,
 `comment_scope.py`, `state_compatibility.py` и `modal_routing.py`. Чистые
-state-query функции находятся в `conversation/state/queries.py`. Production
+canonical unresolved membership/priority и state-query функции находятся в
+`conversation/state/queries.py`. Production
 imports переведены на новые owners, а старые
 `services/conversation_handlers/state_compatibility.py`, `modal_routing.py` и
 `state.py` оставлены только как re-export facades.

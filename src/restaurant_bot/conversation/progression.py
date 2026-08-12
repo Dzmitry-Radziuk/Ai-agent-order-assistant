@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import StrEnum
 
-from restaurant_bot.conversation.state.queries import first_unresolved
+from restaurant_bot.conversation.state.queries import first_unresolved, is_unresolved_status
 from restaurant_bot.domain.models import (
     CartItem,
     ConversationState,
@@ -33,18 +33,6 @@ class ProgressionResult:
     added_count: int = 0
 
 
-_PREFERRED_ISSUE_STATUSES = frozenset(
-    {
-        ItemStatus.DUPLICATE_PENDING,
-        ItemStatus.UNIT_MISMATCH,
-        ItemStatus.MISSING_QTY,
-        ItemStatus.AMBIGUOUS,
-        ItemStatus.NOT_FOUND,
-        ItemStatus.NEW,
-        ItemStatus.AI_PENDING,
-    }
-)
-
 _ISSUE_KINDS = {
     ItemStatus.AMBIGUOUS: IssueKind.CANDIDATE,
     ItemStatus.NOT_FOUND: IssueKind.NOT_FOUND,
@@ -69,7 +57,7 @@ def advance(
             (
                 item
                 for item in state.cart
-                if item.id == preferred_issue_item_id and item.status in _PREFERRED_ISSUE_STATUSES
+                if item.id == preferred_issue_item_id and is_unresolved_status(item.status)
             ),
             None,
         )

@@ -371,7 +371,7 @@ conversation/routing/state_compatibility.py
 conversation/routing/modal_routing.py
   -> channel-neutral агрегатор ModalRoutingDecision
 conversation/state/queries.py
-  -> чистые first_unresolved и item_index
+  -> canonical unresolved membership/priority, first_unresolved и item_index
 ```
 
 Production imports переведены на новых owners. После Block 5AC leaf policy
