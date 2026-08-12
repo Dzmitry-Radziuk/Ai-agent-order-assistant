@@ -104,7 +104,7 @@ CommentScopeHandler их сохраняет.
 | `catalog/safety.py` | Конфликты квалификаторов, numeric compatibility, safe equivalence, broad-category policy и auto-select safety |
 | `services/replies.py` | Пользовательские карточки и клавиатуры основного диалога |
 | `services/submission.py` | Контрольные точки записи, пересчёта, опциональной отправки и чтения статусов |
-| `services/submission_presenter.py` | Тексты и кнопки завершения заявки и истории заказов |
+| `presentation/telegram/submission.py` | Telegram-тексты, кнопки завершения заявки и истории заказов; канонический owner после Block 5Q |
 | `services/product_add_flow.py` | Сценарий запроса снабженцу на добавление ненайденного товара |
 | `services/venue_registration.py` | Центральный каталог заведений, доступ, invite-коды и привязки |
 | `services/text.py` | Transitional владелец units, numbers, overlap и presentation primitives; `clean_text`/`normalize_text` перенесены в `text_normalization.py`; полный аудит — [`docs/SERVICES_TEXT_AUDIT.md`](../docs/SERVICES_TEXT_AUDIT.md) |

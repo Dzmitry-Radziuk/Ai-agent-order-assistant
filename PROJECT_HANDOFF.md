@@ -1,5 +1,16 @@
 # Передача проекта
 
+## Block 5Q — перенос Telegram submission presenter
+
+Block 5Q завершён механическим переносом `services/submission_presenter.py` в
+`presentation/telegram/submission.py`. Все 28 функций и их сигнатуры сохранены;
+production и test callers переведены на новый путь, старый services-файл удалён.
+Presenter остаётся чистым presentation/read-model слоем: он возвращает `BotReply`,
+`Button` и текст, не выполняет DB, Redis, Sheets, OpenAI, TelegramClient или
+submission side effects. Временная зависимость только одна: `services.text.escape`.
+Сравнение старого и нового модуля на 23 representative cases дало `MISMATCHES=0`.
+Следующий seam после Block 5Q не назначается автоматически.
+
 ## Block 5P — чистая политика выбора транскрипции
 
 Block 5P завершён поведенчески нейтрально. Функции `has_supported_voice_letters` и

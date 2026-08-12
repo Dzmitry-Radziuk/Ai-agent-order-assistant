@@ -1,5 +1,14 @@
 # План декомпозиции архитектуры
 
+## Block 5Q — выполненный перенос submission presenter
+
+`services/submission_presenter.py` механически перенесён в
+`presentation/telegram/submission.py`. Все 28 AST-функций и сигнатуры совпадают с
+исходным модулем. `SubmissionService`, `ConversationEngine` и тесты используют
+канонический путь; старый файл удалён. Presenter импортирует только domain-модели
+и временный `services.text.escape`, не выполняет внешних эффектов. Следующий seam
+не назначен.
+
 ## Block 5P — выполненный перенос политики транскрипции
 
 Из `services/input_recognition.py` механически вынесены только

@@ -31,11 +31,7 @@ from restaurant_bot.integrations.google_sheets import (
     OrderSubmissionResult,
 )
 from restaurant_bot.integrations.telegram import TelegramAPIError, TelegramClient
-from restaurant_bot.repositories.order_events import OrderEventRepository
-from restaurant_bot.repositories.sessions import SessionRepository
-from restaurant_bot.repositories.submissions import SubmissionRepository
-from restaurant_bot.services.replies import cart_reply
-from restaurant_bot.services.submission_presenter import (
+from restaurant_bot.presentation.telegram.submission import (
     _callback_with_revision,
     build_order_status_detail_reply,
     build_order_status_list_reply,
@@ -50,6 +46,10 @@ from restaurant_bot.services.submission_presenter import (
     submission_recalculation_uncertain_reply,
     submission_success_reply,
 )
+from restaurant_bot.repositories.order_events import OrderEventRepository
+from restaurant_bot.repositories.sessions import SessionRepository
+from restaurant_bot.repositories.submissions import SubmissionRepository
+from restaurant_bot.services.replies import cart_reply
 from restaurant_bot.services.text import escape
 from restaurant_bot.services.venue_registration import VenueRegistrationService
 

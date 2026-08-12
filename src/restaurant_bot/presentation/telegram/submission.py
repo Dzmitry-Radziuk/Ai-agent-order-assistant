@@ -6,6 +6,8 @@ from typing import Any
 from restaurant_bot.domain.models import BotReply, Button
 from restaurant_bot.services.text import escape
 
+# Канонический Telegram presenter.
+
 
 def _callback_with_revision(state: Any, callback_data: str) -> str:
     """Добавляет версию интерфейса к callback."""

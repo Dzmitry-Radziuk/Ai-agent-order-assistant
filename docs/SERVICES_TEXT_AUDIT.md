@@ -66,7 +66,7 @@ re-export и динамические пути. Поиск `importlib`, `__impor
 | `normalize_department` | `integrations/google_sheets.py`, `services/engine.py` | Нет прямых | Нет | Нет | `services/text.py` → `domain/departments.py` | `MOVE_LATER` |
 | `numeric_range_spans` | `integrations/openai_client.py`, `orders/catalog_resolution.py`, `parsing/ai/quantity_reconciliation.py`, `parsing/{packaging,products,quantities}.py` | Косвенно через quantity/packaging tests | Нет | Нет | `services/text.py` → quantity/evidence owner после сравнения regex | `MOVE_LATER` |
 | `to_float` | `integrations/google_sheets.py`, `integrations/openai_client.py`, `parsing/ai/{comment_reconciliation,item_reconciliation,quantity_reconciliation,shadow_items}.py` | `tests/input/test_input_edge_cases.py` | Нет; читает входные значения | Нет | `services/text.py` → numeric value primitive, но Sheets-контракт требует отдельной проверки | `AUDIT_REQUIRED` |
-| `escape` | `services/{engine,order_review,replies,submission,submission_presenter,venue_registration}.py` | Нет прямых | Нет | Да, Telegram HTML | `services/text.py` → `presentation/telegram.py` или presentation owner | `MOVE_LATER` |
+| `escape` | `services/{engine,order_review,replies,submission,venue_registration}.py`, `presentation/telegram/submission.py` | Нет прямых | Нет | Да, Telegram HTML | `services/text.py` → presentation owner | `MOVE_LATER` |
 | `format_number` | `services/replies.py` | Нет прямых | Нет | Косвенно пользовательский UI | `services/text.py` → presentation formatting | `MOVE_LATER` |
 | `parse_number_words` | `catalog/{evidence,safety}.py`, `parsing/ai/quantity_reconciliation.py`, `parsing/{products,quantities}.py`, `services/conversation_handlers/pending_quantity.py` | Косвенно через quantity tests | Нет | Нет | `services/text.py` → quantity parsing owner | `MOVE_LATER` |
 | `convert_quantity` | `services/engine.py`, `services/replies.py` | Косвенно через unit-flow tests | Мутирует `CartItem` только callers, сам pure | Нет | `services/text.py` → order measurement owner | `MOVE_LATER` |
@@ -113,7 +113,7 @@ re-export и динамические пути. Поиск `importlib`, `__impor
 | `services/order_review.py` | `escape` | presentation/use case | presentation owner | Submission UX |
 | `services/replies.py` | `UNIT_ALIASES`, `convert_quantity`, `escape`, `format_number`, `normalize_unit` | Telegram presentation | measurements, presentation | HTML/UX contract |
 | `services/submission.py` | `escape` | submission presentation | presentation owner | Submission checkpoint UX |
-| `services/submission_presenter.py` | `escape` | presentation | presentation owner | HTML contract |
+| `presentation/telegram/submission.py` | `escape` | presentation | presentation owner | HTML contract |
 | `services/venue_registration.py` | `clean_text`, `escape`, `normalize_text` | venue service | text, presentation | Access/registration contract |
 | `tests/catalog/test_catalog_resolver.py` | `remove_phrase_overlap` | direct regression | target search owner | Preserve exact output |
 | `tests/catalog/test_matching.py` | `remove_phrase_overlap` | direct regression | target search owner | Preserve exact output |

@@ -74,6 +74,12 @@ from restaurant_bot.orders.catalog_resolution import CatalogResolutionService
 from restaurant_bot.orders.supplier_minimums import supplier_minimum_warnings
 from restaurant_bot.parsing.comment_policy import supplier_comment_start
 from restaurant_bot.parsing.quantities import has_explicit_order_quantity
+from restaurant_bot.presentation.telegram.submission import (
+    submission_dispatch_uncertain_reply,
+    submission_failure_reply,
+    submission_in_progress_reply,
+    submission_recovery_unavailable_reply,
+)
 from restaurant_bot.services.conversation_handlers.candidate_selection import (
     CandidateSelectionHandler,
 )
@@ -122,12 +128,6 @@ from restaurant_bot.services.replies import (
     supplier_warning_details_reply,
     unknown_intent_reply,
     unrecognized_voice_reply,
-)
-from restaurant_bot.services.submission_presenter import (
-    submission_dispatch_uncertain_reply,
-    submission_failure_reply,
-    submission_in_progress_reply,
-    submission_recovery_unavailable_reply,
 )
 from restaurant_bot.services.text import (
     NUMBER_WORDS,

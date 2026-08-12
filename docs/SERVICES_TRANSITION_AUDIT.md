@@ -1,5 +1,13 @@
 # Аудит переходного слоя services/ и результат Block 5K
 
+## Block 5Q — выполненный перенос Telegram submission presenter
+
+`submission_presenter.py` удалён из `services/` после repository-wide caller-аудита и
+перенесён без изменения тела функций в `presentation/telegram/submission.py`.
+Канонический модуль содержит только presentation/read-model formatting и callback
+строки; его единственная transitional dependency — `services.text.escape`.
+`SubmissionService`, `ConversationEngine` и тесты импортируют новый путь.
+
 ## Block 5P — выполненный pure voice transcript seam
 
 Проверенный перенос завершён: два pure-алгоритма `has_supported_voice_letters` и
@@ -60,7 +68,7 @@ navigation.py, pending_quantity.py.
 | parser.py | infer_intent и parse_callback; imports владельцев parsing command | Чистый parsing; callback — channel contract | Частичный facade и реальный public owner | parsing/commands и input/callback / SPLIT | P3 |
 | product_add_flow.py | Request ID, prompt, clear pending; callers: engine | Небольшой state helper и presentation text | Связный временный владелец | orders/product_add и presentation / SPLIT | P4 |
 | replies.py | BotReply renderers, cards, keyboards, issue/candidate/status text | Читает state, агрегирует display данные, строит callbacks | Presentation с остаточными расчётами | presentation/telegram replies / SPLIT | P4 |
-| submission_presenter.py | Submission/status/recovery/history rendering | Чистая presentation и callbacks | Владелец presentation | presentation/telegram/submission / MOVE | P3 |
+| presentation/telegram/submission.py | Submission/status/recovery/history rendering | Чистая presentation и callbacks | Владелец presentation | DONE в Block 5Q | P3 |
 | submission.py | Submit, read-back, checkpoints, catalog/recalc, dispatch fencing, completion, product-add write | DB/Redis/Sheets/Telegram effects | Смешанный сервис с safety-критичными операциями | submission/service, catalog, dispatch / SPLIT | P5 |
 | text.py | Cleanup, normalization, units/departments, ranges, number words, conversion, numeric parse, HTML/number formatting | Pure, но с большим fan-in в lower layers и presentation | Смешанный core/presentation primitive owner | parsing text, domain units, presentation formatting / SPLIT | P2 |
 | venue_registration.py | Directory, invite, access registry, binding, context, replies | HTTP/Redis/DB/Sheets и access mutation | Смешанный venue service | venues/directory, access, registration / SPLIT | P5 |
