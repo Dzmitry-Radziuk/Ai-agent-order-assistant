@@ -82,6 +82,10 @@ flowchart LR
 | `services/conversation_handlers/modal_routing.py` | Compatibility re-export facade для `conversation/routing/modal_routing.py` |
 | `services/conversation_handlers/state.py` | Compatibility re-export facade для `conversation/state/queries.py` |
 
+Полный audit transitional `services/`, callers и следующий migration seam
+зафиксированы в `docs/SERVICES_TRANSITION_AUDIT.md`. Production-код в audit-only
+блоке не изменяется.
+
 После Block 5B `conversation/comments.py` и `conversation/draft.py` являются
 единственными владельцами перечисленных core-операций. `comment_scope.py`
 сохраняет handler и делегирует им выполнение; Telegram/presentation handlers

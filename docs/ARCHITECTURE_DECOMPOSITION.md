@@ -111,6 +111,8 @@ contracts и проходит focused/full regression до следующего 
 - `services/engine.py` остаётся transitional orchestration/state-machine caller:
   он делегирует catalog-to-draft resolution новому orders owner и сохраняет
   только совместимые тонкие вызовы для доказанных legacy callers.
+- Полный audit оставшегося `services/` и доказанный порядок демонтажа находятся
+  в `docs/SERVICES_TRANSITION_AUDIT.md`; этот документ не переносит production-код.
 
 ### Conversation
 

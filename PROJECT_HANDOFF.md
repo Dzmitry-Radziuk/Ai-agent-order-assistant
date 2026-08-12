@@ -114,6 +114,8 @@ Telegram update
   применение решения каталога делегируется `orders/catalog_resolution.py`, а
   остальные переходы черновика, comments, quantity, duplicate flow и подготовка
   submission остаются в engine.
+- Полный audit оставшегося transitional `services/`, dependency direction и
+  caller-backed roadmap находится в `docs/SERVICES_TRANSITION_AUDIT.md`.
 - `services/replies.py` — карточки, клавиатуры и пользовательские тексты.
 
 ### Внешние эффекты
@@ -304,9 +306,10 @@ channel boundary без изменения callback format и пользоват
 
 ## 11. Следующий функциональный блок
 
-Следующий seam — только отдельно подтверждённый audit оставшихся `services/`
-модулей или внешний review. Автоматически начинать следующий перенос, уменьшать
-`engine.py` или менять поведение state machine нельзя.
+Следующий code seam — механический перенос `services/comment_policy.py` в
+`parsing/comment_policy.py`: только три pure supplier-comment функции и их
+private regex/constants. Production-код этого переноса ещё не начинать; scope,
+callers и regression corpus зафиксированы в `docs/SERVICES_TRANSITION_AUDIT.md`.
 
 ## 12. Проверки
 
