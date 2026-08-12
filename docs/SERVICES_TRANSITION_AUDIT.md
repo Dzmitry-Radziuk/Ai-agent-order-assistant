@@ -15,7 +15,7 @@
 | Review side effects | `services/order_review.py` | Координация lease, DB, Sheets и Telegram |
 
 `presentation/telegram/*` не изменяет `ConversationState`. Нормализация страниц
-и onboarding flag принадлежат conversation/engine handlers; presenter получает
+и onboarding flag принадлежат `conversation/state/transitions.py` и conversation/engine handlers; presenter получает
 уже выбранное состояние и строит только `BotReply`.
 
 ### Block 5U-D — handlers audit

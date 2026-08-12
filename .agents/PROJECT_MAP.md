@@ -14,6 +14,7 @@
 | Review token | `application/order_review/token.py` | Формат `uuid4().hex[:20]` |
 | Review presentation | `presentation/telegram/order_review.py` | Preview, truncation и submission replies |
 | Review effects | `services/order_review.py` | Lease/DB/Sheets/Telegram coordination |
+| Cart page transition | `conversation/state/transitions.py` | Clamp persisted page before rendering |
 
 После Block 5U `services/parser.py`, `services/replies.py` и
 `services/product_add_flow.py` отсутствуют. Таблицы ниже описывают текущие

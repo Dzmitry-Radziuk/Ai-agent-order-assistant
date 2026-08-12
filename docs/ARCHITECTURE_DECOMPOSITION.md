@@ -14,6 +14,7 @@
 | Review token | `application/order_review/token.py` | Одноразовый токен длиной 20 hex |
 | Review Telegram UI | `presentation/telegram/order_review.py` | Preview, truncation и submit replies |
 | Review external effects | `services/order_review.py` | Lease/DB/Sheets/Telegram coordinator |
+| Cart page state transition | `conversation/state/transitions.py` | Clamp выполняется до presentation |
 
 `services/parser.py`, `services/replies.py` и `services/product_add_flow.py`
 отсутствуют. Исторические таблицы и решения ниже помечены как snapshots и не

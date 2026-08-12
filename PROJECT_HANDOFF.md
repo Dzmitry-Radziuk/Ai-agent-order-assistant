@@ -18,7 +18,7 @@
 `services/parser.py`, `services/replies.py` и `services/product_add_flow.py`
 удалены после caller-аудита. `presentation/telegram/*` только читает
 `ConversationState`; onboarding и нормализация страниц выполняются в
-conversation/engine handlers. Исторические блоки ниже помечаются как архивные и
+`conversation/state/transitions.py` и conversation/engine handlers. Исторические блоки ниже помечаются как архивные и
 не являются текущей картой владельцев.
 
 ## Block 5U — выполненная декомпозиция
@@ -33,6 +33,8 @@ lease/DB/Sheets/Telegram порядок и остался координатор
 5U-D подтвердил, что candidate selection и comment scope — thin adapters к
 `conversation/` core, final review владеет page transition, а pending quantity
 сохраняется без переноса из-за риска изменить Block C quantity semantics.
+Отдельная state-boundary функция `normalize_cart_page` теперь сохраняет clamp
+страницы до вызова Telegram presenter; presenter больше не исправляет state.
 
 ## Block 5S — контролируемая декомпозиция `services/text.py`
 
@@ -109,7 +111,7 @@ AI помогает понять свободную речь и найти ка�
 - Текущий Git HEAD всегда определяется командой `git rev-parse HEAD`, а не
   фиксируется в handoff после каждого commit.
 - Единственный рабочий remote: GitHub `origin/decompose_bot`.
-- Текущий полный baseline: `1368 collected / 1368 passed` после двух
+- Текущий полный baseline: `1369 collected / 1369 passed` после трёх
   архитектурных regression-тестов Block 5U.
 - `manual_smoke_forensic_logs.txt` — необязательный локальный diagnostic artifact,
   не tracked-файл репозитория. Если он существует локально, его нельзя менять,
