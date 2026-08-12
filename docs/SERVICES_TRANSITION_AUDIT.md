@@ -1,4 +1,4 @@
-# Аудит переходного слоя services/ и результат Block 5J
+# Аудит переходного слоя services/ и результат Block 5K
 
 ## Границы
 
@@ -53,7 +53,8 @@ navigation.py, pending_quantity.py, __init__.py.
 ## Граф зависимостей
 
 Production-импорты из services:
-workers/tasks → orchestrator; api/app → input_normalizer; orchestrator → engine,
+workers/tasks → orchestrator и application/background_tasks;
+api/app → input_normalizer; orchestrator → engine,
 input, order_review, parser, text, venue; engine → parser, product_add_flow,
 replies, submission, submission_presenter, handlers;
 order_review → replies, text, venue; submission → replies, submission_presenter,
@@ -74,6 +75,12 @@ parsing/comment_policy → services/text;
 services сохраняется только через text и требует отдельного audit.
 Зависимости presentation от старых services use cases допустимы до отдельного
 блока application/presentation.
+
+`application/background_tasks.py` содержит только Protocol фоновых эффектов.
+`services/orchestrator.py` зависит от этого порта и не импортирует workers.
+`workers/tasks.py` реализует порт через Celery `.delay`; поэтому внешнее
+направление `workers/tasks → orchestrator` сохраняется, а обратный импорт
+устранён.
 
 ## Карта ответственности text.py
 
@@ -180,10 +187,21 @@ Obsolete facades catalog_resolver.py, matching.py и modal/state facades уда�
 ранее в Block 5I. Не удалять services искусственно: application coordinator,
 adapters и доказанные public facades могут временно оставаться.
 
+## Dependency inversion фоновых задач
+
+До Block 5K `workers/tasks.py → services/orchestrator.py` и локальные imports в
+`UpdateOrchestrator._enqueue_side_effects()` создавали обратный цикл. Теперь
+`application/background_tasks.py` владеет минимальным Protocol, orchestrator
+получает его через constructor dependency, а `CeleryBackgroundTaskDispatcher`
+в workers вызывает неизменённые Celery tasks. Repository-wide проверка после
+изменения даёт `services.orchestrator → workers.tasks = 0` и сохраняет
+`workers.tasks → services.orchestrator`.
+
 ## Что намеренно не делалось
 
 В Block 5J изменены только тестовые imports, удалены пять re-export модулей и
-обновлены audit-документы. Алгоритмы callers,
-services/text.py, prompts, catalog thresholds, AI, callbacks, DB, Sheets, Docker,
-workers и UX не менялись. Block 5I и Block 5G не переоткрывались; новый ADR не
-добавлялся.
+обновлены audit-документы. В Block 5K добавлены application task port,
+минимальный Celery adapter, constructor wiring и regression tests dispatch/lease;
+алгоритмы callers, services/text.py, prompts, catalog thresholds, AI, callbacks,
+DB, Sheets, Docker, task bodies, decorators, names, retry settings и UX не
+менялись. Block 5I и Block 5G не переоткрывались; новый ADR не добавлялся.

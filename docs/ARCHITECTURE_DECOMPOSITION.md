@@ -20,6 +20,7 @@ contracts и проходит focused/full regression до следующего 
 |---|---|---|
 | `api/app.py:telegram_webhook` | FastAPI transport | Проверить Telegram secret, нормализовать update, поставить его в inbox один раз. |
 | `workers/tasks.py:process_telegram_update` | Celery delivery | Retry и передача одного update orchestrator. |
+| `application/background_tasks.py` | Application port | Описывает фоновые эффекты без зависимости от Celery или workers. |
 | `services/orchestrator.py:UpdateOrchestrator.process` | Application pipeline | Claim, lease, venue access, parse, engine, checkpoint и reply. |
 | `services/engine.py:ConversationEngine.handle` | State machine | Применить ParsedCommand к ConversationState и вернуть EngineResult. |
 | `services/submission.py:SubmissionService` | Submission use case | Свежий доступ/снимок, запись, read-back, пересчёт, dispatch и уведомление. |
@@ -33,6 +34,7 @@ contracts и проходит focused/full regression до следующего 
 | `services/engine.py` | 3353 | State routing, draft, catalog, review, submission preparation | Позже разделить по ответственности. |
 | `integrations/openai_prompts.py` | 2378 | Prompt contracts | Переносить как единый внешний контракт. |
 | `services/orchestrator.py` | 2152 | Transaction pipeline и scheduling | Позже выделить application pipeline. |
+| `application/background_tasks.py` | 31 | Typed port фоновых эффектов | Реальная DI-граница между application и Celery adapter. |
 | `services/submission.py` | 2047 | Submission use cases и checkpoints | Разделять по внешним контрактам. |
 | `integrations/openai_parsing.py` | 39 | Совместимый re-export facade | Не содержит алгоритмов; удаление — отдельный шаг после audit callers. |
 | `parsing/ai/schemas.py` | 67 | Declarative structured-output schemas | Не зависит от transport, state и внешних эффектов. |
@@ -187,6 +189,7 @@ restaurant_bot/
   submission/{service.py,checkpoints.py,catalog.py,status.py,presenter.py}
   venues/{directory.py,access.py,registration.py}
   application/{update_pipeline.py,ai_service.py}
+  application/background_tasks.py
   input/{telegram.py,recognition.py}
   integrations/{telegram,openai,google_sheets}
 ```
@@ -209,6 +212,12 @@ domain
 `parsing` импортирует только domain и допустимые лексические service
 primitives; `catalog` не меняет state; `conversation` не импортирует
 Celery/DB/Sheets; `repositories` не импортируют services/integrations.
+`application` зависит от domain и собственных портов, но не импортирует
+`workers`, Celery или channel adapters. `workers` и API являются внешними
+адаптерами и могут импортировать application use cases/порты.
+В текущем runtime допустимы `workers/tasks → services/orchestrator` и
+`orchestrator → application/background_tasks`; обратного импорта
+`services.orchestrator → workers.tasks` быть не должно.
 В migration period facade допускает временное нарушение формы, но содержит
 только явный re-export и имеет записанный шаг удаления.
 

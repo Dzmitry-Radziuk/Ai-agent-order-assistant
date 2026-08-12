@@ -27,6 +27,40 @@ UPDATE_DELIVERY_MAX_RETRIES = 4
 logger = structlog.get_logger(__name__)
 
 
+class CeleryBackgroundTaskDispatcher:
+    """Адаптирует Celery-задачи к application-level контракту."""
+
+    def submit_order(self, chat_id: str) -> None:
+        """Ставит в Celery отправку заявки."""
+        submit_order.delay(chat_id)
+
+    def send_order_status(
+        self,
+        chat_id: str,
+        *,
+        page: int,
+        detail_page: int,
+        selected_index: int | None,
+        order_number: str,
+    ) -> None:
+        """Ставит в Celery отправку статуса заявки."""
+        send_order_status.delay(
+            chat_id,
+            page=page,
+            detail_page=detail_page,
+            selected_index=selected_index,
+            order_number=order_number,
+        )
+
+    def submit_product_add(self, chat_id: str) -> None:
+        """Ставит в Celery добавление нового товара."""
+        submit_product_add.delay(chat_id)
+
+    def submit_review_order(self, chat_id: str, token: str) -> None:
+        """Ставит в Celery отправку заявки из review-ссылки."""
+        submit_review_order.delay(chat_id, token)
+
+
 @lru_cache(maxsize=1)
 def dependencies() -> tuple[UpdateOrchestrator, SubmissionService]:
     """Создаёт и кэширует зависимости фонового процесса."""
@@ -36,7 +70,14 @@ def dependencies() -> tuple[UpdateOrchestrator, SubmissionService]:
     sheets = GoogleSheetsGateway(settings)
     openai_service = OpenAIService(settings)
     return (
-        UpdateOrchestrator(settings, redis, telegram, openai_service, sheets),
+        UpdateOrchestrator(
+            settings,
+            redis,
+            telegram,
+            openai_service,
+            sheets,
+            CeleryBackgroundTaskDispatcher(),
+        ),
         SubmissionService(settings, redis, telegram, sheets),
     )
 

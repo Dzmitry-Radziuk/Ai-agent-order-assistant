@@ -230,12 +230,13 @@ def test_side_effect_enqueue_is_fenced_before_task_publish(mocker) -> None:  # t
         enqueue_product_add=False,
         enqueue_review_submission=False,
     )
-    submit_order = mocker.patch("restaurant_bot.workers.tasks.submit_order")
+    service = object.__new__(UpdateOrchestrator)
+    service.background_tasks = MagicMock()
 
     with pytest.raises(ChatLeaseLostError):
-        UpdateOrchestrator._enqueue_side_effects("chat-1", result, lease=lease)
+        service._enqueue_side_effects("chat-1", result, lease=lease)
 
-    submit_order.delay.assert_not_called()
+    service.background_tasks.submit_order.assert_not_called()
 
 
 def test_redrive_enqueues_oldest_recoverable_updates(mocker) -> None:  # type: ignore[no-untyped-def]

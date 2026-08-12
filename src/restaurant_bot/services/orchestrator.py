@@ -13,6 +13,7 @@ from openai import APIConnectionError, APITimeoutError, RateLimitError
 from redis import Redis
 from structlog.contextvars import bound_contextvars
 
+from restaurant_bot.application.background_tasks import BackgroundTaskDispatcher
 from restaurant_bot.catalog.evidence import (
     canonical_search_query,
     query_evidence_tokens,
@@ -134,6 +135,7 @@ class UpdateOrchestrator:
         telegram: TelegramClient,
         openai_service: OpenAIService,
         sheets: GoogleSheetsGateway,
+        background_tasks: BackgroundTaskDispatcher,
     ):
         """Инициализирует компонент."""
         self.settings = settings
@@ -147,6 +149,7 @@ class UpdateOrchestrator:
         self.tracer = openai_service.tracer
         self.registration = VenueRegistrationService(settings, redis, sheets)
         self.order_review = OrderReviewService(settings, redis, telegram, sheets)
+        self.background_tasks = background_tasks
 
     def process(self, update_id: int) -> None:
         """Обрабатывает одно обновление Telegram целиком."""
@@ -2081,8 +2084,8 @@ class UpdateOrchestrator:
             if update:
                 update.tasks_enqueued = True
 
-    @staticmethod
     def _enqueue_side_effects(
+        self,
         chat_id: str,
         result: EngineResult,
         *,
@@ -2090,17 +2093,11 @@ class UpdateOrchestrator:
     ) -> None:
         """Ставит отложенные действия в очередь."""
         if result.enqueue_submission:
-            if lease is not None:
-                _ensure_lease(lease)
-            from restaurant_bot.workers.tasks import submit_order
-
-            submit_order.delay(chat_id)
+            _ensure_lease(lease)
+            self.background_tasks.submit_order(chat_id)
         if result.enqueue_order_status:
-            if lease is not None:
-                _ensure_lease(lease)
-            from restaurant_bot.workers.tasks import send_order_status
-
-            send_order_status.delay(
+            _ensure_lease(lease)
+            self.background_tasks.send_order_status(
                 chat_id,
                 page=result.order_status_page,
                 detail_page=result.order_status_detail_page,
@@ -2108,17 +2105,11 @@ class UpdateOrchestrator:
                 order_number=result.order_status_order_number,
             )
         if result.enqueue_product_add:
-            if lease is not None:
-                _ensure_lease(lease)
-            from restaurant_bot.workers.tasks import submit_product_add
-
-            submit_product_add.delay(chat_id)
+            _ensure_lease(lease)
+            self.background_tasks.submit_product_add(chat_id)
         if result.enqueue_review_submission:
-            if lease is not None:
-                _ensure_lease(lease)
-            from restaurant_bot.workers.tasks import submit_review_order
-
-            submit_review_order.delay(chat_id, result.state.review_token)
+            _ensure_lease(lease)
+            self.background_tasks.submit_review_order(chat_id, result.state.review_token)
 
     def _finish(
         self,

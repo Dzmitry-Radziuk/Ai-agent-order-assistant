@@ -117,6 +117,13 @@ Telegram update
   caller-backed roadmap находится в `docs/SERVICES_TRANSITION_AUDIT.md`.
 - `services/replies.py` — карточки, клавиатуры и пользовательские тексты.
 
+### Application и фоновые задачи
+
+- `application/background_tasks.py` — типизированный порт четырёх фоновых
+  эффектов без зависимости от Celery.
+- `services/orchestrator.py` — использует этот порт через явную constructor
+  dependency; worker-модули больше не импортируются из orchestration-кода.
+
 ### Внешние эффекты
 
 - `services/submission.py` — запись, checkpoints, пересчёт, dispatch и статусы.
@@ -124,7 +131,7 @@ Telegram update
 - `integrations/telegram.py` — Telegram transport.
 - `integrations/google_sheets.py` — каталог и листы заведения.
 - `integrations/cache.py` — catalog cache и Redis locks.
-- `workers/tasks.py` — только Celery delivery и фоновые границы.
+- `workers/tasks.py` — Celery tasks и adapter реализации application-порта.
 
 ## 5. Неприкосновенные инварианты
 
@@ -331,9 +338,10 @@ python scripts/check_markdown_links.py
 git diff --check
 ```
 
-Импортированы новые catalog owners и compatibility facades; циклических
-импортов не обнаружено. `.env` и `manual_smoke_forensic_logs.txt` в commit не
-входят.
+Импортированы канонические catalog/routing owners и application task port.
+Цикл `services.orchestrator ↔ workers.tasks` устранён: допустимое направление
+остаётся `workers.tasks → services.orchestrator`, обратных imports нет.
+`.env` и `manual_smoke_forensic_logs.txt` в commit не входят.
 
 ## 13. Правила передачи
 

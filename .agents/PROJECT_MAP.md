@@ -32,7 +32,7 @@ flowchart LR
 |---|---|
 | `src/restaurant_bot/api/app.py` | Health endpoints, проверка webhook-secret, нормализация и идемпотентная постановка Telegram update в очередь |
 | `src/restaurant_bot/workers/celery_app.py` | Конфигурация Celery и расписание фоновой очистки |
-| `src/restaurant_bot/workers/tasks.py` | Обработка update, запись заявки, добавление товара, статусы и очистка аудита |
+| `src/restaurant_bot/workers/tasks.py` | Celery delivery, task implementations и внешний adapter фоновых задач |
 | `src/restaurant_bot/cli.py` | Служебные команды, включая webhook и синхронизацию привязок |
 
 ## Слои и модули
@@ -45,7 +45,7 @@ flowchart LR
 
 | Модуль | Роль |
 |---|---|
-| `services/orchestrator.py` | Транзакционный pipeline: claim update, регистрация и доступ, блокировка чата, загрузка состояния, текстовая маршрутизация, каталог, engine, сохранение, задачи и доставка ответа |
+| `services/orchestrator.py` | Транзакционный pipeline: claim update, регистрация и доступ, блокировка чата, загрузка состояния, текстовая маршрутизация, каталог, engine, application task port и доставка ответа |
 | `services/engine.py` | Transitional orchestration state machine: приоритет незавершённых вопросов, команды, callback и переходы черновика; применение каталога делегирует `orders/catalog_resolution.py` |
 | `conversation/comments.py` | Channel-neutral операции подтверждённых комментариев, comment scope, provenance-нормализация и comment shadows |
 | `conversation/draft.py` | Channel-neutral операции целостности черновика и слияния подтверждённых дублей |
@@ -101,6 +101,12 @@ CommentScopeHandler их сохраняет.
 | `services/product_add_flow.py` | Сценарий запроса снабженцу на добавление ненайденного товара |
 | `services/venue_registration.py` | Центральный каталог заведений, доступ, invite-коды и привязки |
 | `services/text.py` | Нормализация текста, единиц, чисел и комментариев |
+
+### Application contracts
+
+| Модуль | Роль |
+|---|---|
+| `application/background_tasks.py` | Типизированный порт фоновых эффектов без зависимости от Celery или workers |
 
 ### Integrations
 
