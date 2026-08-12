@@ -96,4 +96,7 @@ class FinalReviewHandler:
                 return max(0, int(target.partition(":")[2]))
             except ValueError:
                 return 0
-        return max(0, state.final_review_page)
+        requested = max(0, state.final_review_page)
+        active_count = sum(item.status != ItemStatus.SKIPPED for item in state.cart)
+        total_pages = max(1, (active_count + 20 - 1) // 20)
+        return min(requested, total_pages - 1)

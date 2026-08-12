@@ -43,6 +43,13 @@ class PassiveIntentHandler:
         builder = _PASSIVE_REPLIES.get(command.intent)
         if builder is None:
             return None
+        if command.intent is Intent.GREETING:
+            first_contact = not bool(state.metadata.get("onboarding_shown"))
+            state.metadata["onboarding_shown"] = True
+            return EngineResult(
+                state=state,
+                reply=welcome_reply(state, first_contact=first_contact),
+            )
         return EngineResult(state=state, reply=builder(state))
 
 

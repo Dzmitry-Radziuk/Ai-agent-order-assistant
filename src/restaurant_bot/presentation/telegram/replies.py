@@ -80,12 +80,16 @@ def format_item_comment(comment: str) -> str:
     return f"  <i>Комментарий: {escape(comment)}</i>"
 
 
-def welcome_reply(state: ConversationState) -> BotReply:
+def welcome_reply(
+    state: ConversationState,
+    *,
+    first_contact: bool | None = None,
+) -> BotReply:
     """Формирует приветственное сообщение бота."""
     count = len(_active_items(state))
     requests = _request_count(state)
-    first_contact = not bool(state.metadata.get("onboarding_shown"))
-    state.metadata["onboarding_shown"] = True
+    if first_contact is None:
+        first_contact = not bool(state.metadata.get("onboarding_shown"))
     if first_contact or not (count or requests):
         return BotReply(text=_NEW_ORDER_MESSAGE)
     details = "\n".join(
@@ -419,7 +423,6 @@ def cart_reply(
     paginated = len(items) > _CART_PAGE_SIZE
     total_pages = max(1, (len(items) + _CART_PAGE_SIZE - 1) // _CART_PAGE_SIZE)
     page = min(max(0, state.cart_page), total_pages - 1)
-    state.cart_page = page
     if paginated:
         page_items = (ready + issues)[page * _CART_PAGE_SIZE : (page + 1) * _CART_PAGE_SIZE]
         page_ready = [item for item in page_items if item.status not in ISSUE_STATUSES]
@@ -742,7 +745,6 @@ def final_review_reply(state: ConversationState) -> BotReply:
     items = _active_items(state)
     total_pages = max(1, (len(items) + _FINAL_REVIEW_PAGE_SIZE - 1) // _FINAL_REVIEW_PAGE_SIZE)
     page = min(max(0, state.final_review_page), total_pages - 1)
-    state.final_review_page = page
     page_items = items[page * _FINAL_REVIEW_PAGE_SIZE : (page + 1) * _FINAL_REVIEW_PAGE_SIZE]
     paginated = total_pages > 1
     lines = ["📦 <b>Финальная проверка</b>", ""]
