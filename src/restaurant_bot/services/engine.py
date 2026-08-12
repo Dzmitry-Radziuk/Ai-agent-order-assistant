@@ -31,6 +31,12 @@ from restaurant_bot.conversation.draft import (
 )
 from restaurant_bot.conversation.progression import ProgressionKind
 from restaurant_bot.conversation.progression import advance as advance_progression
+from restaurant_bot.conversation.quantity_resolution import (
+    is_multiple_warning,
+    multiple_warnings,
+    select_multiple_warning,
+    suggested_quantity_for_multiple,
+)
 from restaurant_bot.conversation.routing.contracts import (
     CompatibilityAction,
     CompatibilityContext,
@@ -82,7 +88,6 @@ from restaurant_bot.services.conversation_handlers.pending_quantity import (
     PendingQuantityAction,
     PendingQuantityHandler,
 )
-from restaurant_bot.services.matching import nearest_valid_multiple
 from restaurant_bot.services.parser import (
     clean_command_target,
     dialogue_response_for,
@@ -705,13 +710,13 @@ class ConversationEngine:
         if command.intent == Intent.FIX_MULTIPLE:
             return self._show_multiple_quantity_choice(state)
         if command.intent == Intent.ACCEPT_SUGGESTED_QUANTITY:
-            self._select_multiple_warning(state)
+            select_multiple_warning(state)
             return self._accept_suggested_quantity(state)
         if command.intent in {Intent.KEEP_CURRENT_QUANTITY, Intent.KEEP_MULTIPLE}:
-            self._select_multiple_warning(state)
+            select_multiple_warning(state)
             return self._keep_current_quantity(state)
         if command.intent in {Intent.ENTER_OTHER_QUANTITY, Intent.EDIT_MULTIPLE}:
-            self._select_multiple_warning(state)
+            select_multiple_warning(state)
             return self._enter_other_quantity(state)
         if command.intent == Intent.SKIP_CURRENT:
             return self._skip_current(state)
@@ -842,7 +847,7 @@ class ConversationEngine:
                     if item.quantity is not None:
                         same_missing.quantity = item.quantity
                         same_missing.unit = item.unit or same_missing.catalog_unit
-                        same_missing.suggested_quantity = self._suggested_quantity_for_multiple(
+                        same_missing.suggested_quantity = suggested_quantity_for_multiple(
                             same_missing
                         )
                         same_missing.status = ItemStatus.MATCHED
@@ -1129,11 +1134,7 @@ class ConversationEngine:
             )
         )
 
-        has_multiple_warning = (
-            current.status == ItemStatus.MATCHED
-            and current.suggested_quantity is not None
-            and current.suggested_quantity != current.quantity
-        )
+        has_multiple_warning = is_multiple_warning(current)
         if has_multiple_warning:
             if quantity is not None:
                 return command.model_copy(
@@ -1582,13 +1583,7 @@ class ConversationEngine:
             if self._has_any_prefix(phrase, "нет", "измен", "другое колич"):
                 return command.model_copy(update={"intent": Intent.ENTER_OTHER_QUANTITY})
 
-        warnings = [
-            item
-            for item in state.cart
-            if item.status == ItemStatus.MATCHED
-            and item.suggested_quantity is not None
-            and item.suggested_quantity != item.quantity
-        ]
+        warnings = multiple_warnings(state)
         if warnings:
             if self._has_any_prefix(phrase, "остав", "как указ", "не исправ"):
                 return command.model_copy(update={"intent": Intent.KEEP_MULTIPLE})
@@ -1839,20 +1834,15 @@ class ConversationEngine:
             or (has_negation(phrase) and self._spoken_choice_index(phrase) is not None)
         ):
             return command.model_copy(update={"intent": Intent.CONTINUE_CURRENT})
-        if (
-            current.status == ItemStatus.MATCHED
-            and current.suggested_quantity is not None
-            and current.suggested_quantity != current.quantity
-            and (
-                command.intent == Intent.KEEP_CURRENT_QUANTITY
-                or has_negated_action(
-                    phrase,
-                    "исправ",
-                    "измен",
-                    "округл",
-                    "рекоменд",
-                    "замен",
-                )
+        if is_multiple_warning(current) and (
+            command.intent == Intent.KEEP_CURRENT_QUANTITY
+            or has_negated_action(
+                phrase,
+                "исправ",
+                "измен",
+                "округл",
+                "рекоменд",
+                "замен",
             )
         ):
             return command.model_copy(update={"intent": Intent.KEEP_CURRENT_QUANTITY})
@@ -2325,7 +2315,7 @@ class ConversationEngine:
         elif not item.unit:
             item.unit = item.catalog_unit
 
-        suggested = self._suggested_quantity_for_multiple(item)
+        suggested = suggested_quantity_for_multiple(item)
         if suggested:
             item.suggested_quantity = suggested
         else:
@@ -2351,7 +2341,7 @@ class ConversationEngine:
             )
             item.supplier_minimum_amount = product.supplier_minimum_amount
             item.minimum_multiple = product.minimum_multiple
-            item.suggested_quantity = self._suggested_quantity_for_multiple(item)
+            item.suggested_quantity = suggested_quantity_for_multiple(item)
             item.catalog_comment = product.comment
             item.catalog_comment_source = (
                 CommentSource.CATALOG if product.comment else CommentSource.NONE
@@ -2427,18 +2417,6 @@ class ConversationEngine:
 
         if item.quantity is None and explicit_quantity[0] is not None:
             item.quantity, item.unit = explicit_quantity
-
-    @staticmethod
-    def _suggested_quantity_for_multiple(item: CartItem) -> float | None:
-        """Рассчитывает количество с учётом кратности."""
-        if item.quantity is None:
-            return None
-        valid_total = nearest_valid_multiple(
-            item.existing_quantity + item.quantity, item.minimum_multiple
-        )
-        if valid_total is None:
-            return None
-        return round(valid_total - item.existing_quantity, 6)
 
     def _first_unresolved(self, state: ConversationState) -> CartItem | None:
         """Возвращает приоритетную нерешённую позицию."""
@@ -2599,31 +2577,9 @@ class ConversationEngine:
             ),
         )
 
-    @staticmethod
-    def _multiple_warnings(state: ConversationState) -> list[CartItem]:
-        """Возвращает товары, для которых нужно выбрать количество."""
-        return [
-            item
-            for item in state.cart
-            if item.status == ItemStatus.MATCHED
-            and item.suggested_quantity is not None
-            and item.suggested_quantity != item.quantity
-        ]
-
-    def _select_multiple_warning(self, state: ConversationState) -> CartItem | None:
-        """Выбирает текущий товар с предупреждением или первый доступный."""
-        current = state.current_item()
-        warnings = self._multiple_warnings(state)
-        if current in warnings:
-            return current
-        if warnings:
-            state.current_issue_item_id = warnings[0].id
-            return warnings[0]
-        return None
-
     def _show_multiple_quantity_choice(self, state: ConversationState) -> EngineResult:
         """Открывает варианты количества без автоматического изменения."""
-        item = self._select_multiple_warning(state)
+        item = select_multiple_warning(state)
         if item is None:
             state.current_issue_item_id = ""
             return EngineResult(state=state, reply=final_review_reply(state))
@@ -2634,7 +2590,7 @@ class ConversationEngine:
     def _advance_multiple_quantity_choice(self, state: ConversationState) -> EngineResult:
         """Показывает следующий выбор количества или финальную проверку."""
         state.current_issue_item_id = ""
-        next_item = self._select_multiple_warning(state)
+        next_item = select_multiple_warning(state)
         if next_item is not None:
             state.stage = SessionStage.AWAIT_SUBMIT_CONFIRM
             state.status = "await_multiple_choice"
@@ -2776,7 +2732,7 @@ class ConversationEngine:
             return EngineResult(
                 state=state, reply=BotReply(text="Позиция для изменения не найдена.")
             )
-        was_multiple_choice = item in self._multiple_warnings(state) and state.stage in {
+        was_multiple_choice = item in multiple_warnings(state) and state.stage in {
             SessionStage.AWAIT_SUBMIT_CONFIRM,
             SessionStage.AWAIT_MULTIPLE_QUANTITY,
         }
@@ -2794,7 +2750,7 @@ class ConversationEngine:
         item.unit = item.catalog_unit or command.edit_unit or item.unit
         if item.catalog_product_id:
             item.status = ItemStatus.MATCHED
-            item.suggested_quantity = self._suggested_quantity_for_multiple(item)
+            item.suggested_quantity = suggested_quantity_for_multiple(item)
         if was_multiple_choice:
             return self._advance_multiple_quantity_choice(state)
         return self._advance(state)

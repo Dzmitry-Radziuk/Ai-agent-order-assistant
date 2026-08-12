@@ -1,8 +1,6 @@
-"""Сохраняет совместимость импортов каталога и временно владеет помощником кратности заказа."""
+"""Сохраняет совместимость импортов каталога и кратности заказа."""
 
 from __future__ import annotations
-
-import math
 
 from restaurant_bot.catalog.evidence import (
     canonical_search_query,
@@ -24,18 +22,7 @@ from restaurant_bot.catalog.safety import (
     is_safe_catalog_name_equivalent,
 )
 from restaurant_bot.catalog.scoring import match_score
-
-
-def nearest_valid_multiple(quantity: float, multiple: float | None) -> float | None:
-    """Возвращает ближайшее допустимое кратное."""
-    if not multiple or multiple <= 0:
-        return None
-    ratio = quantity / multiple
-    nearest = math.ceil(ratio - 1e-9) * multiple
-    if abs(nearest - quantity) < 1e-9:
-        return None
-    return round(nearest, 6)
-
+from restaurant_bot.conversation.quantity_resolution import nearest_valid_multiple
 
 __all__ = [
     "can_auto_select",

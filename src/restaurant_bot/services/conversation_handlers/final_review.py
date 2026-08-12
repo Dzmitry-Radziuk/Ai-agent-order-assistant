@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from restaurant_bot.conversation.quantity_resolution import multiple_warnings
 from restaurant_bot.conversation.state.queries import (
     first_unresolved,
     item_index,
@@ -74,12 +75,7 @@ class FinalReviewHandler:
                     reply=issue_reply(unresolved, item_index(state, unresolved)),
                 )
             )
-        has_multiple_warning = any(
-            item.status == ItemStatus.MATCHED
-            and item.suggested_quantity is not None
-            and item.suggested_quantity != item.quantity
-            for item in state.cart
-        )
+        has_multiple_warning = bool(multiple_warnings(state))
         if has_multiple_warning:
             state.stage = SessionStage.AWAIT_SUBMIT_CONFIRM
             return FinalReviewOutcome(

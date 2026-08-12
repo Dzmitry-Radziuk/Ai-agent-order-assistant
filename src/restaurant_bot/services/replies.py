@@ -4,6 +4,7 @@ import math
 import re
 from typing import TypedDict
 
+from restaurant_bot.conversation.quantity_resolution import multiple_warnings
 from restaurant_bot.domain.models import (
     BotReply,
     Button,
@@ -826,13 +827,7 @@ def final_review_reply(state: ConversationState) -> BotReply:
         )
         if item.comment:
             lines.append(format_item_comment(item.comment))
-    multiple = [
-        item
-        for item in items
-        if item.status == ItemStatus.MATCHED
-        and item.suggested_quantity is not None
-        and item.suggested_quantity != item.quantity
-    ]
+    multiple = multiple_warnings(state)
     warnings = _supplier_warnings(state)
     rows: list[list[Button]] = []
     if paginated:

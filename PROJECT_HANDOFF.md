@@ -91,9 +91,11 @@ Telegram update
   equivalence, broad-category policy и auto-select safety.
 - `catalog/resolver.py` — поиск в supplier scope и чистое решение
   `CatalogDecision` без изменения `ConversationState`.
+- `conversation/quantity_resolution.py` — единый channel-neutral владелец
+  кратности заказа: `nearest_valid_multiple`, расчёт рекомендации и
+  предупреждения без изменения черновика.
 - `services/matching.py` — transitional compatibility path: catalog symbols
-  re-exported, а `nearest_valid_multiple()` остаётся legacy non-catalog
-  реализацией помощника кратности заказа.
+  и совместимый re-export `nearest_valid_multiple`.
 - `services/catalog_resolver.py` — чистый compatibility re-export facade для
   `catalog/resolver.py`.
 - `conversation/selection.py` — channel-neutral score, targeting и выбор
@@ -186,8 +188,9 @@ Block 4 завершён механически: смешанный catalog matc
 `catalog/retrieval.py` (53), `catalog/safety.py` (385) и
 `catalog/resolver.py` (199). `services/matching.py` оставлен transitional
 compatibility module: каталоговые symbols re-exported, а
-`nearest_valid_multiple()` сохранён как единственная legacy non-catalog
-реализация помощника кратности, потому что он не относится к каталогу.
+`nearest_valid_multiple()` оставлен совместимым re-export из
+`conversation/quantity_resolution.py`, который теперь является владельцем
+non-catalog политики кратности.
 `services/catalog_resolver.py` остаётся чистым re-export facade. Production callers
 переведены на новые owners. Сравнение старого и нового pipeline на 18
 представительных corpus-классах дало `0 mismatches`; полный baseline —
@@ -204,8 +207,9 @@ seam, который позднее можно заменить searchable proje
 parsing/conversation cleanup, а не дублирующая реализация.
 Repository-wide audit подтвердил одного owner для catalog responsibilities,
 отсутствие циклов и workflow-изменений в engine/orchestrator; единственный
-production caller `nearest_valid_multiple()` остаётся в engine через
-`services/matching.py`. Conversation Block не начинался.
+политика кратности вынесена в `conversation/quantity_resolution.py`, а
+`services/matching.py` сохраняет только compatibility re-export. Conversation
+Block не начинался.
 
 Block 5A выполнен как поведенчески нейтральная декомпозиция conversation
 routing/state policy. Новые channel-neutral owners находятся в

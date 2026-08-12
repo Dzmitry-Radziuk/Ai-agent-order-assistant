@@ -95,9 +95,10 @@ contracts и проходит focused/full regression до следующего 
   каждый модуль имеет одну каталожную ответственность.
 - `catalog/resolver.py` — **Block 4 MOVE** из `services/catalog_resolver.py`;
   resolver не меняет state.
+- `conversation/quantity_resolution.py` — **Block 5E owner** channel-neutral
+  политики кратности, рекомендации количества и предупреждений.
 - `services/matching.py` — **Block 4 compatibility path**: каталожные symbols
-  re-exported, но transitional `nearest_valid_multiple()` остаётся единственной
-  legacy non-catalog реализацией.
+  re-exported и совместимый `nearest_valid_multiple()`.
 - `services/catalog_resolver.py` — **Block 4 pure re-export facade**;
   второй реализации resolver в нём нет.
 - `catalog/evidence.py` владеет canonical representation, tokens,
@@ -120,6 +121,9 @@ contracts и проходит focused/full regression до следующего 
 - `conversation/progression.py` — channel-neutral owner перехода к следующей
   нерешённой позиции, issue mapping и progression stage; presentation replies
   остаются в `ConversationEngine`.
+- `conversation/quantity_resolution.py` — channel-neutral owner политики
+  кратности: расчёт рекомендации, канонические предупреждения и выбор позиции
+  без зависимости от канала или presentation.
 - `services/conversation_handlers/state_compatibility.py`, `modal_routing.py`
   и `state.py` оставлены только как compatibility facades с доказанными
   callers.
@@ -161,6 +165,7 @@ restaurant_bot/
   conversation/
     selection.py
     progression.py
+    quantity_resolution.py
     routing/
       contracts.py
       state_compatibility.py
@@ -345,10 +350,9 @@ ConversationEngine и channel adapters. PostgreSQL, embeddings, индексы,
 parsing/conversation, а не дублирование алгоритмов. Audit catalog-модулей
 подтвердил отсутствие циклов, dead duplicate algorithms и зависимостей от
 engine/orchestrator/Telegram/Celery/Sheets. `engine.py` и `orchestrator.py`
-сохраняют workflow; engine использует только catalog owners и legacy helper
-`nearest_valid_multiple()` через compatibility path. `services/matching.py`
-остаётся временным владельцем этого helper, потому что отдельного естественного
-owner сейчас нет; новая папка ради одной функции не создаётся.
+сохраняют workflow; engine использует catalog owners и
+`conversation/quantity_resolution.py`. `services/matching.py` остаётся
+compatibility facade для старого импорта `nearest_valid_multiple()`.
 
 ### Block 5A review
 

@@ -50,6 +50,7 @@ flowchart LR
 | `conversation/comments.py` | Channel-neutral операции подтверждённых комментариев, comment scope, provenance-нормализация и comment shadows |
 | `conversation/draft.py` | Channel-neutral операции целостности черновика и слияния подтверждённых дублей |
 | `conversation/progression.py` | Channel-neutral переход к следующей нерешённой позиции и смена progression stage без presentation |
+| `conversation/quantity_resolution.py` | Channel-neutral расчёт кратности, рекомендуемого количества и выбор предупреждений без изменения черновика |
 | `services/input_recognition.py` | Скачивание voice/photo, транскрибация с безопасным fallback и обновление карточки прогресса |
 | `services/parser.py` | Text intent facade, callback contract и временный dispatcher command parsing |
 | `parsing/commands/patterns.py` | Статические шаблоны text-команд |
@@ -90,7 +91,7 @@ CommentScopeHandler их сохраняет.
 | `catalog/scoring.py` | Детерминированная оценка одного каталожного товара |
 | `catalog/retrieval.py` | Ограниченный in-memory поиск, admission и порядок кандидатов |
 | `catalog/safety.py` | Конфликты квалификаторов, numeric compatibility, safe equivalence, broad-category policy и auto-select safety |
-| `services/matching.py` | Compatibility path для catalog re-export; transitional quantity helper `nearest_valid_multiple` остаётся единственной legacy non-catalog реализацией |
+| `services/matching.py` | Compatibility path для catalog re-export и совместимый re-export `nearest_valid_multiple` |
 | `services/catalog_resolver.py` | Чистый compatibility re-export facade для `catalog/resolver.py` |
 | `services/replies.py` | Пользовательские карточки и клавиатуры основного диалога |
 | `services/submission.py` | Контрольные точки записи, пересчёта, опциональной отправки и чтения статусов |
