@@ -302,3 +302,24 @@ adapters и доказанные public facades могут временно ос
 алгоритмы callers, services/text.py, prompts, catalog thresholds, AI, callbacks,
 DB, Sheets, Docker, task bodies, decorators, names, retry settings и UX не
 менялись. Block 5I и Block 5G не переоткрывались; новый ADR не добавлялся.
+## Block 5T — controlled cleanup transitional leaf boundaries
+
+Block 5T завершён в `9456e79` от `227ba6e`. Это механический перенос владельцев
+без изменения пользовательского поведения или алгоритмов.
+
+| Этап | Итоговый owner | Старый путь | Решение |
+|---|---|---|---|
+| 5T-A `to_float` | `services/text.py` | тот же | Оставлен: общий контракт Google Sheets и AI reconciliation ещё не имеет безопасного единого owner. |
+| 5T-B text commands | `parsing/commands/api.py` | `services/parser.py` | Production imports переведены; facade оставлен только для тестовых imports и callback API. |
+| 5T-B callbacks | `input/telegram_callbacks.py` | `services/parser.py` | Перенесён 1:1, включая `v2:*` mapping и revision semantics. |
+| 5T-C request/state/prompt | `orders/product_add.py`, `conversation/product_add.py`, `presentation/telegram/product_add.py` | `services/product_add_flow.py` | Старый модуль удалён после caller-аудита. |
+| 5T-D replies | `presentation/telegram/replies.py` | `services/replies.py` | Telegram UX и callback contracts перенесены без изменения строк; старый модуль удалён. |
+| 5T-D package suggestion | `orders/package_suggestions.py` | private helper в replies | Вынесена чистая channel-neutral расчётная функция. |
+
+AST-проверка после переноса не выявила циклов. Четыре lower/core → `services`
+edges остаются только из AI reconciliation-модулей к `services/text.py:to_float`;
+это осознанное решение 5T-A, а не забытый импорт.
+Production imports старых `services.parser`, `services.replies` и
+`services.product_add_flow` отсутствуют. Динамических ссылок на удалённые
+facades не найдено. Остальные большие application/use-case модули не дробились.
+Полный baseline до и после — `1366 collected / 1366 passed`.

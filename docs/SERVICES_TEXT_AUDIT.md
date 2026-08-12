@@ -374,3 +374,11 @@ Group N**:
 - Переносы Block 5S не меняли бизнес-алгоритмы или тестовые assertions.
 - Baseline после Block 5S подтверждён свежим запуском: `1366 collected /
   1366 passed`.
+## Block 5T-A — окончательное решение по `to_float`
+
+В Block 5T выполнен повторный caller-аудит. `services/text.py` содержит только
+`to_float`; его используют Google Sheets, `openai_client.py` и AI reconciliation.
+Функция допускает форматы чисел внешнего Sheets-контракта и участвует в
+reconciliation. Перенос в `domain` или `parsing` сейчас смешал бы эти
+ответственности, поэтому владелец осознанно оставлен до отдельного доказанного
+numeric-value seam.

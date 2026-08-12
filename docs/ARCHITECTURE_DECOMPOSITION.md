@@ -500,3 +500,22 @@ owners без изменения assertions и поведения; полный 
 persistence, migrations, DB schema, Docker/deploy, workers, API entrypoints,
 tests только ради нового пути импорта или внешние сервисы. Известные manual
 acceptance issues остаются в `PROJECT_HANDOFF.md`.
+## Block 5T — controlled cleanup leaf boundaries
+
+Block 5T завершён механически в `9456e79` от `227ba6e`. Канонические владельцы:
+
+- `parsing/commands/api.py` — semantic text command API;
+- `input/telegram_callbacks.py` — Telegram callback parsing;
+- `orders/product_add.py`, `conversation/product_add.py`,
+  `presentation/telegram/product_add.py` — product-add contracts;
+- `presentation/telegram/replies.py` — Telegram replies и keyboards;
+- `orders/package_suggestions.py` — чистая подсказка фасовки;
+- `services/text.py` — только `to_float`, оставленный из-за смешанного Sheets и
+  AI-reconciliation контракта.
+
+`services/parser.py` сохранён как 50-строчный compatibility facade: production
+импорты переведены, но тестовый public path и callback API ещё используются.
+`services/replies.py` и `services/product_add_flow.py` удалены. State-machine,
+matching, prompts, schemas, persistence и DevOps не затрагивались.
+Единственная оставшаяся нижнеуровневая зависимость от `services` — вызов
+`to_float` из четырёх AI reconciliation-модулей; она покрыта решением 5T-A.

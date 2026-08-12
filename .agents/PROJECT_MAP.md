@@ -221,3 +221,17 @@ CommentScopeHandler их сохраняет.
 | `tests/docs/`, `tests/ci/` | Сценарии, docstring, ссылки и документационные контракты |
 
 Канонический каталог пользовательских сценариев: `docs/user-scenarios/scenarios.json`. Markdown и HTML генерируются из него, поэтому вручную редактировать производные файлы нельзя.
+## Block 5T — актуальные владельцы transitional leaf boundaries
+
+Канонический semantic text parser находится в `parsing/commands/api.py`, а
+Telegram callback contract — в `input/telegram_callbacks.py`. `services/parser.py`
+сокращён до compatibility facade без production callers; его сохранение
+объяснено тестовыми импортами и обратной совместимостью API.
+
+Product-add owners: `orders/product_add.py`, `conversation/product_add.py` и
+`presentation/telegram/product_add.py`. Telegram replies принадлежат
+`presentation/telegram/replies.py`; чистая подсказка фасовки принадлежит
+`orders/package_suggestions.py`. `services/product_add_flow.py` и
+`services/replies.py` удалены. `services/text.py` по-прежнему содержит только
+`to_float`, потому что Sheets и AI-reconciliation контракты пока не имеют
+доказанного единого нового owner.

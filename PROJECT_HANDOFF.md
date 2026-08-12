@@ -442,3 +442,34 @@ git diff --check
 PROJECT_HANDOFF.md, `.agents/DECISIONS.md`, `.agents/PROJECT_MAP.md`,
 архитектурной документации, тестов и текущего Git state. История обсуждений
 в handoff не копируется.
+## Block 5T — controlled cleanup transitional leaf boundaries
+
+Block 5T завершён поведенчески нейтрально в коммите `9456e79` от исходного
+`227ba6e`. Изменения ограничены переносом владельцев и импортов; database,
+Alembic, DevOps, prompts, schemas, state-machine, matching и serialized state
+contracts не менялись.
+
+### Решения по этапам
+
+- **5T-A — `to_float`: AUDITED/LEFT.** `services/text.py` оставлен с единственной
+  функцией `to_float`: её одновременно используют Google Sheets и AI
+  reconciliation, а безопасный общий owner для обоих контрактов не доказан.
+- **5T-B — parser boundary: MOVED.** Semantic text API находится в
+  `parsing/commands/api.py`, callback parsing — в `input/telegram_callbacks.py`.
+  `services/parser.py` теперь 50-строчный compatibility facade для 28 тестовых
+  импортов и старого двухаргументного callback API; production старый путь не
+  импортирует, callback values и revision semantics сохранены.
+- **5T-C — product-add boundary: MOVED.** Request id перенесён в
+  `orders/product_add.py`, очистка pending state — в `conversation/product_add.py`,
+  prompt — в `presentation/telegram/product_add.py`; старый facade удалён.
+- **5T-D — replies boundary: MOVED.** Replies и keyboards находятся в
+  `presentation/telegram/replies.py`; `services/replies.py` удалён. Чистая
+  подсказка фасовки вынесена в `orders/package_suggestions.py`.
+- **5T-E — dependency audit: DONE.** Новых циклов нет. Единственные
+  lower/core → `services` edges — четыре AI reconciliation-модуля к
+  `services/text.py:to_float`; это осознанно оставленная граница 5T-A. Остальные
+  services отвечают за application adapters и координацию.
+
+Baseline до и после: `1366 collected / 1366 passed`. Focused parser, callback,
+product-add, replies, supplier и submission tests зелёные. Следующий block не
+назначается автоматически: Block 5U не начинался.
