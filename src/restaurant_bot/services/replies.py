@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import math
 import re
-from typing import TypedDict
 
 from restaurant_bot.conversation.quantity_resolution import multiple_warnings
 from restaurant_bot.domain.models import (
@@ -12,8 +11,8 @@ from restaurant_bot.domain.models import (
     ConversationState,
     ExtractedItem,
     ItemStatus,
-    SessionStage,
 )
+from restaurant_bot.orders.supplier_minimums import supplier_minimum_warnings
 from restaurant_bot.services.text import (
     UNIT_ALIASES,
     convert_quantity,
@@ -37,15 +36,6 @@ _NEW_ORDER_MESSAGE = (
     "Я распознаю названия, количество и комментарии.\n\n"
     "Когда закончите, скажите «покажи итог» — я покажу заявку для проверки."
 )
-
-
-class _SupplierWarningGroup(TypedDict):
-    """Группирует предупреждения о минимуме поставщика."""
-
-    current: float
-    added: float
-    minimum: float
-    items: list[CartItem]
 
 
 def _active_items(state: ConversationState) -> list[CartItem]:
@@ -120,34 +110,6 @@ def _package_count_suggestion(item: CartItem) -> tuple[int, float, str] | None:
         count = max(1, math.ceil(item.quantity / converted_package))
         return count, round(count * converted_package, 6), item.unit
     return None
-
-
-def _supplier_warnings(
-    state: ConversationState,
-) -> list[tuple[str, float, float, float, list[CartItem]]]:
-    """Формирует предупреждения о минимумах поставщиков."""
-    groups: dict[str, _SupplierWarningGroup] = {}
-    for item in _active_items(state):
-        if item.status != ItemStatus.MATCHED or not item.supplier:
-            continue
-        group = groups.setdefault(
-            item.supplier, {"current": 0.0, "added": 0.0, "minimum": 0.0, "items": []}
-        )
-        group["current"] = max(group["current"], float(item.supplier_current_sum or 0))
-        group["added"] += item.amount
-        group["minimum"] = max(group["minimum"], float(item.supplier_minimum_amount or 0))
-        group["items"].append(item)
-    return [
-        (
-            supplier,
-            group["current"],
-            group["added"],
-            group["minimum"],
-            list(group["items"]),
-        )
-        for supplier, group in groups.items()
-        if group["minimum"] > 0 and group["current"] + group["added"] < group["minimum"]
-    ]
 
 
 def welcome_reply(state: ConversationState) -> BotReply:
@@ -828,7 +790,7 @@ def final_review_reply(state: ConversationState) -> BotReply:
         if item.comment:
             lines.append(format_item_comment(item.comment))
     multiple = multiple_warnings(state)
-    warnings = _supplier_warnings(state)
+    warnings = supplier_minimum_warnings(state)
     rows: list[list[Button]] = []
     if paginated:
         navigation: list[Button] = []
@@ -874,8 +836,8 @@ def final_review_reply(state: ConversationState) -> BotReply:
         if warnings:
             lines += ["", "⚠️ <b>Минимальная сумма поставщика</b>"]
             lines += [
-                f"{escape(supplier)}: {format_number(current + added)} ₽ из {format_number(minimum)} ₽"
-                for supplier, current, added, minimum, _ in warnings
+                f"{escape(warning.supplier)}: {format_number(warning.current_amount + warning.added_amount)} ₽ из {format_number(warning.minimum_amount)} ₽"
+                for warning in warnings
             ]
             rows.append(
                 [
@@ -935,26 +897,37 @@ def multiple_quantity_choice_reply(item: CartItem) -> BotReply:
 
 def supplier_warning_details_reply(state: ConversationState) -> BotReply:
     """Формирует подробности минимума поставщика."""
-    warnings = _supplier_warnings(state)
+    warnings = supplier_minimum_warnings(state)
     if not warnings:
         return BotReply(
             text="<i>Минимальная сумма набрана</i>",
             rows=[[Button(text="К финальной проверке", callback_data="v2:cart")]],
         )
     lines = ["⚠️ <b>Минимальная сумма не набрана</b>"]
-    for supplier, current, added, minimum, items in warnings[:8]:
-        lines += ["", f"<b>Поставщик: {escape(supplier)}</b>", "Товары в этой заявке:"]
-        for item in items[:8]:
+    for warning in warnings[:8]:
+        lines += [
+            "",
+            f"<b>Поставщик: {escape(warning.supplier)}</b>",
+            "Товары в этой заявке:",
+        ]
+        for item in warning.items[:8]:
             lines.append(
                 f"• {escape(_item_name(item))} — {format_number(item.quantity)} {escape(_item_unit(item) or 'шт')} · {format_number(item.amount)} ₽"
             )
         lines += [
-            f"В заказе этого поставщика: {format_number(current + added)} ₽ из {format_number(minimum)} ₽",
-            f"<b>Не хватает: {format_number(minimum - current - added)} ₽</b>",
+            f"В заказе этого поставщика: {format_number(warning.current_amount + warning.added_amount)} ₽ из {format_number(warning.minimum_amount)} ₽",
+            f"<b>Не хватает: {format_number(warning.missing_amount)} ₽</b>",
         ]
     lines += ["", "Можно добавить товары этого поставщика или отправить заявку как есть."]
     rows = (
-        [[Button(text=(f"Добавить товары: {warnings[0][0]}")[:62], callback_data="v2:minsumadd:0")]]
+        [
+            [
+                Button(
+                    text=(f"Добавить товары: {warnings[0].supplier}")[:62],
+                    callback_data="v2:minsumadd:0",
+                )
+            ]
+        ]
         if len(warnings) == 1
         else [[Button(text="Выбрать поставщика", callback_data="v2:minsumchoose")]]
     )
@@ -967,7 +940,7 @@ def supplier_warning_details_reply(state: ConversationState) -> BotReply:
 
 def supplier_warning_choose_reply(state: ConversationState) -> BotReply:
     """Формирует выбор поставщика с недобранным минимумом."""
-    warnings = _supplier_warnings(state)
+    warnings = supplier_minimum_warnings(state)
     if not warnings:
         return BotReply(
             text="<i>Минимальная сумма набрана</i>\n\nДополнительная проверка не требуется.",
@@ -976,11 +949,13 @@ def supplier_warning_choose_reply(state: ConversationState) -> BotReply:
     rows = [
         [
             Button(
-                text=f"{supplier} · не хватает {format_number(minimum - current - added)} ₽"[:62],
+                text=f"{warning.supplier} · не хватает {format_number(warning.missing_amount)} ₽"[
+                    :62
+                ],
                 callback_data=f"v2:minsumadd:{index}",
             )
         ]
-        for index, (supplier, current, added, minimum, _) in enumerate(warnings[:10])
+        for index, warning in enumerate(warnings[:10])
     ]
     rows += [
         [Button(text="К минимальной сумме", callback_data="v2:minsum")],
@@ -992,16 +967,8 @@ def supplier_warning_choose_reply(state: ConversationState) -> BotReply:
     )
 
 
-def start_adding_supplier_reply(state: ConversationState, index: int) -> BotReply:
-    """Начинает добавление товаров выбранного поставщика."""
-    warnings = _supplier_warnings(state)
-    if index < 0 or index >= len(warnings):
-        return supplier_warning_choose_reply(state)
-    supplier = warnings[index][0]
-    state.stage = SessionStage.COLLECTING
-    state.status = "collecting"
-    state.supplier_hint_context = supplier
-    state.supplier_search_locked = True
+def start_adding_supplier_reply(supplier: str) -> BotReply:
+    """Формирует сообщение для добавления товаров выбранного поставщика."""
     return BotReply(
         text=f"🚚 <b>Добавьте товары поставщика</b>\n\nПоставщик: {escape(supplier)}\n\nОтправьте товары текстом, голосом или фото. Поиск будет выполнен только у этого поставщика.",
         rows=[

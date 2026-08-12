@@ -94,6 +94,9 @@ Telegram update
 - `conversation/quantity_resolution.py` — единый channel-neutral владелец
   кратности заказа: `nearest_valid_multiple`, расчёт рекомендации и
   предупреждения без изменения черновика.
+- `orders/supplier_minimums.py` — единый channel-neutral владелец агрегации
+  минимальных сумм поставщиков и структурированных предупреждений без мутации
+  состояния.
 - `services/matching.py` — transitional compatibility path: catalog symbols
   и совместимый re-export `nearest_valid_multiple`.
 - `services/catalog_resolver.py` — чистый compatibility re-export facade для
@@ -296,8 +299,8 @@ channel boundary без изменения callback format и пользоват
 
 ## 11. Следующий функциональный блок
 
-После review Block 5D отдельно назначается следующий этап декомпозиции. До
-такого решения нельзя автоматически переносить остальные handlers, уменьшать
+Следующий seam — catalog-to-draft resolution после отдельного external review.
+До такого решения нельзя автоматически переносить остальные handlers, уменьшать
 `engine.py` или менять поведение state machine.
 
 ## 12. Проверки

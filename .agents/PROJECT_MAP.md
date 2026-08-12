@@ -51,6 +51,7 @@ flowchart LR
 | `conversation/draft.py` | Channel-neutral операции целостности черновика и слияния подтверждённых дублей |
 | `conversation/progression.py` | Channel-neutral переход к следующей нерешённой позиции и смена progression stage без presentation |
 | `conversation/quantity_resolution.py` | Channel-neutral расчёт кратности, рекомендуемого количества и выбор предупреждений без изменения черновика |
+| `orders/supplier_minimums.py` | Channel-neutral агрегация минимальных сумм поставщиков и предупреждений без изменения состояния |
 | `services/input_recognition.py` | Скачивание voice/photo, транскрибация с безопасным fallback и обновление карточки прогресса |
 | `services/parser.py` | Text intent facade, callback contract и временный dispatcher command parsing |
 | `parsing/commands/patterns.py` | Статические шаблоны text-команд |

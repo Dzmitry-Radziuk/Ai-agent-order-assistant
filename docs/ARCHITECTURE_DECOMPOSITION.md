@@ -124,6 +124,8 @@ contracts и проходит focused/full regression до следующего 
 - `conversation/quantity_resolution.py` — channel-neutral owner политики
   кратности: расчёт рекомендации, канонические предупреждения и выбор позиции
   без зависимости от канала или presentation.
+- `orders/supplier_minimums.py` — channel-neutral owner агрегации минимальных
+  сумм поставщиков; возвращает структурированные warnings без мутации state.
 - `services/conversation_handlers/state_compatibility.py`, `modal_routing.py`
   и `state.py` оставлены только как compatibility facades с доказанными
   callers.

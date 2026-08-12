@@ -74,6 +74,7 @@ from restaurant_bot.domain.models import (
     SessionStage,
     TelegramEvent,
 )
+from restaurant_bot.orders.supplier_minimums import supplier_minimum_warnings
 from restaurant_bot.services.comment_policy import supplier_comment_start
 from restaurant_bot.services.conversation_handlers.candidate_selection import (
     CandidateSelectionHandler,
@@ -655,7 +656,15 @@ class ConversationEngine:
                 index = int(command.callback_target)
             except ValueError:
                 return EngineResult(state=state, reply=supplier_warning_choose_reply(state))
-            return EngineResult(state=state, reply=start_adding_supplier_reply(state, index))
+            warnings = supplier_minimum_warnings(state)
+            if index < 0 or index >= len(warnings):
+                return EngineResult(state=state, reply=supplier_warning_choose_reply(state))
+            supplier = warnings[index].supplier
+            state.stage = SessionStage.COLLECTING
+            state.status = "collecting"
+            state.supplier_hint_context = supplier
+            state.supplier_search_locked = True
+            return EngineResult(state=state, reply=start_adding_supplier_reply(supplier))
 
         if command.comment_clarification:
             state.pending_comment_items = [item.model_copy(deep=True) for item in command.items]
@@ -1952,21 +1961,7 @@ class ConversationEngine:
     @staticmethod
     def _spoken_supplier_warning_index(phrase: str, state: ConversationState) -> int | None:
         """Определяет поставщика из голосовой команды."""
-        groups: dict[str, tuple[float, float, float]] = {}
-        for item in state.cart:
-            if item.status != ItemStatus.MATCHED or not item.supplier:
-                continue
-            current, added, minimum = groups.get(item.supplier, (0.0, 0.0, 0.0))
-            groups[item.supplier] = (
-                max(current, float(item.supplier_current_sum or 0)),
-                added + item.amount,
-                max(minimum, float(item.supplier_minimum_amount or 0)),
-            )
-        options = [
-            supplier
-            for supplier, (current, added, minimum) in groups.items()
-            if minimum > 0 and current + added < minimum
-        ]
+        options = [warning.supplier for warning in supplier_minimum_warnings(state)]
         compact_phrase = ConversationEngine._spoken_acronym(phrase)
         for index, supplier in enumerate(options):
             normalized_supplier = normalize_text(supplier)
@@ -1980,21 +1975,7 @@ class ConversationEngine:
     @staticmethod
     def _supplier_warning_count(state: ConversationState) -> int:
         """Считает предупреждения по поставщикам."""
-        groups: dict[str, tuple[float, float, float]] = {}
-        for item in state.cart:
-            if item.status != ItemStatus.MATCHED or not item.supplier:
-                continue
-            current, added, minimum = groups.get(item.supplier, (0.0, 0.0, 0.0))
-            groups[item.supplier] = (
-                max(current, float(item.supplier_current_sum or 0)),
-                added + item.amount,
-                max(minimum, float(item.supplier_minimum_amount or 0)),
-            )
-        return sum(
-            1
-            for current, added, minimum in groups.values()
-            if minimum > 0 and current + added < minimum
-        )
+        return len(supplier_minimum_warnings(state))
 
     @staticmethod
     def _spoken_acronym(value: str) -> str:
