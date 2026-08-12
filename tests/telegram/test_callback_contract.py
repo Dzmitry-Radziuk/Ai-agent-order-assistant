@@ -6,8 +6,8 @@ from restaurant_bot.domain.models import (
     ItemStatus,
     TelegramEvent,
 )
+from restaurant_bot.input.telegram_callbacks import parse_callback
 from restaurant_bot.services.engine import ConversationEngine
-from restaurant_bot.services.parser import parse_callback
 
 
 def test_callback_actions_have_explicit_state_machine_meanings() -> None:

@@ -8,8 +8,9 @@ from restaurant_bot.domain.models import (
     ItemStatus,
     TelegramEvent,
 )
+from restaurant_bot.input.telegram_callbacks import parse_callback
+from restaurant_bot.parsing.commands.api import enrich_command, infer_intent
 from restaurant_bot.services.engine import ConversationEngine
-from restaurant_bot.services.parser import infer_intent
 
 
 @pytest.mark.parametrize(
@@ -71,7 +72,7 @@ def test_order_status_callback_uses_source_progress_text(settings) -> None:  # t
         TelegramEvent(
             update_id=1, chat_id="1", input_type=InputKind.CALLBACK, callback_message_id=42
         ),
-        infer_intent("", "v2:orders:r3"),
+        enrich_command("", parse_callback("v2:orders:r3")),
         ConversationState(ui_revision=3),
         [],
     )
@@ -94,7 +95,7 @@ def test_order_status_callback_opens_selected_order(settings) -> None:  # type: 
             input_type=InputKind.CALLBACK,
             callback_data="v2:order:2",
         ),
-        infer_intent("", "v2:order:2"),
+        enrich_command("", parse_callback("v2:order:2")),
         state,
         [],
     )
@@ -264,7 +265,7 @@ def test_natural_order_status_phrase_contains_selected_position() -> None:
 
 def test_order_status_page_callback_contains_page_number() -> None:
     """Извлекает страницу из безопасного callback без номера заявки."""
-    command = infer_intent("", "v2:orderspage:3")
+    command = enrich_command("", parse_callback("v2:orderspage:3"))
 
     assert command.intent is Intent.ORDER_STATUS
     assert command.callback_target == "page:3"

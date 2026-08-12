@@ -1,7 +1,7 @@
 import pytest
 
 from restaurant_bot.domain.models import Intent
-from restaurant_bot.services.parser import infer_intent
+from restaurant_bot.parsing.commands.api import infer_intent
 
 
 @pytest.mark.parametrize(

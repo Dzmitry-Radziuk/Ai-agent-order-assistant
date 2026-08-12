@@ -11,8 +11,8 @@ from restaurant_bot.domain.models import (
     SessionStage,
     TelegramEvent,
 )
+from restaurant_bot.input.telegram_callbacks import parse_callback
 from restaurant_bot.services.engine import ConversationEngine
-from restaurant_bot.services.parser import parse_callback
 
 
 def _event() -> TelegramEvent:

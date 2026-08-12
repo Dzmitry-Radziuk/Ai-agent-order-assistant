@@ -12,8 +12,8 @@ from restaurant_bot.domain.models import (
     ParsedCommand,
     TelegramEvent,
 )
+from restaurant_bot.parsing.products import parse_product_lines
 from restaurant_bot.services.engine import ConversationEngine
-from restaurant_bot.services.parser import parse_product_lines
 
 
 def _event() -> TelegramEvent:

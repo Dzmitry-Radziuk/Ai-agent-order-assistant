@@ -1,4 +1,4 @@
-from restaurant_bot.services.parser import is_product_add_request_phrase
+from restaurant_bot.parsing.commands.item_commands import is_product_add_request_phrase
 
 
 def test_procurement_request_phrases_are_recognized_in_any_word_order() -> None:

@@ -1,4 +1,4 @@
-from restaurant_bot.services.parser import parse_quantity_unit
+from restaurant_bot.parsing.quantities import parse_quantity_unit
 
 
 def test_short_quantity_answers_support_digits_and_number_words() -> None:

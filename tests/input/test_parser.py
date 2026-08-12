@@ -1,7 +1,8 @@
 import pytest
 
 from restaurant_bot.domain.models import Intent
-from restaurant_bot.services.parser import infer_intent, parse_product_lines
+from restaurant_bot.parsing.commands.api import infer_intent
+from restaurant_bot.parsing.products import parse_product_lines
 
 
 def test_parses_quantity_and_unit_after_product_name() -> None:

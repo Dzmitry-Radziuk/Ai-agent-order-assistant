@@ -8,9 +8,10 @@ from restaurant_bot.domain.models import (
     TelegramEvent,
 )
 from restaurant_bot.input.telegram import normalize_telegram_update
+from restaurant_bot.input.telegram_callbacks import parse_callback
+from restaurant_bot.parsing.commands.api import enrich_command, infer_intent
 from restaurant_bot.services.orchestrator import UpdateOrchestrator
 from restaurant_bot.services.order_review import ReviewSnapshot
-from restaurant_bot.services.parser import infer_intent
 
 
 def test_bot_suffix_is_removed_from_slash_command_before_routing() -> None:
@@ -88,7 +89,7 @@ def test_review_deep_link_is_a_dedicated_command() -> None:
 
 def test_review_callbacks_keep_the_token_and_revision() -> None:
     """Проверяет, что подтверждение заявки сохраняет токен и ревизию интерфейса."""
-    command = infer_intent("", "v2:review_submit:token123:r7")
+    command = enrich_command("", parse_callback("v2:review_submit:token123:r7"))
 
     assert command.intent is Intent.REVIEW_SUBMIT
     assert command.callback_target == "token123"

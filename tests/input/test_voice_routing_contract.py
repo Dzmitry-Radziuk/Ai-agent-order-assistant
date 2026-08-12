@@ -7,8 +7,8 @@ from restaurant_bot.domain.models import (
     ParsedCommand,
     TelegramEvent,
 )
+from restaurant_bot.parsing.commands.api import infer_intent
 from restaurant_bot.services.engine import ConversationEngine
-from restaurant_bot.services.parser import infer_intent
 
 
 def test_voice_add_product_phrase_is_not_interpreted_as_candidate_selection() -> None:

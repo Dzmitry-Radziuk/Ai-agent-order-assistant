@@ -1452,7 +1452,7 @@ def test_large_list_transport_error_is_not_replaced_with_guessed_items(settings)
 
 def test_product_name_digits_are_not_bare_quantities() -> None:
     """Не принимает артикул или год в конце названия за количество заказа."""
-    from restaurant_bot.services.parser import parse_product_lines
+    from restaurant_bot.parsing.products import parse_product_lines
 
     items = parse_product_lines("Вино Кюве 2026")
     assert len(items) == 1

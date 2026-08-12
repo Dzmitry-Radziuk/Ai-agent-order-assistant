@@ -13,8 +13,9 @@ from restaurant_bot.domain.models import (
     SessionStage,
     TelegramEvent,
 )
+from restaurant_bot.input.telegram_callbacks import parse_callback
+from restaurant_bot.parsing.commands.api import infer_intent
 from restaurant_bot.services.engine import ConversationEngine
-from restaurant_bot.services.parser import infer_intent, parse_callback
 
 
 def test_explicit_candidate_selection_uses_selected_catalog_row(settings) -> None:  # type: ignore[no-untyped-def]

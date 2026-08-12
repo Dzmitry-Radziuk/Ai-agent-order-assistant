@@ -10,8 +10,9 @@ from restaurant_bot.domain.models import (
     SessionStage,
     TelegramEvent,
 )
+from restaurant_bot.input.telegram_callbacks import parse_callback
+from restaurant_bot.parsing.commands.api import enrich_command, infer_intent
 from restaurant_bot.services.engine import ConversationEngine
-from restaurant_bot.services.parser import infer_intent
 
 
 def _voice(text: str, update_id: int = 1) -> TelegramEvent:
@@ -281,7 +282,7 @@ def test_add_more_callbacks_respect_revision(settings) -> None:
             input_type=InputKind.CALLBACK,
             callback_data="v2:add:r2",
         ),
-        infer_intent("", callback_data="v2:add:r2"),
+        enrich_command("", parse_callback("v2:add:r2")),
         added.state,
         [],
     )
@@ -294,7 +295,7 @@ def test_add_more_callbacks_respect_revision(settings) -> None:
             input_type=InputKind.CALLBACK,
             callback_data="v2:add:r3",
         ),
-        infer_intent("", callback_data="v2:add:r3"),
+        enrich_command("", parse_callback("v2:add:r3")),
         stale.state,
         [],
     )
