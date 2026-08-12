@@ -138,7 +138,7 @@ services/{engine,input*,orchestrator,replies,submission*,venue,...} ─┘
 Но направление всё ещё нарушает роль `services/` как transitional layer: catalog,
 conversation, orders и parsing зависят от исторического service-модуля.
 
-После потенциального Group N направление должно стать:
+После реализованного Group N фактическое направление стало:
 
 ```text
 catalog / conversation / orders / parsing / integrations / services
@@ -146,7 +146,8 @@ catalog / conversation / orders / parsing / integrations / services
 ```
 
 При этом `text_normalization.py` не импортирует `services`, `catalog`, `parsing`,
-`domain` или внешние адаптеры. В отличие от `parsing/text.py`, такой owner не
+`domain` или внешние адаптеры. В отличие от отклонённого исторического target
+`parsing/text.py`, такой owner не
 приписывает общую нормализацию только parsing-слою.
 
 ## 5. Классификация кластеров
@@ -264,18 +265,20 @@ department/domain mapping, не parsing. Риск мал, но эффект по
 
 ## 9. Конечная судьба `services/text.py`
 
-Рекомендуемая судьба — **частичный transitional facade**, затем постепенное
-уменьшение и eventual delete только после доказанного отсутствия callers:
+Фактическая судьба после Block 5M — **частичный transitional owner без facade для
+Group N**:
 
-1. Group N переносит generic normalization и оставляет явный re-export;
-2. после отдельного сравнения переносятся measurement и numeric groups;
-3. comment/search операции получают разных owners;
-4. presentation функции переходят в presentation owner;
-5. repository-wide audit подтверждает нулевые imports и только после этого facade
-   удаляется.
+1. `clean_text` и `normalize_text` имеют единственного owner в
+   `src/restaurant_bot/text_normalization.py`;
+2. внешние imports старого пути удалены, а public re-export из `services.text`
+   не предоставляется;
+3. `services/text.py` сохраняет только units, numbers, overlap, departments и
+   presentation primitives;
+4. последующие кластеры не переносятся в рамках Block 5M и требуют отдельного
+   аудита callers и контрактов.
 
-Удаление одним блоком запрещено: у каждого кластера разные callers, тесты и
-контракты.
+Такое частичное разделение сохраняет разные semantic contracts и не смешивает
+нормализацию текста с measurement, numeric, search или presentation logic.
 
 ## 10. Ровно один следующий code seam
 
@@ -290,9 +293,9 @@ department/domain mapping, не parsing. Риск мал, но эффект по
 - **Callers:** все строки caller matrix с этими двумя символами; production-группы
   перечислены в разделах 2–3. Тесты проверяются не только прямыми imports, но и
   полным pipeline corpus.
-- **Facade strategy:** старые внешние imports удалены; `services/text.py` использует
-  private aliases нового owner только для своих оставшихся алгоритмов. Второй алгоритм
-  не создаётся.
+- **Facade strategy:** compatibility facade для Group N не создаётся; старые внешние
+  imports удалены, а `services/text.py` использует private aliases нового owner только
+  для своих оставшихся алгоритмов. Второй алгоритм не создаётся.
 - **Out of scope:** `UNIT_ALIASES`, `NUMBER_WORDS`, overlap, ranges, `to_float`,
   departments, `escape`, `format_number`, весь `engine.py`, `orchestrator.py`,
   prompts, state machine, matching, persistence, Docker/CI и Block 5K.
@@ -307,7 +310,8 @@ department/domain mapping, не parsing. Риск мал, но эффект по
   semantic-neutral owner, отсутствие нового цикла и уменьшение mixed-owner facade
   на два наиболее общих символа.
 
-Этот seam только назначен по результатам аудита. В Block 5L он не реализуется.
+Этот seam реализован в Block 5M; следующие кластеры остаются только предметом будущего
+аудита и в текущем correction block не начинаются.
 
 ## 11. Проверка Block 5K и качество
 

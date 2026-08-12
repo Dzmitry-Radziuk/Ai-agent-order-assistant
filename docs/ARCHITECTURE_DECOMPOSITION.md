@@ -218,15 +218,18 @@ Celery/DB/Sheets; `repositories` не импортируют services/integratio
 В текущем runtime допустимы `workers/tasks → services/orchestrator` и
 `orchestrator → application/background_tasks`; обратного импорта
 `services.orchestrator → workers.tasks` быть не должно.
-В migration period facade допускает временное нарушение формы, но содержит
-только явный re-export и имеет записанный шаг удаления.
+В migration period facade допускается только если это явно предусмотрено
+конкретным блоком и имеет записанный шаг удаления. Block 5M является исключением:
+для Group N compatibility facade не создаётся.
 
 ## 7. Compatibility strategy
 
 Каждый перенос проходит четыре фазы:
 
 1. Создать нового owner механически, без изменения поведения.
-2. Перевести внутренние imports и оставить старый путь re-export facade.
+2. Перевести внутренние imports и, только если это предусмотрено контрактом блока,
+   оставить старый путь re-export facade. Для Group N Block 5M старый public path
+   намеренно не сохраняется.
 3. Просканировать source/tests/scripts/workers/packaging и прогнать gates.
 4. Удалить facade только отдельным блоком после доказанного отсутствия callers.
 

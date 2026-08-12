@@ -253,9 +253,10 @@ def to_float(value: Any) -> float | None:
     if raw.count(".") > 1:
         sign = "-" if raw.startswith("-") else ""
         parts = raw.lstrip("-").split(".")
-        # Google Sheets can prefix Russian currency with a letter and a dot.
-        # The final one/two digits are decimals; preceding dots are visual
-        # separators. Longer final groups mean every dot is a separator.
+        # Google Sheets может добавлять к российской валюте букву и точку.
+        # Последние одна-две цифры считаются десятичной частью, предыдущие
+        # точки — визуальными разделителями. Более длинная последняя группа
+        # означает, что все точки являются разделителями.
         if parts[-1] and len(parts[-1]) <= 2:
             raw = sign + "".join(parts[:-1]) + "." + parts[-1]
         else:
