@@ -10,13 +10,12 @@ from restaurant_bot.parsing.products import parse_product_lines
 from restaurant_bot.parsing.quantities import parse_quantity_unit
 from restaurant_bot.services.text import (
     UNIT_ALIASES,
-    clean_text,
-    normalize_text,
     normalize_unit,
     numeric_range_spans,
     parse_number_words,
     to_float,
 )
+from restaurant_bot.text_normalization import clean_text, normalize_text
 
 _PACKAGING_ROLE_CONFIDENCE_THRESHOLD = 0.85
 

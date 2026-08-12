@@ -7,7 +7,7 @@ import re
 from restaurant_bot.domain.models import Intent, ParsedCommand
 from restaurant_bot.parsing.commands.item_commands import clean_command_target
 from restaurant_bot.parsing.commands.normalization import normalize_command_text
-from restaurant_bot.services.text import clean_text
+from restaurant_bot.text_normalization import clean_text
 
 _COMMENT_NOUN_RE = r"(?:комментар\w*|примечан\w*)"
 _COMMENT_ACTION_RE = r"(?:добав\w*|внес\w*|запиш\w*|укаж\w*|измени\w*|поправ\w*)"

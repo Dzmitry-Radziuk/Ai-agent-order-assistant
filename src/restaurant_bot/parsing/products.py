@@ -16,12 +16,11 @@ from restaurant_bot.parsing.quantities import _is_standalone_quantity
 from restaurant_bot.services.text import (
     NUMBER_WORDS,
     UNIT_ALIASES,
-    clean_text,
-    normalize_text,
     normalize_unit,
     numeric_range_spans,
     parse_number_words,
 )
+from restaurant_bot.text_normalization import clean_text, normalize_text
 
 
 def _query_with_unmarked_tail(name: str, tail: str) -> str:

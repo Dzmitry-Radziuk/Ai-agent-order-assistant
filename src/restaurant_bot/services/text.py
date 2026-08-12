@@ -5,6 +5,13 @@ import re
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
+from restaurant_bot.text_normalization import (
+    clean_text as _clean_text,
+)
+from restaurant_bot.text_normalization import (
+    normalize_text as _normalize_text,
+)
+
 UNIT_ALIASES: dict[str, str] = {
     "шт": "шт",
     "штук": "шт",
@@ -151,23 +158,10 @@ NUMBER_WORDS: dict[str, float] = {
 }
 
 
-def clean_text(value: Any) -> str:
-    """Очищает произвольное текстовое значение."""
-    return re.sub(r"\s+", " ", str(value or "")).strip()
-
-
-def normalize_text(value: Any) -> str:
-    """Нормализует текст для сравнения."""
-    text = clean_text(value).lower().replace("ё", "е")
-    text = re.sub(r"[«»\"'`]", "", text)
-    text = re.sub(r"[^a-zа-я0-9%.,/\-\s]", " ", text, flags=re.I)
-    return re.sub(r"\s+", " ", text).strip()
-
-
 def remove_global_comment_overlap(item_comment: str, global_comment: str) -> str:
     """Удаляет общую часть и разговорные слова охвата из локального комментария."""
-    item_text = clean_text(item_comment).strip(" .,;")
-    global_text = clean_text(global_comment).strip(" .,;")
+    item_text = _clean_text(item_comment).strip(" .,;")
+    global_text = _clean_text(global_comment).strip(" .,;")
     if not item_text or not global_text:
         return item_text
     match = re.search(re.escape(global_text), item_text, flags=re.I)
@@ -192,13 +186,13 @@ def remove_global_comment_overlap(item_comment: str, global_comment: str) -> str
 
 def remove_phrase_overlap(source_text: str, phrase: str) -> str:
     """Убирает подтверждённую фразу из поисковой копии, не меняя исходные данные."""
-    source = clean_text(source_text)
+    source = _clean_text(source_text)
     phrase_tokens = [
-        normalize_text(token)
-        for token in re.findall(r"[a-zа-яё0-9%]+", normalize_text(phrase), flags=re.I)
+        _normalize_text(token)
+        for token in re.findall(r"[a-zа-яё0-9%]+", _normalize_text(phrase), flags=re.I)
     ]
     source_matches = list(re.finditer(r"[a-zа-яё0-9%]+", source, flags=re.I))
-    source_tokens = [normalize_text(match.group()) for match in source_matches]
+    source_tokens = [_normalize_text(match.group()) for match in source_matches]
     if not source_tokens or not phrase_tokens or len(phrase_tokens) > len(source_tokens):
         return source
     for start in range(len(source_tokens) - len(phrase_tokens) + 1):
@@ -206,26 +200,26 @@ def remove_phrase_overlap(source_text: str, phrase: str) -> str:
             continue
         left = source[: source_matches[start].start()].strip()
         right = source[source_matches[start + len(phrase_tokens) - 1].end() :].strip()
-        replacement = clean_text(f"{left} {right}")
+        replacement = _clean_text(f"{left} {right}")
         return replacement or source
     return source
 
 
 def normalize_unit(value: Any) -> str:
     """Нормализует единицу измерения."""
-    text = normalize_text(value)
-    return UNIT_ALIASES.get(text, clean_text(value))
+    text = _normalize_text(value)
+    return UNIT_ALIASES.get(text, _clean_text(value))
 
 
 def normalize_department(value: Any) -> str:
     """Приводит название отдела к заголовку листа заявки."""
-    text = normalize_text(value)
-    return DEPARTMENT_ALIASES.get(text, clean_text(value))
+    text = _normalize_text(value)
+    return DEPARTMENT_ALIASES.get(text, _clean_text(value))
 
 
 def numeric_range_spans(value: Any) -> list[tuple[int, int]]:
     """Находит цифровые и словесные диапазоны характеристик товара."""
-    text = clean_text(value)
+    text = _clean_text(value)
     if not text:
         return []
     unit_pattern = "|".join(
@@ -254,7 +248,7 @@ def to_float(value: Any) -> float | None:
     """Безопасно преобразует значение в число."""
     if value is None or value == "":
         return None
-    raw = clean_text(value).replace(" ", "").replace(",", ".")
+    raw = _clean_text(value).replace(" ", "").replace(",", ".")
     raw = re.sub(r"[^0-9.\-]", "", raw)
     if raw.count(".") > 1:
         sign = "-" if raw.startswith("-") else ""
@@ -275,7 +269,7 @@ def to_float(value: Any) -> float | None:
 
 def escape(value: Any) -> str:
     """Экранирует текст для безопасного HTML Telegram."""
-    return html.escape(clean_text(value), quote=False)
+    return html.escape(_clean_text(value), quote=False)
 
 
 def format_number(value: float | None) -> str:

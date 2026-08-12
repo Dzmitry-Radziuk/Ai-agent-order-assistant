@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 
-from restaurant_bot.services.text import clean_text, normalize_text
+from restaurant_bot.text_normalization import clean_text, normalize_text
 
 
 def _extract_global_comment(text: str) -> tuple[str, str]:

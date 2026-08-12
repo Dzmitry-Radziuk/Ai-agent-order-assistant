@@ -17,7 +17,8 @@ from restaurant_bot.db_models import VenueBinding
 from restaurant_bot.domain.models import BotReply, Button, TelegramEvent
 from restaurant_bot.integrations.google_sheets import GoogleSheetsGateway
 from restaurant_bot.repositories.venue_bindings import VenueBindingRepository
-from restaurant_bot.services.text import clean_text, escape, normalize_text
+from restaurant_bot.services.text import escape
+from restaurant_bot.text_normalization import clean_text, normalize_text
 
 logger = structlog.get_logger(__name__)
 

@@ -20,11 +20,10 @@ from restaurant_bot.parsing.comment_scope import has_explicit_global_comment_sco
 from restaurant_bot.services.text import (
     NUMBER_WORDS,
     UNIT_ALIASES,
-    clean_text,
-    normalize_text,
     normalize_unit,
     to_float,
 )
+from restaurant_bot.text_normalization import clean_text, normalize_text
 
 
 def collapse_comment_shadow_items(

@@ -25,7 +25,7 @@ from restaurant_bot.parsing.ai.quantity_reconciliation import (
 from restaurant_bot.parsing.ai.shadow_items import _collapse_shadow_item_projections
 from restaurant_bot.parsing.comment_scope import has_explicit_global_comment_scope
 from restaurant_bot.parsing.products import parse_product_lines
-from restaurant_bot.services.text import clean_text, normalize_text
+from restaurant_bot.text_normalization import clean_text, normalize_text
 
 
 def recover_omitted_explicit_items(payload: dict[str, Any], source_text: str) -> dict[str, Any]:

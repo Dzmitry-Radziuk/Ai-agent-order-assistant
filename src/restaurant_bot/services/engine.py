@@ -135,9 +135,9 @@ from restaurant_bot.services.text import (
     convert_quantity,
     escape,
     normalize_department,
-    normalize_text,
     normalize_unit,
 )
+from restaurant_bot.text_normalization import normalize_text
 
 
 class ConversationEngine:

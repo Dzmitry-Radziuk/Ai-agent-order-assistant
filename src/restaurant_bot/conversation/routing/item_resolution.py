@@ -14,7 +14,7 @@ from restaurant_bot.domain.models import (
     ParsedCommand,
     SessionStage,
 )
-from restaurant_bot.services.text import normalize_text
+from restaurant_bot.text_normalization import normalize_text
 
 
 def has_product_items(command: ParsedCommand) -> bool:

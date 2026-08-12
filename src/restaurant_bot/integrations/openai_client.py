@@ -45,12 +45,11 @@ from restaurant_bot.services.parser import (
 )
 from restaurant_bot.services.text import (
     UNIT_ALIASES,
-    clean_text,
-    normalize_text,
     normalize_unit,
     numeric_range_spans,
     to_float,
 )
+from restaurant_bot.text_normalization import clean_text, normalize_text
 
 __all__ = [
     "CommentBindingSchema",

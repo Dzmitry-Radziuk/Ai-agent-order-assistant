@@ -3,8 +3,8 @@
 ## Статус и границы
 
 Аудит выполнен на ветке `decompose_bot` в исходной ревизии
-`7e8a84c134f72749439d28b7dd187739f70182d8`. Удалённая ветка
-`origin/decompose_bot` указывает на тот же SHA. Семантический baseline,
+`7e8a84c134f72749439d28b7dd187739f70182d8`. Этот SHA является исходным audit baseline Block 5L;
+он не описывает текущий remote после последующих commits. Семантический baseline,
 указанный для сравнения, — `f9cbc3195c0eae843de3208e488c3f46baa5a5ec`.
 
 Block 5L выполнен только как исследование. Файлы `src/**/*.py` и `tests/**/*.py`
@@ -20,16 +20,18 @@ re-export и динамические пути. Поиск `importlib`, `__impor
 
 ## 1. Фактический состав модуля
 
-`src/restaurant_bot/services/text.py` содержит 326 строк, три словаря и двенадцать
-функций. Все функции не имеют внешних эффектов и не мутируют переданные значения.
+В исходном снимке Block 5L `src/restaurant_bot/services/text.py` содержал 326 строк,
+три словаря и двенадцать функций. После Block 5M в нём осталось 320 строк и десять
+функций, а две чистые функции нормализации находятся в отдельном owner-модуле.
+Все функции не имеют внешних эффектов и не мутируют переданные значения.
 
 | Символ | Строки | Фактическая ответственность |
 |---|---:|---|
 | `UNIT_ALIASES` | 8–84 | Алиасы единиц измерения, фасовок и тары к коротким каноническим значениям. |
 | `DEPARTMENT_ALIASES` | 86–101 | Алиасы отделов/зон заявки к заголовкам листа. |
 | `NUMBER_WORDS` | 103–151 | Словесные числительные и их числовые значения. |
-| `clean_text` | 154–157 | Приведение произвольного значения к строке, схлопывание пробелов и trim. |
-| `normalize_text` | 159–164 | Канонизация текста для сравнений: lower, `ё/е`, кавычки и разрешённые символы. |
+| `clean_text` | `text_normalization.py:7–10` | Приведение произвольного значения к строке, схлопывание пробелов и trim. |
+| `normalize_text` | `text_normalization.py:12–16` | Канонизация текста для сравнений: lower, `ё/е`, кавычки и разрешённые символы. |
 | `remove_global_comment_overlap` | 167–190 | Удаление общего комментария из локального комментария с удалением остатка области действия. |
 | `remove_phrase_overlap` | 193–211 | Временное удаление подтверждённой фразы из поисковой копии. Исходные поля не меняет. |
 | `normalize_unit` | 214–218 | Поиск канонической единицы по `UNIT_ALIASES`. |
@@ -56,8 +58,8 @@ re-export и динамические пути. Поиск `importlib`, `__impor
 | `UNIT_ALIASES` | `catalog/evidence.py`, `catalog/safety.py`, `conversation/comments.py`, `integrations/openai_client.py`, `orders/catalog_resolution.py`, `parsing/ai/{item_reconciliation,quantity_reconciliation,shadow_items}.py`, `parsing/commands/{dialogue,navigation,router}.py`, `parsing/{products,quantities}.py`, `services/conversation_handlers/pending_quantity.py`, `services/{engine,replies}.py` | Нет прямых | Нет | Нет | `services/text.py` → `domain/measurements.py` или отдельный owner измерений | `MOVE_LATER` |
 | `DEPARTMENT_ALIASES` | Только через `normalize_department` в `integrations/google_sheets.py` и `services/engine.py` | Нет прямых | Нет | Нет | `services/text.py` → `domain/departments.py` | `MOVE_LATER` |
 | `NUMBER_WORDS` | `catalog/{evidence,safety}.py`, `conversation/comments.py`, `parsing/ai/{item_reconciliation,shadow_items}.py`, `parsing/commands/{dialogue,item_commands}.py`, `parsing/{products,quantities}.py`, `services/engine.py` | Нет прямых | Нет | Нет | `services/text.py` → owner числовых parsing primitives | `MOVE_LATER` |
-| `clean_text` | `integrations/{google_sheets,openai_client}.py`, `parsing/ai/{comment_reconciliation,item_reconciliation,quantity_reconciliation,reconciliation,shadow_items}.py`, `parsing/commands/{comment_commands,item_commands,router}.py`, `parsing/{comment_policy,comment_scope,packaging,products}.py`, `services/{input_normalizer,orchestrator,venue_registration}.py` | Косвенно через все соответствующие сценарии | Нет | Нет | `services/text.py` → `text/normalization.py` | `MOVE_NEXT` вместе с `normalize_text` |
-| `normalize_text` | `catalog/{evidence,resolver,safety,scoring}.py`, `conversation/{comments,draft,selection}.py`, `conversation/routing/item_resolution.py`, `integrations/{google_sheets,openai_client}.py`, `orders/catalog_resolution.py`, `parsing/ai/{comment_reconciliation,item_reconciliation,quantity_reconciliation,reconciliation,shadow_items}.py`, `parsing/commands/{item_commands,normalization,router}.py`, `parsing/{comment_policy,comment_scope,packaging,products,quantities}.py`, `services/{conversation_handlers/navigation,pending_quantity,engine,input_recognition,orchestrator,venue_registration}.py` | Косвенно через все соответствующие сценарии | Нет | Нет | `services/text.py` → `text/normalization.py` | `MOVE_NEXT` вместе с `clean_text` |
+| `clean_text` | `integrations/{google_sheets,openai_client}.py`, `parsing/ai/{comment_reconciliation,item_reconciliation,quantity_reconciliation,reconciliation,shadow_items}.py`, `parsing/commands/{comment_commands,item_commands,router}.py`, `parsing/{comment_policy,comment_scope,packaging,products}.py`, `services/{input_normalizer,orchestrator,venue_registration}.py` | Косвенно через все соответствующие сценарии | Нет | Нет | `services/text.py` → `text_normalization.py` | `DONE` вместе с `normalize_text` |
+| `normalize_text` | `catalog/{evidence,resolver,safety,scoring}.py`, `conversation/{comments,draft,selection}.py`, `conversation/routing/item_resolution.py`, `integrations/{google_sheets,openai_client}.py`, `orders/catalog_resolution.py`, `parsing/ai/{comment_reconciliation,item_reconciliation,quantity_reconciliation,reconciliation,shadow_items}.py`, `parsing/commands/{item_commands,normalization,router}.py`, `parsing/{comment_policy,comment_scope,packaging,products,quantities}.py`, `services/{conversation_handlers/navigation,pending_quantity,engine,input_recognition,orchestrator,venue_registration}.py` | Косвенно через все соответствующие сценарии | Нет | Нет | `services/text.py` → `text_normalization.py` | `DONE` вместе с `clean_text` |
 | `remove_global_comment_overlap` | `parsing/ai/comment_reconciliation.py`; `conversation/comments.py` импортирует его под alias и предоставляет одноимённый wrapper; `services/engine.py` использует уже conversation-owner | Нет прямых | Нет | Нет | Алгоритм — `services/text.py`; wrapper — `conversation/comments.py` | `AUDIT_REQUIRED`, не объединять в один блок |
 | `remove_phrase_overlap` | `orders/catalog_resolution.py`, `services/orchestrator.py` | `tests/catalog/{test_catalog_resolver,test_matching}.py` | Нет | Нет | `services/text.py` → `catalog/search_query.py` или `catalog/evidence.py` после отдельного search-аудита | `MOVE_LATER` |
 | `normalize_unit` | `catalog/{evidence,safety}.py`, `conversation/{comments,draft}.py`, `integrations/openai_client.py`, `orders/catalog_resolution.py`, `parsing/ai/{quantity_reconciliation,shadow_items}.py`, `parsing/commands/dialogue.py`, `parsing/{packaging,products,quantities}.py`, `services/{conversation_handlers/pending_quantity,engine,input_recognition,replies}.py` | Нет прямых | Нет | Нет | `services/text.py` → owner измерительных/фасовочных единиц | `MOVE_LATER` |
@@ -78,34 +80,34 @@ re-export и динамические пути. Поиск `importlib`, `__impor
 | Caller module | Символы из `services.text` | Слой | Зависимость после миграции | Блокер |
 |---|---|---|---|---|
 | `catalog/evidence.py` | `NUMBER_WORDS`, `UNIT_ALIASES`, `normalize_text`, `normalize_unit`, `parse_number_words` | catalog/core | text normalization, measurements, numeric evidence | Нельзя смешать поиск и нормализацию |
-| `catalog/resolver.py` | `normalize_text` | catalog/core | `text/normalization.py` | Нет |
+| `catalog/resolver.py` | `normalize_text` | catalog/core | `text_normalization.py` | Нет |
 | `catalog/safety.py` | `NUMBER_WORDS`, `UNIT_ALIASES`, `normalize_text`, `normalize_unit`, `parse_number_words` | catalog/safety | отдельные numeric/measurement owners | Safety не должен импортировать services |
-| `catalog/scoring.py` | `normalize_text` | catalog/core | `text/normalization.py` | Нет |
+| `catalog/scoring.py` | `normalize_text` | catalog/core | `text_normalization.py` | Нет |
 | `conversation/comments.py` | `NUMBER_WORDS`, `UNIT_ALIASES`, `normalize_text`, `normalize_unit`, overlap wrapper | conversation/core | text, measurements, comment policy | Wrapper должен остаться channel-neutral adapter |
 | `conversation/draft.py` | `normalize_unit` | conversation/core | measurements | Нет |
-| `conversation/routing/item_resolution.py` | `normalize_text` | routing/core | `text/normalization.py` | Нет |
-| `conversation/selection.py` | `normalize_text` | conversation/core | `text/normalization.py` | Нет |
+| `conversation/routing/item_resolution.py` | `normalize_text` | routing/core | `text_normalization.py` | Нет |
+| `conversation/selection.py` | `normalize_text` | conversation/core | `text_normalization.py` | Нет |
 | `orders/catalog_resolution.py` | `UNIT_ALIASES`, `normalize_text`, `normalize_unit`, `numeric_range_spans`, `remove_phrase_overlap` | orders/core | measurements, numeric evidence, search query owner | Нужен отдельный comparison corpus |
 | `parsing/ai/comment_reconciliation.py` | `clean_text`, `normalize_text`, `remove_global_comment_overlap`, `to_float` | parsing/AI | text normalization, comment policy, numeric primitive | Provenance regression corpus |
 | `parsing/ai/item_reconciliation.py` | `NUMBER_WORDS`, `UNIT_ALIASES`, `clean_text`, `normalize_text`, `to_float` | parsing/AI | text, measurements, numeric primitive | Shadow/recovery semantics |
 | `parsing/ai/quantity_reconciliation.py` | `UNIT_ALIASES`, `clean_text`, `normalize_text`, `normalize_unit`, `numeric_range_spans`, `parse_number_words`, `to_float` | parsing/AI | quantity/evidence owners | Voice quantity and packaging corpus |
-| `parsing/ai/reconciliation.py` | `clean_text`, `normalize_text` | parsing/AI | `text/normalization.py` | Нет |
+| `parsing/ai/reconciliation.py` | `clean_text`, `normalize_text` | parsing/AI | `text_normalization.py` | Нет |
 | `parsing/ai/shadow_items.py` | `NUMBER_WORDS`, `UNIT_ALIASES`, `clean_text`, `normalize_text`, `normalize_unit`, `to_float` | parsing/AI | text, measurements, numeric primitive | Shadow collapse corpus |
-| `parsing/commands/comment_commands.py` | `clean_text` | parsing/commands | `text/normalization.py` | Нет |
+| `parsing/commands/comment_commands.py` | `clean_text` | parsing/commands | `text_normalization.py` | Нет |
 | `parsing/commands/dialogue.py` | `NUMBER_WORDS`, `UNIT_ALIASES`, `normalize_unit` | parsing/commands | command quantity owner | Не смешивать с global command routing |
 | `parsing/commands/item_commands.py` | `NUMBER_WORDS`, `clean_text`, `normalize_text` | parsing/commands | text, command patterns | Нет |
 | `parsing/commands/navigation.py` | `UNIT_ALIASES` | parsing/commands | measurements | Navigation должен оставаться command-specific |
-| `parsing/commands/normalization.py` | `normalize_text` | parsing/commands | `text/normalization.py` | `normalize_command_text` — отдельная функция |
+| `parsing/commands/normalization.py` | `normalize_text` | parsing/commands | `text_normalization.py` | `normalize_command_text` — отдельная функция |
 | `parsing/commands/router.py` | `UNIT_ALIASES`, `clean_text`, `normalize_text` | parsing/commands | text, measurements | Intent order не менять |
-| `parsing/comment_policy.py` | `clean_text`, `normalize_text` | parsing/core | `text/normalization.py` | Comment policy остаётся owner policy |
-| `parsing/comment_scope.py` | `clean_text`, `normalize_text` | parsing/core | `text/normalization.py` | Scope parser не смешивать с global normalization |
+| `parsing/comment_policy.py` | `clean_text`, `normalize_text` | parsing/core | `text_normalization.py` | Comment policy остаётся owner policy |
+| `parsing/comment_scope.py` | `clean_text`, `normalize_text` | parsing/core | `text_normalization.py` | Scope parser не смешивать с global normalization |
 | `parsing/packaging.py` | `clean_text`, `normalize_text`, `normalize_unit`, `numeric_range_spans` | parsing/core | text, measurements, numeric evidence | Packaging/order distinction |
 | `parsing/products.py` | `NUMBER_WORDS`, `UNIT_ALIASES`, `clean_text`, `normalize_text`, `normalize_unit`, `numeric_range_spans`, `parse_number_words` | parsing/core | product parser owners | Поведение Block 2A |
 | `parsing/quantities.py` | `NUMBER_WORDS`, `UNIT_ALIASES`, `normalize_text`, `normalize_unit`, `numeric_range_spans`, `parse_number_words` | parsing/core | quantity owner | Quantity contract |
-| `services/conversation_handlers/navigation.py` | `normalize_text` | transitional handler | `text/normalization.py` | Legacy handler remains |
+| `services/conversation_handlers/navigation.py` | `normalize_text` | transitional handler | `text_normalization.py` | Legacy handler remains |
 | `services/conversation_handlers/pending_quantity.py` | `UNIT_ALIASES`, `normalize_text`, `normalize_unit`, `parse_number_words` | transitional handler | measurements, quantity owner | MISSING_QTY behavior |
 | `services/engine.py` | `NUMBER_WORDS`, `UNIT_ALIASES`, `convert_quantity`, `escape`, `normalize_department`, `normalize_text`, `normalize_unit` | transitional state machine | domain measurements, presentation, text | Не начинать engine decomposition |
-| `services/input_normalizer.py` | `clean_text` | input adapter | `text/normalization.py` | Input boundary остаётся отдельно |
+| `services/input_normalizer.py` | `clean_text` | input adapter | `text_normalization.py` | Input boundary остаётся отдельно |
 | `services/input_recognition.py` | `normalize_text`, `normalize_unit` | input/voice adapter | text, measurements | Voice contract |
 | `services/orchestrator.py` | `clean_text`, `normalize_text`, `remove_phrase_overlap` | application orchestration | text, search query owner | Block 5K не менять |
 | `services/order_review.py` | `escape` | presentation/use case | presentation owner | Submission UX |
@@ -143,7 +145,7 @@ catalog / conversation / orders / parsing / integrations / services
     └──→ restaurant_bot.text.normalization
 ```
 
-При этом `text/normalization.py` не импортирует `services`, `catalog`, `parsing`,
+При этом `text_normalization.py` не импортирует `services`, `catalog`, `parsing`,
 `domain` или внешние адаптеры. В отличие от `parsing/text.py`, такой owner не
 приписывает общую нормализацию только parsing-слою.
 
@@ -158,8 +160,9 @@ catalog / conversation / orders / parsing / integrations / services
 используют её напрямую.
 
 **Вывод:** единый следующий seam — перенести оба символа вместе в
-`src/restaurant_bot/text/normalization.py`, оставив временный re-export в
-`services/text.py`. Не переносить их в `parsing/text.py`: это создало бы ложную
+`src/restaurant_bot/text_normalization.py`. Прямые callers уже переведены; временный
+private import в `services/text.py` нужен только оставшимся алгоритмам этого файла.
+Не переносить их в `parsing/text.py`: это создало бы ложную
 зависимость catalog/integrations от parsing и смешало generic normalization с
 command parsing.
 
@@ -236,7 +239,7 @@ department/domain mapping, не parsing. Риск мал, но эффект по
 
 | Группа | Символы | Target owner | Почему вместе | Почему не с другими | Риск | Статус |
 |---|---|---|---|---|---|---|
-| N | `clean_text`, `normalize_text` | `text/normalization.py` | `normalize_text` напрямую зависит от `clean_text`; callers используют общий lexical contract. | Не включать единицы, числа, comments и presentation. | Средний: большой fan-in, но pure semantics. | `MOVE_NEXT` |
+| N | `clean_text`, `normalize_text` | `text_normalization.py` | `normalize_text` напрямую зависит от `clean_text`; callers используют общий lexical contract. | Не включать единицы, числа, comments и presentation. | Средний: большой fan-in, но pure semantics. | `DONE` |
 | U | `UNIT_ALIASES`, `normalize_unit`, `convert_quantity` | `domain/measurements.py` | Алиасы и пересчёт составляют measurement/packaging contract. | Не включать NUMBER_WORDS и UI formatting. | Высокий: catalog units, packaging и unit mismatch. | `MOVE_LATER` |
 | R1 | `NUMBER_WORDS`, `parse_number_words` | quantity parsing owner | Словесное число и его разбор неделимы. | `numeric_range_spans` и `to_float` имеют другие contracts. | Средний/высокий: voice quantity. | `MOVE_LATER` |
 | R2 | `numeric_range_spans` | source-evidence owner | Диапазон — отдельный span contract. | Не объединять с quantity scalar parser. | Высокий: packaging/range provenance. | `AUDIT_REQUIRED` |
@@ -276,19 +279,20 @@ department/domain mapping, не parsing. Риск мал, но эффект по
 
 ## 10. Ровно один следующий code seam
 
-### Предложение: Group N
+### Реализованный Group N
 
-- **Исходный SHA:** `7e8a84c134f72749439d28b7dd187739f70182d8`.
+- **Исходный SHA Block 5L:** `7e8a84c134f72749439d28b7dd187739f70182d8`.
 - **Символы:** `clean_text`, `normalize_text`.
-- **Новый target:** `src/restaurant_bot/text/normalization.py`.
+- **Новый owner:** `src/restaurant_bot/text_normalization.py`.
 - **Почему не `parsing/text.py`:** 10+ non-parsing групп (`catalog`, `conversation`,
   `orders`, `integrations`, `services`) используют эти функции напрямую; generic
   owner в parsing создаст неправильную семантическую зависимость.
 - **Callers:** все строки caller matrix с этими двумя символами; production-группы
   перечислены в разделах 2–3. Тесты проверяются не только прямыми imports, но и
   полным pipeline corpus.
-- **Facade strategy:** временный явный re-export из `services/text.py`; второй
-  алгоритм не создаётся.
+- **Facade strategy:** старые внешние imports удалены; `services/text.py` использует
+  private aliases нового owner только для своих оставшихся алгоритмов. Второй алгоритм
+  не создаётся.
 - **Out of scope:** `UNIT_ALIASES`, `NUMBER_WORDS`, overlap, ranges, `to_float`,
   departments, `escape`, `format_number`, весь `engine.py`, `orchestrator.py`,
   prompts, state machine, matching, persistence, Docker/CI и Block 5K.

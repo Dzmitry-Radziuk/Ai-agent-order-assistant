@@ -72,12 +72,13 @@ from restaurant_bot.services.input_normalizer import normalize_telegram_update
 from restaurant_bot.services.input_recognition import InputRecognitionService
 from restaurant_bot.services.order_review import OrderReviewService
 from restaurant_bot.services.parser import infer_intent
-from restaurant_bot.services.text import clean_text, normalize_text, remove_phrase_overlap
+from restaurant_bot.services.text import remove_phrase_overlap
 from restaurant_bot.services.venue_registration import (
     RegistrationResult,
     VenueContext,
     VenueRegistrationService,
 )
+from restaurant_bot.text_normalization import clean_text, normalize_text
 
 logger = structlog.get_logger(__name__)
 

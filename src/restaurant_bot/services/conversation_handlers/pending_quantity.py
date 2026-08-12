@@ -20,10 +20,10 @@ from restaurant_bot.services.parser import (
 )
 from restaurant_bot.services.text import (
     UNIT_ALIASES,
-    normalize_text,
     normalize_unit,
     parse_number_words,
 )
+from restaurant_bot.text_normalization import normalize_text
 
 _SINGLE_CONTAINER_UNITS = {
     "банка",

@@ -12,7 +12,7 @@ from restaurant_bot.domain.models import (
     ConversationState,
     ItemStatus,
 )
-from restaurant_bot.services.text import normalize_text
+from restaurant_bot.text_normalization import normalize_text
 
 
 class SelectionFailure(StrEnum):

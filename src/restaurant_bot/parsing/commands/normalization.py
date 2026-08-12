@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 
-from restaurant_bot.services.text import normalize_text
+from restaurant_bot.text_normalization import normalize_text
 
 
 def normalize_command_text(value: str) -> str:

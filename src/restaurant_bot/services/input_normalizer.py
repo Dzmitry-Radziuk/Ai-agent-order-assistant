@@ -4,7 +4,7 @@ import re
 from typing import Any
 
 from restaurant_bot.domain.models import InputKind, TelegramEvent
-from restaurant_bot.services.text import clean_text
+from restaurant_bot.text_normalization import clean_text
 
 
 def _clean_message_text(value: Any) -> str:

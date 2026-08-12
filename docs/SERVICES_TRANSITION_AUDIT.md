@@ -173,11 +173,11 @@ comment-policy seam, Block 5J — только удаление доказанн
 
 ### NEXT — только после external review
 
-Block 5L завершил отдельный caller/duplicate audit. Следующий seam назначен только
-как предложение, без реализации: совместный перенос `clean_text` и `normalize_text`
-в semantic-neutral `text/normalization.py` с временным re-export из `services/text.py`.
-Полная таблица callers, риски и исключение старого варианта `parsing/text.py`
-зафиксированы в [`docs/SERVICES_TEXT_AUDIT.md`](SERVICES_TEXT_AUDIT.md).
+Block 5L завершил отдельный caller/duplicate audit, а Block 5M завершил его единственный
+следующий seam: `clean_text` и `normalize_text` перенесены в semantic-neutral
+`text_normalization.py`; старые callers переведены, а оставшиеся функции `services/text.py`
+используют private imports. Полная таблица callers, риски и исключение старого варианта
+`parsing/text.py` зафиксированы в [`docs/SERVICES_TEXT_AUDIT.md`](SERVICES_TEXT_AUDIT.md).
 Block 5I стартовал с SHA 1a6bf0da753976303b196c57f65a36316bc15685.
 
 ### ПОЗДНЕЕ

@@ -19,7 +19,7 @@ from restaurant_bot.services.replies import (
     thanks_reply,
     welcome_reply,
 )
-from restaurant_bot.services.text import normalize_text
+from restaurant_bot.text_normalization import normalize_text
 
 ReplyBuilder = Callable[[ConversationState], BotReply]
 

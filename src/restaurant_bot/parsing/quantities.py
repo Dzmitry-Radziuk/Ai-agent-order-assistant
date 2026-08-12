@@ -7,11 +7,11 @@ import re
 from restaurant_bot.services.text import (
     NUMBER_WORDS,
     UNIT_ALIASES,
-    normalize_text,
     normalize_unit,
     numeric_range_spans,
     parse_number_words,
 )
+from restaurant_bot.text_normalization import normalize_text
 
 _EXPLICIT_ORDER_QUANTITY_RE = re.compile(
     r"(?:мне\s+)?(?:нужн(?:о|а|ы)|надо|закаж(?:и|ем|у)|добав(?:ь|ить)|"

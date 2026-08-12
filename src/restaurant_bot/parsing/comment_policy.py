@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 
-from restaurant_bot.services.text import clean_text, normalize_text
+from restaurant_bot.text_normalization import clean_text, normalize_text
 
 _COMMENT_LABEL_RE = re.compile(
     r"^(?:комментар(?:ий|ия)|примечани(?:е|я)|пожелани(?:е|я))"

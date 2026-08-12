@@ -9,10 +9,10 @@ from restaurant_bot.domain.models import CatalogProduct
 from restaurant_bot.services.text import (
     NUMBER_WORDS,
     UNIT_ALIASES,
-    normalize_text,
     normalize_unit,
     parse_number_words,
 )
+from restaurant_bot.text_normalization import normalize_text
 
 _STOP_WORDS = {
     "и",

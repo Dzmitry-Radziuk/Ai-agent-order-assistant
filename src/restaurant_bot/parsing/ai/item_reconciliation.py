@@ -15,10 +15,9 @@ from restaurant_bot.parsing.products import parse_product_lines
 from restaurant_bot.services.text import (
     NUMBER_WORDS,
     UNIT_ALIASES,
-    clean_text,
-    normalize_text,
     to_float,
 )
+from restaurant_bot.text_normalization import clean_text, normalize_text
 
 _MIXED_SCRIPT_TOKEN_RE = re.compile(r"[A-Za-zА-Яа-яЁё]+")
 

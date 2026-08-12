@@ -10,11 +10,10 @@ from restaurant_bot.parsing.ai.quantity_reconciliation import _remove_matching_q
 from restaurant_bot.parsing.comment_policy import explicit_supplier_comment, supplier_comment_start
 from restaurant_bot.parsing.comment_scope import has_explicit_global_comment_scope
 from restaurant_bot.services.text import (
-    clean_text,
-    normalize_text,
     remove_global_comment_overlap,
     to_float,
 )
+from restaurant_bot.text_normalization import clean_text, normalize_text
 
 _COMMENT_BINDING_CONFIDENCE = 0.9
 
