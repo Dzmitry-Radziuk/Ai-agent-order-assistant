@@ -1,5 +1,17 @@
 # Block 5O — аудит `InputRecognitionService`
 
+## Block 5P — выполненный перенос pure transcript policy
+
+Выбранный в Block 5O seam завершён без изменения алгоритма. Канонический модуль
+`input/voice_transcript_policy.py` владеет только `has_supported_voice_letters` и
+`select_transcription_result`; зависимости ограничены stdlib `re` и
+`text_normalization.normalize_text`. `InputRecognitionService` остаётся смешанным
+координатором media/provider/state-aware flow, а `requires_high_accuracy_transcription`,
+`voice_transcription_prompt`, visible actions, progress и model fallback не переносились.
+Старые class-level и orchestrator test-only wrappers удалены после caller-аудита,
+тесты импортируют канонический модуль напрямую. Corpus comparison: `MISMATCHES=0`.
+Новый migration seam после Block 5P пока не назначен.
+
 ## Статус и границы
 
 Аудит выполнен на ветке `decompose_bot` при starting SHA
@@ -49,9 +61,9 @@ adapter остаётся в `input/telegram.py`.
 | `_recognize_photo` | Только внутренний вызов из `recognize_media` | `test_photo_pipeline_*` косвенно | Внутренний | Читает event | OpenAI vision и два progress update в Telegram | Photo/OpenAI/Telegram | Photo provider flow с progress | Средний |
 | `update_processing` | `_recognize_photo`; orchestrator `_update_processing` делегирует ему | Фото pipeline проверяет результат косвенно | Внутренний плюс thin wrapper | Не мутирует state | `TelegramClient.send_reply`, проглатывание исключения, warning log | Telegram presentation | Редактирование progress card | Средний |
 | `match_visible_action` | `requires_high_accuracy_transcription`; orchestrator wrapper и text routing | `test_voice_phrase_without_button_verb_matches_visible_action` | Прямой static call и wrapper | Только читает `visible_actions` | Нет | UI/callback semantics | Контекстное сопоставление visible action | Средний |
-| `has_supported_voice_letters` | Voice validation и transcript selection | `test_voice_transcript_rejects_unrelated_script` | Прямой static call и wrapper | Нет | Нет | Voice transcript | Проверка допустимого алфавита | Низкий |
+| `has_supported_voice_letters` | Voice validation и transcript selection | `test_voice_transcript_rejects_unrelated_script` | Прямой импорт из `input/voice_transcript_policy.py` | Нет | Нет | Voice transcript | Проверка допустимого алфавита | Низкий |
 | `voice_transcription_prompt` | Дважды из `_recognize_voice` | Prompt tests через orchestrator wrapper | Прямой static call и wrapper | Читает item/stage/actions | Нет | Voice/OpenAI prompt | Runtime prompt policy | Средний |
-| `select_transcription_result` | `_recognize_voice` после retry | Два focused теста через wrapper | Прямой class call и wrapper | Нет | Нет | Voice transcript | Детерминированный выбор primary/retry | Низкий |
+| `select_transcription_result` | `_recognize_voice` после retry | Два focused теста через canonical owner | Прямой импорт из `input/voice_transcript_policy.py` | Нет | Нет | Voice transcript | Детерминированный выбор primary/retry | Низкий |
 | `requires_high_accuracy_transcription` | `_recognize_voice` | Четыре focused теста через wrapper | Прямой class call и wrapper | Читает state, candidates, actions | Вызывает `infer_intent` и scoring | Voice + conversation/catalog context | Решение о retry | Высокий |
 | `has_distinct_transcription_fallback` | `_recognize_voice` | Проверяется через orchestrator wrapper | Прямой instance call | Читает OpenAI settings | Нет | OpenAI provider | Проверка доступности отдельной модели | Низкий |
 | `has_distinct_models` | `has_distinct_transcription_fallback`; orchestrator wrapper | Тест same-model/mini fallback | Прямой static call и wrapper | Читает settings | Нет | OpenAI provider | Model capability heuristic | Низкий |
@@ -64,10 +76,10 @@ adapter остаётся в `input/telegram.py`.
 - `workers/tasks.py::dependencies()` создаёт `UpdateOrchestrator`; сам
   `InputRecognitionService` создаётся внутри его constructor, а не worker-ом.
 - `api/app.py` класс напрямую не создаёт.
-- Тесты не импортируют `InputRecognitionService` напрямую. Они используют
-  public-ish wrappers `UpdateOrchestrator._match_visible_action`,
-  `_voice_transcription_prompt`, `_select_transcription_result`,
-  `_requires_high_accuracy_transcription` и `_has_supported_voice_letters`.
+- Тесты не импортируют `InputRecognitionService` напрямую. Pure transcript policy
+  тестируется прямым импортом из `input/voice_transcript_policy.py`; wrappers
+  orchestrator для двух функций удалены. Остальные state-aware wrappers сохраняются
+  для prompt, visible actions и high-accuracy policy.
 - Voice/photo pipeline tests создают orchestrator через `object.__new__`,
   подменяют `telegram` и `openai`, а `_recognizer()` лениво создаёт service.
 - `rg`, AST и поиск строковых путей не нашли subclassing, fixture с отдельным
@@ -263,15 +275,15 @@ facade только после caller-аудита.
 boolean на выходе. Перенос улучшит dependency direction, не смешает UI с
 recognition policy и имеет существующий focused corpus.
 
-### Предлагаемый будущий mechanical diff
+### Выполненный mechanical diff Block 5P
 
-В отдельном implementation block изменить только:
+В Block 5P изменено только:
 
-1. создать `input/voice_transcript_policy.py` с двумя pure functions;
-2. заменить внутренние вызовы в `services/input_recognition.py` на новый owner;
-3. временно сохранить class-level compatibility wrappers, если они нужны
-   orchestrator/tests;
-4. добавить прямые unit tests нового owner, сохранив существующие behavioral tests.
+1. создан `input/voice_transcript_policy.py` с двумя pure functions;
+2. внутренние вызовы в `services/input_recognition.py` переведены на новый owner;
+3. class-level compatibility wrappers и два orchestrator wrappers удалены после
+   repository-wide caller-аудита;
+4. существующие behavioral tests переведены на canonical owner без дублирования.
 
 Не переносить вместе с ним `requires_high_accuracy_transcription`,
 `voice_transcription_prompt`, `match_visible_action`, `update_processing`,

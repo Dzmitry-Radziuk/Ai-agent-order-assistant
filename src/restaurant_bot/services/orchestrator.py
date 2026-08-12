@@ -1565,19 +1565,9 @@ class UpdateOrchestrator:
         )
 
     @staticmethod
-    def _has_supported_voice_letters(transcript: str) -> bool:
-        """Проверяет допустимый алфавит распознанной речи."""
-        return InputRecognitionService.has_supported_voice_letters(transcript)
-
-    @staticmethod
     def _voice_transcription_prompt(state: ConversationState) -> str:
         """Формирует контекст для распознавания голоса."""
         return InputRecognitionService.voice_transcription_prompt(state)
-
-    @staticmethod
-    def _select_transcription_result(primary: str, retry: str) -> str:
-        """Не позволяет повторному распознаванию потерять значимую часть речи."""
-        return InputRecognitionService.select_transcription_result(primary, retry)
 
     @staticmethod
     def _requires_high_accuracy_transcription(transcript: str, state: ConversationState) -> bool:

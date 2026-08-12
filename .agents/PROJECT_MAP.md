@@ -1,5 +1,12 @@
 # Карта проекта
 
+## Block 5P: владельцы политики транскрипции
+
+`src/restaurant_bot/input/voice_transcript_policy.py` содержит две чистые функции
+выбора и проверки транскрипции. `src/restaurant_bot/services/input_recognition.py`
+остаётся transitional coordinator для Telegram/OpenAI voice/photo и state-aware
+retry, но больше не владеет этими двумя алгоритмами.
+
 Документ помогает быстро найти код, но не заменяет чтение затронутых файлов. Актуальный перечень файлов, символов и тестов создаётся командой `python scripts/build_agent_context.py` в `.agents/runtime/CURRENT_CONTEXT.md`.
 
 ## Назначение

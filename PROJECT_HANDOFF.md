@@ -1,5 +1,17 @@
 # Передача проекта
 
+## Block 5P — чистая политика выбора транскрипции
+
+Block 5P завершён поведенчески нейтрально. Функции `has_supported_voice_letters` и
+`select_transcription_result` имеют единственного владельца
+`src/restaurant_bot/input/voice_transcript_policy.py` и зависят только от `re` и
+`text_normalization.normalize_text`. `InputRecognitionService` сохранил orchestration
+голоса, фото, retry, visible actions и progress; он вызывает новый pure-модуль.
+Тесты переведены на канонический импорт, старые test-only wrappers удалены.
+Сравнение старой и новой реализации на corpus дало `MISMATCHES=0`; полный baseline
+после переноса: `1366 collected / 1366 passed`. Следующий seam после Block 5P не
+назначается до отдельного review.
+
 ## 1. Назначение
 
 Это production Python-бот для закупок ресторана в Telegram. Он принимает текст,
@@ -346,8 +358,9 @@ Block 5O выполнен как audit-only проверка `services/input_rec
 OpenAI voice/photo, state-aware retry, visible actions и progress presentation.
 Единственный следующий code seam — чистая transcript policy
 `has_supported_voice_letters` + `select_transcription_result` в
-`input/voice_transcript_policy.py`; production Python и tests в Block 5O не
-изменялись. Полный отчёт: [`docs/INPUT_RECOGNITION_AUDIT.md`](docs/INPUT_RECOGNITION_AUDIT.md).
+`input/voice_transcript_policy.py`; сам перенос выполнен в Block 5P, а production
+voice orchestration и tests сохранены по контракту. Полный отчёт:
+[`docs/INPUT_RECOGNITION_AUDIT.md`](docs/INPUT_RECOGNITION_AUDIT.md).
 
 ## 12. Проверки
 

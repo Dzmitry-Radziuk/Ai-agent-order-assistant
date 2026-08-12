@@ -1,5 +1,13 @@
 # План декомпозиции архитектуры
 
+## Block 5P — выполненный перенос политики транскрипции
+
+Из `services/input_recognition.py` механически вынесены только
+`has_supported_voice_letters` и `select_transcription_result` в
+`input/voice_transcript_policy.py`. Новый модуль не знает о Telegram, OpenAI,
+state, parser или persistence. Остальные voice/photo responsibilities и
+`services/input_recognition.py` не менялись; дальнейший seam не назначен.
+
 ## 1. Назначение и границы
 
 Документ фиксирует безопасную поведенчески нейтральную декомпозицию. Каждый
@@ -79,7 +87,7 @@ contracts и проходит focused/full regression до следующего 
 | Текущий owner | Действие |
 |---|---|
 | `input/telegram.py` | Block 5N: канонический Telegram raw-update adapter; старый `services/input_normalizer.py` удалён после нулевого caller-аудита. |
-| `services/input_recognition.py` | Block 5O: полный MOVE в `input/recognition.py` отклонён как смешение transport/provider/policy/presentation; следующий seam — `has_supported_voice_letters` + `select_transcription_result` в `input/voice_transcript_policy.py`. |
+| `services/input_recognition.py` | Block 5O полный MOVE в `input/recognition.py` отклонён как смешение transport/provider/policy/presentation; Block 5P завершил перенос `has_supported_voice_letters` и `select_transcription_result` в `input/voice_transcript_policy.py`. |
 | `services/parser.py` | **Block 2B: FACADE** для text/callback public contract и dispatcher. |
 | `parsing/commands/` | **Block 2B: CREATE** owners text command parsing по responsibility. |
 | `parsing/products.py` | **Block 1/2A: MOVE** orchestration в parsing package; после extraction остаётся центральным entry point. |

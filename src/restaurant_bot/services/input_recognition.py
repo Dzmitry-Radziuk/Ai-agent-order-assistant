@@ -21,6 +21,10 @@ from restaurant_bot.domain.models import (
     SessionStage,
     TelegramEvent,
 )
+from restaurant_bot.input.voice_transcript_policy import (
+    has_supported_voice_letters,
+    select_transcription_result,
+)
 from restaurant_bot.integrations.openai_client import OpenAIService
 from restaurant_bot.integrations.telegram import TelegramClient
 from restaurant_bot.services.parser import infer_intent, parse_quantity_unit
@@ -100,7 +104,7 @@ class InputRecognitionService:
                     prompt=self.voice_transcription_prompt(state),
                     high_accuracy=True,
                 )
-                transcript = self.select_transcription_result(
+                transcript = select_transcription_result(
                     primary_transcript,
                     retry_transcript,
                 )
@@ -116,7 +120,7 @@ class InputRecognitionService:
             duration_ms=round((perf_counter() - stage_started) * 1000),
             high_accuracy_retry=high_accuracy_retry,
         )
-        if not self.has_supported_voice_letters(transcript):
+        if not has_supported_voice_letters(transcript):
             return ParsedCommand(intent=Intent.UNKNOWN, text="")
         stage_started = perf_counter()
         parsed = parse_text(transcript, state)
@@ -211,11 +215,6 @@ class InputRecognitionService:
         return best[1] if best[0] >= 0.72 else ""
 
     @staticmethod
-    def has_supported_voice_letters(transcript: str) -> bool:
-        """Проверяет допустимый алфавит распознанной речи."""
-        return bool(re.search(r"[A-Za-zА-Яа-яЁё]", transcript))
-
-    @staticmethod
     def voice_transcription_prompt(state: ConversationState) -> str:
         """Формирует контекст для распознавания голоса."""
         current = state.current_item()
@@ -261,31 +260,6 @@ class InputRecognitionService:
             "действие на противоположное. Команда не является названием товара."
             f"{screen_hint}"
         )
-
-    @classmethod
-    def select_transcription_result(cls, primary: str, retry: str) -> str:
-        """Не позволяет повторному распознаванию потерять значимую часть речи."""
-        primary_normalized = normalize_text(primary)
-        retry_normalized = normalize_text(retry)
-        if primary_normalized in {"тестовый товар", "тест товар", "test product"}:
-            return retry
-        if not cls.has_supported_voice_letters(retry):
-            return primary
-        if not cls.has_supported_voice_letters(primary):
-            return retry
-        primary_words = re.findall(r"[a-zа-яё0-9]+", primary_normalized, flags=re.I)
-        retry_words = re.findall(r"[a-zа-яё0-9]+", retry_normalized, flags=re.I)
-        primary_has_list_structure = bool(
-            re.search(r"[,;\n]", primary)
-            or len(re.findall(r"\d+(?:[,.]\d+)?", primary_normalized)) >= 2
-        )
-        if (
-            len(primary_words) >= 6
-            and len(retry_words) * 2 < len(primary_words)
-            and primary_has_list_structure
-        ):
-            return primary
-        return retry
 
     @classmethod
     def requires_high_accuracy_transcription(

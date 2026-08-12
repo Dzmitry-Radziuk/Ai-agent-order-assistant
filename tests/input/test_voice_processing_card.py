@@ -15,6 +15,10 @@ from restaurant_bot.domain.models import (
     SessionStage,
     TelegramEvent,
 )
+from restaurant_bot.input.voice_transcript_policy import (
+    has_supported_voice_letters,
+    select_transcription_result,
+)
 from restaurant_bot.services.orchestrator import UpdateOrchestrator
 
 
@@ -57,9 +61,9 @@ def test_text_processing_card_does_not_replace_quantity_or_navigation() -> None:
 
 def test_voice_transcript_rejects_unrelated_script() -> None:
     """Проверяет, что голос транскрипция отклоняет несвязанные script."""
-    assert not UpdateOrchestrator._has_supported_voice_letters("روبطرخون")
-    assert UpdateOrchestrator._has_supported_voice_letters("сироп роза")
-    assert UpdateOrchestrator._has_supported_voice_letters("соус Heinz")
+    assert not has_supported_voice_letters("روبطرخون")
+    assert has_supported_voice_letters("сироп роза")
+    assert has_supported_voice_letters("соус Heinz")
 
 
 def test_generic_voice_prompt_explicitly_preserves_navigation_commands() -> None:
@@ -227,13 +231,13 @@ def test_high_accuracy_retry_cannot_truncate_a_full_product_list() -> None:
     primary = "Сироп роза 10 штук, говядины пару килограмм, пару яблок, бутылка воды."
     retry = "Говядины пару килограмм."
 
-    assert UpdateOrchestrator._select_transcription_result(primary, retry) == primary
+    assert select_transcription_result(primary, retry) == primary
 
 
 def test_high_accuracy_retry_replaces_known_placeholder_transcript() -> None:
     """Заменяет служебную галлюцинацию более точным результатом."""
     assert (
-        UpdateOrchestrator._select_transcription_result(
+        select_transcription_result(
             "Тестовый товар",
             "Не добавлять",
         )

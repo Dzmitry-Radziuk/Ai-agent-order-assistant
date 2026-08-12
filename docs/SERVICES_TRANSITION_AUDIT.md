@@ -1,5 +1,15 @@
 # Аудит переходного слоя services/ и результат Block 5K
 
+## Block 5P — выполненный pure voice transcript seam
+
+Проверенный перенос завершён: два pure-алгоритма `has_supported_voice_letters` и
+`select_transcription_result` теперь находятся только в
+`input/voice_transcript_policy.py`. `services/input_recognition.py` импортирует их
+как канонический owner и сохраняет все provider, Telegram, state-aware retry и
+progress обязанности. Динамических или production callers старых class methods
+не найдено; orchestrator wrappers и тестовые вызовы переведены на новый импорт.
+Поведенческое сравнение с исходным SHA дало `MISMATCHES=0`.
+
 ## Границы
 
 Аудит выполнен на ветке decompose_bot, исходный SHA аудита:
