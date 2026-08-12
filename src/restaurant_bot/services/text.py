@@ -9,24 +9,6 @@ from typing import Any
 from restaurant_bot.domain.units import UNIT_ALIASES
 from restaurant_bot.text_normalization import clean_text, normalize_text
 
-DEPARTMENT_ALIASES: dict[str, str] = {
-    "зал": "Зал",
-    "зала": "Зал",
-    "залу": "Зал",
-    "зале": "Зал",
-    "бар": "Бар",
-    "бара": "Бар",
-    "бару": "Бар",
-    "баре": "Бар",
-    "кухня": "Кухня",
-    "кухни": "Кухня",
-    "кухню": "Кухня",
-    "кухне": "Кухня",
-    "hall": "Зал",
-    "bar": "Бар",
-    "kitchen": "Кухня",
-}
-
 NUMBER_WORDS: dict[str, float] = {
     "ноль": 0,
     "один": 1,
@@ -122,12 +104,6 @@ def remove_phrase_overlap(source_text: str, phrase: str) -> str:
         replacement = clean_text(f"{left} {right}")
         return replacement or source
     return source
-
-
-def normalize_department(value: Any) -> str:
-    """Приводит название отдела к заголовку листа заявки."""
-    text = normalize_text(value)
-    return DEPARTMENT_ALIASES.get(text, clean_text(value))
 
 
 def numeric_range_spans(value: Any) -> list[tuple[int, int]]:
