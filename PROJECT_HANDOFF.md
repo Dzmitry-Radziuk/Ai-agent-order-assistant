@@ -308,8 +308,9 @@ channel boundary без изменения callback format и пользоват
 
 Следующий code seam — механический перенос `services/comment_policy.py` в
 `parsing/comment_policy.py`: только три pure supplier-comment функции и их
-private regex/constants. Production-код этого переноса ещё не начинать; scope,
-callers и regression corpus зафиксированы в `docs/SERVICES_TRANSITION_AUDIT.md`.
+private regex/constants. Starting SHA этого seam: `d8fbced775aeb0685a49e2ae52be53e74c1ecaf8`.
+Production-код этого переноса ещё не начинать; scope, callers и regression corpus
+зафиксированы в `docs/SERVICES_TRANSITION_AUDIT.md`.
 
 ## 12. Проверки
 
