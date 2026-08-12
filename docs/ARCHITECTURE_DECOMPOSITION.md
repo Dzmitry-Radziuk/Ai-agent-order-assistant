@@ -105,8 +105,12 @@ contracts и проходит focused/full regression до следующего 
   query/catalog evidence и supplier hint matching; `catalog/safety.py` владеет
   qualifier conflicts, numeric compatibility, safe equivalence, broad-category
   policy и auto-select safety.
-- `engine.py` позднее оставляет orchestration, а применение draft выделяется
-  отдельно.
+- `orders/catalog_resolution.py` владеет channel-neutral применением результата
+  каталога к `CartItem`: каталожные поля, quantity reconciliation, comment
+  provenance, статусы и обновление уже выбранных позиций.
+- `services/engine.py` остаётся transitional orchestration/state-machine caller:
+  он делегирует catalog-to-draft resolution новому orders owner и сохраняет
+  только совместимые тонкие вызовы для доказанных legacy callers.
 
 ### Conversation
 
@@ -126,6 +130,9 @@ contracts и проходит focused/full regression до следующего 
   без зависимости от канала или presentation.
 - `orders/supplier_minimums.py` — channel-neutral owner агрегации минимальных
   сумм поставщиков; возвращает структурированные warnings без мутации state.
+- `orders/catalog_resolution.py` — channel-neutral owner применения каталожного
+  результата к позиции заказа и refresh каталожных значений черновика; не знает
+  Telegram, ParsedCommand, engine или persistence.
 - `services/conversation_handlers/state_compatibility.py`, `modal_routing.py`
   и `state.py` оставлены только как compatibility facades с доказанными
   callers.

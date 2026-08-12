@@ -97,6 +97,9 @@ Telegram update
 - `orders/supplier_minimums.py` — единый channel-neutral владелец агрегации
   минимальных сумм поставщиков и структурированных предупреждений без мутации
   состояния.
+- `orders/catalog_resolution.py` — единый channel-neutral владелец применения
+  результата `CatalogResolver` к `CartItem`: каталожные поля, quantity
+  reconciliation, comment provenance, статусы и refresh черновика.
 - `services/matching.py` — transitional compatibility path: catalog symbols
   и совместимый re-export `nearest_valid_multiple`.
 - `services/catalog_resolver.py` — чистый compatibility re-export facade для
@@ -107,8 +110,10 @@ Telegram update
   следующей нерешённой позиции, issue mapping и смена stage без presentation.
 - `services/conversation_handlers/` — quantity, candidate, comment scope,
   review, navigation и единая StateCompatibilityPolicy.
-- `services/engine.py` — текущая state machine, применение решения каталога,
-  изменение черновика, comments, quantity, duplicate flow и подготовка submission.
+- `services/engine.py` — transitional state machine и orchestration caller;
+  применение решения каталога делегируется `orders/catalog_resolution.py`, а
+  остальные переходы черновика, comments, quantity, duplicate flow и подготовка
+  submission остаются в engine.
 - `services/replies.py` — карточки, клавиатуры и пользовательские тексты.
 
 ### Внешние эффекты
@@ -299,9 +304,9 @@ channel boundary без изменения callback format и пользоват
 
 ## 11. Следующий функциональный блок
 
-Следующий seam — catalog-to-draft resolution после отдельного external review.
-До такого решения нельзя автоматически переносить остальные handlers, уменьшать
-`engine.py` или менять поведение state machine.
+Следующий seam — только отдельно подтверждённый audit оставшихся `services/`
+модулей или внешний review. Автоматически начинать следующий перенос, уменьшать
+`engine.py` или менять поведение state machine нельзя.
 
 ## 12. Проверки
 

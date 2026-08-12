@@ -139,6 +139,27 @@
 - Реализация: будущие design blocks для catalog sync и searchable projection;
   Block 3 не меняет БД, migrations, Docker или Sheets sync.
 
+### ADR-015 — `services/` остаётся transitional compatibility layer
+
+- Дата: 2026-08-12.
+- Статус: действует.
+- Контекст: исторический пакет `services/` содержит orchestration, handlers,
+  presentation и остаточные core-алгоритмы, поэтому его нельзя считать целевой
+  архитектурой или безопасно переносить целиком.
+- Решение: каждый оставшийся модуль `services/` проходит отдельный
+  responsibility/caller/duplicate audit. Core переносится по одному доказанному
+  seam в именованный owner (`conversation/`, `orders/`, `catalog/`, `parsing/`,
+  `submission/`, `venues/` или `application/`). Compatibility facade допустим
+  только при подтверждённых старых callers, без собственной реализации и с
+  понятным путём удаления.
+- Последствия: массовой механической миграции и generic-свалок не создаём;
+  `services/engine.py` может временно координировать state machine, а новые
+  channel-neutral owners должны зависеть от domain/core, а не от engine или
+  transport.
+- Реализация: `orders/catalog_resolution.py`, owner maps в
+  `.agents/PROJECT_MAP.md`, `docs/ARCHITECTURE_DECOMPOSITION.md` и текущие
+  compatibility wrappers в `services/engine.py`.
+
 ## Шаблон новой записи
 
 ```markdown

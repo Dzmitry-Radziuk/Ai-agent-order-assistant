@@ -7,11 +7,9 @@ from datetime import UTC, datetime
 from uuid import uuid4
 
 from restaurant_bot.catalog.evidence import (
-    has_complete_query_evidence,
     query_evidence_tokens,
 )
-from restaurant_bot.catalog.resolver import CatalogDecision, CatalogResolver
-from restaurant_bot.catalog.safety import has_compatible_numeric_characteristics
+from restaurant_bot.catalog.resolver import CatalogResolver
 from restaurant_bot.config import Settings
 from restaurant_bot.conversation.comments import (
     apply_global_comment,
@@ -20,8 +18,6 @@ from restaurant_bot.conversation.comments import (
     merge_comments,
     prune_pending_comment_item_ids,
     remove_cart_comment_shadows,
-    remove_catalog_fact_comments,
-    remove_exact_comment_fragments,
     remove_global_comment_overlap,
 )
 from restaurant_bot.conversation.draft import (
@@ -74,7 +70,9 @@ from restaurant_bot.domain.models import (
     SessionStage,
     TelegramEvent,
 )
+from restaurant_bot.orders.catalog_resolution import CatalogResolutionService
 from restaurant_bot.orders.supplier_minimums import supplier_minimum_warnings
+from restaurant_bot.parsing.quantities import has_explicit_order_quantity
 from restaurant_bot.services.comment_policy import supplier_comment_start
 from restaurant_bot.services.conversation_handlers.candidate_selection import (
     CandidateSelectionHandler,
@@ -99,7 +97,6 @@ from restaurant_bot.services.parser import (
     is_product_add_request_phrase,
     normalize_command_text,
     parse_product_lines,
-    parse_quantity_unit,
 )
 from restaurant_bot.services.product_add_flow import (
     clear_product_add_pending,
@@ -140,15 +137,6 @@ from restaurant_bot.services.text import (
     normalize_department,
     normalize_text,
     normalize_unit,
-    numeric_range_spans,
-    parse_number_words,
-    remove_phrase_overlap,
-)
-
-_EXPLICIT_ORDER_QUANTITY_RE = re.compile(
-    r"(?:мне\s+)?(?:нужн(?:о|а|ы)|надо|закаж(?:и|ем|у)|добав(?:ь|ить)|"
-    r"постав(?:ь|ить)|возьм(?:и|ем)|количеств(?:о|ом)?|вес)\b",
-    flags=re.I,
 )
 
 
@@ -170,6 +158,7 @@ class ConversationEngine:
         """Инициализирует компонент."""
         self.settings = settings
         self.catalog_resolver = catalog_resolver or CatalogResolver()
+        self.catalog_resolution = CatalogResolutionService(self.catalog_resolver)
         self.pending_quantity_handler = pending_quantity_handler or PendingQuantityHandler()
         self.final_review_handler = final_review_handler or FinalReviewHandler()
         self.passive_intent_handler = passive_intent_handler or PassiveIntentHandler()
@@ -1008,58 +997,7 @@ class ConversationEngine:
     @staticmethod
     def _has_explicit_order_quantity(source_line: str, quantity: float | None) -> bool:
         """Отличает объём заказа от чисел в размере или фасовке товара."""
-        if quantity is None:
-            return False
-        source = str(source_line or "").strip()
-        if not source:
-            return False
-        range_spans = numeric_range_spans(source)
-        masked = list(source)
-        for start, end in range_spans:
-            masked[start:end] = [" "] * (end - start)
-        masked_source = "".join(masked)
-        unit_pattern = "|".join(
-            sorted((re.escape(unit) for unit in UNIT_ALIASES), key=len, reverse=True)
-        )
-        number_word_pattern = "|".join(
-            sorted((re.escape(word) for word in NUMBER_WORDS), key=len, reverse=True)
-        )
-        value_pattern = re.compile(
-            rf"(?<![\w-])(?P<value>\d+(?:[,.]\d+)?|"
-            rf"(?:{number_word_pattern})(?:\s+(?:{number_word_pattern}))*)"
-            rf"\s*(?P<unit>{unit_pattern})?\b",
-            flags=re.I,
-        )
-        values: list[float] = []
-        for match in value_pattern.finditer(masked_source):
-            raw_value = match.group("value").casefold()
-            try:
-                value = float(raw_value.replace(",", "."))
-            except ValueError:
-                tokens = raw_value.split()
-                parsed = parse_number_words(tokens, 0)
-                value = parsed[0] if parsed and parsed[1] == len(tokens) else -1
-            if value >= 0:
-                values.append(value)
-        if not values or not any(abs(value - quantity) <= 1e-9 for value in values):
-            return False
-        # A numeric range is reference data. Any matching value outside it is
-        # an order quantity, even when the user omitted an explicit verb.
-        if range_spans:
-            return True
-        if _EXPLICIT_ORDER_QUANTITY_RE.search(masked_source):
-            return True
-        # A second number or a terminal dash makes the last value an order
-        # quantity, while a lone ``180 грамм`` remains a product characteristic.
-        if len(values) > 1:
-            return True
-        return bool(
-            re.search(
-                rf"(?:^|[-—–:])\s*\d+(?:[,.]\d+)?\s*(?:{unit_pattern})?\s*$",
-                masked_source,
-                flags=re.I,
-            )
-        )
+        return has_explicit_order_quantity(source_line, quantity)
 
     @staticmethod
     def _spoken_unit_only_quantity(text: str) -> tuple[float | None, str]:
@@ -2063,51 +2001,8 @@ class ConversationEngine:
         item: CartItem,
         candidates: list[Candidate],
     ) -> tuple[float, str] | None:
-        """Находит фасовку, ошибочно распознанную как количество заказа.
-
-        Голосовой разбор не знает каталог и может превратить «Марципан 65
-        грамм» в количество 65 г. Если единственное число строки совпадает с
-        фасовкой кандидата, а единица заказа каталога другая (например, кг),
-        безопаснее сохранить число как атрибут товара и запросить реальное
-        количество в единице каталога.
-        """
-        if item.quantity is None or not item.unit or item.quantity_source:
-            return None
-        source = normalize_text(item.source_line)
-        if not source or _EXPLICIT_ORDER_QUANTITY_RE.search(source) or numeric_range_spans(source):
-            return None
-
-        unit_pattern = "|".join(
-            sorted((re.escape(unit) for unit in UNIT_ALIASES), key=len, reverse=True)
-        )
-        measurements = re.findall(
-            rf"(?<![\w-])(?P<value>\d+(?:[,.]\d+)?)\s*"
-            rf"(?P<unit>{unit_pattern})\b",
-            source,
-            flags=re.IGNORECASE,
-        )
-        if len(measurements) != 1:
-            return None
-        value, raw_unit = measurements[0]
-        spoken_unit = normalize_unit(raw_unit)
-        try:
-            spoken_value = float(value.replace(",", "."))
-        except ValueError:
-            return None
-        if abs(spoken_value - item.quantity) > 1e-9 or spoken_unit != item.unit:
-            return None
-
-        packaging_candidates = [
-            candidate
-            for candidate in candidates
-            if has_compatible_numeric_characteristics(
-                f"{spoken_value:g} {spoken_unit}", candidate.name
-            )
-            and normalize_unit(candidate.unit) != spoken_unit
-        ]
-        if not packaging_candidates:
-            return None
-        return spoken_value, spoken_unit
+        """Совместимо вызывает владельца разрешения каталога."""
+        return CatalogResolutionService._catalog_packaging_measurement(item, candidates)
 
     def _match_item(
         self,
@@ -2115,81 +2010,8 @@ class ConversationEngine:
         catalog: list[CatalogProduct],
         search_scope: SearchScope | None = None,
     ) -> None:
-        """Сопоставляет позицию с товаром каталога."""
-        self._remove_unanchored_supplier_hint(item)
-        search_query = remove_phrase_overlap(item.source_query, item.comment)
-        search = self.catalog_resolver.search(
-            search_query,
-            catalog,
-            item.supplier_hint,
-            search_scope,
-        )
-        candidates = list(search.candidates)
-        packaging_measurement = self._catalog_packaging_measurement(item, candidates)
-        if packaging_measurement is not None:
-            packaging_value, packaging_unit = packaging_measurement
-            item.packaging_text = f"{packaging_value:g} {packaging_unit}"
-            item.packaging_role = "catalog_attribute"
-            item.packaging_confidence = max(item.packaging_confidence, 0.86)
-            item.quantity = None
-            item.unit = ""
-        item.candidates = candidates
-        item.supplier_search_locked = search.supplier_search_locked
-        if not search.found_in_scope:
-            item.status = ItemStatus.NOT_FOUND
-            return
-        if not item.comment and len(candidates) >= 2:
-            split = self.catalog_resolver.split_explicit_supplier_comment(
-                item.source_query,
-                candidates,
-            )
-            if split is not None:
-                item.comment = merge_comments(item.comment, split.supplier_comment)
-                item.comment_source = CommentSource.EXPLICIT_MARKER
-                item.source_query = split.product_query
-                search_query = remove_phrase_overlap(item.source_query, item.comment)
-                search = self.catalog_resolver.search(
-                    search_query,
-                    catalog,
-                    item.supplier_hint,
-                    search_scope,
-                )
-                candidates = list(search.candidates)
-                item.candidates = candidates
-                item.supplier_search_locked = search.supplier_search_locked
-                if not search.found_in_scope:
-                    item.status = ItemStatus.NOT_FOUND
-                    return
-        item.supplier_search_locked = False
-        reconciliation_candidate: Candidate | None = None
-        if candidates:
-            primary = candidates[0]
-            primary_evidence = query_evidence_tokens(item.source_query, primary.name)
-            primary_decision = self.catalog_resolver.decide(
-                item.source_query,
-                candidates,
-                comment=item.comment,
-                packaging_text=item.packaging_text,
-                packaging_role=item.packaging_role,
-            )
-            if (
-                has_complete_query_evidence(item.source_query, primary.name)
-                or primary_decision is CatalogDecision.AUTO_SELECT
-                or (len(candidates) == 1 and len(primary_evidence) >= 2)
-            ):
-                reconciliation_candidate = primary
-        self._sanitize_catalog_facts_before_resolution(item, reconciliation_candidate)
-        decision = self.catalog_resolver.decide(
-            item.source_query,
-            candidates,
-            comment=item.comment,
-            packaging_text=item.packaging_text,
-            packaging_role=item.packaging_role,
-        )
-        if decision is CatalogDecision.CLARIFY:
-            item.status = ItemStatus.AMBIGUOUS
-            return
-        self._apply_catalog(item, candidates[0], catalog)
+        """Совместимо вызывает сопоставление позиции в новом владельце."""
+        self.catalog_resolution.match_item(item, catalog, search_scope)
 
     @staticmethod
     def _looks_like_supplier_comment_fragment(words: list[str]) -> bool:
@@ -2198,51 +2020,16 @@ class ConversationEngine:
 
     @staticmethod
     def _remove_unanchored_supplier_hint(item: CartItem) -> None:
-        """Не считает хвост названия товара поставщиком без явной команды."""
-        hint = normalize_text(item.supplier_hint)
-        source = normalize_text(item.source_line)
-        if not hint or not source:
-            return
-        explicit_supplier = re.search(
-            r"\b(?:поставщик\w*|у\s+поставщик\w*|от\s+поставщик\w*|купить\s+у)\b",
-            source,
-            flags=re.I,
-        )
-        if explicit_supplier:
-            return
-        query = normalize_text(item.source_query)
-        if query and query in source and source.find(query) < source.rfind(hint):
-            item.supplier_hint = ""
+        """Совместимо вызывает очистку подсказки поставщика."""
+        CatalogResolutionService._remove_unanchored_supplier_hint(item)
 
     def _sanitize_catalog_facts_before_resolution(
         self,
         item: CartItem,
         candidate: Candidate | None,
     ) -> None:
-        """Удаляет характеристики каталога из количества и комментария до ИИ-уточнения."""
-        product_name = candidate.name if candidate is not None else ""
-        if item.quantity is not None and item.unit and not item.quantity_source:
-            quantity_text = f"{item.quantity:g} {item.unit}"
-            explicit_order = self._has_explicit_order_quantity(item.source_line, item.quantity)
-            if (
-                has_compatible_numeric_characteristics(quantity_text, product_name)
-                and (item.packaging_role == "catalog_attribute" or not explicit_order)
-            ) or (
-                not explicit_order
-                and item.source_line
-                and normalize_text(item.source_line) == normalize_text(product_name)
-            ):
-                item.quantity = None
-                item.unit = ""
-        item.comment = remove_catalog_fact_comments(
-            item.comment,
-            item.source_query,
-            product_name,
-            source_line=item.source_line,
-            include_source_query=False,
-        )
-        if not item.comment:
-            item.comment_source = CommentSource.NONE
+        """Совместимо вызывает очистку фактов каталога перед решением."""
+        self.catalog_resolution._sanitize_catalog_facts_before_resolution(item, candidate)
 
     @staticmethod
     def _supplier_comment_start(words: list[str]) -> int | None:
@@ -2255,149 +2042,21 @@ class ConversationEngine:
         candidate: Candidate,
         catalog: list[CatalogProduct],
     ) -> None:
-        """Применяет каталог к распознанным позициям."""
-        product = self.catalog_resolver.product_for(candidate, catalog)
-        if product is None:
-            item.status = ItemStatus.NOT_FOUND
-            return
-        self._sanitize_catalog_facts_before_resolution(item, candidate)
-        item.catalog_product_id = product.product_id
-        item.catalog_name = product.name
-        item.supplier = product.supplier
-        item.catalog_unit = normalize_unit(product.unit)
-        item.price = product.price
-        item.minimum_multiple = product.minimum_multiple
-        item.useful_volume = product.useful_volume
-        item.supplier_minimum_amount = product.supplier_minimum_amount
-        item.supplier_current_sum = product.supplier_current_sum
-        item.existing_quantity = product.department_quantities.for_department(item.department) or 0
-        self._reconcile_quantity_with_catalog_name(item, product.name)
-        user_comment = item.comment
-        item.catalog_comment = product.comment
-        item.catalog_comment_source = (
-            CommentSource.CATALOG if product.comment else CommentSource.NONE
-        )
-        item.comment = user_comment
-        if not user_comment:
-            item.comment_source = CommentSource.NONE
-
-        if item.quantity is None:
-            item.status = ItemStatus.MISSING_QTY
-            return
-        if (
-            item.unit
-            and item.catalog_unit
-            and normalize_unit(item.unit) != normalize_unit(item.catalog_unit)
-        ):
-            # A spoken unit is user intent. Even convertible pairs are
-            # confirmed before changing the order silently.
-            item.status = ItemStatus.UNIT_MISMATCH
-            return
-        elif not item.unit:
-            item.unit = item.catalog_unit
-
-        suggested = suggested_quantity_for_multiple(item)
-        if suggested:
-            item.suggested_quantity = suggested
-        else:
-            item.suggested_quantity = None
-        item.status = ItemStatus.MATCHED
+        """Совместимо вызывает применение результата каталога к позиции."""
+        self.catalog_resolution.apply_catalog(item, candidate, catalog)
 
     def _refresh_cart_order_values(
         self,
         state: ConversationState,
         catalog: list[CatalogProduct],
     ) -> None:
-        """Обновляет сумму и количество из строки каждого выбранного товара."""
-        products_by_id = {product.product_id: product for product in catalog}
-        for item in state.cart:
-            if item.status != ItemStatus.MATCHED or not item.catalog_product_id:
-                continue
-            product = products_by_id.get(item.catalog_product_id)
-            if product is None:
-                continue
-            item.supplier_current_sum = product.supplier_current_sum
-            item.existing_quantity = (
-                product.department_quantities.for_department(item.department) or 0
-            )
-            item.supplier_minimum_amount = product.supplier_minimum_amount
-            item.minimum_multiple = product.minimum_multiple
-            item.suggested_quantity = suggested_quantity_for_multiple(item)
-            item.catalog_comment = product.comment
-            item.catalog_comment_source = (
-                CommentSource.CATALOG if product.comment else CommentSource.NONE
-            )
-            if not (
-                item.source_line
-                and item.comment_source
-                in {
-                    CommentSource.SEMANTIC,
-                    CommentSource.EXPLICIT_MARKER,
-                }
-            ):
-                item.comment = remove_exact_comment_fragments(item.comment, product.comment)
-            if not item.comment:
-                item.comment_source = CommentSource.NONE
+        """Совместимо вызывает обновление каталожных значений черновика."""
+        self.catalog_resolution.refresh_cart_order_values(state, catalog)
 
     @staticmethod
     def _reconcile_quantity_with_catalog_name(item: CartItem, product_name: str) -> None:
-        """Отделяет количество заказа от фасовки в полном названии."""
-        if item.quantity_source:
-            return
-        if (
-            item.quantity is not None
-            and item.source_line
-            and normalize_text(item.source_line) == normalize_text(product_name)
-            and not ConversationEngine._has_explicit_order_quantity(
-                item.source_line,
-                item.quantity,
-            )
-        ):
-            item.quantity = None
-            item.unit = ""
-            return
-        if numeric_range_spans(item.source_line):
-            parsed_source = parse_product_lines(item.source_line)
-            if len(parsed_source) == 1:
-                parsed_item = parsed_source[0]
-                if not ConversationEngine._has_explicit_order_quantity(
-                    item.source_line,
-                    item.quantity,
-                ):
-                    item.quantity = parsed_item.quantity
-                    item.unit = parsed_item.unit if parsed_item.quantity is not None else ""
-                return
-            # A shared multi-product source line is reconciled by the parser
-            # before it reaches the catalog. Do not parse its normalized token
-            # stream: ``0,9-1,3`` would otherwise start with a false zero.
-            return
-        source_tokens = re.findall(r"[a-zа-я0-9%]+", normalize_text(item.source_line), flags=re.I)
-        product_tokens = re.findall(r"[a-zа-я0-9%]+", normalize_text(product_name), flags=re.I)
-        if not source_tokens or not product_tokens or len(source_tokens) < len(product_tokens):
-            return
-
-        product_start = next(
-            (
-                index
-                for index in range(len(source_tokens) - len(product_tokens) + 1)
-                if source_tokens[index : index + len(product_tokens)] == product_tokens
-            ),
-            None,
-        )
-        if product_start is None:
-            return
-
-        before = " ".join(source_tokens[:product_start])
-        after = " ".join(source_tokens[product_start + len(product_tokens) :])
-        explicit_quantity: tuple[float | None, str] = (None, "")
-        for outside_name in (after, before):
-            quantity, unit = parse_quantity_unit(outside_name)
-            if quantity is not None:
-                explicit_quantity = (quantity, unit)
-                break
-
-        if item.quantity is None and explicit_quantity[0] is not None:
-            item.quantity, item.unit = explicit_quantity
+        """Совместимо вызывает отделение заказа от фасовки каталога."""
+        CatalogResolutionService._reconcile_quantity_with_catalog_name(item, product_name)
 
     def _first_unresolved(self, state: ConversationState) -> CartItem | None:
         """Возвращает приоритетную нерешённую позицию."""

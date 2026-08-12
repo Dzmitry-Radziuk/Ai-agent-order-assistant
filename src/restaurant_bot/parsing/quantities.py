@@ -5,11 +5,76 @@ from __future__ import annotations
 import re
 
 from restaurant_bot.services.text import (
+    NUMBER_WORDS,
     UNIT_ALIASES,
     normalize_text,
     normalize_unit,
+    numeric_range_spans,
     parse_number_words,
 )
+
+_EXPLICIT_ORDER_QUANTITY_RE = re.compile(
+    r"(?:мне\s+)?(?:нужн(?:о|а|ы)|надо|закаж(?:и|ем|у)|добав(?:ь|ить)|"
+    r"постав(?:ь|ить)|возьм(?:и|ем)|количеств(?:о|ом)?|вес)\b",
+    flags=re.I,
+)
+
+
+def has_explicit_order_quantity(source_line: str, quantity: float | None) -> bool:
+    """Отличает объём заказа от числа в размере или фасовке товара."""
+    if quantity is None:
+        return False
+    source = str(source_line or "").strip()
+    if not source:
+        return False
+    range_spans = numeric_range_spans(source)
+    masked = list(source)
+    for start, end in range_spans:
+        masked[start:end] = [" "] * (end - start)
+    masked_source = "".join(masked)
+    unit_pattern = "|".join(
+        sorted((re.escape(unit) for unit in UNIT_ALIASES), key=len, reverse=True)
+    )
+    number_word_pattern = "|".join(
+        sorted((re.escape(word) for word in NUMBER_WORDS), key=len, reverse=True)
+    )
+    value_pattern = re.compile(
+        rf"(?<![\w-])(?P<value>\d+(?:[,.]\d+)?|"
+        rf"(?:{number_word_pattern})(?:\s+(?:{number_word_pattern}))*)"
+        rf"\s*(?P<unit>{unit_pattern})?\b",
+        flags=re.I,
+    )
+    values: list[float] = []
+    for match in value_pattern.finditer(masked_source):
+        raw_value = match.group("value").casefold()
+        try:
+            value = float(raw_value.replace(",", "."))
+        except ValueError:
+            tokens = raw_value.split()
+            parsed = parse_number_words(tokens, 0)
+            value = parsed[0] if parsed and parsed[1] == len(tokens) else -1
+        if value >= 0:
+            values.append(value)
+    if not values or not any(abs(value - quantity) <= 1e-9 for value in values):
+        return False
+    if range_spans:
+        return True
+    if has_explicit_order_marker(masked_source):
+        return True
+    if len(values) > 1:
+        return True
+    return bool(
+        re.search(
+            rf"(?:^|[-—–:])\s*\d+(?:[,.]\d+)?\s*(?:{unit_pattern})?\s*$",
+            masked_source,
+            flags=re.I,
+        )
+    )
+
+
+def has_explicit_order_marker(source_line: str) -> bool:
+    """Проверяет наличие словесного маркера количества заказа."""
+    return bool(_EXPLICIT_ORDER_QUANTITY_RE.search(str(source_line or "")))
 
 
 def _is_standalone_quantity(value: str) -> bool:
