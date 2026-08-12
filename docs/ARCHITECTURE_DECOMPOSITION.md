@@ -117,6 +117,9 @@ contracts и проходит focused/full regression до следующего 
   Модуль не импортирует `ParsedCommand` и не знает о callback semantics.
 - `services/conversation_handlers/candidate_selection.py` — presentation-only
   adapter, преобразующий `ParsedCommand` в нейтральные аргументы selection core.
+- `conversation/progression.py` — channel-neutral owner перехода к следующей
+  нерешённой позиции, issue mapping и progression stage; presentation replies
+  остаются в `ConversationEngine`.
 - `services/conversation_handlers/state_compatibility.py`, `modal_routing.py`
   и `state.py` оставлены только как compatibility facades с доказанными
   callers.
@@ -156,6 +159,8 @@ restaurant_bot/
       reconciliation.py
   catalog/{evidence.py,scoring.py,retrieval.py,safety.py,resolver.py}
   conversation/
+    selection.py
+    progression.py
     routing/
       contracts.py
       state_compatibility.py

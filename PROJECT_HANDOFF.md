@@ -98,6 +98,8 @@ Telegram update
   `catalog/resolver.py`.
 - `conversation/selection.py` — channel-neutral score, targeting и выбор
   кандидата; не знает о ParsedCommand или callback semantics.
+- `conversation/progression.py` — channel-neutral progression core: выбор
+  следующей нерешённой позиции, issue mapping и смена stage без presentation.
 - `services/conversation_handlers/` — quantity, candidate, comment scope,
   review, navigation и единая StateCompatibilityPolicy.
 - `services/engine.py` — текущая state machine, применение решения каталога,
@@ -239,6 +241,9 @@ comments; Telegram/presentation handlers в нём не переносились
 завершён: `conversation/selection.py` владеет channel-neutral selection core,
 а `CandidateSelectionHandler` остаётся presentation-only адаптером. Engine и
 input recognition используют этот общий owner.
+Block 5D также завершает поведенчески нейтральное выделение progression core:
+`conversation/progression.py` владеет переходом к следующей нерешённой позиции,
+а engine сохраняет только presentation adapter.
 
 Постоянное правило: перед каждым `MOVE`/`MERGE`/`DELETE` выполняются
 repository-wide usage и duplicate audit. Мёртвый или дублирующий код не
@@ -286,7 +291,7 @@ channel boundary без изменения callback format и пользоват
 
 ## 11. Следующий функциональный блок
 
-После review Block 5C отдельно назначается следующий этап декомпозиции. До
+После review Block 5D отдельно назначается следующий этап декомпозиции. До
 такого решения нельзя автоматически переносить остальные handlers, уменьшать
 `engine.py` или менять поведение state machine.
 

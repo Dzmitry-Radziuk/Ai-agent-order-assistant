@@ -29,6 +29,8 @@ from restaurant_bot.conversation.draft import (
     has_active_draft_items,
     remove_exact_cart_duplicates,
 )
+from restaurant_bot.conversation.progression import ProgressionKind
+from restaurant_bot.conversation.progression import advance as advance_progression
 from restaurant_bot.conversation.routing.contracts import (
     CompatibilityAction,
     CompatibilityContext,
@@ -59,7 +61,6 @@ from restaurant_bot.domain.models import (
     ExtractedItem,
     InputKind,
     Intent,
-    IssueKind,
     ItemStatus,
     ParsedCommand,
     PendingSubmission,
@@ -2450,55 +2451,27 @@ class ConversationEngine:
         preferred_issue_item_id: str = "",
     ) -> EngineResult:
         """Переходит к следующей нерешённой позиции."""
-        if added_count:
-            state.pending_added_items_count = added_count
-        unresolved = self._first_unresolved(state)
-        if preferred_issue_item_id:
-            preferred = next(
-                (
-                    item
-                    for item in state.cart
-                    if item.id == preferred_issue_item_id
-                    and item.status
-                    in {
-                        ItemStatus.DUPLICATE_PENDING,
-                        ItemStatus.UNIT_MISMATCH,
-                        ItemStatus.MISSING_QTY,
-                        ItemStatus.AMBIGUOUS,
-                        ItemStatus.NOT_FOUND,
-                        ItemStatus.NEW,
-                        ItemStatus.AI_PENDING,
-                    }
-                ),
-                None,
-            )
-            if preferred is not None:
-                unresolved = preferred
-        if unresolved:
-            state.current_issue_item_id = unresolved.id
-            state.current_issue_kind = {
-                ItemStatus.AMBIGUOUS: IssueKind.CANDIDATE,
-                ItemStatus.NOT_FOUND: IssueKind.NOT_FOUND,
-                ItemStatus.MISSING_QTY: IssueKind.QUANTITY,
-                ItemStatus.UNIT_MISMATCH: IssueKind.UNIT,
-                ItemStatus.DUPLICATE_PENDING: IssueKind.DUPLICATE,
-            }.get(unresolved.status)
-            return EngineResult(
-                state=state, reply=issue_reply(unresolved, self._item_index(state, unresolved))
-            )
-        state.current_issue_item_id = ""
-        state.current_issue_kind = None
-        if state.pending_added_items_count:
-            prompt_count = state.pending_added_items_count
-            state.pending_added_items_count = 0
-            state.stage = SessionStage.AWAIT_ADD_MORE_CONFIRM
-            state.status = "await_add_more_confirm"
+        progression = advance_progression(
+            state,
+            added_count=added_count,
+            preferred_issue_item_id=preferred_issue_item_id,
+        )
+        if progression.kind is ProgressionKind.ISSUE:
+            assert progression.item is not None
             return EngineResult(
                 state=state,
-                reply=added_items_question_reply(state, prompt_count),
+                reply=issue_reply(progression.item, self._item_index(state, progression.item)),
             )
-        state.stage = SessionStage.REVIEW if state.cart else SessionStage.COLLECTING
-        title = f"Добавлено позиций: {added_count}" if added_count else "Черновик заявки"
+        if progression.kind is ProgressionKind.ADD_MORE_CONFIRM:
+            return EngineResult(
+                state=state,
+                reply=added_items_question_reply(state, progression.prompt_count),
+            )
+        title = (
+            f"Добавлено позиций: {progression.added_count}"
+            if progression.added_count
+            else "Черновик заявки"
+        )
         return EngineResult(state=state, reply=cart_reply(state, title=title))
 
     def _resume_after_new_order_confirmation(self, state: ConversationState) -> EngineResult:

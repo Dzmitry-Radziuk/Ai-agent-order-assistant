@@ -49,6 +49,7 @@ flowchart LR
 | `services/engine.py` | Детерминированная state machine, приоритет незавершённых вопросов, команды, callback и переходы черновика |
 | `conversation/comments.py` | Channel-neutral операции подтверждённых комментариев, comment scope, provenance-нормализация и comment shadows |
 | `conversation/draft.py` | Channel-neutral операции целостности черновика и слияния подтверждённых дублей |
+| `conversation/progression.py` | Channel-neutral переход к следующей нерешённой позиции и смена progression stage без presentation |
 | `services/input_recognition.py` | Скачивание voice/photo, транскрибация с безопасным fallback и обновление карточки прогресса |
 | `services/parser.py` | Text intent facade, callback contract и временный dispatcher command parsing |
 | `parsing/commands/patterns.py` | Статические шаблоны text-команд |
