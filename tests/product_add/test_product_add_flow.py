@@ -1,11 +1,9 @@
 import re
 
+from restaurant_bot.conversation.product_add import clear_product_add_pending
 from restaurant_bot.domain.models import CartItem, ConversationState
-from restaurant_bot.services.product_add_flow import (
-    clear_product_add_pending,
-    new_product_add_request_id,
-    product_add_prompt,
-)
+from restaurant_bot.orders.product_add import new_product_add_request_id
+from restaurant_bot.presentation.telegram.product_add import product_add_prompt
 
 
 def test_new_product_add_request_id_is_safe_and_contains_item_id() -> None:

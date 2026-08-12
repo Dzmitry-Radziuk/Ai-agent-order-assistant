@@ -9,8 +9,8 @@ from restaurant_bot.domain.models import (
     ParsedCommand,
     TelegramEvent,
 )
+from restaurant_bot.presentation.telegram.replies import supplier_warning_details_reply
 from restaurant_bot.services.engine import ConversationEngine
-from restaurant_bot.services.replies import supplier_warning_details_reply
 
 
 def test_supplier_minimum_warning_shows_gap_and_recovery_actions() -> None:

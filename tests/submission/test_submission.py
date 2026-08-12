@@ -17,9 +17,9 @@ from restaurant_bot.integrations.google_sheets import (
     OrderSubmissionResult,
     PreparedOrderSubmission,
 )
+from restaurant_bot.presentation.telegram.replies import cart_reply
 from restaurant_bot.presentation.telegram.submission import order_status_detail_page_count
 from restaurant_bot.services import submission as submission_module
-from restaurant_bot.services.replies import cart_reply
 from restaurant_bot.services.submission import (
     SubmissionService,
     build_order_status_text,

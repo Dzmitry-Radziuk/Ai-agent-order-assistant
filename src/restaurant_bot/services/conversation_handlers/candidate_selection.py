@@ -16,7 +16,7 @@ from restaurant_bot.domain.models import (
     EngineResult,
     ParsedCommand,
 )
-from restaurant_bot.services.replies import cart_reply, issue_reply
+from restaurant_bot.presentation.telegram.replies import cart_reply, issue_reply
 
 
 @dataclass(frozen=True, slots=True)

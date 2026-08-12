@@ -13,7 +13,7 @@ from restaurant_bot.domain.models import (
     ParsedCommand,
     TelegramEvent,
 )
-from restaurant_bot.services.replies import (
+from restaurant_bot.presentation.telegram.replies import (
     help_reply,
     small_talk_reply,
     thanks_reply,

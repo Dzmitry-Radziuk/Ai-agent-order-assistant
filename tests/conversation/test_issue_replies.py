@@ -1,5 +1,5 @@
 from restaurant_bot.domain.models import CartItem, ItemStatus
-from restaurant_bot.services.replies import issue_reply
+from restaurant_bot.presentation.telegram.replies import issue_reply
 
 
 def test_missing_quantity_card_has_skip_action() -> None:

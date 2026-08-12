@@ -1,7 +1,6 @@
-from __future__ import annotations
+"""Формирует Telegram-ответы, кнопки и read-model карточки диалога."""
 
-import math
-import re
+from __future__ import annotations
 
 from restaurant_bot.conversation.quantity_resolution import multiple_warnings
 from restaurant_bot.domain.models import (
@@ -12,8 +11,8 @@ from restaurant_bot.domain.models import (
     ExtractedItem,
     ItemStatus,
 )
-from restaurant_bot.domain.unit_conversion import convert_quantity
-from restaurant_bot.domain.units import UNIT_ALIASES, normalize_unit
+from restaurant_bot.domain.units import normalize_unit
+from restaurant_bot.orders.package_suggestions import package_count_suggestion
 from restaurant_bot.orders.supplier_minimums import supplier_minimum_warnings
 from restaurant_bot.presentation.telegram.formatting import escape, format_number
 
@@ -79,33 +78,6 @@ def _item_unit(item: CartItem) -> str:
 def format_item_comment(comment: str) -> str:
     """Формирует курсивную строку комментария под товаром."""
     return f"  <i>Комментарий: {escape(comment)}</i>"
-
-
-def _package_count_suggestion(item: CartItem) -> tuple[int, float, str] | None:
-    """Предлагает число упаковок по весу или объёму в названии."""
-    if (
-        item.quantity is None
-        or item.unit not in {"г", "кг", "мл", "л"}
-        or item.catalog_unit not in {"шт", "уп", "кор", "пач", "бан", "бут"}
-    ):
-        return None
-
-    unit_pattern = "|".join(
-        sorted((re.escape(unit) for unit in UNIT_ALIASES), key=len, reverse=True)
-    )
-    for match in re.finditer(
-        rf"(\d+(?:[,.]\d+)?)\s*({unit_pattern})\b",
-        item.catalog_name or item.source_query,
-        flags=re.I,
-    ):
-        package_quantity = float(match.group(1).replace(",", "."))
-        package_unit = normalize_unit(match.group(2))
-        converted_package = convert_quantity(package_quantity, package_unit, item.unit)
-        if converted_package is None or converted_package <= 0:
-            continue
-        count = max(1, math.ceil(item.quantity / converted_package))
-        return count, round(count * converted_package, 6), item.unit
-    return None
 
 
 def welcome_reply(state: ConversationState) -> BotReply:
@@ -573,7 +545,7 @@ def issue_reply(item: CartItem, item_index: int | None = None) -> BotReply:
                 ],
             )
         unit_rows: list[list[Button]] = []
-        package_suggestion = _package_count_suggestion(item)
+        package_suggestion = package_count_suggestion(item)
         if package_suggestion is not None:
             count, approximate_quantity, approximate_unit = package_suggestion
             unit_rows.append(

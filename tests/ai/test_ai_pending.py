@@ -10,9 +10,9 @@ from restaurant_bot.domain.models import (
     TelegramEvent,
 )
 from restaurant_bot.integrations.openai_client import ProductMatchDecision
+from restaurant_bot.presentation.telegram.replies import issue_reply
 from restaurant_bot.services.engine import ConversationEngine
 from restaurant_bot.services.orchestrator import UpdateOrchestrator
-from restaurant_bot.services.replies import issue_reply
 
 
 class _Matcher:

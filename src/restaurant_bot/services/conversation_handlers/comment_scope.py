@@ -19,7 +19,10 @@ from restaurant_bot.domain.models import (
     ParsedCommand,
     SessionStage,
 )
-from restaurant_bot.services.replies import cart_reply, comment_scope_clarification_reply
+from restaurant_bot.presentation.telegram.replies import (
+    cart_reply,
+    comment_scope_clarification_reply,
+)
 
 
 @dataclass(frozen=True, slots=True)

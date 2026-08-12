@@ -52,6 +52,7 @@ from restaurant_bot.domain.models import (
     TelegramEvent,
 )
 from restaurant_bot.input.telegram import normalize_telegram_update
+from restaurant_bot.input.telegram_callbacks import parse_callback
 from restaurant_bot.integrations.cache import (
     CatalogCache,
     ChatLease,
@@ -62,6 +63,7 @@ from restaurant_bot.integrations.google_sheets import GoogleSheetsGateway
 from restaurant_bot.integrations.openai_client import OpenAIService
 from restaurant_bot.integrations.telegram import TELEGRAM_TRANSIENT_ERRORS, TelegramClient
 from restaurant_bot.logging import sanitize_log_value
+from restaurant_bot.parsing.commands.api import enrich_command, infer_intent
 from restaurant_bot.repositories.order_events import OrderEventRepository
 from restaurant_bot.repositories.sessions import SessionRepository
 from restaurant_bot.repositories.updates import (
@@ -72,7 +74,6 @@ from restaurant_bot.repositories.updates import (
 from restaurant_bot.services.engine import ConversationEngine
 from restaurant_bot.services.input_recognition import InputRecognitionService
 from restaurant_bot.services.order_review import OrderReviewService
-from restaurant_bot.services.parser import infer_intent
 from restaurant_bot.services.venue_registration import (
     RegistrationResult,
     VenueContext,
@@ -1306,11 +1307,11 @@ class UpdateOrchestrator:
     ) -> ParsedCommand:
         """Разбирает нормализованное событие пользователя."""
         if event.input_type == InputKind.CALLBACK and event.callback_data.startswith("v2:review"):
-            return infer_intent("", event.callback_data)
+            return enrich_command("", parse_callback(event.callback_data))
         if event.input_type == InputKind.CALLBACK and state.pending_comment_items:
             return self._parse_pending_comment_scope(event.callback_data, state)
         if event.input_type == InputKind.CALLBACK:
-            return infer_intent("", event.callback_data)
+            return enrich_command("", parse_callback(event.callback_data))
         if event.input_type == InputKind.TEXT:
             return self._parse_text_in_context(event.text, state)
         if event.input_type in {InputKind.VOICE, InputKind.PHOTO}:
@@ -1353,7 +1354,9 @@ class UpdateOrchestrator:
         if not state.pending_comment_items:
             callback_data = self._match_visible_action(text, state)
             if callback_data:
-                return infer_intent("", callback_data).model_copy(update={"text": text})
+                return enrich_command("", parse_callback(callback_data)).model_copy(
+                    update={"text": text}
+                )
         parsed = self.openai.parse_text(text)
         review_command = self._parse_sheet_review_command(text, parsed, state)
         if review_command is not None:
@@ -1374,7 +1377,9 @@ class UpdateOrchestrator:
         ):
             callback_data = self._match_visible_action(text, state)
             if callback_data:
-                return infer_intent("", callback_data).model_copy(update={"text": text})
+                return enrich_command("", parse_callback(callback_data)).model_copy(
+                    update={"text": text}
+                )
         if not self._needs_visible_action_ai(text, parsed, state):
             return parsed
         try:
@@ -1393,7 +1398,7 @@ class UpdateOrchestrator:
             if parsed.intent is Intent.ADD_ITEMS and parsed.items:
                 return ParsedCommand(intent=Intent.UNKNOWN, text=text)
             return parsed
-        return infer_intent("", selected).model_copy(update={"text": text})
+        return enrich_command("", parse_callback(selected)).model_copy(update={"text": text})
 
     def _parse_sheet_review_command(
         self,

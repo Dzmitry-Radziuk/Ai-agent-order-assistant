@@ -1,5 +1,10 @@
 from restaurant_bot.domain.models import Candidate, CartItem, ConversationState, ItemStatus
-from restaurant_bot.services.replies import cart_reply, final_review_reply, help_reply, issue_reply
+from restaurant_bot.presentation.telegram.replies import (
+    cart_reply,
+    final_review_reply,
+    help_reply,
+    issue_reply,
+)
 
 
 def test_help_explains_how_to_include_product_and_order_comments() -> None:

@@ -25,6 +25,7 @@ from restaurant_bot.conversation.draft import (
     has_active_draft_items,
     remove_exact_cart_duplicates,
 )
+from restaurant_bot.conversation.product_add import clear_product_add_pending
 from restaurant_bot.conversation.progression import ProgressionKind
 from restaurant_bot.conversation.progression import advance as advance_progression
 from restaurant_bot.conversation.quantity_resolution import (
@@ -74,47 +75,27 @@ from restaurant_bot.domain.models import (
 from restaurant_bot.domain.unit_conversion import convert_quantity
 from restaurant_bot.domain.units import UNIT_ALIASES, normalize_unit
 from restaurant_bot.orders.catalog_resolution import CatalogResolutionService
+from restaurant_bot.orders.product_add import new_product_add_request_id
 from restaurant_bot.orders.supplier_minimums import supplier_minimum_warnings
-from restaurant_bot.parsing.comment_policy import supplier_comment_start
-from restaurant_bot.parsing.number_words import NUMBER_WORDS
-from restaurant_bot.parsing.quantities import has_explicit_order_quantity
-from restaurant_bot.presentation.telegram.formatting import escape
-from restaurant_bot.presentation.telegram.submission import (
-    submission_dispatch_uncertain_reply,
-    submission_failure_reply,
-    submission_in_progress_reply,
-    submission_recovery_unavailable_reply,
-)
-from restaurant_bot.services.conversation_handlers.candidate_selection import (
-    CandidateSelectionHandler,
-)
-from restaurant_bot.services.conversation_handlers.comment_scope import CommentScopeHandler
-from restaurant_bot.services.conversation_handlers.final_review import FinalReviewHandler
-from restaurant_bot.services.conversation_handlers.navigation import (
-    OrderStatusHandler,
-    PassiveIntentHandler,
-)
-from restaurant_bot.services.conversation_handlers.pending_quantity import (
-    PendingQuantityAction,
-    PendingQuantityHandler,
-)
-from restaurant_bot.services.parser import (
+from restaurant_bot.parsing.commands.api import infer_intent
+from restaurant_bot.parsing.commands.dialogue import dialogue_response_for
+from restaurant_bot.parsing.commands.item_commands import (
     clean_command_target,
-    dialogue_response_for,
+    is_product_add_request_phrase,
+)
+from restaurant_bot.parsing.commands.normalization import (
     has_negated_action,
     has_negation,
-    infer_intent,
     is_explicit_item_rejection,
-    is_product_add_request_phrase,
     normalize_command_text,
-    parse_product_lines,
 )
-from restaurant_bot.services.product_add_flow import (
-    clear_product_add_pending,
-    new_product_add_request_id,
-    product_add_prompt,
-)
-from restaurant_bot.services.replies import (
+from restaurant_bot.parsing.comment_policy import supplier_comment_start
+from restaurant_bot.parsing.number_words import NUMBER_WORDS
+from restaurant_bot.parsing.products import parse_product_lines
+from restaurant_bot.parsing.quantities import has_explicit_order_quantity
+from restaurant_bot.presentation.telegram.formatting import escape
+from restaurant_bot.presentation.telegram.product_add import product_add_prompt
+from restaurant_bot.presentation.telegram.replies import (
     added_items_question_reply,
     cart_reply,
     comment_scope_clarification_reply,
@@ -133,6 +114,25 @@ from restaurant_bot.services.replies import (
     supplier_warning_details_reply,
     unknown_intent_reply,
     unrecognized_voice_reply,
+)
+from restaurant_bot.presentation.telegram.submission import (
+    submission_dispatch_uncertain_reply,
+    submission_failure_reply,
+    submission_in_progress_reply,
+    submission_recovery_unavailable_reply,
+)
+from restaurant_bot.services.conversation_handlers.candidate_selection import (
+    CandidateSelectionHandler,
+)
+from restaurant_bot.services.conversation_handlers.comment_scope import CommentScopeHandler
+from restaurant_bot.services.conversation_handlers.final_review import FinalReviewHandler
+from restaurant_bot.services.conversation_handlers.navigation import (
+    OrderStatusHandler,
+    PassiveIntentHandler,
+)
+from restaurant_bot.services.conversation_handlers.pending_quantity import (
+    PendingQuantityAction,
+    PendingQuantityHandler,
 )
 from restaurant_bot.text_normalization import normalize_text
 

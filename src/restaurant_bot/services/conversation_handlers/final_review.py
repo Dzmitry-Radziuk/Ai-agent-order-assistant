@@ -17,7 +17,11 @@ from restaurant_bot.domain.models import (
     ParsedCommand,
     SessionStage,
 )
-from restaurant_bot.services.replies import empty_draft_reply, final_review_reply, issue_reply
+from restaurant_bot.presentation.telegram.replies import (
+    empty_draft_reply,
+    final_review_reply,
+    issue_reply,
+)
 
 
 @dataclass(frozen=True, slots=True)

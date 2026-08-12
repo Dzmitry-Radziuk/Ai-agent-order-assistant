@@ -17,9 +17,9 @@ from restaurant_bot.domain.models import (
     SessionStage,
     TelegramEvent,
 )
+from restaurant_bot.presentation.telegram.replies import issue_reply, product_add_requests_reply
 from restaurant_bot.services import submission as submission_module
 from restaurant_bot.services.engine import ConversationEngine
-from restaurant_bot.services.replies import issue_reply, product_add_requests_reply
 from restaurant_bot.services.submission import SubmissionService
 
 

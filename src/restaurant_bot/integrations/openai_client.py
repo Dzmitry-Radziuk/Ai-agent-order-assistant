@@ -37,14 +37,14 @@ from restaurant_bot.parsing.ai.schemas import (
     ProductMatchDecision,
     VisibleActionDecision,
 )
-from restaurant_bot.parsing.numeric_ranges import numeric_range_spans
-from restaurant_bot.services.parser import (
+from restaurant_bot.parsing.commands.api import infer_intent
+from restaurant_bot.parsing.commands.dialogue import (
     dialogue_response_for,
-    has_explicit_add_items,
-    has_explicit_global_comment_scope,
-    infer_intent,
     retry_requested_for,
 )
+from restaurant_bot.parsing.commands.item_commands import has_explicit_add_items
+from restaurant_bot.parsing.comment_scope import has_explicit_global_comment_scope
+from restaurant_bot.parsing.numeric_ranges import numeric_range_spans
 from restaurant_bot.services.text import to_float
 from restaurant_bot.text_normalization import clean_text, normalize_text
 
