@@ -18,7 +18,7 @@ from restaurant_bot.domain.models import (
     ParsedCommand,
     SessionStage,
 )
-from restaurant_bot.presentation.telegram.pagination import FINAL_REVIEW_PAGE_SIZE
+from restaurant_bot.presentation.telegram.pagination import FINAL_REVIEW_PAGE_SIZE, page_count
 from restaurant_bot.presentation.telegram.replies import (
     empty_draft_reply,
     final_review_reply,
@@ -100,15 +100,9 @@ class FinalReviewHandler:
             except ValueError:
                 return 0
             active_count = sum(item.status != ItemStatus.SKIPPED for item in state.cart)
-            total_pages = max(
-                1,
-                (active_count + FINAL_REVIEW_PAGE_SIZE - 1) // FINAL_REVIEW_PAGE_SIZE,
-            )
+            total_pages = page_count(active_count, FINAL_REVIEW_PAGE_SIZE)
             return min(requested, total_pages - 1)
         requested = max(0, state.final_review_page)
         active_count = sum(item.status != ItemStatus.SKIPPED for item in state.cart)
-        total_pages = max(
-            1,
-            (active_count + FINAL_REVIEW_PAGE_SIZE - 1) // FINAL_REVIEW_PAGE_SIZE,
-        )
+        total_pages = page_count(active_count, FINAL_REVIEW_PAGE_SIZE)
         return min(requested, total_pages - 1)
