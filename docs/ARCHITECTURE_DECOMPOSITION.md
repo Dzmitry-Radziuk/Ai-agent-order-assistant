@@ -1,6 +1,6 @@
 # План декомпозиции архитектуры
 
-## CURRENT ARCHITECTURE — Block 5U
+## CURRENT ARCHITECTURE — Block 5V
 
 После Block 5U актуальная карта owners выглядит так:
 
@@ -15,10 +15,27 @@
 | Review Telegram UI | `presentation/telegram/order_review.py` | Preview, truncation и submit replies |
 | Review external effects | `services/order_review.py` | Lease/DB/Sheets/Telegram coordinator |
 | Cart page state transition | `conversation/state/transitions.py` | Clamp выполняется до presentation |
+| Telegram pagination constants | `presentation/telegram/pagination.py` | Page size belongs to Telegram presentation |
+| Voice policy | `input/voice_policy.py` | Pure visible-action/prompt/model policy |
+| Venue directory | `integrations/venue_directory.py` | GViz/cache and code primitives |
+| Venue access registry | `integrations/venue_access_registry.py` | Access decision and cache |
+| Venue registration input | `input/telegram_venue_registration.py` | Telegram text/callback parsing |
+| Venue registration presentation | `presentation/telegram/venue_registration.py` | Pure BotReply builders |
 
 `services/parser.py`, `services/replies.py` и `services/product_add_flow.py`
 отсутствуют. Исторические таблицы и решения ниже помечены как snapshots и не
 являются текущей картой owners.
+
+## Block 5V — завершённые controlled seams
+
+В 5V-A state page normalization получает явный `page_size`; Telegram constants
+и page-count принадлежат `presentation/telegram/pagination.py`. В 5V-B чистые
+voice-policy функции выделены в `input/voice_policy.py`, а media/provider/state
+координатор сохранён в `services/input_recognition.py`. В 5V-C directory, access
+registry, Telegram registration input и presentation разделены на отдельные
+owners; `services/venue_registration.py` оставлен coordinator DB/Sheets/cache/
+rollback с переходными `VenueContext` и `RegistrationResult`. Поведение,
+callback values, prompts и внешние протоколы не менялись.
 
 ## HISTORICAL ARCHITECTURE SNAPSHOTS
 

@@ -1,6 +1,6 @@
 # Передача проекта
 
-## CURRENT ARCHITECTURE — Block 5U
+## CURRENT ARCHITECTURE — Block 5V
 
 Последний завершённый блок — Block 5U. Актуальные владельцы:
 
@@ -14,12 +14,47 @@
 | Review token | `application/order_review/token.py` |
 | Review preview и submission replies | `presentation/telegram/order_review.py` |
 | Review side-effect coordinator | `services/order_review.py` |
+| Telegram page-size constants | `presentation/telegram/pagination.py` |
+| Pure voice recognition policy | `input/voice_policy.py` |
+| Venue directory adapter | `integrations/venue_directory.py` |
+| Venue access registry adapter | `integrations/venue_access_registry.py` |
+| Venue registration input | `input/telegram_venue_registration.py` |
+| Venue registration presentation | `presentation/telegram/venue_registration.py` |
+| Venue registration coordinator | `services/venue_registration.py` |
 
 `services/parser.py`, `services/replies.py` и `services/product_add_flow.py`
 удалены после caller-аудита. `presentation/telegram/*` только читает
 `ConversationState`; onboarding и нормализация страниц выполняются в
 `conversation/state/transitions.py` и conversation/engine handlers. Исторические блоки ниже помечаются как архивные и
 не являются текущей картой владельцев.
+
+## Block 5V — pagination, input recognition и venue registration
+
+Block 5V-A завершён: размеры страниц Telegram (`20`) принадлежат
+`presentation/telegram/pagination.py`; state transitions получают явный
+`page_size` и больше не знают Telegram-значение. Cart и final-review callbacks
+сохранили прежнюю арифметику и callback-контракт.
+
+Block 5V-B завершён: pure policy `match_visible_action`,
+`voice_transcription_prompt`, `requires_high_accuracy_transcription`,
+`has_distinct_models` вынесены в `input/voice_policy.py`. Сервис
+`InputRecognitionService` сохранён как media/provider/state-aware coordinator;
+visible actions остаются contextual fallback и не стали глобальным parser-ом.
+Prompt-тексты и voice/photo pipeline не менялись.
+
+Block 5V-C завершён: `VenueDirectory` и его GViz/cache primitives находятся в
+`integrations/venue_directory.py`, `VenueAccessRegistry` — в
+`integrations/venue_access_registry.py`, Telegram registration input — в
+`input/telegram_venue_registration.py`, а чистые ответы — в
+`presentation/telegram/venue_registration.py`. `VenueRegistrationService`
+сохраняет DB/Sheets/cache/rollback coordinator; `VenueContext` и
+`RegistrationResult` намеренно остаются его переходным контрактом. Service
+re-exports сохранены для совместимости старых callers.
+
+Focused проверка Block 5V-C: `63 passed`; полные quality gates выполняются после
+обновления owner-документации. БД, Alembic, DevOps, prompts, OpenAI schemas,
+catalog thresholds, callbacks, serialized state и submission protocol не
+изменялись.
 
 ## Block 5U — выполненная декомпозиция
 

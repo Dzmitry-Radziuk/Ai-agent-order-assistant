@@ -1,4 +1,4 @@
-# Block 5O — аудит `InputRecognitionService`
+# Block 5O/5V — аудит `InputRecognitionService`
 
 ## Block 5P — выполненный перенос pure transcript policy
 
@@ -11,6 +11,17 @@
 Старые class-level и orchestrator test-only wrappers удалены после caller-аудита,
 тесты импортируют канонический модуль напрямую. Corpus comparison: `MISMATCHES=0`.
 Новый migration seam после Block 5P пока не назначен.
+
+## Block 5V-B — дополнительное controlled extraction
+
+После caller-аудита в `input/voice_policy.py` находятся чистые политики
+`match_visible_action`, `voice_transcription_prompt`,
+`requires_high_accuracy_transcription` и `has_distinct_models`. Их старые
+class-level вызовы сохранены как тонкие compatibility adapters внутри
+`InputRecognitionService`; media download/cleanup, OpenAI voice/photo calls,
+retry, progress и state orchestration намеренно остались в service. Prompt text,
+visible-action contextual semantics и voice fallback contract не менялись.
+Сравнение focused voice suite после переноса: `274 passed`.
 
 ## Статус и границы
 

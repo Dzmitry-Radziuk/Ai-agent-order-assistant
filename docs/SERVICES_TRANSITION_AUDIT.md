@@ -1,6 +1,6 @@
-# Аудит переходного слоя services/ и результат Block 5K
+# Аудит переходного слоя services/ и результат Block 5V
 
-## CURRENT ARCHITECTURE — Block 5U
+## CURRENT ARCHITECTURE — Block 5V
 
 Текущая карта владельцев после Block 5U:
 
@@ -13,10 +13,24 @@
 | Review token | `application/order_review/token.py` | Ничего |
 | Review Telegram presentation | `presentation/telegram/order_review.py` | Ничего |
 | Review side effects | `services/order_review.py` | Координация lease, DB, Sheets и Telegram |
+| Telegram pagination | `presentation/telegram/pagination.py` | Размер страницы и page-count |
+| Voice pure policy | `input/voice_policy.py` | Visible-action/prompt/model decisions |
+| Venue directory | `integrations/venue_directory.py` | GViz fetch, parse, cache и code primitives |
+| Venue access | `integrations/venue_access_registry.py` | Access rows, decision и cache |
+| Venue registration input | `input/telegram_venue_registration.py` | Telegram commands/callbacks |
+| Venue registration presentation | `presentation/telegram/venue_registration.py` | BotReply и Button builders |
+| Venue registration effects | `services/venue_registration.py` | DB/Sheets/cache/rollback coordinator |
 
 `presentation/telegram/*` не изменяет `ConversationState`. Нормализация страниц
 и onboarding flag принадлежат `conversation/state/transitions.py` и conversation/engine handlers; presenter получает
 уже выбранное состояние и строит только `BotReply`.
+
+Block 5V подтвердил, что `services/input_recognition.py` остаётся переходным
+координатором media/provider/state-aware flow, тогда как pure policy вынесена в
+`input/voice_policy.py`. `services/venue_registration.py` больше не владеет
+GViz directory, access registry, Telegram input или registration presentation;
+он сохраняет только координацию DB/Sheets/cache/rollback и два transitional
+контракта (`VenueContext`, `RegistrationResult`).
 
 ### Block 5U-D — handlers audit
 

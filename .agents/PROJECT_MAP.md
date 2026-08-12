@@ -1,6 +1,6 @@
 # Карта проекта
 
-## Current architecture after Block 5U
+## Current architecture after Block 5V
 
 Актуальные владельцы имеют приоритет при чтении этой карты:
 
@@ -15,10 +15,23 @@
 | Review presentation | `presentation/telegram/order_review.py` | Preview, truncation и submission replies |
 | Review effects | `services/order_review.py` | Lease/DB/Sheets/Telegram coordination |
 | Cart page transition | `conversation/state/transitions.py` | Clamp persisted page before rendering |
+| Telegram page-size constants | `presentation/telegram/pagination.py` | Telegram presentation owns page size |
+| Voice policy | `input/voice_policy.py` | Pure visible-action/prompt/model policy |
+| Venue directory | `integrations/venue_directory.py` | GViz fetch, parse, cache and code primitives |
+| Venue access registry | `integrations/venue_access_registry.py` | Access rows, decision and cache |
+| Venue registration input | `input/telegram_venue_registration.py` | Telegram commands and callbacks |
+| Venue registration presentation | `presentation/telegram/venue_registration.py` | Registration replies/buttons only |
 
 После Block 5U `services/parser.py`, `services/replies.py` и
 `services/product_add_flow.py` отсутствуют. Таблицы ниже описывают текущие
 модули; исторические аудиты помечены явно и не являются owner-map.
+
+Block 5V оставил `services/input_recognition.py` переходным координатором
+media/provider/state-aware flow; pure voice policy находится в
+`input/voice_policy.py`. `services/venue_registration.py` координирует только
+DB/Sheets/cache/rollback и re-export-ит переходные `VenueContext` и
+`RegistrationResult`; каталог, access registry, Telegram input и replies имеют
+отдельных владельцев выше.
 
 ## Block 5S — актуальные владельцы бывших `services.text` символов
 
@@ -146,7 +159,7 @@ CommentScopeHandler их сохраняет.
 | `services/submission.py` | Контрольные точки записи, пересчёта, опциональной отправки и чтения статусов |
 | `presentation/telegram/submission.py` | Telegram-тексты, кнопки завершения заявки и истории заказов; канонический owner после Block 5Q |
 | `orders/product_add.py`, `conversation/product_add.py`, `presentation/telegram/product_add.py` | Сценарий запроса снабженцу на добавление ненайденного товара |
-| `services/venue_registration.py` | Центральный каталог заведений, доступ, invite-коды и привязки |
+| `services/venue_registration.py` | Координатор DB/Sheets/cache/rollback привязки; directory, access, input и replies вынесены в Block 5V |
 | `services/text.py` | Transitional владелец только `to_float`; units, departments, number words, ranges и overlap перенесены в канонические domain/parsing/catalog/conversation owners; полный аудит — [`docs/SERVICES_TEXT_AUDIT.md`](../docs/SERVICES_TEXT_AUDIT.md) |
 
 ### Application contracts
