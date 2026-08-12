@@ -62,7 +62,7 @@ Telegram update
 
 ### Ввод и разбор
 
-- `services/input_normalizer.py` — Telegram payload -> TelegramEvent.
+- `input/telegram.py` — канонический адаптер Telegram raw update -> `TelegramEvent`.
 - `services/input_recognition.py` — voice/photo, транскрибация и visible actions.
 - `services/parser.py` — глобальный intent/callback parser и совместимый фасад.
 - `parsing/products.py` — orchestration разбора товарных строк и сборка
@@ -329,6 +329,13 @@ Block 5J завершил удаление пяти obsolete test-only compatibi
 owners (`catalog/*`, `conversation/routing/*`, `conversation/state/queries.py`);
 production и dynamic caller-ы отсутствовали. Поведение и assertions не менялись,
 полный baseline сохранён: `1362 collected / 1362 passed`.
+
+Block 5N завершил механический перенос Telegram raw-update adapter из
+`services/input_normalizer.py` в `input/telegram.py`. Перенесены только
+`_clean_message_text` и `normalize_telegram_update`; API, orchestrator, tests и
+`TelegramEvent` contract используют новый owner. Старый services-модуль удалён
+после repository-wide caller-аудита; `input_recognition.py` и остальные services
+не изменялись.
 
 ## 12. Проверки
 

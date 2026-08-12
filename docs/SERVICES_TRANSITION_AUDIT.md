@@ -13,7 +13,7 @@ cli.py; динамические границы проверены по orchestr
 
 ## Состав пакета
 
-Файлы верхнего уровня: engine.py, input_normalizer.py, input_recognition.py,
+Файлы верхнего уровня: engine.py, input/telegram.py, input_recognition.py,
 orchestrator.py, order_review.py, parser.py,
 product_add_flow.py, replies.py, submission_presenter.py, submission.py, text.py,
 venue_registration.py.
@@ -29,7 +29,7 @@ navigation.py, pending_quantity.py, __init__.py.
 | matching.py | Удалён в Block 5J после нулевого caller-аудита | Только core; мутаций не было | Удалённый compatibility facade | catalog/* и conversation quantity / DONE | P2 |
 | services/comment_policy.py | Удалён в Block 5I; до переноса callers: catalog, conversation, parsing, AI, engine | Чистая parsing/evidence policy, внешних эффектов нет | Удалён после audit | parsing/comment_policy.py / DONE | P1 |
 | engine.py | ConversationEngine: handle, routing, modal actions, duplicate/comment/product-add/submission preparation, catalog callers | Изменяет ConversationState/CartItem; строит replies | Смешанный координатор state-machine; catalog core перенесён в 5G | application/conversation и owners conversation / SPLIT | P4 |
-| input_normalizer.py | Telegram payload в TelegramEvent; callers: api и orchestrator | Связь с Telegram/raw update; внешних эффектов нет | Адаптер input | input/telegram.py / MOVE | P3 |
+| input/telegram.py | Telegram raw payload в TelegramEvent; callers: api и orchestrator | Связь с Telegram/raw update; внешних эффектов нет | Канонический input adapter | DONE | P3 |
 | input_recognition.py | Скачивание файла, OpenAI voice/photo recognition, visible actions, progress | Telegram + provider + state-aware prompts и побочные progress effects | Смешанный input adapter | input/recognition и channel progress / SPLIT | P3 |
 | orchestrator.py | Claim/lease, access, session, recognition, parsing, catalog, engine, checkpoints, delivery, review/analytics | DB/Redis/Sheets/OpenAI/Telegram/Celery effects | Координатор application смешан с use cases | application/update_pipeline и use cases / SPLIT | P5 |
 | order_review.py | Review snapshot, stale token, preview, submit handoff | Redis/DB/Sheets/Telegram | Review use case смешан с presentation | submission/review и presentation / SPLIT | P4 |
@@ -54,7 +54,7 @@ navigation.py, pending_quantity.py, __init__.py.
 
 Production-импорты из services:
 workers/tasks → orchestrator и application/background_tasks;
-api/app → input_normalizer; orchestrator → engine,
+api/app → input/telegram; orchestrator → engine,
 input, order_review, parser, text, venue; engine → parser, product_add_flow,
 replies, submission, submission_presenter, handlers;
 order_review → replies, text, venue; submission → replies, submission_presenter,

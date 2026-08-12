@@ -7,7 +7,7 @@ from restaurant_bot.domain.models import (
     SessionStage,
     TelegramEvent,
 )
-from restaurant_bot.services.input_normalizer import normalize_telegram_update
+from restaurant_bot.input.telegram import normalize_telegram_update
 from restaurant_bot.services.orchestrator import UpdateOrchestrator
 from restaurant_bot.services.order_review import ReviewSnapshot
 from restaurant_bot.services.parser import infer_intent

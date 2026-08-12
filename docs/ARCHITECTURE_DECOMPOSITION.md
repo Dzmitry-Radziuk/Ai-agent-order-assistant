@@ -78,7 +78,7 @@ contracts и проходит focused/full regression до следующего 
 
 | Текущий owner | Действие |
 |---|---|
-| `services/input_normalizer.py` | Позже MOVE в `input/telegram.py`, временный facade. |
+| `input/telegram.py` | Block 5N: канонический Telegram raw-update adapter; старый `services/input_normalizer.py` удалён после нулевого caller-аудита. |
 | `services/input_recognition.py` | Позже MOVE в `input/recognition.py`. |
 | `services/parser.py` | **Block 2B: FACADE** для text/callback public contract и dispatcher. |
 | `parsing/commands/` | **Block 2B: CREATE** owners text command parsing по responsibility. |

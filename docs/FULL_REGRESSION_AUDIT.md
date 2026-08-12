@@ -361,7 +361,7 @@ domain/models.py
 
 | Area | Current owner | Responsibility | Boundary note |
 |---|---|---|---|
-| input recognition | `input_normalizer.py`, `input_recognition.py` | Telegram normalization, voice/photo download and recognition | Telegram event types still cross into core |
+| input recognition | `input/telegram.py`, `services/input_recognition.py` | Telegram normalization, voice/photo download and recognition | Telegram event types still cross into core |
 | parsing | `parser.py`, `openai_parsing.py`, `openai_client.py` | deterministic/AI structured command and recovery | AI postprocessing is broad and currently red in baseline |
 | compatibility/routing | `state_compatibility.py`, `modal_routing.py` | modal decision before handlers | policy still knows quantity handler; no cycle observed |
 | handlers | `conversation_handlers/*`, portions of `engine.py` | modal-specific actions | engine still owns many implementations |

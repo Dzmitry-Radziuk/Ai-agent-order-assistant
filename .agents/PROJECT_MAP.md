@@ -90,7 +90,7 @@ compatibility facades удалены после подтверждённого �
 не переносятся механически. Исторически разные функции объединения комментариев
 сохранены раздельно, потому что engine нормализует внутренние пробелы, а
 CommentScopeHandler их сохраняет.
-| `services/input_normalizer.py` | Приведение Telegram payload к единому `TelegramEvent` |
+| `input/telegram.py` | Каноническое приведение Telegram raw payload к `TelegramEvent`; input/recognition остаётся отдельным transitional adapter |
 | `catalog/evidence.py` | Каноническое представление, токены, query/catalog evidence и supplier hint matching |
 | `catalog/scoring.py` | Детерминированная оценка одного каталожного товара |
 | `catalog/retrieval.py` | Ограниченный in-memory поиск, admission и порядок кандидатов |

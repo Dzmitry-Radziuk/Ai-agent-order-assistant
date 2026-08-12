@@ -11,9 +11,9 @@ from redis import Redis
 
 from restaurant_bot.config import get_settings
 from restaurant_bot.db import SessionLocal
+from restaurant_bot.input.telegram import normalize_telegram_update
 from restaurant_bot.logging import configure_logging
 from restaurant_bot.repositories.updates import UpdateRepository
-from restaurant_bot.services.input_normalizer import normalize_telegram_update
 
 settings = get_settings()
 logger = structlog.get_logger(__name__)

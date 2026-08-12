@@ -1,5 +1,5 @@
 from restaurant_bot.domain.models import InputKind
-from restaurant_bot.services.input_normalizer import normalize_telegram_update
+from restaurant_bot.input.telegram import normalize_telegram_update
 
 
 def test_normalizes_text_command_and_sender() -> None:

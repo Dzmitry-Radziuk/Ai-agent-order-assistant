@@ -8,7 +8,7 @@ from restaurant_bot.text_normalization import clean_text
 
 
 def _clean_message_text(value: Any) -> str:
-    """Normalize message text while preserving line boundaries in product lists."""
+    """Очищает текст сообщения, сохраняя границы строк товарного списка."""
     return "\n".join(
         cleaned for line in str(value or "").splitlines() if (cleaned := clean_text(line))
     )
