@@ -1,8 +1,7 @@
-from restaurant_bot.catalog.evidence import has_catalog_search_evidence
+from restaurant_bot.catalog.evidence import has_catalog_search_evidence, remove_phrase_overlap
 from restaurant_bot.catalog.retrieval import rank_candidates
 from restaurant_bot.catalog.safety import can_auto_select
 from restaurant_bot.domain.models import CatalogProduct
-from restaurant_bot.catalog.evidence import remove_phrase_overlap
 
 
 def _catalog() -> list[CatalogProduct]:

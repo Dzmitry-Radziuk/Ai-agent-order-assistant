@@ -5,8 +5,8 @@ from __future__ import annotations
 import re
 
 from restaurant_bot.domain.models import CommentSource, ExtractedItem
-from restaurant_bot.parsing.comment_policy import explicit_supplier_comment
 from restaurant_bot.domain.units import normalize_unit
+from restaurant_bot.parsing.comment_policy import explicit_supplier_comment
 from restaurant_bot.parsing.numeric_ranges import numeric_range_spans
 from restaurant_bot.text_normalization import clean_text, normalize_text
 

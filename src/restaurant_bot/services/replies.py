@@ -12,10 +12,10 @@ from restaurant_bot.domain.models import (
     ExtractedItem,
     ItemStatus,
 )
-from restaurant_bot.orders.supplier_minimums import supplier_minimum_warnings
-from restaurant_bot.presentation.telegram.formatting import escape, format_number
 from restaurant_bot.domain.unit_conversion import convert_quantity
 from restaurant_bot.domain.units import UNIT_ALIASES, normalize_unit
+from restaurant_bot.orders.supplier_minimums import supplier_minimum_warnings
+from restaurant_bot.presentation.telegram.formatting import escape, format_number
 
 ISSUE_STATUSES = {
     ItemStatus.DUPLICATE_PENDING,

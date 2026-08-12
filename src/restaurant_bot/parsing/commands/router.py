@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 
 from restaurant_bot.domain.models import Intent, ParsedCommand
+from restaurant_bot.domain.units import UNIT_ALIASES
 from restaurant_bot.parsing.commands.comment_commands import _parse_edit_comment
 from restaurant_bot.parsing.commands.item_commands import (
     _AFFIRM_NEW_ORDER_RE,
@@ -30,7 +31,6 @@ from restaurant_bot.parsing.commands.normalization import (
 from restaurant_bot.parsing.commands.patterns import _COMMANDS, _NATURAL_COMMANDS
 from restaurant_bot.parsing.comment_scope import _extract_global_comment
 from restaurant_bot.parsing.products import parse_product_lines
-from restaurant_bot.domain.units import UNIT_ALIASES
 from restaurant_bot.text_normalization import clean_text, normalize_text
 
 

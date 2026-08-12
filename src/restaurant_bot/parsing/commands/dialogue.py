@@ -6,10 +6,10 @@ import re
 from collections.abc import Sequence
 
 from restaurant_bot.domain.models import DialogueResponse, ExtractedItem, Intent
-from restaurant_bot.parsing.commands.normalization import normalize_command_text
-from restaurant_bot.parsing.quantities import parse_quantity_unit
 from restaurant_bot.domain.units import UNIT_ALIASES, normalize_unit
+from restaurant_bot.parsing.commands.normalization import normalize_command_text
 from restaurant_bot.parsing.number_words import NUMBER_WORDS
+from restaurant_bot.parsing.quantities import parse_quantity_unit
 
 _STANDALONE_RETRY_RE = re.compile(
     r"(?:повтори|повторить|повтори отправку|повторить отправку|"

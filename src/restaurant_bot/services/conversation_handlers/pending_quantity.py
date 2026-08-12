@@ -14,12 +14,12 @@ from restaurant_bot.domain.models import (
     SessionStage,
     TelegramEvent,
 )
+from restaurant_bot.domain.units import UNIT_ALIASES, normalize_unit
+from restaurant_bot.parsing.number_words import parse_number_words
 from restaurant_bot.services.parser import (
     parse_product_lines,
     parse_quantity_unit,
 )
-from restaurant_bot.domain.units import UNIT_ALIASES, normalize_unit
-from restaurant_bot.parsing.number_words import parse_number_words
 from restaurant_bot.text_normalization import normalize_text
 
 _SINGLE_CONTAINER_UNITS = {

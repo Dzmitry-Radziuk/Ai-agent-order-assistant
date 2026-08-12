@@ -8,9 +8,9 @@ from collections.abc import Sequence
 from restaurant_bot.domain.models import Intent, ParsedCommand
 from restaurant_bot.parsing.commands.normalization import normalize_command_text
 from restaurant_bot.parsing.comment_scope import _extract_global_comment
+from restaurant_bot.parsing.number_words import NUMBER_WORDS
 from restaurant_bot.parsing.products import parse_product_lines
 from restaurant_bot.parsing.quantities import parse_quantity_unit
-from restaurant_bot.parsing.number_words import NUMBER_WORDS
 from restaurant_bot.text_normalization import clean_text, normalize_text
 
 _DRAFT_CONTAINER_RE = r"(?:заявк\w*|заказ\w*|корзин\w*|черновик\w*|списк\w*)"

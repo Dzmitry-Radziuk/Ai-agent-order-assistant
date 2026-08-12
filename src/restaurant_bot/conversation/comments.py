@@ -11,8 +11,8 @@ from restaurant_bot.domain.models import (
     ExtractedItem,
     ItemStatus,
 )
-from restaurant_bot.parsing.comment_policy import comment_semantic_key
 from restaurant_bot.domain.units import UNIT_ALIASES, normalize_unit
+from restaurant_bot.parsing.comment_policy import comment_semantic_key
 from restaurant_bot.parsing.number_words import NUMBER_WORDS
 from restaurant_bot.text_normalization import clean_text, normalize_text
 

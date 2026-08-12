@@ -50,6 +50,7 @@ from restaurant_bot.conversation.state.queries import (
     first_unresolved as first_unresolved_item,
 )
 from restaurant_bot.conversation.state.queries import item_index as state_item_index
+from restaurant_bot.domain.departments import normalize_department
 from restaurant_bot.domain.models import (
     BotReply,
     Button,
@@ -70,9 +71,12 @@ from restaurant_bot.domain.models import (
     SessionStage,
     TelegramEvent,
 )
+from restaurant_bot.domain.unit_conversion import convert_quantity
+from restaurant_bot.domain.units import UNIT_ALIASES, normalize_unit
 from restaurant_bot.orders.catalog_resolution import CatalogResolutionService
 from restaurant_bot.orders.supplier_minimums import supplier_minimum_warnings
 from restaurant_bot.parsing.comment_policy import supplier_comment_start
+from restaurant_bot.parsing.number_words import NUMBER_WORDS
 from restaurant_bot.parsing.quantities import has_explicit_order_quantity
 from restaurant_bot.presentation.telegram.formatting import escape
 from restaurant_bot.presentation.telegram.submission import (
@@ -130,10 +134,6 @@ from restaurant_bot.services.replies import (
     unknown_intent_reply,
     unrecognized_voice_reply,
 )
-from restaurant_bot.domain.unit_conversion import convert_quantity
-from restaurant_bot.domain.departments import normalize_department
-from restaurant_bot.domain.units import UNIT_ALIASES, normalize_unit
-from restaurant_bot.parsing.number_words import NUMBER_WORDS
 from restaurant_bot.text_normalization import normalize_text
 
 

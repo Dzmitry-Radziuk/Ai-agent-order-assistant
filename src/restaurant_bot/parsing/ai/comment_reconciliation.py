@@ -5,8 +5,8 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from restaurant_bot.domain.models import CommentSource
 from restaurant_bot.conversation.comments import remove_global_comment_overlap
+from restaurant_bot.domain.models import CommentSource
 from restaurant_bot.parsing.ai.quantity_reconciliation import _remove_matching_quantity
 from restaurant_bot.parsing.comment_policy import explicit_supplier_comment, supplier_comment_start
 from restaurant_bot.parsing.comment_scope import has_explicit_global_comment_scope
