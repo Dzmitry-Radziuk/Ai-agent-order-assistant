@@ -1,5 +1,24 @@
 # Карта проекта
 
+## Current architecture after Block 5U
+
+Актуальные владельцы имеют приоритет при чтении этой карты:
+
+| Область | Владелец | Граница |
+|---|---|---|
+| Текстовая команда | `parsing/commands/api.py` | Чистый semantic parser |
+| Callback Telegram | `input/telegram_callbacks.py` | Декодирование `v2:*` и revision |
+| Telegram replies | `presentation/telegram/replies.py` | Только чтение state и построение `BotReply` |
+| Review contracts | `application/order_review/contracts.py` | Frozen `ReviewItem` и `ReviewSnapshot` |
+| Review snapshot | `application/order_review/snapshot.py` | Чистая агрегация и fingerprint |
+| Review token | `application/order_review/token.py` | Формат `uuid4().hex[:20]` |
+| Review presentation | `presentation/telegram/order_review.py` | Preview, truncation и submission replies |
+| Review effects | `services/order_review.py` | Lease/DB/Sheets/Telegram coordination |
+
+После Block 5U `services/parser.py`, `services/replies.py` и
+`services/product_add_flow.py` отсутствуют. Таблицы ниже описывают текущие
+модули; исторические аудиты помечены явно и не являются owner-map.
+
 ## Block 5S — актуальные владельцы бывших `services.text` символов
 
 После Block 5S `services/text.py` содержит только transitional `to_float`.
@@ -81,7 +100,7 @@ flowchart LR
 | `orders/supplier_minimums.py` | Channel-neutral агрегация минимальных сумм поставщиков и предупреждений без изменения состояния |
 | `orders/catalog_resolution.py` | Channel-neutral применение результата `CatalogResolver` к `CartItem`: каталожные поля, quantity/comment provenance, статусы и refresh черновика |
 | `services/input_recognition.py` | Transitional voice/photo recognition: Telegram transport, OpenAI calls, state-aware retry, visible actions и progress; Block 5O назначил единственный следующий transcript-policy seam, полный MOVE не принят |
-| `services/parser.py` | Text intent facade, callback contract и временный dispatcher command parsing |
+| `parsing/commands/api.py` | Text intent API и enrichment ParsedCommand; прежний `services/parser.py` удалён в Block 5U |
 | `parsing/commands/patterns.py` | Статические шаблоны text-команд |
 | `parsing/commands/normalization.py` | Нормализация команд и отрицание |
 | `parsing/commands/navigation.py` | Свободная навигация и order-status text commands |
@@ -122,10 +141,10 @@ CommentScopeHandler их сохраняет.
 | `catalog/scoring.py` | Детерминированная оценка одного каталожного товара |
 | `catalog/retrieval.py` | Ограниченный in-memory поиск, admission и порядок кандидатов |
 | `catalog/safety.py` | Конфликты квалификаторов, numeric compatibility, safe equivalence, broad-category policy и auto-select safety |
-| `services/replies.py` | Пользовательские карточки и клавиатуры основного диалога |
+| `presentation/telegram/replies.py` | Пользовательские карточки и клавиатуры основного диалога; presenter не меняет ConversationState |
 | `services/submission.py` | Контрольные точки записи, пересчёта, опциональной отправки и чтения статусов |
 | `presentation/telegram/submission.py` | Telegram-тексты, кнопки завершения заявки и истории заказов; канонический owner после Block 5Q |
-| `services/product_add_flow.py` | Сценарий запроса снабженцу на добавление ненайденного товара |
+| `orders/product_add.py`, `conversation/product_add.py`, `presentation/telegram/product_add.py` | Сценарий запроса снабженцу на добавление ненайденного товара |
 | `services/venue_registration.py` | Центральный каталог заведений, доступ, invite-коды и привязки |
 | `services/text.py` | Transitional владелец только `to_float`; units, departments, number words, ranges и overlap перенесены в канонические domain/parsing/catalog/conversation owners; полный аудит — [`docs/SERVICES_TEXT_AUDIT.md`](../docs/SERVICES_TEXT_AUDIT.md) |
 
@@ -134,6 +153,9 @@ CommentScopeHandler их сохраняет.
 | Модуль | Роль |
 |---|---|
 | `application/background_tasks.py` | Типизированный порт фоновых эффектов без зависимости от Celery или workers |
+| `application/order_review/contracts.py` | Frozen `ReviewItem` и `ReviewSnapshot` |
+| `application/order_review/snapshot.py` | Чистая агрегация review snapshot и SHA256 fingerprint |
+| `application/order_review/token.py` | Формат review token без внешних зависимостей |
 
 ### Integrations
 
@@ -221,12 +243,11 @@ CommentScopeHandler их сохраняет.
 | `tests/docs/`, `tests/ci/` | Сценарии, docstring, ссылки и документационные контракты |
 
 Канонический каталог пользовательских сценариев: `docs/user-scenarios/scenarios.json`. Markdown и HTML генерируются из него, поэтому вручную редактировать производные файлы нельзя.
-## Block 5T — актуальные владельцы transitional leaf boundaries
+## Block 5T — historical migration notes
 
 Канонический semantic text parser находится в `parsing/commands/api.py`, а
-Telegram callback contract — в `input/telegram_callbacks.py`. `services/parser.py`
-сокращён до compatibility facade без production callers; его сохранение
-объяснено тестовыми импортами и обратной совместимостью API.
+Telegram callback contract — в `input/telegram_callbacks.py`. В Block 5U
+устаревший `services/parser.py` удалён после миграции тестовых callers.
 
 Product-add owners: `orders/product_add.py`, `conversation/product_add.py` и
 `presentation/telegram/product_add.py`. Telegram replies принадлежат
@@ -236,6 +257,5 @@ Product-add owners: `orders/product_add.py`, `conversation/product_add.py` и
 `to_float`, потому что Sheets и AI-reconciliation контракты пока не имеют
 доказанного единого нового owner.
 
-Эта секция имеет приоритет над историческими строками таблиц ниже, где пути
-`services/replies.py` и `services/product_add_flow.py` ещё отражают состояние до
-Block 5T.
+Эта секция сохранена как историческая заметка; текущая карта владельцев указана
+в начале файла.

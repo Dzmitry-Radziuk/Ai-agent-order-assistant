@@ -1,5 +1,26 @@
 # План декомпозиции архитектуры
 
+## CURRENT ARCHITECTURE — Block 5U
+
+После Block 5U актуальная карта owners выглядит так:
+
+| Область | Owner | Граница |
+|---|---|---|
+| Semantic command API | `parsing/commands/api.py` | Text parsing и enrichment |
+| Callback decoding | `input/telegram_callbacks.py` | Telegram `v2:*` contract |
+| Telegram rendering | `presentation/telegram/replies.py` | Read-only относительно state |
+| Review contracts | `application/order_review/contracts.py` | Frozen snapshot types |
+| Review pure snapshot | `application/order_review/snapshot.py` | Department aggregation и SHA256 fingerprint |
+| Review token | `application/order_review/token.py` | Одноразовый токен длиной 20 hex |
+| Review Telegram UI | `presentation/telegram/order_review.py` | Preview, truncation и submit replies |
+| Review external effects | `services/order_review.py` | Lease/DB/Sheets/Telegram coordinator |
+
+`services/parser.py`, `services/replies.py` и `services/product_add_flow.py`
+отсутствуют. Исторические таблицы и решения ниже помечены как snapshots и не
+являются текущей картой owners.
+
+## HISTORICAL ARCHITECTURE SNAPSHOTS
+
 ## Block 5S — выполненная декомпозиция `services/text.py`
 
 Четыре независимых seam-группы перенесены механически и проверены полным
@@ -82,8 +103,8 @@ contracts и проходит focused/full regression до следующего 
 | `parsing/ai/item_reconciliation.py` | 332 | Source evidence, qualifier cleanup и item recovery | Не меняет state и persistence. |
 | `parsing/ai/shadow_items.py` | 363 | Shadow projections, fragments и source variants | Только чистые преобразования AI payload. |
 | `parsing/ai/reconciliation.py` | 89 | Порядок общей reconciliation pipeline | Единственная orchestration-точка AI postprocessing. |
-| `services/parser.py` | 224 | Public text/callback facade и dispatcher | Callback остаётся channel contract. |
-| `services/replies.py` | 1017 | Cards, keyboards и UX contracts | Делить по экранным семействам. |
+| `parsing/commands/api.py` | 33 | Public text command API и enrichment | `services/parser.py` удалён в Block 5U. |
+| `presentation/telegram/replies.py` | 947 | Cards, keyboards и UX contracts | Read-only presenter; делить только по доказанным seams. |
 | `integrations/openai_client.py` | 927 | Transport и AI use cases | Разделять только после контрактов. |
 | `integrations/google_sheets.py` | 884 | Несколько Sheets contracts | Сохранять единый gateway до доказанного split. |
 | `catalog/evidence.py` | 323 | Канонизация, токены и evidence | Block 4 owner; чистые преобразования и доказательства. |
@@ -119,7 +140,7 @@ contracts и проходит focused/full regression до следующего 
 |---|---|
 | `input/telegram.py` | Block 5N: канонический Telegram raw-update adapter; старый `services/input_normalizer.py` удалён после нулевого caller-аудита. |
 | `services/input_recognition.py` | Block 5O полный MOVE в `input/recognition.py` отклонён как смешение transport/provider/policy/presentation; Block 5P завершил перенос `has_supported_voice_letters` и `select_transcription_result` в `input/voice_transcript_policy.py`. |
-| `services/parser.py` | **Block 2B: FACADE** для text/callback public contract и dispatcher. |
+| `parsing/commands/api.py` | **Block 2B/5U: CANONICAL OWNER** text command API; callback owner — `input/telegram_callbacks.py`. |
 | `parsing/commands/` | **Block 2B: CREATE** owners text command parsing по responsibility. |
 | `parsing/products.py` | **Block 1/2A: MOVE** orchestration в parsing package; после extraction остаётся центральным entry point. |
 | `parsing/quantities.py` | **Block 2A: CREATE** quantity primitives. |
@@ -500,7 +521,7 @@ owners без изменения assertions и поведения; полный 
 persistence, migrations, DB schema, Docker/deploy, workers, API entrypoints,
 tests только ради нового пути импорта или внешние сервисы. Известные manual
 acceptance issues остаются в `PROJECT_HANDOFF.md`.
-## Block 5T — controlled cleanup leaf boundaries
+## Historical snapshot — Block 5T controlled cleanup leaf boundaries
 
 Block 5T завершён механически в `9456e79` от `227ba6e`. Канонические владельцы:
 
@@ -513,8 +534,8 @@ Block 5T завершён механически в `9456e79` от `227ba6e`. К
 - `services/text.py` — только `to_float`, оставленный из-за смешанного Sheets и
   AI-reconciliation контракта.
 
-`services/parser.py` сохранён как 50-строчный compatibility facade: production
-импорты переведены, но тестовый public path и callback API ещё используются.
+`services/parser.py` был сохранён как 50-строчный compatibility facade на момент
+Block 5T; в Block 5U он удалён после миграции тестовых imports.
 `services/replies.py` и `services/product_add_flow.py` удалены. State-machine,
 matching, prompts, schemas, persistence и DevOps не затрагивались.
 Единственная оставшаяся нижнеуровневая зависимость от `services` — вызов

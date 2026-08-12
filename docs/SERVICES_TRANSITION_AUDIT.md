@@ -1,5 +1,58 @@
 # Аудит переходного слоя services/ и результат Block 5K
 
+## CURRENT ARCHITECTURE — Block 5U
+
+Текущая карта владельцев после Block 5U:
+
+| Ответственность | Канонический owner | Что осталось в `services/` |
+|---|---|---|
+| Semantic text commands | `parsing/commands/api.py` | Ничего; `services/parser.py` удалён |
+| Telegram replies | `presentation/telegram/replies.py` | Ничего; `services/replies.py` удалён |
+| Review contracts | `application/order_review/contracts.py` | Ничего |
+| Review snapshot/fingerprint | `application/order_review/snapshot.py` | `OrderReviewService.snapshot()` только читает Sheets и делегирует |
+| Review token | `application/order_review/token.py` | Ничего |
+| Review Telegram presentation | `presentation/telegram/order_review.py` | Ничего |
+| Review side effects | `services/order_review.py` | Координация lease, DB, Sheets и Telegram |
+
+`presentation/telegram/*` не изменяет `ConversationState`. Нормализация страниц
+и onboarding flag принадлежат conversation/engine handlers; presenter получает
+уже выбранное состояние и строит только `BotReply`.
+
+### Block 5U-D — handlers audit
+
+| Handler | Решение | Основание |
+|---|---|---|
+| `candidate_selection.py` | `KEEP_TEMP` | Thin adapter к чистому `conversation/selection.py`; строит только `EngineResult` и replies. |
+| `comment_scope.py` | `KEEP_TEMP` | Adapter к `conversation/comments.py`; state transition и pending context остаются в handler boundary. |
+| `final_review.py` | `KEEP_TEMP` | Владеет stage/issue и нормализацией `final_review_page`; безопасный перенос потребовал бы менять engine review contract. |
+| `navigation.py` | `KEEP_TEMP` | Содержит passive replies и order-status background request; это не чистый navigation core. |
+| `pending_quantity.py` | `KEEP_TEMP` | Смешивает короткое распознавание и мутацию `CartItem`; перенос мог изменить Block C quantity semantics. |
+
+В Block 5U-D новые pure algorithms не создавались искусственно и handlers не
+удалялись. Все handlers импортируют только domain, conversation core и
+presentation; lower/core не импортирует handlers или `services` за исключением
+осознанного остаточного `parsing/ai/* -> services/text.py:to_float`.
+
+### Block 5U-F — dependency audit
+
+Подтверждённые lower/core → `services` edges после блока:
+
+| Source | Target | Symbol | Почему остаётся |
+|---|---|---|---|
+| `parsing/ai/comment_reconciliation.py` | `services/text.py` | `to_float` | Смешанный Sheets/AI numeric contract; отдельный owner не доказан |
+| `parsing/ai/item_reconciliation.py` | `services/text.py` | `to_float` | То же |
+| `parsing/ai/quantity_reconciliation.py` | `services/text.py` | `to_float` | То же |
+| `parsing/ai/shadow_items.py` | `services/text.py` | `to_float` | То же |
+
+Presentation не импортирует DB, Redis, Sheets, OpenAI или `TelegramClient` и не
+меняет state. Циклы в production imports не обнаружены; удалённые facades не
+имеют прямых или динамических callers.
+
+Таблица и граф ниже с заголовком `HISTORICAL AUDIT SNAPSHOT` сохранены для
+трассировки прежних блоков и не описывают текущих owners.
+
+## HISTORICAL AUDIT SNAPSHOT
+
 ## Block 5S — controlled multi-seam decomposition `services/text.py`
 
 `services/text.py` больше не является владельцем units, departments, number
@@ -85,16 +138,16 @@ navigation.py, pending_quantity.py.
 | input_recognition.py | Скачивание файла, OpenAI voice/photo recognition, visible actions, progress | Telegram + provider + state-aware prompts и побочные progress effects | Смешанный input adapter | input/recognition и channel progress / SPLIT | P3 |
 | orchestrator.py | Claim/lease, access, session, recognition, parsing, catalog, engine, checkpoints, delivery, review/analytics | DB/Redis/Sheets/OpenAI/Telegram/Celery effects | Координатор application смешан с use cases | application/update_pipeline и use cases / SPLIT | P5 |
 | order_review.py | Review snapshot, stale token, preview, submit handoff | Redis/DB/Sheets/Telegram | Review use case смешан с presentation | submission/review и presentation / SPLIT | P4 |
-| parser.py | infer_intent и parse_callback; imports владельцев parsing command | Чистый parsing; callback — channel contract | Частичный facade и реальный public owner | parsing/commands и input/callback / SPLIT | P3 |
+| parser.py | infer_intent и parse_callback; imports владельцев parsing command | Чистый parsing; callback — channel contract | Удалённый facade после Block 5U | parsing/commands и input/callback / DONE | P3 |
 | product_add_flow.py | Request ID, prompt, clear pending; callers: engine | Небольшой state helper и presentation text | Связный временный владелец | orders/product_add и presentation / SPLIT | P4 |
-| replies.py | BotReply renderers, cards, keyboards, issue/candidate/status text | Читает state, агрегирует display данные, строит callbacks | Presentation с остаточными расчётами | presentation/telegram replies / SPLIT | P4 |
+| replies.py | BotReply renderers, cards, keyboards, issue/candidate/status text | Читает state, агрегирует display данные, строит callbacks | Удалённый transitional модуль после Block 5T | presentation/telegram/replies / DONE | P4 |
 | presentation/telegram/submission.py | Submission/status/recovery/history rendering | Чистая presentation и callbacks | Владелец presentation | DONE в Block 5Q | P3 |
 | submission.py | Submit, read-back, checkpoints, catalog/recalc, dispatch fencing, completion, product-add write | DB/Redis/Sheets/Telegram effects | Смешанный сервис с safety-критичными операциями | submission/service, catalog, dispatch / SPLIT | P5 |
 | text.py | Transitional numeric primitive `to_float` | Pure функция с callers Google Sheets и AI-reconciliation | Остаточный совместимый owner; остальные symbols вынесены в канонические owners | Отдельный audit `to_float`; файл не удалять до нового доказательства | P2 |
 | venue_registration.py | Directory, invite, access registry, binding, context, replies | HTTP/Redis/DB/Sheets и access mutation | Смешанный venue service | venues/directory, access, registration / SPLIT | P5 |
 | services/conversation_handlers/candidate_selection.py | Adapter к conversation.selection; callers engine/tests | Читает state, возвращает EngineResult/reply | Корректный adapter | conversation routing / KEEP_TEMP | P3 |
 | services/conversation_handlers/comment_scope.py | Проверка и применение pending scope; callers engine/tests | Мутирует comments/stage, строит replies | State/presentation adapter; core в conversation/comments | conversation routing / KEEP_TEMP | P3 |
-| services/conversation_handlers/final_review.py | Final guards и подготовка submission | Мутирует stage/issue, строит reply | Адаптер review | conversation/review / MOVE later | P4 |
+| services/conversation_handlers/final_review.py | Final guards, page ownership и подготовка submission | Мутирует stage/issue/page, строит reply | Доказанный thin adapter; core review остаётся связанным с engine | conversation/review / KEEP_TEMP | P4 |
 | services/conversation_handlers/modal_routing.py | Удалён в Block 5J после перевода тестового import | Эффектов не было | Удалённый compatibility facade | conversation.routing / DONE | P2 |
 | services/conversation_handlers/navigation.py | Passive replies и paging истории | Мутирует history view state, ставит async request | Смешанный navigation/history adapter | conversation navigation + history use case / SPLIT | P4 |
 | services/conversation_handlers/pending_quantity.py | Parser ответа количеством и мутация CartItem | Мутация modal state, зависимости parser/text | Адаптер state количества | conversation quantity flow / MOVE later | P3 |

@@ -1,5 +1,39 @@
 # Передача проекта
 
+## CURRENT ARCHITECTURE — Block 5U
+
+Последний завершённый блок — Block 5U. Актуальные владельцы:
+
+| Ответственность | Канонический модуль |
+|---|---|
+| Text semantic parser | `parsing/commands/api.py` |
+| Telegram callback parser | `input/telegram_callbacks.py` |
+| Основные Telegram replies | `presentation/telegram/replies.py` |
+| Review contracts | `application/order_review/contracts.py` |
+| Review snapshot и fingerprint | `application/order_review/snapshot.py` |
+| Review token | `application/order_review/token.py` |
+| Review preview и submission replies | `presentation/telegram/order_review.py` |
+| Review side-effect coordinator | `services/order_review.py` |
+
+`services/parser.py`, `services/replies.py` и `services/product_add_flow.py`
+удалены после caller-аудита. `presentation/telegram/*` только читает
+`ConversationState`; onboarding и нормализация страниц выполняются в
+conversation/engine handlers. Исторические блоки ниже помечаются как архивные и
+не являются текущей картой владельцев.
+
+## Block 5U — выполненная декомпозиция
+
+5U-A удалил obsolete `services/parser.py`; все 28 тестовых импортных групп
+переведены на canonical parsing/callback owners, полный suite остался зелёным.
+5U-B убрал три мутации из Telegram presentation и добавил regression-тест
+read-only контракта. 5U-C вынес frozen review contracts, чистый snapshot и token
+в `application/order_review/`, а preview и submission reply builders — в
+`presentation/telegram/order_review.py`. `OrderReviewService.submit()` сохранил
+lease/DB/Sheets/Telegram порядок и остался координатором внешних эффектов.
+5U-D подтвердил, что candidate selection и comment scope — thin adapters к
+`conversation/` core, final review владеет page transition, а pending quantity
+сохраняется без переноса из-за риска изменить Block C quantity semantics.
+
 ## Block 5S — контролируемая декомпозиция `services/text.py`
 
 Block 5S завершён как поведенчески нейтральный перенос четырёх независимых
@@ -75,7 +109,8 @@ AI помогает понять свободную речь и найти ка�
 - Текущий Git HEAD всегда определяется командой `git rev-parse HEAD`, а не
   фиксируется в handoff после каждого commit.
 - Единственный рабочий remote: GitHub `origin/decompose_bot`.
-- Текущий полный baseline: `1366 collected / 1366 passed`.
+- Текущий полный baseline: `1368 collected / 1368 passed` после двух
+  архитектурных regression-тестов Block 5U.
 - `manual_smoke_forensic_logs.txt` — необязательный локальный diagnostic artifact,
   не tracked-файл репозитория. Если он существует локально, его нельзя менять,
   удалять или добавлять в commit; отсутствие файла нормально.
@@ -119,7 +154,8 @@ Telegram update
 - `services/input_recognition.py` — transitional voice/photo recognition; Block 5O
   подтвердил смешение transport/provider/policy/presentation и назначил единственный
   следующий seam `input/voice_transcript_policy.py` для transcript selection.
-- `services/parser.py` — глобальный intent/callback parser и совместимый фасад.
+- `parsing/commands/api.py` — глобальный intent parser и enrichment; callback
+  contract находится в `input/telegram_callbacks.py`.
 - `parsing/products.py` — orchestration разбора товарных строк и сборка
   итогового списка `ExtractedItem`.
 - `parsing/quantities.py` — короткие ответы количества и quantity primitives.
@@ -171,7 +207,8 @@ Telegram update
   submission остаются в engine.
 - Полный audit оставшегося transitional `services/`, dependency direction и
   caller-backed roadmap находится в `docs/SERVICES_TRANSITION_AUDIT.md`.
-- `services/replies.py` — карточки, клавиатуры и пользовательские тексты.
+- `presentation/telegram/replies.py` — карточки, клавиатуры и пользовательские
+  тексты без мутации `ConversationState`.
 
 ### Application и фоновые задачи
 
@@ -224,13 +261,19 @@ GitLab не используется. В этой задаче разрешён 
 - «удали все комментарии» не должна очищать товары;
 - исправление комментария «не X, а Y» должно менять только исправленную часть.
 
+## HISTORICAL ARCHITECTURE TIMELINE
+
+Разделы ниже сохраняют историю завершённых блоков. Текущие owners и текущий
+статус Block 5U указаны выше и имеют приоритет.
+
 ## 8. Статус декомпозиции
 
 Block 0 завершён: зафиксированы владельцы, dependency rules, compatibility
 facades и порядок миграции в `docs/ARCHITECTURE_DECOMPOSITION.md`.
 
 Block 1 завершён механически: реализация product parser находится в
-`parsing/products.py`, а `services/parser.py` импортирует его напрямую.
+`parsing/products.py`; позднее text command API переехал в
+`parsing/commands/api.py`.
 Поведение, prompts, state machine, matching, UX, persistence и deployment не
 менялись. Focused и полный regression baseline проходят.
 
@@ -240,7 +283,7 @@ Block 2A завершён: из `products.py` вынесены три доказ
 пути не найдены.
 
 Block 2B завершён механически: text command parsing разделён по ответственностям
-в `parsing/commands/`, а `services/parser.py` стал facade/dispatcher на 224 строки.
+в `parsing/commands/`; Block 5U позже удалил obsolete parser facade после caller-аудита.
 `parse_callback()` оставлен отдельным channel contract. Поведение подтверждено
 сравнением на 62 существующих случаях и полным baseline `1362 passed`.
 
@@ -325,20 +368,20 @@ repository-wide usage и duplicate audit. Мёртвый или дублирую
 facade допустим только как явный re-export при подтверждённых callers и явном контракте
 конкретного блока. Для Group N Block 5M такой facade намеренно не создаётся.
 
-## 9. Block 2B
+## HISTORICAL SNAPSHOT — Block 2B
 
 Документационный commit с постоянными правилами создан отдельно. Text command
 parsing механически разделён по доказанным ответственностям в `parsing/commands/`.
-`services/parser.py` оставлен компактным facade/dispatcher: `infer_intent`,
-`parse_callback` и public compatibility exports. Callback mapping не смешан с
-channel-agnostic text parsing. Product parsing Block 2A не изменялся.
+На момент Block 2B `services/parser.py` оставался компактным facade/dispatcher:
+`infer_intent`, `parse_callback` и public compatibility exports. В Block 5U этот
+facade удалён; текущие owners перечислены в начале handoff.
 
 До code commit выполнены повторные usage/duplicate/dead-code audit и semantic
 comparison на 62 существующих тестовых строках: расхождений нет. Полный
 regression baseline остаётся `1362 passed`; code migration прошёл все quality
 gates.
 
-## 10. Block 5B — выделение conversation draft и comments
+## HISTORICAL SNAPSHOT — Block 5B и Block 5T owner table
 
 Block 5B выполняется как поведенчески нейтральное выделение channel-neutral
 операций из `services/engine.py`. Владельцами становятся:
@@ -395,7 +438,7 @@ Block 5N завершил механический перенос Telegram raw-u
 не изменялись.
 
 Block 5S завершил controlled multi-seam decomposition `services/text.py`; текущий
-полный baseline — `1366 collected / 1366 passed`. `to_float` оставлен после
+полный baseline на момент Block 5S — `1366 collected / 1366 passed`. `to_float` оставлен после
 отдельного caller-аудита, остальные symbols переведены в канонические owners,
 описанные в начале этого handoff и [`docs/SERVICES_TEXT_AUDIT.md`](docs/SERVICES_TEXT_AUDIT.md).
 Следующий блок не назначается автоматически.
@@ -442,7 +485,7 @@ git diff --check
 PROJECT_HANDOFF.md, `.agents/DECISIONS.md`, `.agents/PROJECT_MAP.md`,
 архитектурной документации, тестов и текущего Git state. История обсуждений
 в handoff не копируется.
-## Block 5T — controlled cleanup transitional leaf boundaries
+## HISTORICAL SNAPSHOT — Block 5T
 
 Block 5T завершён поведенчески нейтрально в коммите `9456e79` от исходного
 `227ba6e`. Изменения ограничены переносом владельцев и импортов; database,
@@ -456,9 +499,9 @@ contracts не менялись.
   reconciliation, а безопасный общий owner для обоих контрактов не доказан.
 - **5T-B — parser boundary: MOVED.** Semantic text API находится в
   `parsing/commands/api.py`, callback parsing — в `input/telegram_callbacks.py`.
-  `services/parser.py` теперь 50-строчный compatibility facade для 28 тестовых
-  импортов и старого двухаргументного callback API; production старый путь не
-  импортирует, callback values и revision semantics сохранены.
+  В Block 5U временный compatibility facade `services/parser.py` удалён после
+  миграции 28 тестовых импортных групп; callback values и revision semantics
+  сохранены.
 - **5T-C — product-add boundary: MOVED.** Request id перенесён в
   `orders/product_add.py`, очистка pending state — в `conversation/product_add.py`,
   prompt — в `presentation/telegram/product_add.py`; старый facade удалён.
