@@ -1,12 +1,20 @@
 # План декомпозиции архитектуры
 
+## Block 5R — Telegram presentation formatting
+
+`escape` и `format_number` механически перенесены из `services/text.py` в
+`presentation/telegram/formatting.py`. Новый owner зависит только от
+`text_normalization` и stdlib; `presentation/telegram/submission.py` больше не
+зависит от `services`. HTML, числовой формат, callback и UX-контракты не
+изменялись; corpus comparison дал `MISMATCHES=0`.
+
 ## Block 5Q — выполненный перенос submission presenter
 
 `services/submission_presenter.py` механически перенесён в
 `presentation/telegram/submission.py`. Все 28 AST-функций и сигнатуры совпадают с
 исходным модулем. `SubmissionService`, `ConversationEngine` и тесты используют
 канонический путь; старый файл удалён. Presenter импортирует только domain-модели
-и временный `services.text.escape`, не выполняет внешних эффектов. Следующий seam
+и `presentation/telegram/formatting.py`, не выполняет внешних эффектов. Следующий seam
 не назначен.
 
 ## Block 5P — выполненный перенос политики транскрипции

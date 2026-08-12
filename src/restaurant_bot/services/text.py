@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import html
 import re
 from decimal import Decimal, InvalidOperation
 from typing import Any
@@ -266,20 +265,6 @@ def to_float(value: Any) -> float | None:
     except (InvalidOperation, ValueError):
         return None
     return number if number > 0 else None
-
-
-def escape(value: Any) -> str:
-    """Экранирует текст для безопасного HTML Telegram."""
-    return html.escape(_clean_text(value), quote=False)
-
-
-def format_number(value: float | None) -> str:
-    """Форматирует число для сообщения пользователю."""
-    if value is None:
-        return "-"
-    if float(value).is_integer():
-        return str(int(value))
-    return f"{value:.3f}".rstrip("0").rstrip(".").replace(".", ",")
 
 
 def parse_number_words(tokens: list[str], start: int) -> tuple[float, int] | None:

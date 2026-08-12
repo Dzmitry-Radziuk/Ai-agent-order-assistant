@@ -13,11 +13,10 @@ from restaurant_bot.domain.models import (
     ItemStatus,
 )
 from restaurant_bot.orders.supplier_minimums import supplier_minimum_warnings
+from restaurant_bot.presentation.telegram.formatting import escape, format_number
 from restaurant_bot.services.text import (
     UNIT_ALIASES,
     convert_quantity,
-    escape,
-    format_number,
     normalize_unit,
 )
 

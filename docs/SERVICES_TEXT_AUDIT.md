@@ -1,5 +1,12 @@
 # Block 5L — аудит `services/text.py`
 
+## Block 5R — завершённый перенос presentation formatting
+
+`escape` и `format_number` теперь принадлежат
+`presentation/telegram/formatting.py`; старых callers из `services.text` нет.
+В `services/text.py` сохранены units, numbers, overlap и parsing primitives.
+Measurement symbols в этот перенос не входили.
+
 ## Статус и границы
 
 Аудит выполнен на ветке `decompose_bot` в исходной ревизии
@@ -66,8 +73,8 @@ re-export и динамические пути. Поиск `importlib`, `__impor
 | `normalize_department` | `integrations/google_sheets.py`, `services/engine.py` | Нет прямых | Нет | Нет | `services/text.py` → `domain/departments.py` | `MOVE_LATER` |
 | `numeric_range_spans` | `integrations/openai_client.py`, `orders/catalog_resolution.py`, `parsing/ai/quantity_reconciliation.py`, `parsing/{packaging,products,quantities}.py` | Косвенно через quantity/packaging tests | Нет | Нет | `services/text.py` → quantity/evidence owner после сравнения regex | `MOVE_LATER` |
 | `to_float` | `integrations/google_sheets.py`, `integrations/openai_client.py`, `parsing/ai/{comment_reconciliation,item_reconciliation,quantity_reconciliation,shadow_items}.py` | `tests/input/test_input_edge_cases.py` | Нет; читает входные значения | Нет | `services/text.py` → numeric value primitive, но Sheets-контракт требует отдельной проверки | `AUDIT_REQUIRED` |
-| `escape` | `services/{engine,order_review,replies,submission,venue_registration}.py`, `presentation/telegram/submission.py` | Нет прямых | Нет | Да, Telegram HTML | `services/text.py` → presentation owner | `MOVE_LATER` |
-| `format_number` | `services/replies.py` | Нет прямых | Нет | Косвенно пользовательский UI | `services/text.py` → presentation formatting | `MOVE_LATER` |
+| `escape` | `services/{engine,order_review,replies,submission,venue_registration}.py`, `presentation/telegram/submission.py` | Нет прямых | Нет | Да, Telegram HTML | `presentation/telegram/formatting.py` | `DONE` |
+| `format_number` | `services/replies.py` | Нет прямых | Нет | Косвенно пользовательский UI | `presentation/telegram/formatting.py` | `DONE` |
 | `parse_number_words` | `catalog/{evidence,safety}.py`, `parsing/ai/quantity_reconciliation.py`, `parsing/{products,quantities}.py`, `services/conversation_handlers/pending_quantity.py` | Косвенно через quantity tests | Нет | Нет | `services/text.py` → quantity parsing owner | `MOVE_LATER` |
 | `convert_quantity` | `services/engine.py`, `services/replies.py` | Косвенно через unit-flow tests | Мутирует `CartItem` только callers, сам pure | Нет | `services/text.py` → order measurement owner | `MOVE_LATER` |
 
@@ -247,7 +254,7 @@ department/domain mapping, не parsing. Риск мал, но эффект по
 | R3 | `to_float` | numeric scalar owner | Tolerant parse используется Sheets и structured AI. | Не объединять с linguistic parsing. | Высокий: Sheets formats и confidence. | `AUDIT_REQUIRED` |
 | C | `remove_global_comment_overlap` | `conversation/comments` или `parsing/comment_policy`; `remove_phrase_overlap` отдельно | Оба удаляют overlap, но один comment provenance, другой search copy. | Объединение скроет разные инварианты. | Высокий: comment/product-query contract. | `AUDIT_REQUIRED` |
 | D | `DEPARTMENT_ALIASES`, `normalize_department` | `domain/departments.py` | Один самостоятельный mapping. | Не включать generic text и catalog units. | Низкий/средний. | `MOVE_LATER` |
-| P | `escape`, `format_number` и отдельный `format_quantity` audit | presentation owner | UI formatting имеет внешний HTML/text contract. | Не включать lower/core primitives. | Средний: UX snapshot. | `MOVE_LATER` |
+| P | `escape`, `format_number` и отдельный `format_quantity` audit | presentation owner | UI formatting имеет внешний HTML/text contract. | Не включать lower/core primitives. | Средний: UX snapshot. | `escape` и `format_number` DONE в Block 5R; `format_quantity` отдельно |
 
 ## 8. Почему нельзя переносить весь `text.py`
 

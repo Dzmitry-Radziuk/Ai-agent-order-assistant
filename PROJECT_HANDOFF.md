@@ -1,5 +1,14 @@
 # Передача проекта
 
+## Block 5R — Telegram presentation formatting
+
+Block 5R завершён механическим переносом `escape` и `format_number` из
+`services/text.py` в канонический `presentation/telegram/formatting.py`.
+Новый модуль зависит только от `text_normalization.clean_text` и стандартных
+библиотек. Все production callers переведены, старых импортов нет; остальные
+symbols `services.text` не менялись. Сравнение с исходными реализациями:
+`escape` — 14 случаев, `format_number` — 16 случаев, `MISMATCHES=0`.
+
 ## Block 5Q — перенос Telegram submission presenter
 
 Block 5Q завершён механическим переносом `services/submission_presenter.py` в
@@ -7,7 +16,8 @@ Block 5Q завершён механическим переносом `services/
 production и test callers переведены на новый путь, старый services-файл удалён.
 Presenter остаётся чистым presentation/read-model слоем: он возвращает `BotReply`,
 `Button` и текст, не выполняет DB, Redis, Sheets, OpenAI, TelegramClient или
-submission side effects. Временная зависимость только одна: `services.text.escape`.
+submission side effects. Formatting dependency направлена на
+`presentation/telegram/formatting.py`; временной зависимости от `services` нет.
 Сравнение старого и нового модуля на 23 representative cases дало `MISMATCHES=0`.
 Следующий seam после Block 5Q не назначается автоматически.
 

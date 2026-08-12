@@ -1,11 +1,19 @@
 # Аудит переходного слоя services/ и результат Block 5K
 
+## Block 5R — presentation formatting вынесен
+
+`escape` и `format_number` удалены из transitional `services/text.py` и
+переведены на `presentation/telegram/formatting.py`. Caller audit подтвердил
+нулевые старые imports; `presentation/telegram/submission.py` больше не
+зависит от `services`. Остальные measurement и parsing symbols `services.text`
+не переносились.
+
 ## Block 5Q — выполненный перенос Telegram submission presenter
 
 `submission_presenter.py` удалён из `services/` после repository-wide caller-аудита и
 перенесён без изменения тела функций в `presentation/telegram/submission.py`.
 Канонический модуль содержит только presentation/read-model formatting и callback
-строки; его единственная transitional dependency — `services.text.escape`.
+строки; его formatting dependency — `presentation/telegram/formatting.py`.
 `SubmissionService`, `ConversationEngine` и тесты импортируют новый путь.
 
 ## Block 5P — выполненный pure voice transcript seam

@@ -15,9 +15,9 @@ from restaurant_bot.domain.models import BotReply, Button, SessionStage
 from restaurant_bot.integrations.cache import ChatLeaseLostError, chat_lock
 from restaurant_bot.integrations.google_sheets import GoogleSheetsGateway
 from restaurant_bot.integrations.telegram import TelegramClient
+from restaurant_bot.presentation.telegram.formatting import escape
 from restaurant_bot.repositories.sessions import SessionRepository
 from restaurant_bot.services.replies import format_item_comment
-from restaurant_bot.services.text import escape
 from restaurant_bot.services.venue_registration import VenueContext, VenueRegistrationService
 
 logger = structlog.get_logger(__name__)

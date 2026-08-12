@@ -31,6 +31,7 @@ from restaurant_bot.integrations.google_sheets import (
     OrderSubmissionResult,
 )
 from restaurant_bot.integrations.telegram import TelegramAPIError, TelegramClient
+from restaurant_bot.presentation.telegram.formatting import escape
 from restaurant_bot.presentation.telegram.submission import (
     _callback_with_revision,
     build_order_status_detail_reply,
@@ -50,7 +51,6 @@ from restaurant_bot.repositories.order_events import OrderEventRepository
 from restaurant_bot.repositories.sessions import SessionRepository
 from restaurant_bot.repositories.submissions import SubmissionRepository
 from restaurant_bot.services.replies import cart_reply
-from restaurant_bot.services.text import escape
 from restaurant_bot.services.venue_registration import VenueRegistrationService
 
 logger = structlog.get_logger(__name__)

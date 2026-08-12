@@ -74,6 +74,7 @@ from restaurant_bot.orders.catalog_resolution import CatalogResolutionService
 from restaurant_bot.orders.supplier_minimums import supplier_minimum_warnings
 from restaurant_bot.parsing.comment_policy import supplier_comment_start
 from restaurant_bot.parsing.quantities import has_explicit_order_quantity
+from restaurant_bot.presentation.telegram.formatting import escape
 from restaurant_bot.presentation.telegram.submission import (
     submission_dispatch_uncertain_reply,
     submission_failure_reply,
@@ -133,7 +134,6 @@ from restaurant_bot.services.text import (
     NUMBER_WORDS,
     UNIT_ALIASES,
     convert_quantity,
-    escape,
     normalize_department,
     normalize_unit,
 )

@@ -4,7 +4,7 @@ from datetime import datetime
 from typing import Any
 
 from restaurant_bot.domain.models import BotReply, Button
-from restaurant_bot.services.text import escape
+from restaurant_bot.presentation.telegram.formatting import escape
 
 # Канонический Telegram presenter.
 
