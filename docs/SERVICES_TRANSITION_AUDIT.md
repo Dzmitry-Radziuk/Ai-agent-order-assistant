@@ -1,5 +1,17 @@
 # Аудит переходного слоя services/ и результат Block 5K
 
+## Block 5S — controlled multi-seam decomposition `services/text.py`
+
+`services/text.py` больше не является владельцем units, departments, number
+words, ranges или overlap. Эти responsibilities находятся соответственно в
+`domain/units.py`, `domain/unit_conversion.py`, `domain/departments.py`,
+`parsing/number_words.py`, `parsing/numeric_ranges.py`,
+`conversation/comments.py` и `catalog/evidence.py`. В transitional-файле
+осознанно оставлен только `to_float`: его callers одновременно обслуживают
+Google Sheets и AI-reconciliation, а безопасный единый новый owner не доказан.
+Перенос был механическим; DB, external effects, prompts и state-machine не
+менялись. После блока полный suite: `1366 collected / 1366 passed`.
+
 ## Block 5R — presentation formatting вынесен
 
 `escape` и `format_number` удалены из transitional `services/text.py` и
@@ -78,7 +90,7 @@ navigation.py, pending_quantity.py.
 | replies.py | BotReply renderers, cards, keyboards, issue/candidate/status text | Читает state, агрегирует display данные, строит callbacks | Presentation с остаточными расчётами | presentation/telegram replies / SPLIT | P4 |
 | presentation/telegram/submission.py | Submission/status/recovery/history rendering | Чистая presentation и callbacks | Владелец presentation | DONE в Block 5Q | P3 |
 | submission.py | Submit, read-back, checkpoints, catalog/recalc, dispatch fencing, completion, product-add write | DB/Redis/Sheets/Telegram effects | Смешанный сервис с safety-критичными операциями | submission/service, catalog, dispatch / SPLIT | P5 |
-| text.py | Cleanup, normalization, units/departments, ranges, number words, conversion, numeric parse, HTML/number formatting | Pure, но с большим fan-in в lower layers и presentation | Смешанный core/presentation primitive owner | parsing text, domain units, presentation formatting / SPLIT | P2 |
+| text.py | Transitional numeric primitive `to_float` | Pure функция с callers Google Sheets и AI-reconciliation | Остаточный совместимый owner; остальные symbols вынесены в канонические owners | Отдельный audit `to_float`; файл не удалять до нового доказательства | P2 |
 | venue_registration.py | Directory, invite, access registry, binding, context, replies | HTTP/Redis/DB/Sheets и access mutation | Смешанный venue service | venues/directory, access, registration / SPLIT | P5 |
 | services/conversation_handlers/candidate_selection.py | Adapter к conversation.selection; callers engine/tests | Читает state, возвращает EngineResult/reply | Корректный adapter | conversation routing / KEEP_TEMP | P3 |
 | services/conversation_handlers/comment_scope.py | Проверка и применение pending scope; callers engine/tests | Мутирует comments/stage, строит replies | State/presentation adapter; core в conversation/comments | conversation routing / KEEP_TEMP | P3 |
@@ -251,12 +263,13 @@ comment-policy seam, Block 5J — только удаление доказанн
 
 ### NEXT — только после external review
 
-Block 5L завершил отдельный caller/duplicate audit, а Block 5M завершил его единственный
-следующий seam: `clean_text` и `normalize_text` перенесены в semantic-neutral
-`text_normalization.py`; старые callers переведены, а оставшиеся функции `services/text.py`
-используют private imports. Полная таблица callers, риски и исключение старого варианта
-`parsing/text.py` зафиксированы в [`docs/SERVICES_TEXT_AUDIT.md`](SERVICES_TEXT_AUDIT.md).
-Block 5I стартовал с SHA 1a6bf0da753976303b196c57f65a36316bc15685.
+Block 5L завершил caller/duplicate audit, Block 5M перенёс
+`clean_text`/`normalize_text`, а Block 5S завершил доказанные seams для units,
+departments, number words, ranges и overlap. `services/text.py` теперь содержит
+только `to_float`; его Google Sheets/AI contract оставлен до отдельного
+доказательства owner. Полная таблица callers и границы зафиксированы в
+[`docs/SERVICES_TEXT_AUDIT.md`](SERVICES_TEXT_AUDIT.md). Следующий seam не
+назначается автоматически.
 
 ### ПОЗДНЕЕ
 

@@ -1,11 +1,38 @@
 # Block 5L — аудит `services/text.py`
 
+## Block 5S — итог controlled multi-seam decomposition
+
+Block 5S завершил перенос доказанных чистых кластеров без изменения порядка
+правил и public contracts:
+
+| Этап | Символы | Канонический owner |
+|---|---|---|
+| 5S-A | `UNIT_ALIASES`, `normalize_unit`, `convert_quantity` | `domain/units.py`, `domain/unit_conversion.py` |
+| 5S-B | `DEPARTMENT_ALIASES`, `normalize_department` | `domain/departments.py` |
+| 5S-C | `NUMBER_WORDS`, `parse_number_words`, `numeric_range_spans` | `parsing/number_words.py`, `parsing/numeric_ranges.py` |
+| 5S-D | `remove_global_comment_overlap` | `conversation/comments.py` |
+| 5S-D | `remove_phrase_overlap` | `catalog/evidence.py` |
+
+5S-D сохраняет разные ответственности: комментарий изменяется только в
+comment-policy pipeline, а поисковый overlap строит временную копию query.
+Ни одна из этих функций не записывает результат обратно в `source_query`,
+`product_query`, `comment` или `comment_source`.
+
+После переноса `services/text.py` содержит только `to_float`. Этот primitive
+имеет подтверждённых callers в `integrations/google_sheets.py` и AI
+reconciliation. Он принимает и обычные числовые значения, и tolerant-форматы
+Google Sheets; отдельный owner, который не смешал бы эти контракты, не доказан.
+Поэтому `to_float` оставлен осознанно, а удаление `services/text.py` отложено.
+Repository-wide audit старых путей для перенесённых symbols дал ноль импортов.
+Полный baseline Block 5S: `1366 collected / 1366 passed`.
+
 ## Block 5R — завершённый перенос presentation formatting
 
 `escape` и `format_number` теперь принадлежат
 `presentation/telegram/formatting.py`; старых callers из `services.text` нет.
-В `services/text.py` сохранены units, numbers, overlap и parsing primitives.
-Measurement symbols в этот перенос не входили.
+После Block 5S в `services/text.py` сохранён только `to_float`; units, numbers,
+overlap и остальные parsing primitives имеют owners, перечисленные в итоговой
+таблице выше.
 
 ## Статус и границы
 
@@ -53,6 +80,25 @@ re-export и динамические пути. Поиск `importlib`, `__impor
 Таким образом, один файл одновременно владеет лексической нормализацией,
 комментариями, поиском, единицами, числами, отделами и Telegram-представлением.
 Это подтверждённое смешение ответственностей, а не проблема размера файла.
+
+### Актуальное состояние после Block 5S
+
+Предыдущая таблица описывает исторический снимок Block 5L и сохраняется как
+аудиторское доказательство. Текущая реализация имеет следующий состав:
+
+| Файл | Символы после Block 5S |
+|---|---|
+| `services/text.py` | только `to_float` |
+| `domain/units.py` | `UNIT_ALIASES`, `normalize_unit` |
+| `domain/unit_conversion.py` | `convert_quantity` |
+| `domain/departments.py` | `DEPARTMENT_ALIASES`, `normalize_department` |
+| `parsing/number_words.py` | `NUMBER_WORDS`, `parse_number_words` |
+| `parsing/numeric_ranges.py` | `numeric_range_spans` |
+| `conversation/comments.py` | `remove_global_comment_overlap` |
+| `catalog/evidence.py` | `remove_phrase_overlap` |
+
+Для перенесённых symbols старые production, test и dynamic imports не найдены;
+для `to_float` сохранены callers Google Sheets и AI-reconciliation.
 
 ## 2. Таблица символов и callers
 
@@ -272,17 +318,17 @@ department/domain mapping, не parsing. Риск мал, но эффект по
 
 ## 9. Конечная судьба `services/text.py`
 
-Фактическая судьба после Block 5M — **частичный transitional owner без facade для
+Фактическая судьба после Block 5S — **частичный transitional owner без facade для
 Group N**:
 
 1. `clean_text` и `normalize_text` имеют единственного owner в
    `src/restaurant_bot/text_normalization.py`;
 2. внешние imports старого пути удалены, а public re-export из `services.text`
    не предоставляется;
-3. `services/text.py` сохраняет только units, numbers, overlap, departments и
-   presentation primitives;
-4. последующие кластеры не переносятся в рамках Block 5M и требуют отдельного
-   аудита callers и контрактов.
+3. `services/text.py` сохраняет только `to_float`; units, numbers, overlap,
+   departments и presentation primitives имеют канонические owners;
+4. `to_float` не переносился: его смешанный Google Sheets/AI contract требует
+   отдельного доказательства безопасной границы.
 
 Такое частичное разделение сохраняет разные semantic contracts и не смешивает
 нормализацию текста с measurement, numeric, search или presentation logic.
@@ -317,15 +363,14 @@ Group N**:
   semantic-neutral owner, отсутствие нового цикла и уменьшение mixed-owner facade
   на два наиболее общих символа.
 
-Этот seam реализован в Block 5M; следующие кластеры остаются только предметом будущего
-аудита и в текущем correction block не начинаются.
+Этот seam и этапы 5S-A–5S-D реализованы; следующий функциональный блок не
+начинается автоматически.
 
 ## 11. Проверка Block 5K и качество
 
 - `services.orchestrator → workers.tasks` отсутствует.
 - `workers.tasks → services.orchestrator` сохранено как внешнее направление.
 - AST-граф production-пакета не содержит циклов.
-- `src/` и `tests/` в Block 5L не изменялись.
-- Baseline на текущей ревизии остаётся `1366 collected / 1366 passed` по последней
-  подтверждённой проверке Block 5K; новый запуск ниже не требовался для audit-only
-  Python diff.
+- Переносы Block 5S не меняли бизнес-алгоритмы или тестовые assertions.
+- Baseline после Block 5S подтверждён свежим запуском: `1366 collected /
+  1366 passed`.

@@ -1,5 +1,19 @@
 # План декомпозиции архитектуры
 
+## Block 5S — выполненная декомпозиция `services/text.py`
+
+Четыре независимых seam-группы перенесены механически и проверены полным
+regression suite. `domain/units.py` и `domain/unit_conversion.py` владеют
+единицами и пересчётом; `domain/departments.py` — отделами;
+`parsing/number_words.py` и `parsing/numeric_ranges.py` — словесными
+числительными и диапазонами; `conversation/comments.py` и `catalog/evidence.py`
+разделяют comment overlap и временный search overlap. `services/text.py`
+сохраняет только `to_float`, поскольку его контракт одновременно нужен
+Google Sheets и AI-reconciliation и безопасный отдельный owner не доказан.
+Старые imports перенесённых символов отсутствуют. Baseline: `1366 collected /
+1366 passed`; quality gates проходят. Следующий блок не начинается этим
+изменением.
+
 ## Block 5R — Telegram presentation formatting
 
 `escape` и `format_number` механически перенесены из `services/text.py` в
@@ -36,7 +50,7 @@ contracts и проходит focused/full regression до следующего 
 `e4fb29e4d2d0ba906c91beef5c02d3e87d7a0b09`; Block 3C correction baseline:
 `21358755ebbc36b95b9fb6b4799021027a2158e7`. Текущий Git HEAD определяется
 через `git rev-parse HEAD`, автоматический baseline
-`1362 collected / 1362 passed`. Локальный
+`1366 collected / 1366 passed`. Локальный
 `manual_smoke_forensic_logs.txt` не является частью проекта.
 
 ## 2. Runtime boundary
@@ -111,7 +125,7 @@ contracts и проходит focused/full regression до следующего 
 | `parsing/quantities.py` | **Block 2A: CREATE** quantity primitives. |
 | `parsing/packaging.py` | **Block 2A: CREATE** фасовка и каталожные измерения. |
 | `parsing/comment_scope.py` | **Block 2A: CREATE** явная область общего комментария. |
-| `services/text.py` | Block 5M: `clean_text` и `normalize_text` перенесены в `text_normalization.py`; остальные text-кластеры остаются без изменений до отдельного аудита. |
+| `services/text.py` | Block 5S: сохранён только `to_float`; units, departments, number words, ranges и overlap имеют канонические owners в domain/parsing/catalog/conversation. |
 | `integrations/openai_parsing.py` | Compatibility re-export facade; алгоритмов нет. |
 | `integrations/openai_prompts.py` | Позже MOVE prompt contract без изменения текста. |
 | `integrations/openai_client.py` | Позже SPLIT transport и AI facade в `application/ai_service.py`. |

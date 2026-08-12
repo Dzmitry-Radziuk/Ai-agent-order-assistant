@@ -1,5 +1,18 @@
 # Карта проекта
 
+## Block 5S — актуальные владельцы бывших `services.text` символов
+
+После Block 5S `services/text.py` содержит только transitional `to_float`.
+Канонические owners: `domain/units.py` (`UNIT_ALIASES`, `normalize_unit`),
+`domain/unit_conversion.py` (`convert_quantity`), `domain/departments.py`
+(`DEPARTMENT_ALIASES`, `normalize_department`), `parsing/number_words.py`
+(`NUMBER_WORDS`, `parse_number_words`), `parsing/numeric_ranges.py`
+(`numeric_range_spans`), `conversation/comments.py`
+(`remove_global_comment_overlap`) и `catalog/evidence.py`
+(`remove_phrase_overlap`). Перенесённые production и test imports проверены;
+старых путей для этих символов нет. `to_float` оставлен в `services/text.py`,
+потому что его контракт одновременно покрывает Google Sheets и AI-reconciliation.
+
 ## Block 5R: Telegram presentation formatting
 
 `presentation/telegram/formatting.py` — канонический owner `escape` и
@@ -114,7 +127,7 @@ CommentScopeHandler их сохраняет.
 | `presentation/telegram/submission.py` | Telegram-тексты, кнопки завершения заявки и истории заказов; канонический owner после Block 5Q |
 | `services/product_add_flow.py` | Сценарий запроса снабженцу на добавление ненайденного товара |
 | `services/venue_registration.py` | Центральный каталог заведений, доступ, invite-коды и привязки |
-| `services/text.py` | Transitional владелец units, numbers, overlap и parsing primitives; `clean_text`/`normalize_text` перенесены в `text_normalization.py`, `escape`/`format_number` — в `presentation/telegram/formatting.py`; полный аудит — [`docs/SERVICES_TEXT_AUDIT.md`](../docs/SERVICES_TEXT_AUDIT.md) |
+| `services/text.py` | Transitional владелец только `to_float`; units, departments, number words, ranges и overlap перенесены в канонические domain/parsing/catalog/conversation owners; полный аудит — [`docs/SERVICES_TEXT_AUDIT.md`](../docs/SERVICES_TEXT_AUDIT.md) |
 
 ### Application contracts
 

@@ -1,5 +1,25 @@
 # Передача проекта
 
+## Block 5S — контролируемая декомпозиция `services/text.py`
+
+Block 5S завершён как поведенчески нейтральный перенос четырёх независимых
+seam-групп. Единицы и пересчёт находятся в `domain/units.py` и
+`domain/unit_conversion.py`; отделы — в `domain/departments.py`; словесные
+числительные и диапазоны — в `parsing/number_words.py` и
+`parsing/numeric_ranges.py`. Политики overlap разделены по владельцам:
+`conversation/comments.py` отвечает за комментарии, а `catalog/evidence.py` —
+за временную поисковую копию. `source_query`, `product_query`, `comment` и
+`comment_source` при этом не изменяются поисковыми функциями.
+
+В `services/text.py` оставлен только `to_float`. Он используется одновременно
+Google Sheets и AI-reconciliation и допускает форматы внешнего листа; безопасный
+единый новый owner для этого смешанного контракта не доказан, поэтому файл не
+удалялся. Старых импортов перенесённых символов не осталось. Полный regression
+baseline после переноса: `1366 collected / 1366 passed`; `ruff check`, формат,
+`mypy`, Markdown links, `compileall` и `git diff --check` проходят. БД, Alembic,
+Docker, prompts, state-machine semantics и тестовые assertions не менялись.
+Следующий блок автоматически не назначается.
+
 ## Block 5R — Telegram presentation formatting
 
 Block 5R завершён механическим переносом `escape` и `format_number` из
@@ -105,7 +125,8 @@ Telegram update
 - `parsing/quantities.py` — короткие ответы количества и quantity primitives.
 - `parsing/packaging.py` — фасовка, диапазоны и catalog measurement parsing.
 - `parsing/comment_scope.py` — явная область общего комментария.
-- `services/text.py` — лексическая нормализация, единицы, числа и диапазоны.
+- `services/text.py` — transitional `to_float`; единицы, отделы, числительные,
+  диапазоны и overlap находятся в канонических domain/parsing/catalog/conversation owners.
 - `parsing/ai/schemas.py` — structured AI schemas без алгоритмов.
 - `parsing/ai/quantity_reconciliation.py` — reconciliation количеств, фасовки и диапазонов.
 - `parsing/ai/comment_reconciliation.py` — provenance и comment bindings.
@@ -373,6 +394,12 @@ Block 5N завершил механический перенос Telegram raw-u
 после repository-wide caller-аудита; `input_recognition.py` и остальные services
 не изменялись.
 
+Block 5S завершил controlled multi-seam decomposition `services/text.py`; текущий
+полный baseline — `1366 collected / 1366 passed`. `to_float` оставлен после
+отдельного caller-аудита, остальные symbols переведены в канонические owners,
+описанные в начале этого handoff и [`docs/SERVICES_TEXT_AUDIT.md`](docs/SERVICES_TEXT_AUDIT.md).
+Следующий блок не назначается автоматически.
+
 Block 5O выполнен как audit-only проверка `services/input_recognition.py` на SHA
 `9c19f784ef88a0721c8be99bb8cece80ae4ebfe4`. Полный MOVE класса в
 `input/recognition.py` не принят: внутри смешаны Telegram download/cleanup,
@@ -385,14 +412,15 @@ voice orchestration и tests сохранены по контракту. Пол�
 
 ## 12. Проверки
 
-Для Block 4 подтверждены focused catalog/resolver/supplier/AI suite `89 passed`
-и полный baseline `1362 collected / 1362 passed`. Также пройдены:
+Для Block 5S подтверждены focused seam-проверки и полный baseline
+`1366 collected / 1366 passed`. Также пройдены:
 
 ```text
 ruff check src tests
 ruff format --check <изменённые Python-файлы>
 mypy src
 python scripts/check_markdown_links.py
+python -m compileall -q src/restaurant_bot
 git diff --check
 ```
 
