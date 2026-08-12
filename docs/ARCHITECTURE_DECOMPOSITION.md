@@ -356,8 +356,8 @@ repository-wide scan подтверждает отсутствие старог�
 ConversationEngine и channel adapters. PostgreSQL, embeddings, индексы,
 миграции и Sheets sync в этом блоке не реализуются.
 
-`catalog/resolver.py` сохраняет существующие imports `services/comment_policy`
-и `services/text`. Это transitional residue для будущей очистки
+`catalog/resolver.py` импортирует `parsing/comment_policy` и `services/text`.
+Это transitional residue для будущей очистки
 parsing/conversation, а не дублирование алгоритмов. Audit catalog-модулей
 подтвердил отсутствие циклов, dead duplicate algorithms и зависимостей от
 engine/orchestrator/Telegram/Celery/Sheets. `engine.py` и `orchestrator.py`
@@ -417,21 +417,24 @@ services/conversation_handlers/comment_scope.py
   -> presentation/state handler, делегирующий core-операции
 ```
 
-`services/comment_policy.py` не переносился: он остаётся единым владельцем
-лексических и provenance-примитивов. Telegram-зависимые handlers, parser,
-matching, prompts и state-machine workflow не менялись. Все production callers
-переведены на новые owners; старые private engine methods удалены после audit.
-Сравнение старой и новой реализации на строковом и state corpus дало
-`MISMATCHES=0`, полный baseline — `1362 collected / 1362 passed`.
+В Block 5I `services/comment_policy.py` механически перенесён в
+`parsing/comment_policy.py`: туда перемещены три regex-константы и три public
+функции. Telegram-зависимые handlers, parser, matching, prompts и state-machine
+workflow не менялись. Все production callers переведены на новый owner, старый
+модуль удалён после повторного audit. Сравнение старой и новой реализации на
+лексическом corpus дало `MISMATCHES=0`, полный baseline —
+`1362 collected / 1362 passed`.
 
 ## 12. Порядок следующих миграций
 
 1. Conversation routing/state policy — Block 5A выполнен; граница проверена.
 2. Conversation draft и comments — Block 5B выполнен с caller/dead-code audit.
-3. Engine decomposition без изменения state-machine semantics.
-4. Input/channel-neutral boundary и application pipeline.
-5. Orders, submission, venues и внешние adapters.
-6. Только после контрактов уменьшать `engine.py` и `orchestrator.py`.
+3. Comment policy — Block 5I выполнен; новый seam до внешнего review не назначать.
+4. После external review выбрать следующий доказанный seam; `services/text.py` —
+   только кандидат, не начатый этап.
+5. Engine decomposition без изменения state-machine semantics.
+6. Input/channel-neutral boundary, orders, submission, venues и внешние adapters.
+7. Только после контрактов уменьшать `engine.py` и `orchestrator.py`.
 
 Порядок ориентировочный: фактические зависимости и подтверждённые контракты
 имеют приоритет. Catalog Block 4 уже принят и не является следующим этапом.

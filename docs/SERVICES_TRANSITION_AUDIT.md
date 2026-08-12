@@ -1,4 +1,4 @@
-# Block 5H — аудит переходного слоя services/
+# Аудит переходного слоя services/ и результат Block 5I
 
 ## Границы
 
@@ -7,12 +7,13 @@ d1eb9981e91a75a70931b4a3fd5b5e1dc6a8eec6. Рабочий код Python в это
 изменялся. Пакет services/ рассматривается по ADR-015 как переходный слой,
 а не как целевая архитектура. Вызовы проверены по src, tests, api, workers и
 cli.py; динамические границы проверены по orchestrator/tasks и callback-фасадам.
-Этот SHA обозначает исходную ревизию аудита; для следующего seam используется
-текущий подтверждённый SHA d8fbced775aeb0685a49e2ae52be53e74c1ecaf8.
+Этот SHA обозначает исходную ревизию аудита. d8fbced775aeb0685a49e2ae52be53e74c1ecaf8
+остаётся принятым audit baseline; фактический starting SHA Block 5I:
+1a6bf0da753976303b196c57f65a36316bc15685.
 
 ## Состав пакета
 
-Файлы верхнего уровня: catalog_resolver.py, comment_policy.py, engine.py, input_normalizer.py,
+Файлы верхнего уровня: catalog_resolver.py, engine.py, input_normalizer.py,
 input_recognition.py, matching.py, orchestrator.py, order_review.py, parser.py,
 product_add_flow.py, replies.py, submission_presenter.py, submission.py, text.py,
 venue_registration.py.
@@ -27,7 +28,7 @@ state_compatibility.py, __init__.py.
 |---|---|---|---|---|---|
 | catalog_resolver.py | Re-export catalog API; production callers нет, тестовый caller test_catalog_resolver.py | Только catalog; внешних эффектов нет | Compatibility facade | catalog.resolver / DELETE_CANDIDATE | P2 |
 | matching.py | Re-export catalog API и nearest_valid_multiple; production callers нет, только тестовые callers | Только core; мутаций нет | Compatibility facade | catalog/* и conversation quantity / DELETE_CANDIDATE | P2 |
-| comment_policy.py | Три чистые supplier-comment функции; callers: catalog, conversation, parsing, AI, engine | Parsing/evidence, внешних эффектов нет | Временный реальный владелец core | parsing/comment_policy.py / MOVE | P1 |
+| services/comment_policy.py | Удалён в Block 5I; до переноса callers: catalog, conversation, parsing, AI, engine | Чистая parsing/evidence policy, внешних эффектов нет | Удалён после audit | parsing/comment_policy.py / DONE | P1 |
 | engine.py | ConversationEngine: handle, routing, modal actions, duplicate/comment/product-add/submission preparation, catalog callers | Изменяет ConversationState/CartItem; строит replies | Смешанный координатор state-machine; catalog core перенесён в 5G | application/conversation и owners conversation / SPLIT | P4 |
 | input_normalizer.py | Telegram payload в TelegramEvent; callers: api и orchestrator | Связь с Telegram/raw update; внешних эффектов нет | Адаптер input | input/telegram.py / MOVE | P3 |
 | input_recognition.py | Скачивание файла, OpenAI voice/photo recognition, visible actions, progress | Telegram + provider + state-aware prompts и побочные progress effects | Смешанный input adapter | input/recognition и channel progress / SPLIT | P3 |
@@ -55,21 +56,23 @@ state_compatibility.py, __init__.py.
 Production-импорты из services:
 workers/tasks → orchestrator; api/app → input_normalizer; orchestrator → engine,
 input, order_review, parser, text, venue; engine → parser, product_add_flow,
-replies, submission, submission_presenter, comment_policy, handlers;
+replies, submission, submission_presenter, handlers;
 order_review → replies, text, venue; submission → replies, submission_presenter,
 text, venue; cli → venue_registration; openai_client → parser, text.
 
 Зависимости lower/core → services:
-catalog/resolver → comment_policy, text;
+catalog/resolver → parsing/comment_policy, text;
 catalog/evidence, scoring, safety → text;
 orders/catalog_resolution → text;
-conversation/comments, draft, selection, routing/item_resolution → comment_policy/text;
-parsing и parsing/ai → comment_policy/text;
+conversation/comments, draft, selection, routing/item_resolution → parsing/comment_policy/text;
+parsing и parsing/ai → parsing/comment_policy/text;
 integrations/google_sheets → text.
+parsing/comment_policy → services/text;
 
-Это не означает, что каждый импорт является отдельной ошибкой. text.py и
-comment_policy.py пока являются временными владельцами primitives. Прямая
-зависимость lower/core от services — главная причина следующего seam.
+Это не означает, что каждый импорт является отдельной ошибкой. `services/text.py`
+остаётся временным владельцем общих primitives, а `parsing/comment_policy.py`
+теперь является владельцем comment policy. Остаточная зависимость lower/core от
+services сохраняется только через text и требует отдельного audit.
 Зависимости presentation от старых services use cases допустимы до отдельного
 блока application/presentation.
 
@@ -84,18 +87,19 @@ comment_policy.py пока являются временными владель�
 Не переименовывать файл целиком в common/text.py: кластеры имеют разные owners и
 требуют отдельного caller audit.
 
-## Карта ответственности comment_policy.py
+## Карта ответственности parsing/comment_policy.py
 
 explicit_supplier_comment распознаёт явный маркер пожелания; supplier_comment_start
 находит начало подтверждённой инструкции; comment_semantic_key удаляет дубли
 инструкций. Это чистая parsing/evidence policy, не state и не UI. Дубликата тех же
 regex в conversation/comments, parsing/comment_scope и AI reconciliation не найдено.
-Следующий owner — parsing/comment_policy.py.
+Текущий implementation owner — parsing/comment_policy.py; собственного
+implementation в services больше нет.
 
-### Точный caller-аудит services/comment_policy.py
+### Точный caller-аудит до и после Block 5I
 
-Прямые production-импорты символов `services.comment_policy` проверены по
-рабочему дереву. Найдены пять lower/core-модулей:
+До MOVE прямые production-импорты символов `services.comment_policy` были
+проверены по рабочему дереву. Найдены пять lower/core-модулей:
 
 - `src/restaurant_bot/catalog/resolver.py` — `supplier_comment_start`;
 - `src/restaurant_bot/parsing/products.py` — `explicit_supplier_comment`;
@@ -111,6 +115,14 @@ lower/core caller, но входит в общий итог: шесть producti
 `tests/catalog/test_catalog_resolver.py` использует метод
 `CatalogResolver.split_explicit_supplier_comment`, а не `comment_policy`.
 Re-export и динамических callers для этого модуля не найдено.
+
+После MOVE повторный repository-wide поиск
+`restaurant_bot.services.comment_policy` по `src` и `tests` дал `0` импортов.
+Символы `explicit_supplier_comment`, `supplier_comment_start` и
+`comment_semantic_key` имеют единственного implementation owner:
+`src/restaurant_bot/parsing/comment_policy.py`. Все шесть production callers
+переведены на новый путь; test, dynamic и re-export callers старого пути равны
+нулю.
 
 ## Карта ответственности на уровне символов
 
@@ -143,25 +155,15 @@ state_compatibility.py также являются re-export только для
 
 ### СЕЙЧАС
 
-Сохранить текущие services adapters/facades и всех owners Block 5G. В этом audit
-перенос production-кода не выполняется.
+Сохранить текущие services adapters/facades и всех owners Block 5G. Block 5I
+выполнил только comment-policy seam; другие production-переносы не выполняются.
 
-### NEXT — ровно один code seam
+### NEXT — только после external review
 
-Механический перенос services/comment_policy.py в parsing/comment_policy.py:
-только explicit_supplier_comment, supplier_comment_start, comment_semantic_key и
-private regex/constants. Не входят services/text, conversation/comments,
-parsing/comment_scope, AI reconciliation, engine или orchestrator. Starting SHA
-следующего seam: d8fbced775aeb0685a49e2ae52be53e74c1ecaf8.
-
-Почему: это небольшой чистый owner с пятью lower/core production modules
-(catalog/resolver, parsing/products, parsing/packaging, conversation/comments,
-parsing/ai/comment_reconciliation) и отдельным transitional engine caller; он не
-имеет внешних эффектов и устраняет прямую зависимость catalog/conversation/parsing
-от transitional services без изменения state-machine. Regression corpus: comment
-provenance, product/packaging parsing, AI comment reconciliation, catalog safety,
-полный baseline 1362 passed, Ruff/mypy/Markdown/diff. Ожидаемый результат: ноль
-production imports services.comment_policy.
+Следующий code seam не назначен до external review. Наиболее вероятный кандидат
+по прошлому audit — targeted split services/text.py, но его нельзя считать
+утверждённым этапом и нельзя начинать без отдельного caller/duplicate audit.
+Block 5I стартовал с SHA 1a6bf0da753976303b196c57f65a36316bc15685.
 
 ### ПОЗДНЕЕ
 
@@ -172,10 +174,14 @@ reliability-sensitive orchestrator/submission/venue seams.
 ### ФИНАЛЬНАЯ ОЧИСТКА
 
 После доказанных переносов удалить obsolete facades catalog_resolver.py,
-matching.py и modal/state facades. Не удалять services искусственно: application
-coordinator, adapters и доказанные facades могут временно остаться.
+matching.py и modal/state facades. `services/comment_policy.py` уже удалён после
+нулевого caller-аудита. Не удалять services искусственно: application coordinator,
+adapters и доказанные facades могут временно остаться.
 
 ## Что намеренно не делалось
 
-Не менялись src/**/*.py, prompts, catalog thresholds, AI, callbacks, DB, Sheets,
-Docker, workers, tests и UX. Block 5G не переоткрывался; новый ADR не добавлялся.
+В Block 5I изменены только новый owner `parsing/comment_policy.py`, шесть
+production imports и удаление `services/comment_policy.py`. Алгоритмы callers,
+services/text.py, prompts, catalog thresholds, AI, callbacks, DB, Sheets, Docker,
+workers, tests и UX не менялись. Block 5G не переоткрывался; новый ADR не
+добавлялся.

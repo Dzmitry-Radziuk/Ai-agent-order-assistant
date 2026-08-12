@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 
 from restaurant_bot.domain.models import CommentSource, ExtractedItem
-from restaurant_bot.services.comment_policy import explicit_supplier_comment
+from restaurant_bot.parsing.comment_policy import explicit_supplier_comment
 from restaurant_bot.services.text import (
     clean_text,
     normalize_text,

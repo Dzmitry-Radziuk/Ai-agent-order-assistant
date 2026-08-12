@@ -11,7 +11,7 @@ from restaurant_bot.domain.models import (
     ExtractedItem,
     ItemStatus,
 )
-from restaurant_bot.services.comment_policy import comment_semantic_key
+from restaurant_bot.parsing.comment_policy import comment_semantic_key
 from restaurant_bot.services.text import (
     NUMBER_WORDS,
     UNIT_ALIASES,

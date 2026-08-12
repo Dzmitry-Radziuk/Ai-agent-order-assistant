@@ -212,8 +212,8 @@ seam, который позднее можно заменить searchable proje
 лексическими/full-text или `pg_trgm` индексами и, только после benchmark,
 `pgvector`, не меняя evidence, safety, ConversationEngine и channel adapters.
 Реализация PostgreSQL, индексов, embeddings, миграций и Sheets sync не входит
-в этот блок. `catalog/resolver.py` сохраняет существующие transitional imports
-`services/comment_policy` и `services/text`; это остаточная зависимость будущего
+в этот блок. `catalog/resolver.py` сохраняет transitional imports
+`parsing/comment_policy` и `services/text`; это остаточная зависимость будущего
 parsing/conversation cleanup, а не дублирующая реализация.
 Repository-wide audit подтвердил одного owner для catalog responsibilities,
 отсутствие циклов и workflow-изменений в engine/orchestrator; единственный
@@ -288,8 +288,9 @@ Block 5B выполняется как поведенчески нейтраль
 - `conversation/draft.py` — наличие активного черновика, поиск дублей и
   слияние только подтверждённых одинаковых строк.
 
-`services/comment_policy.py` остаётся единым владельцем лексических и
-provenance-примитивов. `services/conversation_handlers/comment_scope.py`
+`parsing/comment_policy.py` теперь является единым владельцем лексических и
+provenance-примитивов; старый `services/comment_policy.py` удалён после
+подтверждённого отсутствия callers. `services/conversation_handlers/comment_scope.py`
 сохраняет presentation/state handler и делегирует core-операции новым
 модулям. Две исторически разные семантики объединения комментариев сохранены:
 `merge_comments()` нормализует внутренние пробелы как прежний engine, а
@@ -306,11 +307,13 @@ channel boundary без изменения callback format и пользоват
 
 ## 11. Следующий функциональный блок
 
-Следующий code seam — механический перенос `services/comment_policy.py` в
-`parsing/comment_policy.py`: только три pure supplier-comment функции и их
-private regex/constants. Starting SHA этого seam: `d8fbced775aeb0685a49e2ae52be53e74c1ecaf8`.
-Production-код этого переноса ещё не начинать; scope, callers и regression corpus
-зафиксированы в `docs/SERVICES_TRANSITION_AUDIT.md`.
+Block 5I завершил механический перенос `services/comment_policy.py` в
+`parsing/comment_policy.py`: перенесены только три pure supplier-comment функции
+и их private regex/constants. Starting SHA блока:
+`1a6bf0da753976303b196c57f65a36316bc15685`.
+Старый модуль удалён после repository-wide audit; production/test imports старого
+пути отсутствуют. Следующий code seam до external review не назначать;
+`services/text.py` остаётся только предложенным кандидатом в отдельном обсуждении.
 
 ## 12. Проверки
 

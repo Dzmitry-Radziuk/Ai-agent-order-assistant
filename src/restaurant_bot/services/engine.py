@@ -72,8 +72,8 @@ from restaurant_bot.domain.models import (
 )
 from restaurant_bot.orders.catalog_resolution import CatalogResolutionService
 from restaurant_bot.orders.supplier_minimums import supplier_minimum_warnings
+from restaurant_bot.parsing.comment_policy import supplier_comment_start
 from restaurant_bot.parsing.quantities import has_explicit_order_quantity
-from restaurant_bot.services.comment_policy import supplier_comment_start
 from restaurant_bot.services.conversation_handlers.candidate_selection import (
     CandidateSelectionHandler,
 )

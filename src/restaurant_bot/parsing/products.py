@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 
 from restaurant_bot.domain.models import CommentSource, ExtractedItem
+from restaurant_bot.parsing.comment_policy import explicit_supplier_comment
 from restaurant_bot.parsing.packaging import (
     _is_compact_catalog_measurement,
     _is_packaging_reference_prefix,
@@ -12,7 +13,6 @@ from restaurant_bot.parsing.packaging import (
     _spoken_measurement_pair,
 )
 from restaurant_bot.parsing.quantities import _is_standalone_quantity
-from restaurant_bot.services.comment_policy import explicit_supplier_comment
 from restaurant_bot.services.text import (
     NUMBER_WORDS,
     UNIT_ALIASES,

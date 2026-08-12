@@ -66,13 +66,13 @@ flowchart LR
 | `parsing/quantities.py` | Короткие quantity primitives |
 | `parsing/packaging.py` | Фасовка и каталожные measurement spans |
 | `parsing/comment_scope.py` | Явная область общего комментария во входной товарной строке |
+| `parsing/comment_policy.py` | Единая policy явных пожеланий поставщику для детерминированного и AI-разбора |
 | `parsing/ai/schemas.py` | Declarative Pydantic-схемы structured output без алгоритмов |
 | `parsing/ai/quantity_reconciliation.py` | Проверка количества заказа, фасовки и диапазонов по source evidence |
 | `parsing/ai/comment_reconciliation.py` | Provenance, scope и comment bindings structured AI output |
 | `parsing/ai/item_reconciliation.py` | Source qualifier cleanup, omitted item и mixed-script recovery |
 | `parsing/ai/shadow_items.py` | Shadow projections, connector fragments и source variants |
 | `parsing/ai/reconciliation.py` | Сохраняемый порядок общей AI reconciliation pipeline |
-| `services/comment_policy.py` | Единая policy явных пожеланий поставщику для детерминированного и AI-разбора |
 | `catalog/resolver.py` | Область поиска поставщика, кандидаты и hard veto безопасного автосопоставления |
 | `conversation/selection.py` | Channel-neutral score, targeting позиции черновика и выбор кандидата без callback/transport contracts |
 | `conversation/routing/` | Channel-neutral contracts и StateCompatibilityPolicy, сгруппированные по item resolution, order/review и comment scope; modal routing остаётся агрегатором |
@@ -82,9 +82,10 @@ flowchart LR
 | `services/conversation_handlers/modal_routing.py` | Compatibility re-export facade для `conversation/routing/modal_routing.py` |
 | `services/conversation_handlers/state.py` | Compatibility re-export facade для `conversation/state/queries.py` |
 
-Полный audit transitional `services/`, callers и следующий migration seam
+Полный audit transitional `services/`, callers и выполненный migration seam
 зафиксированы в `docs/SERVICES_TRANSITION_AUDIT.md`. Production-код в audit-only
-блоке не изменяется.
+блоке не изменяется; `services/comment_policy.py` удалён после подтверждённого
+отсутствия callers.
 
 После Block 5B `conversation/comments.py` и `conversation/draft.py` являются
 единственными владельцами перечисленных core-операций. `comment_scope.py`
