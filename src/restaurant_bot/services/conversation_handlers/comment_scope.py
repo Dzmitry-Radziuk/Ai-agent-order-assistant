@@ -20,6 +20,7 @@ from restaurant_bot.domain.models import (
     ParsedCommand,
     SessionStage,
 )
+from restaurant_bot.presentation.telegram.pagination import CART_PAGE_SIZE
 from restaurant_bot.presentation.telegram.replies import (
     cart_reply,
     comment_scope_clarification_reply,
@@ -58,7 +59,7 @@ class CommentScopeHandler:
                 else SessionStage.COLLECTING
             )
             state.status = state.stage.value
-            normalize_cart_page(state)
+            normalize_cart_page(state, page_size=CART_PAGE_SIZE)
             return CommentScopeOutcome(
                 result=EngineResult(
                     state=state,

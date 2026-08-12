@@ -95,6 +95,7 @@ from restaurant_bot.parsing.number_words import NUMBER_WORDS
 from restaurant_bot.parsing.products import parse_product_lines
 from restaurant_bot.parsing.quantities import has_explicit_order_quantity
 from restaurant_bot.presentation.telegram.formatting import escape
+from restaurant_bot.presentation.telegram.pagination import CART_PAGE_SIZE
 from restaurant_bot.presentation.telegram.product_add import product_add_prompt
 from restaurant_bot.presentation.telegram.replies import (
     added_items_question_reply,
@@ -146,7 +147,7 @@ def cart_reply(
     notice: str = "",
 ) -> BotReply:
     """Нормализует страницу в state boundary и делегирует Telegram-рендеринг."""
-    normalize_cart_page(state)
+    normalize_cart_page(state, page_size=CART_PAGE_SIZE)
     return render_cart_reply(state, title=title, notice=notice)
 
 

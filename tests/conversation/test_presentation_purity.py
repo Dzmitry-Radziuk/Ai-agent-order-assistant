@@ -2,6 +2,7 @@ from copy import deepcopy
 
 from restaurant_bot.conversation.state.transitions import normalize_cart_page
 from restaurant_bot.domain.models import CartItem, ConversationState, ItemStatus
+from restaurant_bot.presentation.telegram.pagination import CART_PAGE_SIZE
 from restaurant_bot.presentation.telegram.replies import (
     cart_reply,
     final_review_reply,
@@ -49,5 +50,5 @@ def test_cart_page_is_normalized_by_state_owner() -> None:
         ],
     )
 
-    assert normalize_cart_page(state) == 0
+    assert normalize_cart_page(state, page_size=CART_PAGE_SIZE) == 0
     assert state.cart_page == 0

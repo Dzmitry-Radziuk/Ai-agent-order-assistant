@@ -9,6 +9,7 @@ from restaurant_bot.conversation.state.queries import (
     first_unresolved,
     item_index,
 )
+from restaurant_bot.conversation.state.transitions import normalize_final_review_page
 from restaurant_bot.domain.models import (
     ConversationState,
     EngineResult,
@@ -17,6 +18,7 @@ from restaurant_bot.domain.models import (
     ParsedCommand,
     SessionStage,
 )
+from restaurant_bot.presentation.telegram.pagination import FINAL_REVIEW_PAGE_SIZE
 from restaurant_bot.presentation.telegram.replies import (
     empty_draft_reply,
     final_review_reply,
@@ -63,6 +65,7 @@ class FinalReviewHandler:
             state.current_issue_kind = None
             if command.intent == Intent.SHOW_FINAL_REVIEW:
                 state.final_review_page = self._requested_page(command, state)
+            normalize_final_review_page(state, page_size=FINAL_REVIEW_PAGE_SIZE)
             state.stage = SessionStage.AWAIT_SUBMIT_CONFIRM
             return FinalReviewOutcome(
                 result=EngineResult(state=state, reply=final_review_reply(state))
@@ -97,9 +100,15 @@ class FinalReviewHandler:
             except ValueError:
                 return 0
             active_count = sum(item.status != ItemStatus.SKIPPED for item in state.cart)
-            total_pages = max(1, (active_count + 20 - 1) // 20)
+            total_pages = max(
+                1,
+                (active_count + FINAL_REVIEW_PAGE_SIZE - 1) // FINAL_REVIEW_PAGE_SIZE,
+            )
             return min(requested, total_pages - 1)
         requested = max(0, state.final_review_page)
         active_count = sum(item.status != ItemStatus.SKIPPED for item in state.cart)
-        total_pages = max(1, (active_count + 20 - 1) // 20)
+        total_pages = max(
+            1,
+            (active_count + FINAL_REVIEW_PAGE_SIZE - 1) // FINAL_REVIEW_PAGE_SIZE,
+        )
         return min(requested, total_pages - 1)

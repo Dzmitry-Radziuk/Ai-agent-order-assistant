@@ -33,6 +33,7 @@ from restaurant_bot.integrations.google_sheets import (
 )
 from restaurant_bot.integrations.telegram import TelegramAPIError, TelegramClient
 from restaurant_bot.presentation.telegram.formatting import escape
+from restaurant_bot.presentation.telegram.pagination import CART_PAGE_SIZE
 from restaurant_bot.presentation.telegram.replies import cart_reply
 from restaurant_bot.presentation.telegram.submission import (
     _callback_with_revision,
@@ -946,7 +947,7 @@ class SubmissionService:
             lease.ensure_owned()
 
         state.ui_revision += 1
-        normalize_cart_page(state)
+        normalize_cart_page(state, page_size=CART_PAGE_SIZE)
         draft = cart_reply(state)
         suffix = f":r{state.ui_revision}"
         for row in draft.rows:

@@ -15,6 +15,11 @@ from restaurant_bot.domain.units import normalize_unit
 from restaurant_bot.orders.package_suggestions import package_count_suggestion
 from restaurant_bot.orders.supplier_minimums import supplier_minimum_warnings
 from restaurant_bot.presentation.telegram.formatting import escape, format_number
+from restaurant_bot.presentation.telegram.pagination import (
+    CART_PAGE_SIZE,
+    FINAL_REVIEW_PAGE_SIZE,
+    page_count,
+)
 
 ISSUE_STATUSES = {
     ItemStatus.DUPLICATE_PENDING,
@@ -407,10 +412,6 @@ def product_add_requests_reply(state: ConversationState) -> BotReply:
     return BotReply(text="\n".join(lines), rows=rows)
 
 
-_CART_PAGE_SIZE = 20
-_FINAL_REVIEW_PAGE_SIZE = 20
-
-
 def cart_reply(
     state: ConversationState,
     title: str = "Черновик заявки",
@@ -420,11 +421,11 @@ def cart_reply(
     items = _active_items(state)
     issues = [item for item in items if item.status in ISSUE_STATUSES]
     ready = [item for item in items if item.status not in ISSUE_STATUSES]
-    paginated = len(items) > _CART_PAGE_SIZE
-    total_pages = max(1, (len(items) + _CART_PAGE_SIZE - 1) // _CART_PAGE_SIZE)
+    paginated = len(items) > CART_PAGE_SIZE
+    total_pages = page_count(len(items), CART_PAGE_SIZE)
     page = min(max(0, state.cart_page), total_pages - 1)
     if paginated:
-        page_items = (ready + issues)[page * _CART_PAGE_SIZE : (page + 1) * _CART_PAGE_SIZE]
+        page_items = (ready + issues)[page * CART_PAGE_SIZE : (page + 1) * CART_PAGE_SIZE]
         page_ready = [item for item in page_items if item.status not in ISSUE_STATUSES]
         page_issues = [item for item in page_items if item.status in ISSUE_STATUSES]
     else:
@@ -743,16 +744,16 @@ def issue_reply(item: CartItem, item_index: int | None = None) -> BotReply:
 def final_review_reply(state: ConversationState) -> BotReply:
     """Формирует карточку финальной проверки."""
     items = _active_items(state)
-    total_pages = max(1, (len(items) + _FINAL_REVIEW_PAGE_SIZE - 1) // _FINAL_REVIEW_PAGE_SIZE)
+    total_pages = page_count(len(items), FINAL_REVIEW_PAGE_SIZE)
     page = min(max(0, state.final_review_page), total_pages - 1)
-    page_items = items[page * _FINAL_REVIEW_PAGE_SIZE : (page + 1) * _FINAL_REVIEW_PAGE_SIZE]
+    page_items = items[page * FINAL_REVIEW_PAGE_SIZE : (page + 1) * FINAL_REVIEW_PAGE_SIZE]
     paginated = total_pages > 1
     lines = ["📦 <b>Финальная проверка</b>", ""]
     if paginated:
         lines.extend([f"Страница {page + 1} из {total_pages}", ""])
     for index, item in enumerate(
         page_items,
-        start=page * _FINAL_REVIEW_PAGE_SIZE + 1,
+        start=page * FINAL_REVIEW_PAGE_SIZE + 1,
     ):
         lines.append(
             f"{index}. {escape(_item_name(item))} — {format_number(item.quantity)} {escape(_item_unit(item) or 'шт')}"

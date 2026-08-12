@@ -17,6 +17,7 @@ from restaurant_bot.domain.models import (
     EngineResult,
     ParsedCommand,
 )
+from restaurant_bot.presentation.telegram.pagination import CART_PAGE_SIZE
 from restaurant_bot.presentation.telegram.replies import cart_reply, issue_reply
 
 
@@ -48,7 +49,7 @@ class CandidateSelectionHandler:
             selection_query=command.selection_query,
         )
         if selection.failure is SelectionFailure.NO_CURRENT_ITEM:
-            normalize_cart_page(state)
+            normalize_cart_page(state, page_size=CART_PAGE_SIZE)
             return CandidateSelectionOutcome(
                 result=EngineResult(state=state, reply=cart_reply(state))
             )
