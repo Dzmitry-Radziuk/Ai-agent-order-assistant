@@ -17,14 +17,15 @@ orchestrator. Порядок callback/text/media, StateCompatibilityPolicy,
 `1377 collected / 1377 passed`; focused input/routing: `444 passed`.
 Коммит extraction: `c6feeb7`.
 
-### Следующая кампания (не начинать)
+### Текущий фокус — Block 6C
 
-Единственная следующая кампания — **BLOCK 6C — STABILIZATION / REALISTIC SMOKE /
-ACCEPTANCE PREP** (сначала plan-only). Block 6B подтвердил, что после 6A нет
-достаточно зрелого низкорискового implementation seam: analytics и voice wrappers
-остаются compatibility-границами, processing UI и UI revision связаны с timing и
-checkpoint, review/venue/catalog/durable protocol защищены. Production decomposition
-до отдельного одобрения не начинать.
+Архитектурная декомпозиция завершена. Block 6C переключил цель на стабилизацию,
+проверку пользовательского поведения и acceptance readiness без нового refactor.
+Актуальный отчёт: [`docs/TESTING_READINESS.md`](docs/TESTING_READINESS.md).
+Единственный verdict: `READY_FOR_MANUAL_TESTING_WITH_KNOWN_NONBLOCKERS`.
+Известные nonblockers: live ASR/vision/Telegram smoke и отдельные realistic
+characterization tests для удаления всех комментариев и коррекции «не X, а Y».
+Новая архитектурная декомпозиция и history implementation не начинать.
 
 ## POST-6A REASSESSMENT / BLOCK 6B
 

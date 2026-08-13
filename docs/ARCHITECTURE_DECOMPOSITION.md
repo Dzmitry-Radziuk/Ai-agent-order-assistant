@@ -23,6 +23,11 @@ STABILIZATION / REALISTIC SMOKE / ACCEPTANCE PREP`, без нового producti
 The current `UpdateOrchestrator` audit and the single candidate input-boundary
 campaign are documented in [`UPDATE_ORCHESTRATOR_AUDIT.md`](UPDATE_ORCHESTRATOR_AUDIT.md).
 
+Декомпозиция на этом этапе завершена. Block 6C занимается только стабилизацией
+и readiness; текущая матрица каналов и acceptance находится в
+[`TESTING_READINESS.md`](TESTING_READINESS.md). Новые слои и переносы не
+создаются без доказанного P0/P1 blocker.
+
 Block 5Y завершил поведенчески нейтральный перенос draft mutations, comment
 operations, progression rendering и transient reset. Свежий полный baseline:
 `1377 collected / 1377 passed`. Канонические owners: `conversation/draft_actions.py`

@@ -14,6 +14,10 @@ Sheets, catalog cache, engine, review, registration, checkpoint или task
 выбрал `ORCHESTRATOR_DECOMPOSITION_SUFFICIENT`; следующая кампания —
 `BLOCK 6C — STABILIZATION / REALISTIC SMOKE / ACCEPTANCE PREP`.
 
+Block 6C переключил текущий фокус с decomposition на testing readiness. Текущий
+отчёт находится в [`docs/TESTING_READINESS.md`](../docs/TESTING_READINESS.md):
+full suite `1377/1377`, verdict `READY_FOR_MANUAL_TESTING_WITH_KNOWN_NONBLOCKERS`.
+
 ## Current architecture after Block 5Y
 
 Detailed current `UpdateOrchestrator` forensic inventory is maintained in
