@@ -13,17 +13,14 @@ from restaurant_bot.db_models import VenueBinding
 from restaurant_bot.domain.models import BotReply, TelegramEvent
 from restaurant_bot.input.telegram_venue_registration import registration_input
 from restaurant_bot.integrations.google_sheets import GoogleSheetsGateway
-from restaurant_bot.integrations.venue_access_registry import (  # noqa: F401
-    VenueAccessEntry,
-    VenueAccessRegistry,
+from restaurant_bot.integrations.venue_access_registry import (
+    VenueAccessRegistry as _VenueAccessRegistry,
 )
 from restaurant_bot.integrations.venue_directory import (
-    Venue,
-    VenueDirectory,
-    VenueDirectoryError,
-    extract_spreadsheet_id,  # noqa: F401
-    normalize_code,
-    valid_code,
+    VenueDirectory as _VenueDirectory,
+)
+from restaurant_bot.integrations.venue_directory import (
+    VenueDirectoryError as _VenueDirectoryError,
 )
 from restaurant_bot.presentation.telegram.venue_registration import (
     access_disabled_reply,
@@ -41,6 +38,8 @@ from restaurant_bot.presentation.telegram.venue_registration import (
 )
 from restaurant_bot.repositories.venue_bindings import VenueBindingRepository
 from restaurant_bot.text_normalization import clean_text, normalize_text
+from restaurant_bot.venues.codes import normalize_code, valid_code
+from restaurant_bot.venues.contracts import Venue as _Venue
 
 logger = structlog.get_logger(__name__)
 
@@ -75,14 +74,14 @@ class VenueRegistrationService:
         settings: Settings,
         redis: Redis[Any],
         sheets: GoogleSheetsGateway,
-        directory: VenueDirectory | None = None,
+        directory: _VenueDirectory | None = None,
     ):
         """Инициализирует компонент."""
         self.settings = settings
         self.redis = redis
         self.sheets = sheets
-        self.directory = directory or VenueDirectory(settings, redis)
-        self.access_registry = VenueAccessRegistry(settings, redis, sheets)
+        self.directory = directory or _VenueDirectory(settings, redis)
+        self.access_registry = _VenueAccessRegistry(settings, redis, sheets)
 
     def context_for(self, event: TelegramEvent) -> VenueContext | None:
         """Возвращает активный контекст заведения пользователя."""
@@ -139,7 +138,7 @@ class VenueRegistrationService:
 
     def bootstrap_existing_bindings(self) -> int:
         """Импортирует действующие привязки из старого реестра."""
-        venues_by_code: dict[str, list[Venue]] = {}
+        venues_by_code: dict[str, list[_Venue]] = {}
         for venue in self.directory.all(force_refresh=True):
             venues_by_code.setdefault(venue.code, []).append(venue)
         imported = 0
@@ -204,7 +203,7 @@ class VenueRegistrationService:
                 )
             return RegistrationResult(handled=True, reply=self.denied_reply(event))
         if not code or not valid_code(code):
-            return RegistrationResult(handled=True, reply=self.not_bound_reply())
+            return RegistrationResult(handled=True, reply=not_bound_reply())
 
         venue_result = self._lookup(code, event)
         if isinstance(venue_result, BotReply):
@@ -219,14 +218,14 @@ class VenueRegistrationService:
         if action in {"confirm", "switch_confirm"}:
             return self._bind(event, venue, current)
         logger.info("venue_confirmation_shown", venue_code=venue.code)
-        return RegistrationResult(handled=True, reply=self._confirmation(venue))
+        return RegistrationResult(handled=True, reply=confirmation(venue))
 
-    def _lookup(self, code: str, event: TelegramEvent) -> Venue | BotReply:
+    def _lookup(self, code: str, event: TelegramEvent) -> _Venue | BotReply:
         """Находит единственное заведение по коду приглашения."""
         normalized_code = normalize_code(code)
         try:
             matches = self.directory.find(normalized_code)
-        except VenueDirectoryError:
+        except _VenueDirectoryError:
             logger.exception("venue_directory_read_failed", chat_id=event.chat_id)
             return directory_error_reply()
         if not matches:
@@ -238,7 +237,7 @@ class VenueRegistrationService:
         return matches[0]
 
     def _bind(
-        self, event: TelegramEvent, venue: Venue, previous: VenueContext | None
+        self, event: TelegramEvent, venue: _Venue, previous: VenueContext | None
     ) -> RegistrationResult:
         """Создаёт или обновляет привязку к заведению."""
         if self._revoked_for_venue(event, venue.code):
@@ -323,13 +322,8 @@ class VenueRegistrationService:
                     event.chat_id,
                 )
             if revoked is not None:
-                return self.access_disabled_reply()
-        return self.not_bound_reply()
-
-    @staticmethod
-    def access_disabled_reply() -> BotReply:
-        """Сообщает пользователю об отключённом доступе."""
-        return access_disabled_reply()
+                return access_disabled_reply()
+        return not_bound_reply()
 
     @staticmethod
     def _revoked_for_venue(event: TelegramEvent, venue_code: str) -> bool:
@@ -366,26 +360,6 @@ class VenueRegistrationService:
             "spreadsheet_url": binding.spreadsheet_url or "",
             "updated_at": now,
         }
-
-    @staticmethod
-    def _confirmation(venue: Venue) -> BotReply:
-        """Формирует карточку подтверждения заведения."""
-        return confirmation(venue)
-
-    @staticmethod
-    def _registration_input(event: TelegramEvent) -> tuple[str, str]:
-        """Сохраняет совместимый фасад разбора регистрации."""
-        return registration_input(event)
-
-    @staticmethod
-    def _switch_confirmation(current: VenueContext, venue: Venue) -> BotReply:
-        """Формирует подтверждение смены заведения."""
-        return switch_confirmation(current.venue_name, venue)
-
-    @staticmethod
-    def not_bound_reply() -> BotReply:
-        """Формирует инструкцию для непривязанного пользователя."""
-        return not_bound_reply()
 
     @staticmethod
     def _context(row: VenueBinding | None) -> VenueContext | None:

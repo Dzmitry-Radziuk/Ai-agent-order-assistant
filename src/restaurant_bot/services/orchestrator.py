@@ -62,10 +62,12 @@ from restaurant_bot.integrations.cache import (
 )
 from restaurant_bot.integrations.google_sheets import GoogleSheetsGateway
 from restaurant_bot.integrations.openai_client import OpenAIService
+from restaurant_bot.integrations.openai_transcription_policy import has_distinct_models
 from restaurant_bot.integrations.telegram import TELEGRAM_TRANSIENT_ERRORS, TelegramClient
 from restaurant_bot.logging import sanitize_log_value
 from restaurant_bot.parsing.commands.api import enrich_command, infer_intent
 from restaurant_bot.presentation.telegram.order_review import preview_reply
+from restaurant_bot.presentation.telegram.venue_registration import not_bound_reply
 from restaurant_bot.repositories.order_events import OrderEventRepository
 from restaurant_bot.repositories.sessions import SessionRepository
 from restaurant_bot.repositories.updates import (
@@ -1215,7 +1217,7 @@ class UpdateOrchestrator:
         state = ConversationState() if registration.reset_session else current
         if registration.context:
             self._apply_venue_context(state, registration.context)
-        reply = registration.reply or VenueRegistrationService.not_bound_reply()
+        reply = registration.reply or not_bound_reply()
         if event.input_type == InputKind.CALLBACK and event.callback_message_id:
             reply.edit_message_id = event.callback_message_id
         state.ui_revision += 1
@@ -1583,7 +1585,7 @@ class UpdateOrchestrator:
 
     def _has_distinct_transcription_fallback(self) -> bool:
         """Разрешает повтор только при реально отличающейся модели."""
-        return InputRecognitionService.has_distinct_models(self.openai)
+        return has_distinct_models(self.openai)
 
     @staticmethod
     def _attach_ui_revision(reply: BotReply, revision: int) -> None:

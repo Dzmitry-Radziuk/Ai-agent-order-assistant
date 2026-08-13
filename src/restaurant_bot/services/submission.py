@@ -50,6 +50,7 @@ from restaurant_bot.presentation.telegram.submission import (
     submission_recalculation_uncertain_reply,
     submission_success_reply,
 )
+from restaurant_bot.presentation.telegram.venue_registration import access_disabled_reply
 from restaurant_bot.repositories.order_events import OrderEventRepository
 from restaurant_bot.repositories.sessions import SessionRepository
 from restaurant_bot.repositories.submissions import SubmissionRepository
@@ -1072,7 +1073,7 @@ class SubmissionService:
         """Отправляет единый ответ об отзыве доступа."""
         self.telegram.send_reply(
             chat_id,
-            VenueRegistrationService.access_disabled_reply(),
+            access_disabled_reply(),
         )
 
     def _load_pending(self, chat_id: str) -> PendingSubmission | None:

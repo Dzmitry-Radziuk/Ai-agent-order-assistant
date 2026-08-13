@@ -20,6 +20,7 @@ from restaurant_bot.presentation.telegram.order_review import (
     submission_failure_reply,
     submission_success_reply,
 )
+from restaurant_bot.presentation.telegram.venue_registration import access_disabled_reply
 from restaurant_bot.repositories.sessions import SessionRepository
 from restaurant_bot.services.venue_registration import VenueContext, VenueRegistrationService
 
@@ -76,7 +77,7 @@ class OrderReviewService:
                     lease.ensure_owned()
                 self.telegram.send_reply(
                     chat_id,
-                    self.registration.access_disabled_reply(),
+                    access_disabled_reply(),
                 )
                 return
             current = self.snapshot(context)

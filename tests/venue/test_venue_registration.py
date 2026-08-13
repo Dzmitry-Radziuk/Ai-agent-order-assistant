@@ -10,17 +10,20 @@ import httpx
 import pytest
 
 from restaurant_bot.domain.models import InputKind, TelegramEvent
-from restaurant_bot.services import venue_registration as registration_module
-from restaurant_bot.services.venue_registration import (
-    Venue,
-    VenueAccessRegistry,
-    VenueContext,
+from restaurant_bot.integrations.venue_access_registry import VenueAccessRegistry
+from restaurant_bot.integrations.venue_directory import (
     VenueDirectory,
     VenueDirectoryError,
-    VenueRegistrationService,
     extract_spreadsheet_id,
-    valid_code,
 )
+from restaurant_bot.presentation.telegram.venue_registration import not_bound_reply
+from restaurant_bot.services import venue_registration as registration_module
+from restaurant_bot.services.venue_registration import (
+    VenueContext,
+    VenueRegistrationService,
+)
+from restaurant_bot.venues.codes import valid_code
+from restaurant_bot.venues.contracts import Venue
 
 
 def _event(text: str = "", *, callback: str = "", chat_type: str = "private") -> TelegramEvent:
@@ -65,7 +68,7 @@ class _Service(VenueRegistrationService):
     def denied_reply(self, event: TelegramEvent):  # type: ignore[no-untyped-def]
         """Возвращает ответ для пользователя без тестового обращения к БД."""
         del event
-        return self.not_bound_reply()
+        return not_bound_reply()
 
 
 def _service(settings, matches: list[Venue]) -> _Service:  # type: ignore[no-untyped-def]

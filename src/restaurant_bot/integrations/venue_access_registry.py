@@ -11,8 +11,9 @@ from redis import Redis
 
 from restaurant_bot.config import Settings
 from restaurant_bot.integrations.google_sheets import GoogleSheetsGateway
-from restaurant_bot.integrations.venue_directory import VenueDirectoryError, normalize_code
+from restaurant_bot.integrations.venue_directory import VenueDirectoryError
 from restaurant_bot.text_normalization import clean_text, normalize_text
+from restaurant_bot.venues.codes import normalize_code
 
 logger = structlog.get_logger(__name__)
 

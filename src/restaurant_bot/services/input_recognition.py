@@ -18,7 +18,6 @@ from restaurant_bot.domain.models import (
     TelegramEvent,
 )
 from restaurant_bot.input.voice_policy import (
-    has_distinct_models,
     match_visible_action,
     requires_high_accuracy_transcription,
     voice_transcription_prompt,
@@ -28,6 +27,7 @@ from restaurant_bot.input.voice_transcript_policy import (
     select_transcription_result,
 )
 from restaurant_bot.integrations.openai_client import OpenAIService
+from restaurant_bot.integrations.openai_transcription_policy import has_distinct_models
 from restaurant_bot.integrations.telegram import TelegramClient
 
 logger = structlog.get_logger(__name__)
@@ -193,9 +193,4 @@ class InputRecognitionService:
 
     def has_distinct_transcription_fallback(self) -> bool:
         """Разрешает повтор только при реально отличающейся модели."""
-        return self.has_distinct_models(self.openai)
-
-    @staticmethod
-    def has_distinct_models(openai_service: object) -> bool:
-        """Сравнивает основную и уточняющую модели распознавания."""
-        return has_distinct_models(openai_service)
+        return has_distinct_models(self.openai)

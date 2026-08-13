@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import re
-from dataclasses import asdict, dataclass
+from dataclasses import asdict
 from typing import Any, ClassVar, cast
 from urllib.parse import urlencode
 
@@ -13,32 +13,12 @@ from redis import Redis
 
 from restaurant_bot.config import Settings
 from restaurant_bot.text_normalization import clean_text, normalize_text
+from restaurant_bot.venues.codes import normalize_code
+from restaurant_bot.venues.contracts import Venue
 
 
 class VenueDirectoryError(RuntimeError):
     """Сообщает об ошибке справочника заведений."""
-
-
-@dataclass(slots=True, frozen=True)
-class Venue:
-    """Описывает заведение из центрального справочника."""
-
-    code: str
-    name: str
-    legal_name: str
-    spreadsheet_id: str
-    spreadsheet_url: str
-
-
-def normalize_code(value: str) -> str:
-    """Нормализует код приглашения."""
-    return clean_text(value).upper()
-
-
-def valid_code(value: str) -> bool:
-    """Проверяет формат кода приглашения."""
-    code = normalize_code(value)
-    return bool(re.fullmatch(r"[A-ZА-ЯЁ0-9]{4,32}", code) and re.search(r"\d", code))
 
 
 def extract_spreadsheet_id(value: str) -> str:

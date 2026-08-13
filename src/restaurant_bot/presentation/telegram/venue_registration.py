@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 from restaurant_bot.domain.models import BotReply, Button
-from restaurant_bot.integrations.venue_directory import Venue
 from restaurant_bot.presentation.telegram.formatting import escape
+from restaurant_bot.venues.contracts import Venue
 
 
 def new_order_button() -> list[list[Button]]:
