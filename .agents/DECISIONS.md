@@ -160,6 +160,25 @@
   `.agents/PROJECT_MAP.md`, `docs/ARCHITECTURE_DECOMPOSITION.md` и текущие
   compatibility wrappers в `services/engine.py`.
 
+### ADR-016 — Общий conversation вход и результат
+
+- Дата: 2026-08-13.
+- Статус: действует.
+- Контекст: будущие MAX/Web/REST адаптеры не должны конструировать Telegram
+  payload для запуска общего диалога.
+- Решение: `application/conversation/contracts.py` владеет
+  `ConversationInput`, `ConversationResult`, `ConversationView`, семантическими
+  действиями и планом эффектов. Канальный adapter переводит свой payload в этот
+  вход, а renderer переводит результат в UI канала. Telegram callback encoding,
+  durable update delivery и side-effect checkpoints остаются на Telegram boundary.
+- Последствия: новый канал может переиспользовать parsing/state/catalog/order
+  правила через `ConversationApplication`; legacy `ConversationEngine` и
+  `BotReply` остаются protected compatibility bridge до отдельного proof
+  checkpoint, без копирования бизнес-правил.
+- Реализация: `application/conversation/`, `input/telegram.py`,
+  `presentation/telegram/conversation.py`,
+  `tests/application/test_conversation_application.py`.
+
 ## Шаблон новой записи
 
 ```markdown
