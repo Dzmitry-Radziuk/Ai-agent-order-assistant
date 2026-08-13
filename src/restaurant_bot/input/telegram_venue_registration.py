@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 
 from restaurant_bot.domain.models import TelegramEvent
-from restaurant_bot.text_normalization import clean_text
+from restaurant_bot.domain.text import clean_text
 from restaurant_bot.venues.codes import valid_code
 
 

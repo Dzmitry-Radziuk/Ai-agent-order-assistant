@@ -10,9 +10,9 @@ from fastapi import FastAPI, Header, HTTPException, Response, status
 from redis import Redis
 
 from restaurant_bot.config import get_settings
-from restaurant_bot.db import SessionLocal
 from restaurant_bot.input.telegram import normalize_telegram_update
-from restaurant_bot.logging import configure_logging
+from restaurant_bot.observability import configure_logging
+from restaurant_bot.persistence.database import SessionLocal
 from restaurant_bot.repositories.updates import UpdateRepository
 
 settings = get_settings()

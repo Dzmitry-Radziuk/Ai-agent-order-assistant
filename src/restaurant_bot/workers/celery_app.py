@@ -4,7 +4,7 @@ from celery import Celery
 from celery.schedules import crontab
 
 from restaurant_bot.config import get_settings
-from restaurant_bot.logging import configure_logging
+from restaurant_bot.observability import configure_logging
 
 settings = get_settings()
 configure_logging(

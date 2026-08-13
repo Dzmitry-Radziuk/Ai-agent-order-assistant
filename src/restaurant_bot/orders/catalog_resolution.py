@@ -11,6 +11,7 @@ from restaurant_bot.catalog.evidence import (
 )
 from restaurant_bot.catalog.resolver import CatalogDecision, CatalogResolver
 from restaurant_bot.catalog.safety import has_compatible_numeric_characteristics
+from restaurant_bot.catalog.search import CatalogSearch, ListCatalogSearch
 from restaurant_bot.conversation.comments import (
     merge_comments,
     remove_catalog_fact_comments,
@@ -26,6 +27,7 @@ from restaurant_bot.domain.models import (
     ItemStatus,
     SearchScope,
 )
+from restaurant_bot.domain.text import normalize_text
 from restaurant_bot.domain.units import UNIT_ALIASES, normalize_unit
 from restaurant_bot.parsing.numeric_ranges import numeric_range_spans
 from restaurant_bot.parsing.products import parse_product_lines
@@ -34,7 +36,6 @@ from restaurant_bot.parsing.quantities import (
     has_explicit_order_quantity,
     parse_quantity_unit,
 )
-from restaurant_bot.text_normalization import normalize_text
 
 
 class CatalogResolutionService:
@@ -47,17 +48,19 @@ class CatalogResolutionService:
     def match_item(
         self,
         item: CartItem,
-        catalog: list[CatalogProduct],
+        catalog: list[CatalogProduct] | None = None,
         search_scope: SearchScope | None = None,
+        *,
+        catalog_search: CatalogSearch | None = None,
     ) -> None:
         """Ищет кандидатов и применяет безопасное решение к позиции."""
+        search_backend = catalog_search or ListCatalogSearch(self.catalog_resolver, catalog or ())
         self._remove_unanchored_supplier_hint(item)
         search_query = remove_phrase_overlap(item.source_query, item.comment)
-        search = self.catalog_resolver.search(
+        search = search_backend.search(
             search_query,
-            catalog,
-            item.supplier_hint,
-            search_scope,
+            supplier_hint=item.supplier_hint,
+            search_scope=search_scope,
         )
         candidates = list(search.candidates)
         packaging_measurement = self._catalog_packaging_measurement(item, candidates)
@@ -83,11 +86,10 @@ class CatalogResolutionService:
                 item.comment_source = CommentSource.EXPLICIT_MARKER
                 item.source_query = split.product_query
                 search_query = remove_phrase_overlap(item.source_query, item.comment)
-                search = self.catalog_resolver.search(
+                search = search_backend.search(
                     search_query,
-                    catalog,
-                    item.supplier_hint,
-                    search_scope,
+                    supplier_hint=item.supplier_hint,
+                    search_scope=search_scope,
                 )
                 candidates = list(search.candidates)
                 item.candidates = candidates
@@ -124,16 +126,22 @@ class CatalogResolutionService:
         if decision is CatalogDecision.CLARIFY:
             item.status = ItemStatus.AMBIGUOUS
             return
-        self.apply_catalog(item, candidates[0], catalog)
+        self.apply_catalog(item, candidates[0], catalog, catalog_search=search_backend)
 
     def apply_catalog(
         self,
         item: CartItem,
         candidate: Candidate,
-        catalog: list[CatalogProduct],
+        catalog: list[CatalogProduct] | None = None,
+        *,
+        catalog_search: CatalogSearch | None = None,
     ) -> None:
         """Записывает поля каталога и итоговый статус в позицию."""
-        product = self.catalog_resolver.product_for(candidate, catalog)
+        product = (
+            catalog_search.product_for(candidate)
+            if catalog_search is not None
+            else self.catalog_resolver.product_for(candidate, catalog or [])
+        )
         if product is None:
             item.status = ItemStatus.NOT_FOUND
             return

@@ -8,9 +8,9 @@ from enum import StrEnum
 from restaurant_bot.conversation.comments import prune_pending_comment_item_ids
 from restaurant_bot.conversation.selection import contains_score, find_cart_item
 from restaurant_bot.domain.models import ConversationState, ItemStatus, ParsedCommand
+from restaurant_bot.domain.text import normalize_text
 from restaurant_bot.domain.units import normalize_unit
 from restaurant_bot.parsing.commands.item_commands import clean_command_target
-from restaurant_bot.text_normalization import normalize_text
 
 
 class DraftActionOutcome(StrEnum):

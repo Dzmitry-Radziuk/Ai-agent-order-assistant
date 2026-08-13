@@ -7,7 +7,7 @@ from sqlalchemy import engine_from_config, make_url, pool
 from alembic import context
 from restaurant_bot import db_models  # noqa: F401
 from restaurant_bot.config import get_settings
-from restaurant_bot.db import Base
+from restaurant_bot.persistence.database import Base
 
 config = context.config
 if config.config_file_name is not None:

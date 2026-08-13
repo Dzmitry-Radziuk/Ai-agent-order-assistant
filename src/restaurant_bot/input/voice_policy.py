@@ -6,10 +6,10 @@ import re
 
 from restaurant_bot.conversation.selection import contains_score
 from restaurant_bot.domain.models import ConversationState, Intent, ItemStatus, SessionStage
+from restaurant_bot.domain.text import normalize_text
 from restaurant_bot.domain.units import normalize_unit
 from restaurant_bot.parsing.commands.api import infer_intent
 from restaurant_bot.parsing.quantities import parse_quantity_unit
-from restaurant_bot.text_normalization import normalize_text
 
 
 def match_visible_action(text: str, state: ConversationState) -> str:

@@ -151,8 +151,8 @@ def configure_logging(
         level=normalized_level,
         force=True,
     )
-    # httpx includes the full request URL in its INFO access records. Telegram
-    # encodes the bot token in that URL, so those records must never reach logs.
+    # httpx пишет полный URL запроса на уровне INFO; Telegram передаёт в URL
+    # токен бота, поэтому такие записи не должны попадать в журнал.
     logging.getLogger("httpx").setLevel(logging.WARNING)
     logging.getLogger("httpcore").setLevel(logging.WARNING)
     structlog.configure(

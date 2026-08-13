@@ -13,13 +13,13 @@ from restaurant_bot.domain.models import (
     Intent,
     ParsedCommand,
 )
+from restaurant_bot.domain.text import normalize_text
 from restaurant_bot.presentation.telegram.replies import (
     help_reply,
     small_talk_reply,
     thanks_reply,
     welcome_reply,
 )
-from restaurant_bot.text_normalization import normalize_text
 
 ReplyBuilder = Callable[[ConversationState], BotReply]
 

@@ -7,6 +7,7 @@ from difflib import SequenceMatcher
 from typing import Any
 
 from restaurant_bot.domain.models import CommentSource, ExtractedItem, ParsedCommand
+from restaurant_bot.domain.text import clean_text, normalize_text
 from restaurant_bot.domain.units import UNIT_ALIASES
 from restaurant_bot.parsing.ai.comment_reconciliation import (
     _append_local_item_comment,
@@ -15,7 +16,6 @@ from restaurant_bot.parsing.ai.comment_reconciliation import (
 from restaurant_bot.parsing.number_words import NUMBER_WORDS
 from restaurant_bot.parsing.numeric import to_float
 from restaurant_bot.parsing.products import parse_product_lines
-from restaurant_bot.text_normalization import clean_text, normalize_text
 
 _MIXED_SCRIPT_TOKEN_RE = re.compile(r"[A-Za-zА-Яа-яЁё]+")
 

@@ -1,6 +1,6 @@
 import logging
 
-from restaurant_bot.logging import configure_logging, sanitize_log_value
+from restaurant_bot.observability import configure_logging, sanitize_log_value
 
 
 def test_http_client_logs_are_suppressed_to_protect_telegram_token() -> None:

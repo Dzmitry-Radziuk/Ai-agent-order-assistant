@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from restaurant_bot.db_models import SubmissionRecord
+from restaurant_bot.persistence.models import SubmissionRecord
 from restaurant_bot.services.submission import SubmissionService
 
 

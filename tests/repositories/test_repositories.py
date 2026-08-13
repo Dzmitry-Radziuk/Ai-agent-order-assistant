@@ -4,8 +4,13 @@ from unittest.mock import MagicMock
 
 from sqlalchemy.exc import IntegrityError
 
-from restaurant_bot.db_models import BotSession, SubmissionRecord, TelegramUpdate, VenueBinding
 from restaurant_bot.domain.models import ConversationState, PendingSubmission, SessionStage
+from restaurant_bot.persistence.models import (
+    BotSession,
+    SubmissionRecord,
+    TelegramUpdate,
+    VenueBinding,
+)
 from restaurant_bot.repositories.sessions import SessionRepository
 from restaurant_bot.repositories.submissions import SubmissionRepository
 from restaurant_bot.repositories.updates import UpdateRepository

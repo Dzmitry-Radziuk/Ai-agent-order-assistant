@@ -11,6 +11,7 @@ from openai import APIConnectionError, APITimeoutError, OpenAI, RateLimitError
 from restaurant_bot.catalog.safety import has_product_variant_qualifier
 from restaurant_bot.config import Settings
 from restaurant_bot.domain.models import ExtractedItem, Intent, ParsedCommand
+from restaurant_bot.domain.text import clean_text, normalize_text
 from restaurant_bot.domain.units import UNIT_ALIASES, normalize_unit
 from restaurant_bot.integrations.openai_prompts import (
     _COMMENT_SCOPE_SYSTEM,
@@ -46,7 +47,6 @@ from restaurant_bot.parsing.commands.item_commands import has_explicit_add_items
 from restaurant_bot.parsing.comment_scope import has_explicit_global_comment_scope
 from restaurant_bot.parsing.numeric import to_float
 from restaurant_bot.parsing.numeric_ranges import numeric_range_spans
-from restaurant_bot.text_normalization import clean_text, normalize_text
 
 __all__ = [
     "CommentBindingSchema",

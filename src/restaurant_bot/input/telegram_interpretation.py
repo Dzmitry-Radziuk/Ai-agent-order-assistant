@@ -25,11 +25,11 @@ from restaurant_bot.domain.models import (
     SessionStage,
     TelegramEvent,
 )
+from restaurant_bot.domain.text import clean_text, normalize_text
 from restaurant_bot.input.telegram_callbacks import parse_callback
 from restaurant_bot.input.voice_policy import match_visible_action
 from restaurant_bot.integrations.openai_client import CommentScopeDecision
 from restaurant_bot.parsing.commands.api import enrich_command
-from restaurant_bot.text_normalization import clean_text, normalize_text
 
 logger = structlog.get_logger(__name__)
 _OPENAI_TRANSIENT_ERRORS = (APIConnectionError, APITimeoutError, RateLimitError)

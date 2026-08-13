@@ -17,7 +17,7 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
-from restaurant_bot.db import Base
+from restaurant_bot.persistence.database import Base
 
 
 class BotSession(Base):

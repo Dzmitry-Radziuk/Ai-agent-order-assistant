@@ -22,8 +22,8 @@ from restaurant_bot.catalog.safety import (
     is_broad_category_query,
 )
 from restaurant_bot.domain.models import Candidate, CatalogProduct, SearchScope
+from restaurant_bot.domain.text import normalize_text
 from restaurant_bot.parsing.comment_policy import supplier_comment_start
-from restaurant_bot.text_normalization import normalize_text
 
 
 class CatalogDecision(StrEnum):

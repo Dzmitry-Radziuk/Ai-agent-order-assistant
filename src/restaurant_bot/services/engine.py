@@ -80,6 +80,7 @@ from restaurant_bot.domain.models import (
     SearchScope,
     SessionStage,
 )
+from restaurant_bot.domain.text import normalize_text
 from restaurant_bot.domain.unit_conversion import convert_quantity
 from restaurant_bot.domain.units import normalize_unit
 from restaurant_bot.input.telegram_visible_actions import (
@@ -143,7 +144,6 @@ from restaurant_bot.services.conversation_handlers.pending_quantity import (
     PendingQuantityAction,
     PendingQuantityHandler,
 )
-from restaurant_bot.text_normalization import normalize_text
 
 
 def cart_reply(

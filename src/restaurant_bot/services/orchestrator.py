@@ -35,7 +35,6 @@ from restaurant_bot.conversation.routing.contracts import (
     CompatibilityAction,
     CompatibilityContext,
 )
-from restaurant_bot.db import SessionLocal
 from restaurant_bot.domain.models import (
     BotReply,
     Button,
@@ -50,6 +49,7 @@ from restaurant_bot.domain.models import (
     SessionStage,
     TelegramEvent,
 )
+from restaurant_bot.domain.text import clean_text, normalize_text
 from restaurant_bot.input.telegram import normalize_telegram_update, to_conversation_input
 from restaurant_bot.input.telegram_interpretation import TelegramInputInterpreter
 from restaurant_bot.integrations.cache import (
@@ -62,8 +62,9 @@ from restaurant_bot.integrations.google_sheets import GoogleSheetsGateway
 from restaurant_bot.integrations.openai_client import OpenAIService
 from restaurant_bot.integrations.openai_transcription_policy import has_distinct_models
 from restaurant_bot.integrations.telegram import TELEGRAM_TRANSIENT_ERRORS, TelegramClient
-from restaurant_bot.logging import sanitize_log_value
+from restaurant_bot.observability import sanitize_log_value
 from restaurant_bot.parsing.commands.api import infer_intent
+from restaurant_bot.persistence.database import SessionLocal
 from restaurant_bot.presentation.telegram.conversation import (
     render_conversation_view,
     telegram_action_mapper,
@@ -85,7 +86,6 @@ from restaurant_bot.services.venue_registration import (
     VenueContext,
     VenueRegistrationService,
 )
-from restaurant_bot.text_normalization import clean_text, normalize_text
 
 logger = structlog.get_logger(__name__)
 

@@ -9,11 +9,11 @@ from restaurant_bot.application.order_review.contracts import ReviewSnapshot
 from restaurant_bot.application.order_review.snapshot import build_review_snapshot
 from restaurant_bot.application.order_review.token import new_review_token
 from restaurant_bot.config import Settings
-from restaurant_bot.db import SessionLocal
 from restaurant_bot.domain.models import SessionStage
 from restaurant_bot.integrations.cache import ChatLeaseLostError, chat_lock
 from restaurant_bot.integrations.google_sheets import GoogleSheetsGateway
 from restaurant_bot.integrations.telegram import TelegramClient
+from restaurant_bot.persistence.database import SessionLocal
 from restaurant_bot.presentation.telegram.order_review import (
     preview_reply,
     submission_disabled_reply,

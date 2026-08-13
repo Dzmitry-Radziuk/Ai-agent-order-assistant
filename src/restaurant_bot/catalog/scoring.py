@@ -14,7 +14,7 @@ from restaurant_bot.catalog.evidence import (
     tokens,
 )
 from restaurant_bot.domain.models import CatalogProduct
-from restaurant_bot.text_normalization import normalize_text
+from restaurant_bot.domain.text import normalize_text
 
 
 def _strong_query_evidence_tokens(query: str, product_name: str) -> set[str]:

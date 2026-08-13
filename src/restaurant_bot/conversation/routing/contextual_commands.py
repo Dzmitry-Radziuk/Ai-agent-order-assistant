@@ -18,6 +18,7 @@ from restaurant_bot.domain.models import (
     ParsedCommand,
     SessionStage,
 )
+from restaurant_bot.domain.text import normalize_text
 from restaurant_bot.domain.units import UNIT_ALIASES, normalize_unit
 from restaurant_bot.orders.supplier_minimums import supplier_minimum_warnings
 from restaurant_bot.parsing.commands.normalization import (
@@ -27,7 +28,6 @@ from restaurant_bot.parsing.commands.normalization import (
     normalize_command_text,
 )
 from restaurant_bot.parsing.number_words import NUMBER_WORDS
-from restaurant_bot.text_normalization import normalize_text
 
 
 class ContextualCommandPolicy:

@@ -11,9 +11,8 @@ from restaurant_bot.application.venue_registration.contracts import (
     VenueContext,
 )
 from restaurant_bot.config import Settings
-from restaurant_bot.db import SessionLocal
-from restaurant_bot.db_models import VenueBinding
 from restaurant_bot.domain.models import BotReply, TelegramEvent
+from restaurant_bot.domain.text import clean_text, normalize_text
 from restaurant_bot.input.telegram_venue_registration import registration_input
 from restaurant_bot.integrations.google_sheets import GoogleSheetsGateway
 from restaurant_bot.integrations.venue_access_registry import (
@@ -25,6 +24,8 @@ from restaurant_bot.integrations.venue_directory import (
 from restaurant_bot.integrations.venue_directory import (
     VenueDirectoryError as _VenueDirectoryError,
 )
+from restaurant_bot.persistence.database import SessionLocal
+from restaurant_bot.persistence.models import VenueBinding
 from restaurant_bot.presentation.telegram.venue_registration import (
     access_disabled_reply,
     already_connected_reply,
@@ -40,7 +41,6 @@ from restaurant_bot.presentation.telegram.venue_registration import (
     sync_failure_reply,
 )
 from restaurant_bot.repositories.venue_bindings import VenueBindingRepository
-from restaurant_bot.text_normalization import clean_text, normalize_text
 from restaurant_bot.venues.codes import normalize_code, valid_code
 from restaurant_bot.venues.contracts import Venue as _Venue
 

@@ -3,7 +3,7 @@ from __future__ import annotations
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from restaurant_bot.db_models import VenueBinding
+from restaurant_bot.persistence.models import VenueBinding
 
 
 class VenueBindingRepository:

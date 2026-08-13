@@ -13,9 +13,9 @@ from restaurant_bot.catalog.evidence import (
     tokens,
 )
 from restaurant_bot.domain.models import Candidate
+from restaurant_bot.domain.text import normalize_text
 from restaurant_bot.domain.units import UNIT_ALIASES, normalize_unit
 from restaurant_bot.parsing.number_words import NUMBER_WORDS, parse_number_words
-from restaurant_bot.text_normalization import normalize_text
 
 _QUALIFIER_IGNORED_WORDS = set(UNIT_ALIASES) | {
     "и",

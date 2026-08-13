@@ -9,8 +9,6 @@ from redis import Redis
 
 from restaurant_bot.config import Settings
 from restaurant_bot.conversation.state.transitions import normalize_cart_page
-from restaurant_bot.db import SessionLocal
-from restaurant_bot.db_models import SubmissionRecord
 from restaurant_bot.domain.models import (
     BotReply,
     Button,
@@ -32,6 +30,8 @@ from restaurant_bot.integrations.google_sheets import (
     OrderSubmissionResult,
 )
 from restaurant_bot.integrations.telegram import TelegramAPIError, TelegramClient
+from restaurant_bot.persistence.database import SessionLocal
+from restaurant_bot.persistence.models import SubmissionRecord
 from restaurant_bot.presentation.telegram.formatting import escape
 from restaurant_bot.presentation.telegram.pagination import CART_PAGE_SIZE
 from restaurant_bot.presentation.telegram.replies import cart_reply
@@ -561,7 +561,7 @@ class SubmissionService:
         """Загружает только безопасную первую доставку уведомления."""
         from sqlalchemy import select
 
-        from restaurant_bot.db_models import SubmissionRecord
+        from restaurant_bot.persistence.models import SubmissionRecord
 
         with SessionLocal.begin() as db:
             records = db.scalars(

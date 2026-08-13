@@ -7,7 +7,7 @@ from sqlalchemy import and_, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from restaurant_bot.db_models import TelegramUpdate
+from restaurant_bot.persistence.models import TelegramUpdate
 
 UNFINISHED_UPDATE_STATUSES = ("queued", "processing")
 STALE_PROCESSING_AFTER = timedelta(minutes=5)

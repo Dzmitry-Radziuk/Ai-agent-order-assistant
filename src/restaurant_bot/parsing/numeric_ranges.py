@@ -5,9 +5,9 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from restaurant_bot.domain.text import clean_text
 from restaurant_bot.domain.units import UNIT_ALIASES
 from restaurant_bot.parsing.number_words import NUMBER_WORDS
-from restaurant_bot.text_normalization import clean_text
 
 
 def numeric_range_spans(value: Any) -> list[tuple[int, int]]:

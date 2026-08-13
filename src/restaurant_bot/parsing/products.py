@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 
 from restaurant_bot.domain.models import CommentSource, ExtractedItem
+from restaurant_bot.domain.text import clean_text, normalize_text
 from restaurant_bot.domain.units import UNIT_ALIASES, normalize_unit
 from restaurant_bot.parsing.comment_policy import explicit_supplier_comment
 from restaurant_bot.parsing.number_words import NUMBER_WORDS, parse_number_words
@@ -16,7 +17,6 @@ from restaurant_bot.parsing.packaging import (
     _spoken_measurement_pair,
 )
 from restaurant_bot.parsing.quantities import _is_standalone_quantity
-from restaurant_bot.text_normalization import clean_text, normalize_text
 
 
 def _query_with_unmarked_tail(name: str, tail: str) -> str:

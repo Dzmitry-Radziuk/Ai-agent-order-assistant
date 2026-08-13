@@ -7,11 +7,11 @@ import structlog
 from redis import Redis
 
 from restaurant_bot.config import get_settings
-from restaurant_bot.db import SessionLocal
 from restaurant_bot.integrations.cache import ChatLeaseLostError, ChatLockBusyError
 from restaurant_bot.integrations.google_sheets import GoogleSheetsGateway
 from restaurant_bot.integrations.openai_client import OpenAIService
 from restaurant_bot.integrations.telegram import TELEGRAM_TRANSIENT_ERRORS, TelegramClient
+from restaurant_bot.persistence.database import SessionLocal
 from restaurant_bot.repositories.order_events import OrderEventRepository
 from restaurant_bot.repositories.updates import (
     STALE_PROCESSING_AFTER,

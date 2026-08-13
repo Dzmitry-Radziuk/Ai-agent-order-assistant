@@ -4,10 +4,10 @@ from __future__ import annotations
 
 import re
 
+from restaurant_bot.domain.text import normalize_text
 from restaurant_bot.domain.units import UNIT_ALIASES, normalize_unit
 from restaurant_bot.parsing.number_words import NUMBER_WORDS, parse_number_words
 from restaurant_bot.parsing.numeric_ranges import numeric_range_spans
-from restaurant_bot.text_normalization import normalize_text
 
 _EXPLICIT_ORDER_QUANTITY_RE = re.compile(
     r"(?:мне\s+)?(?:нужн(?:о|а|ы)|надо|закаж(?:и|ем|у)|добав(?:ь|ить)|"

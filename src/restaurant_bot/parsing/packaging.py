@@ -5,10 +5,10 @@ from __future__ import annotations
 import re
 
 from restaurant_bot.domain.models import CommentSource, ExtractedItem
+from restaurant_bot.domain.text import clean_text, normalize_text
 from restaurant_bot.domain.units import normalize_unit
 from restaurant_bot.parsing.comment_policy import explicit_supplier_comment
 from restaurant_bot.parsing.numeric_ranges import numeric_range_spans
-from restaurant_bot.text_normalization import clean_text, normalize_text
 
 _PACKAGING_REFERENCE_PREFIX_RE = re.compile(
     r"(?:\b(?:в|на)\s+)?(?:упаковк\w*|фасовк\w*|бутылк(?:а|е|у|ой))\s*$",

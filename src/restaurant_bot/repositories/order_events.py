@@ -7,8 +7,8 @@ from sqlalchemy import delete
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
-from restaurant_bot.db_models import OrderEvent, TelegramUpdate
-from restaurant_bot.logging import sanitize_log_value
+from restaurant_bot.observability import sanitize_log_value
+from restaurant_bot.persistence.models import OrderEvent, TelegramUpdate
 
 _MAX_DETAILS_DEPTH = 3
 _MAX_DETAILS_ITEMS = 50

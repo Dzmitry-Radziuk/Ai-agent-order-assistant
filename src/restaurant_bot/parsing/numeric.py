@@ -6,7 +6,7 @@ import re
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
-from restaurant_bot.text_normalization import clean_text
+from restaurant_bot.domain.text import clean_text
 
 
 def to_float(value: Any) -> float | None:

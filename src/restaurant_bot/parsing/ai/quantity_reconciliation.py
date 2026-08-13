@@ -6,13 +6,13 @@ import re
 from typing import Any
 
 from restaurant_bot.domain.models import CommentSource, ExtractedItem
+from restaurant_bot.domain.text import clean_text, normalize_text
 from restaurant_bot.domain.units import UNIT_ALIASES, normalize_unit
 from restaurant_bot.parsing.number_words import parse_number_words
 from restaurant_bot.parsing.numeric import to_float
 from restaurant_bot.parsing.numeric_ranges import numeric_range_spans
 from restaurant_bot.parsing.products import parse_product_lines
 from restaurant_bot.parsing.quantities import parse_quantity_unit
-from restaurant_bot.text_normalization import clean_text, normalize_text
 
 _PACKAGING_ROLE_CONFIDENCE_THRESHOLD = 0.85
 

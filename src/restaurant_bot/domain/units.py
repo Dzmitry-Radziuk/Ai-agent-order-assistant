@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from restaurant_bot.text_normalization import clean_text, normalize_text
+from restaurant_bot.domain.text import clean_text, normalize_text
 
 UNIT_ALIASES: dict[str, str] = {
     "шт": "шт",

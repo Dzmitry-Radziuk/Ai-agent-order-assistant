@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import re
 
-from restaurant_bot.text_normalization import normalize_text
+from restaurant_bot.domain.text import normalize_text
 
 
 def has_supported_voice_letters(transcript: str) -> bool:

@@ -12,7 +12,7 @@ import httpx
 from redis import Redis
 
 from restaurant_bot.config import Settings
-from restaurant_bot.text_normalization import clean_text, normalize_text
+from restaurant_bot.domain.text import clean_text, normalize_text
 from restaurant_bot.venues.codes import normalize_code
 from restaurant_bot.venues.contracts import Venue
 
