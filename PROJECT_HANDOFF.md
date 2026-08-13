@@ -127,5 +127,6 @@ TEXT / VOICE
   канонический каталог сценариев.
 - [`docs/INDEPENDENT_ENGINEERING_AUDIT.md`](docs/INDEPENDENT_ENGINEERING_AUDIT.md) —
   независимые scores, gaps и findings.
-- `docs/ARCHITECTURE_DECOMPOSITION.md`, `docs/DATA_INTEGRITY_*` и остальные block
+- `docs/archive/architecture/ARCHITECTURE_DECOMPOSITION.md`,
+  `docs/archive/data-integrity/` и остальные block
   reports — исторические snapshots, не текущий roadmap.

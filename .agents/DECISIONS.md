@@ -90,7 +90,8 @@
 - Последствия: новые parsing, routing, catalog, conversation и submission owners
   не должны зависеть от Telegram-specific объектов. Пустые будущие packages сейчас
   не создаются.
-- Реализация: границы модулей фиксируются в `docs/ARCHITECTURE_DECOMPOSITION.md`.
+- Реализация: границы модулей зафиксированы в
+  `docs/archive/architecture/ARCHITECTURE_DECOMPOSITION.md`.
 
 ### ADR-012 — Свободные запросы истории проходят через отдельный use case
 
@@ -157,7 +158,7 @@
   channel-neutral owners должны зависеть от domain/core, а не от engine или
   transport.
 - Реализация: `orders/catalog_resolution.py`, owner maps в
-  `.agents/PROJECT_MAP.md`, `docs/ARCHITECTURE_DECOMPOSITION.md` и текущие
+  `.agents/PROJECT_MAP.md`, `docs/archive/architecture/ARCHITECTURE_DECOMPOSITION.md` и текущие
   compatibility wrappers в `services/engine.py`.
 
 ### ADR-016 — Общий conversation вход и результат

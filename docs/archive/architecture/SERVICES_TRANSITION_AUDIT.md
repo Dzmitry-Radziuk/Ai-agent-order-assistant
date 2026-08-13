@@ -284,7 +284,7 @@ workers.tasks = 0`.
 ## Карта ответственности text.py
 
 Полный symbol-level caller/duplicate audit Block 5L вынесен в
-[`docs/SERVICES_TEXT_AUDIT.md`](SERVICES_TEXT_AUDIT.md). Он не переносит production-код
+[`docs/archive/architecture/SERVICES_TEXT_AUDIT.md`](SERVICES_TEXT_AUDIT.md). Он не переносит production-код
 и назначает ровно один следующий seam только для `clean_text` и `normalize_text`.
 
 - Общая очистка: clean_text, normalize_text; lower/core callers в parsing/catalog/conversation.
@@ -354,7 +354,7 @@ Re-export и динамических callers для этого модуля н�
 ## Block 5O — результат targeted audit input recognition
 
 Полный symbol/caller/effect audit `services/input_recognition.py` зафиксирован в
-[`docs/INPUT_RECOGNITION_AUDIT.md`](INPUT_RECOGNITION_AUDIT.md). Весь класс не
+[`docs/archive/architecture/INPUT_RECOGNITION_AUDIT.md`](INPUT_RECOGNITION_AUDIT.md). Весь класс не
 переносится целиком: он одновременно содержит Telegram download/cleanup, OpenAI
 voice/photo, state-aware retry, visible actions и progress presentation.
 
@@ -390,7 +390,7 @@ Block 5L завершил caller/duplicate audit, Block 5M перенёс
 departments, number words, ranges и overlap. `services/text.py` теперь содержит
 только `to_float`; его Google Sheets/AI contract оставлен до отдельного
 доказательства owner. Полная таблица callers и границы зафиксированы в
-[`docs/SERVICES_TEXT_AUDIT.md`](SERVICES_TEXT_AUDIT.md). Следующий seam не
+[`docs/archive/architecture/SERVICES_TEXT_AUDIT.md`](SERVICES_TEXT_AUDIT.md). Следующий seam не
 назначается автоматически.
 
 ### ПОЗДНЕЕ
@@ -625,4 +625,4 @@ SMOKE / ACCEPTANCE PREP`.
 не являются безопасными mechanical moves: они удерживают state routing,
 durable checkpoints, lease fencing, provider retry или внешние эффекты. Их
 удаление без нового use-case/ports proof ухудшило бы dependency direction.
-Подробная текущая карта находится в [`CURRENT_ARCHITECTURE.md`](CURRENT_ARCHITECTURE.md).
+Подробная текущая карта находится в [`CURRENT_ARCHITECTURE.md`](../../CURRENT_ARCHITECTURE.md).

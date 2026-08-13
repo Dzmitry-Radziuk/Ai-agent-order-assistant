@@ -2,7 +2,7 @@
 
 Документ описывает фактическую структуру ветки `decompose_bot` после независимого
 аудита 2026-08-13. Исполняемый код и тесты имеют приоритет. Историю декомпозиции
-сохраняет [`ARCHITECTURE_DECOMPOSITION.md`](ARCHITECTURE_DECOMPOSITION.md), но её
+сохраняет [`ARCHITECTURE_DECOMPOSITION.md`](archive/architecture/ARCHITECTURE_DECOMPOSITION.md), но её
 старые SHA, размеры файлов и verdict не являются текущим состоянием.
 
 ## Состояние

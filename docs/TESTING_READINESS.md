@@ -6,7 +6,7 @@
 `4dc67430336bb90cfad731aca583f51a19948a48`.
 
 Документ не заменяет исполняемый код, каталог сценариев или исторический
-[`FULL_REGRESSION_AUDIT.md`](FULL_REGRESSION_AUDIT.md).
+[`FULL_REGRESSION_AUDIT.md`](archive/regression/FULL_REGRESSION_AUDIT.md).
 
 ## Текущий baseline
 

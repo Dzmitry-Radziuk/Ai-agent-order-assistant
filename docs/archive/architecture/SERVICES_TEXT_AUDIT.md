@@ -7,7 +7,7 @@
 callers: функция механически перенесена в `parsing/numeric.py`, все production и
 test imports обновлены, а `services/text.py` удалён. Текущий источник истины по
 состоянию services — раздел `BLOCK 6C — FINAL SERVICES CLEANUP` в
-`docs/SERVICES_TRANSITION_AUDIT.md`; остальные разделы этого файла являются
+`docs/archive/architecture/SERVICES_TRANSITION_AUDIT.md`; остальные разделы этого файла являются
 историческим снимком Block 5L/5S.
 
 ## Актуализация после Block 6C
@@ -17,7 +17,7 @@ test imports обновлены, а `services/text.py` удалён. Текущ�
 callers: функция механически перенесена в `parsing/numeric.py`, все production и
 test imports обновлены, а `services/text.py` удалён. Текущий источник истины по
 состоянию services — раздел `BLOCK 6C — FINAL SERVICES CLEANUP` в
-`docs/SERVICES_TRANSITION_AUDIT.md`; остальные разделы этого файла являются
+`docs/archive/architecture/SERVICES_TRANSITION_AUDIT.md`; остальные разделы этого файла являются
 историческим снимком Block 5L/5S.
 
 ## Block 5S — итог controlled multi-seam decomposition

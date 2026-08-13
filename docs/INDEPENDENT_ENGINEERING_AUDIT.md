@@ -83,6 +83,8 @@ current state. Remove-кандидатов и настоящих дублей н
 | `.agents/DEVELOPMENT_PROCESS.md` | CURRENT_CANONICAL | текущие quality gates и процесс |
 | `docs/CURRENT_ARCHITECTURE.md` | CURRENT_CANONICAL | переписан по фактическому call graph |
 | `docs/TESTING_READINESS.md` | CURRENT_CANONICAL | удалены current claims `6299a84`/`1382`/freeze |
+| `docs/README.md` | CURRENT_CANONICAL | навигация по актуальной документации |
+| `docs/archive/README.md` | CURRENT_CANONICAL | навигация по историческому архиву |
 | `docs/user-scenarios/scenarios.json` | CURRENT_CANONICAL | версия 2.1, 40 сценариев |
 | `docs/USER_SCENARIOS.md` | CURRENT_CANONICAL | generated; вручную не редактируется |
 | `docs/user-scenarios/index.html` | CURRENT_CANONICAL | generated HTML-каталог |
@@ -92,24 +94,24 @@ current state. Remove-кандидатов и настоящих дублей н
 | `docs/CHANNEL_EXTENSION_GUIDE.md` | CURRENT_SPECIALIZED | расширение каналов без заявления об их реализации |
 | `docs/ci/README.md` | CURRENT_SPECIALIZED | CI-контекст; hosted run здесь не подтверждён |
 | `REFACTORING_CONTEXT_HANDOFF.md` | HISTORICAL_ARCHIVE | handoff завершённой декомпозиции |
-| `docs/ARCHITECTURE_DECOMPOSITION.md` | HISTORICAL_ARCHIVE | история structural campaign |
-| `docs/DATA_INTEGRITY_ANALYSIS.md` | HISTORICAL_ARCHIVE | исходный data-integrity audit |
-| `docs/DATA_INTEGRITY_BLOCK_A_PLAN.md` | HISTORICAL_ARCHIVE | план завершённого блока |
-| `docs/DATA_INTEGRITY_BLOCK_B_PLAN.md` | HISTORICAL_ARCHIVE | план завершённого блока |
-| `docs/DATA_INTEGRITY_BLOCK_C_PLAN.md` | HISTORICAL_ARCHIVE | план завершённого блока |
-| `docs/DATA_INTEGRITY_BLOCK_D_PLAN.md` | HISTORICAL_ARCHIVE | план завершённого блока |
-| `docs/DATA_INTEGRITY_BLOCK_E_PLAN.md` | HISTORICAL_ARCHIVE | план завершённого блока |
-| `docs/DATA_INTEGRITY_BLOCK_F_PLAN.md` | HISTORICAL_ARCHIVE | план завершённого блока |
-| `docs/DATA_INTEGRITY_BLOCK_G_PLAN.md` | HISTORICAL_ARCHIVE | план завершённого блока |
-| `docs/diagnostics/semantic_acceptance_round2.md` | HISTORICAL_ARCHIVE | forensic evidence прошлой приёмки |
-| `docs/FULL_REGRESSION_AUDIT.md` | HISTORICAL_ARCHIVE | старый baseline не используется как current |
-| `docs/INPUT_RECOGNITION_AUDIT.md` | HISTORICAL_ARCHIVE | завершённый аудит границы ввода |
-| `docs/RAPID_INPUT_CONCURRENCY_ANALYSIS.md` | HISTORICAL_ARCHIVE | исходный concurrency analysis |
-| `docs/SERVICES_TEXT_AUDIT.md` | HISTORICAL_ARCHIVE | завершённый targeted audit |
-| `docs/SERVICES_TRANSITION_AUDIT.md` | HISTORICAL_ARCHIVE | история перехода owners |
-| `docs/SUBMISSION_H3_PLAN.md` | HISTORICAL_ARCHIVE | завершённый план submission safety |
-| `docs/SUBMISSION_IDEMPOTENCY_PLAN.md` | HISTORICAL_ARCHIVE | завершённый protocol plan |
-| `docs/UPDATE_ORCHESTRATOR_AUDIT.md` | HISTORICAL_ARCHIVE | forensic snapshot до extraction |
+| `docs/archive/architecture/ARCHITECTURE_DECOMPOSITION.md` | HISTORICAL_ARCHIVE | история structural campaign |
+| `docs/archive/data-integrity/DATA_INTEGRITY_ANALYSIS.md` | HISTORICAL_ARCHIVE | исходный data-integrity audit |
+| `docs/archive/data-integrity/DATA_INTEGRITY_BLOCK_A_PLAN.md` | HISTORICAL_ARCHIVE | план завершённого блока |
+| `docs/archive/data-integrity/DATA_INTEGRITY_BLOCK_B_PLAN.md` | HISTORICAL_ARCHIVE | план завершённого блока |
+| `docs/archive/data-integrity/DATA_INTEGRITY_BLOCK_C_PLAN.md` | HISTORICAL_ARCHIVE | план завершённого блока |
+| `docs/archive/data-integrity/DATA_INTEGRITY_BLOCK_D_PLAN.md` | HISTORICAL_ARCHIVE | план завершённого блока |
+| `docs/archive/data-integrity/DATA_INTEGRITY_BLOCK_E_PLAN.md` | HISTORICAL_ARCHIVE | план завершённого блока |
+| `docs/archive/data-integrity/DATA_INTEGRITY_BLOCK_F_PLAN.md` | HISTORICAL_ARCHIVE | план завершённого блока |
+| `docs/archive/data-integrity/DATA_INTEGRITY_BLOCK_G_PLAN.md` | HISTORICAL_ARCHIVE | план завершённого блока |
+| `docs/archive/diagnostics/semantic_acceptance_round2.md` | HISTORICAL_ARCHIVE | forensic evidence прошлой приёмки |
+| `docs/archive/regression/FULL_REGRESSION_AUDIT.md` | HISTORICAL_ARCHIVE | старый baseline не используется как current |
+| `docs/archive/architecture/INPUT_RECOGNITION_AUDIT.md` | HISTORICAL_ARCHIVE | завершённый аудит границы ввода |
+| `docs/archive/regression/RAPID_INPUT_CONCURRENCY_ANALYSIS.md` | HISTORICAL_ARCHIVE | исходный concurrency analysis |
+| `docs/archive/architecture/SERVICES_TEXT_AUDIT.md` | HISTORICAL_ARCHIVE | завершённый targeted audit |
+| `docs/archive/architecture/SERVICES_TRANSITION_AUDIT.md` | HISTORICAL_ARCHIVE | история перехода owners |
+| `docs/archive/submission/SUBMISSION_H3_PLAN.md` | HISTORICAL_ARCHIVE | завершённый план submission safety |
+| `docs/archive/submission/SUBMISSION_IDEMPOTENCY_PLAN.md` | HISTORICAL_ARCHIVE | завершённый protocol plan |
+| `docs/archive/architecture/UPDATE_ORCHESTRATOR_AUDIT.md` | HISTORICAL_ARCHIVE | forensic snapshot до extraction |
 
 `.agents/runtime/CURRENT_CONTEXT.md` — генерируемый локальный snapshot, а не
 project-authored canonical document.

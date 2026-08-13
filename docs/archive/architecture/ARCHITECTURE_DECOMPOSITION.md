@@ -25,7 +25,7 @@ campaign are documented in [`UPDATE_ORCHESTRATOR_AUDIT.md`](UPDATE_ORCHESTRATOR_
 
 Декомпозиция на этом этапе завершена. Block 6C занимается только стабилизацией
 и readiness; текущая матрица каналов и acceptance находится в
-[`TESTING_READINESS.md`](TESTING_READINESS.md). Новые слои и переносы не
+[`TESTING_READINESS.md`](../../TESTING_READINESS.md). Новые слои и переносы не
 создаются без доказанного P0/P1 blocker.
 
 Block 5Y завершил поведенчески нейтральный перенос draft mutations, comment
@@ -295,7 +295,7 @@ contracts и проходит focused/full regression до следующего 
   он делегирует catalog-to-draft resolution новому orders owner и сохраняет
   только совместимые тонкие вызовы для доказанных legacy callers.
 - Полный audit оставшегося `services/` и доказанный порядок демонтажа находятся
-  в `docs/SERVICES_TRANSITION_AUDIT.md`; этот документ не переносит production-код.
+  в `docs/archive/architecture/SERVICES_TRANSITION_AUDIT.md`; этот документ не переносит production-код.
 
 ### Conversation
 
@@ -670,7 +670,7 @@ matching, prompts, schemas, persistence и DevOps не затрагивалис�
 # Актуальный статус финальной архитектуры
 
 Текущая карта владельцев и dependency direction зафиксирована в
-[`CURRENT_ARCHITECTURE.md`](CURRENT_ARCHITECTURE.md). Финальная кампания не
+[`CURRENT_ARCHITECTURE.md`](../../CURRENT_ARCHITECTURE.md). Финальная кампания не
 переносит защищённые effect coordinators (`engine`, `orchestrator`, `submission`,
 `order_review`, `venue_registration`, `input_recognition`) без отдельного proof
 checkpoint protocol. Контракты `VenueContext` и `RegistrationResult` теперь

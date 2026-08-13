@@ -60,7 +60,7 @@ media services сохраняют внешние delivery/checkpoint contracts. 
 `parsing/numeric.py`; свежий baseline — `1378 collected / 1378 passed`, финальный
 suite после acceptance и architecture coverage — `1382 collected / 1382 passed`. Stateful и
 effectful services намеренно сохранены. Подробный текущий аудит находится в
-`docs/SERVICES_TRANSITION_AUDIT.md`; исторические разделы ниже не переопределяют
+`docs/archive/architecture/SERVICES_TRANSITION_AUDIT.md`; исторические разделы ниже не переопределяют
 этот статус. Block 6D и финальная архитектурная кампания завершены; защищённый
 долг перечислен в [`docs/CURRENT_ARCHITECTURE.md`](../docs/CURRENT_ARCHITECTURE.md).
 
@@ -75,7 +75,7 @@ Sheets, catalog cache, engine, review, registration, checkpoint или task
 `interpret(...)`; `_recognizer()` сохранён lazy seam. Полный baseline после
 переноса: `1377/1377` (исторический); текущий Block 6D baseline — `1378/1378`,
 финальный — `1382/1382`. Пост-6A reassessment в
-[`docs/UPDATE_ORCHESTRATOR_AUDIT.md`](../docs/UPDATE_ORCHESTRATOR_AUDIT.md)
+[`docs/archive/architecture/UPDATE_ORCHESTRATOR_AUDIT.md`](../docs/archive/architecture/UPDATE_ORCHESTRATOR_AUDIT.md)
 выбрал `ORCHESTRATOR_DECOMPOSITION_SUFFICIENT`; следующая кампания —
 `BLOCK 6D — FINAL STABILIZATION / ACCEPTANCE CLOSURE`.
 
@@ -87,7 +87,7 @@ verdict `READY_FOR_MANUAL_TESTING_WITH_KNOWN_NONBLOCKERS`.
 ## История: architecture after Block 5Y
 
 Detailed current `UpdateOrchestrator` forensic inventory is maintained in
-[`docs/UPDATE_ORCHESTRATOR_AUDIT.md`](../docs/UPDATE_ORCHESTRATOR_AUDIT.md).
+[`docs/archive/architecture/UPDATE_ORCHESTRATOR_AUDIT.md`](../docs/archive/architecture/UPDATE_ORCHESTRATOR_AUDIT.md).
 
 Block 5Y завершил controlled cleanup draft/comment/progression seams без изменения
 поведения; свежий полный suite: `1377 collected / 1377 passed`. Публичные методы
@@ -272,7 +272,7 @@ flowchart LR
 | `services/conversation_handlers/` | Legacy Telegram/presentation handlers: количество, выбор товара, область комментария, финальная проверка, статусы и пассивная навигация |
 
 Полный audit transitional `services/`, callers и выполненные migration seams
-зафиксированы в `docs/SERVICES_TRANSITION_AUDIT.md`. После Block 5J obsolete
+зафиксированы в `docs/archive/architecture/SERVICES_TRANSITION_AUDIT.md`. После Block 5J obsolete
 compatibility facades удалены после подтверждённого нулевого caller-аудита;
 реальные owners находятся в `catalog/` и `conversation/`.
 
@@ -292,7 +292,7 @@ CommentScopeHandler их сохраняет.
 | `presentation/telegram/submission.py` | Telegram-тексты, кнопки завершения заявки и истории заказов; канонический owner после Block 5Q |
 | `orders/product_add.py`, `conversation/product_add.py`, `presentation/telegram/product_add.py` | Сценарий запроса снабженцу на добавление ненайденного товара |
 | `services/venue_registration.py` | Координатор DB/Sheets/cache/rollback привязки; directory, access, input и replies вынесены в Block 5V |
-| `services/text.py` | Transitional владелец только `to_float`; units, departments, number words, ranges и overlap перенесены в канонические domain/parsing/catalog/conversation owners; полный аудит — [`docs/SERVICES_TEXT_AUDIT.md`](../docs/SERVICES_TEXT_AUDIT.md) |
+| `services/text.py` | Transitional владелец только `to_float`; units, departments, number words, ranges и overlap перенесены в канонические domain/parsing/catalog/conversation owners; полный аудит — [`docs/SERVICES_TEXT_AUDIT.md`](../docs/archive/architecture/SERVICES_TEXT_AUDIT.md) |
 
 ### Application contracts
 

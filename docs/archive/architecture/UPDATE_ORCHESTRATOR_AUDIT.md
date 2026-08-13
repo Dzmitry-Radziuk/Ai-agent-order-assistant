@@ -569,7 +569,7 @@ status и review tasks через application port. Каждая задача з
 | generic error до reply | `_finish(failed)` + best-effort error reply | повтор опирается на checkpoints |
 | catalog refresh error | cache может вернуть имеющийся cached value | отдельная cache policy; orchestrator не маскирует safety gate |
 
-Исторический `docs/RAPID_INPUT_CONCURRENCY_ANALYSIS.md` описывает pre-heartbeat
+Исторический `docs/archive/regression/RAPID_INPUT_CONCURRENCY_ANALYSIS.md` описывает pre-heartbeat
 состояние и утверждение, что TimeoutError не retry-ится. Это не текущий факт:
 current `workers/tasks.py` retry-ит lock/sequence/lease ошибки, а `ChatLease`
 имеет heartbeat. Документ следует читать только как historical snapshot.
@@ -808,7 +808,7 @@ git diff --check
 
 Текущие owner-map документы остаются компактными. Этот документ является
 подробным forensic приложением; в `PROJECT_HANDOFF.md`, `.agents/PROJECT_MAP.md`
-и `docs/ARCHITECTURE_DECOMPOSITION.md` добавляется только ссылка на него, без
+и `docs/archive/architecture/ARCHITECTURE_DECOMPOSITION.md` добавляется только ссылка на него, без
 копирования таблиц и pipeline.
 
 ## 25. Итоговое решение
