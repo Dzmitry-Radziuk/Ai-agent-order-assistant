@@ -1,6 +1,22 @@
 # План декомпозиции архитектуры
 
-## CURRENT ARCHITECTURE — Block 5X
+## CURRENT ARCHITECTURE — Block 5Y
+
+Block 5Y завершил поведенчески нейтральный перенос draft mutations, comment
+operations, progression rendering и transient reset. Свежий полный baseline:
+`1377 collected / 1377 passed`. Канонические owners: `conversation/draft_actions.py`
+для skip/duplicate/remove, `conversation/comments.py` для comment mutations,
+`conversation/progression.py` для state transition, `presentation/telegram/progression.py`
+для read-only Telegram rendering и `conversation/state/transitions.py` для exact
+transient reset. Engine уменьшен с `1613` до `1535` строк, с `76431` до `72673` байт
+и с `33` до `30` методов; state-mutating methods: `18 → 13`; `MISMATCHES = 0`.
+Порядок `handle()` и stale callback guard сохранены. `_build_item`,
+`_spoken_quantity`, `_cart_page`, `_callback_item_index` оставлены как тонкие
+adapters; quantity/new-order/product-add/submission seams защищены. Readiness:
+`ENGINE_PHASE_ACCEPTABLE`; следующая единственная кампания — analysis-only audit
+UpdateOrchestrator, не начат.
+
+## CURRENT ARCHITECTURE — Block 5X (архив)
 
 Block 5X завершён как поведенчески нейтральная доводка границ contextual routing
 и catalog resolution. Свежий полный baseline: `1370 collected / 1370 passed`.

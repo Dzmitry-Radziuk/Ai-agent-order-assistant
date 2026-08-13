@@ -1,9 +1,9 @@
 # Передача проекта
 
-## CURRENT ARCHITECTURE — Block 5X
+## CURRENT ARCHITECTURE — Block 5Y
 
-Block 5X завершён локально поверх `5cabc5bd56ffc1f1884860a877493dc81d590e3c`;
-после изменений полный regression suite: `1370 collected / 1370 passed`.
+Block 5Y завершён поверх опубликованного `fc39d6a13c6557f24816f9787ce3d14ee5b0985a`;
+текущий полный regression suite: `1377 collected / 1377 passed`.
 `ContextualCommandPolicy` теперь предоставляет публичные методы
 `normalize_pre_modal_voice()`, `reinterpret_contextual_command()` и
 `is_generic_show_products_command()`. Engine вызывает их в прежнем порядке:
@@ -22,7 +22,19 @@ serialization и submission lifecycle не менялись.
 После удаления obsolete catalog facades engine содержит `1613` строк, `76431` байт
 и `33` метода; это уменьшение относится только к переходным wrappers, не к алгоритму.
 
-### Block 5X — проверка границ и callers
+В Block 5Y draft mutations перенесены в `conversation/draft_actions.py`, comment
+mutations — в cohesive операции `conversation/comments.py`, progression state
+transition остался в `conversation/progression.py`, а Telegram rendering вынесен в
+`presentation/telegram/progression.py`. Exact transient reset теперь принадлежит
+`conversation/state/transitions.py`. Engine уменьшен до `1535` строк, `72673` байт и
+`30` методов; state-mutating methods: `18 → 13`. До/после state comparisons дали
+`MISMATCHES = 0`; handle ordering и stale callback guard сохранены.
+
+`_build_item`, `_spoken_quantity`, `_cart_page`, `_callback_item_index` оставлены
+тонкими adapters; `_spoken_quantity` имеет production caller в orchestrator.
+Quantity cluster, new-order lifecycle, product-add и submission остаются protected.
+
+### Block 5Y — проверка границ и callers
 
 Новый architectural regression test проверяет отсутствие Telegram transport/protocol
 зависимостей в contextual policy. Полный suite и focused catalog/routing проверки
@@ -30,10 +42,15 @@ serialization и submission lifecycle не менялись.
 `ruff format --check .` по-прежнему может показывать только ранее известный
 `docs/RAPID_INPUT_CONCURRENCY_ANALYSIS.md`; изменённые файлы форматированы.
 
-Рекомендуемая следующая кампания (только после отдельного одобрения):
-analysis-only аудит оставшихся state-action seams engine с отдельным решением
-по безопасному владельцу; реализацию и дальнейшую декомпозицию в Block 5X не
-начинать.
+ENGINE_PHASE_ACCEPTABLE: ConversationEngine остаётся authoritative ordering
+coordinator без внешних эффектов; следующий крупный target может быть
+UpdateOrchestrator. Единственная следующая кампания после отдельного одобрения:
+analysis-only audit UpdateOrchestrator перед любым переносом кода.
+
+### Block 5X — завершённые seams
+
+Block 5X опубликован коммитом `fc39d6a13c6557f24816f9787ce3d14ee5b0985a`; ниже
+сохраняется его owner-map как историческая база Block 5Y.
 
 ### Block 5W — завершённые seams
 

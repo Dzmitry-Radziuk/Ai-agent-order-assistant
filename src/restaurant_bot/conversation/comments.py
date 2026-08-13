@@ -90,8 +90,26 @@ def apply_global_comment(state: ConversationState, global_comment: str) -> None:
     """Добавляет общий комментарий один раз ко всем активным товарам заявки."""
     for item in state.cart:
         if item.status != ItemStatus.SKIPPED:
-            item.comment = merge_comments(item.comment, global_comment)
-            item.comment_source = CommentSource.SEMANTIC
+            append_item_comment(item, global_comment)
+
+
+def clear_all_active_comments(state: ConversationState) -> None:
+    """Удаляет комментарии только у активных позиций черновика."""
+    for item in state.cart:
+        if item.status != ItemStatus.SKIPPED:
+            clear_item_comment(item)
+
+
+def clear_item_comment(item: CartItem) -> None:
+    """Удаляет комментарий позиции и сбрасывает его происхождение."""
+    item.comment = ""
+    item.comment_source = CommentSource.NONE
+
+
+def append_item_comment(item: CartItem, comment: str) -> None:
+    """Добавляет семантический комментарий позиции без повторов."""
+    item.comment = merge_comments(item.comment, comment)
+    item.comment_source = CommentSource.SEMANTIC
 
 
 def remove_cart_comment_shadows(state: ConversationState) -> None:

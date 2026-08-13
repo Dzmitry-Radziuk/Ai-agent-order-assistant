@@ -11,17 +11,25 @@ from restaurant_bot.catalog.evidence import (
 from restaurant_bot.catalog.resolver import CatalogResolver
 from restaurant_bot.config import Settings
 from restaurant_bot.conversation.comments import (
+    append_item_comment,
     apply_global_comment,
-    clear_pending_comment,
+    clear_all_active_comments,
+    clear_item_comment,
     comment_scope_items,
-    merge_comments,
-    prune_pending_comment_item_ids,
     remove_cart_comment_shadows,
 )
 from restaurant_bot.conversation.draft import (
     find_duplicate,
     has_active_draft_items,
     remove_exact_cart_duplicates,
+)
+from restaurant_bot.conversation.draft_actions import (
+    DraftActionOutcome,
+    confirm_duplicate_item,
+    skip_current_item,
+)
+from restaurant_bot.conversation.draft_actions import (
+    remove_item as remove_draft_item,
 )
 from restaurant_bot.conversation.item_intake import build_cart_item
 from restaurant_bot.conversation.product_add import clear_product_add_pending
@@ -44,19 +52,21 @@ from restaurant_bot.conversation.routing.modal_routing import (
 from restaurant_bot.conversation.routing.state_compatibility import (
     StateCompatibilityPolicy,
 )
-from restaurant_bot.conversation.selection import contains_score, find_cart_item
+from restaurant_bot.conversation.selection import find_cart_item
 from restaurant_bot.conversation.state.queries import (
     first_unresolved as first_unresolved_item,
 )
 from restaurant_bot.conversation.state.queries import item_index as state_item_index
-from restaurant_bot.conversation.state.transitions import normalize_cart_page
+from restaurant_bot.conversation.state.transitions import (
+    clear_transient_dialog_state,
+    normalize_cart_page,
+)
 from restaurant_bot.domain.departments import normalize_department
 from restaurant_bot.domain.models import (
     BotReply,
     Button,
     CartItem,
     CatalogProduct,
-    CommentSource,
     ConversationState,
     DialogueResponse,
     EngineResult,
@@ -91,6 +101,7 @@ from restaurant_bot.parsing.commands.normalization import (
 from restaurant_bot.presentation.telegram.formatting import escape
 from restaurant_bot.presentation.telegram.pagination import CART_PAGE_SIZE
 from restaurant_bot.presentation.telegram.product_add import product_add_prompt
+from restaurant_bot.presentation.telegram.progression import render_progression
 from restaurant_bot.presentation.telegram.replies import (
     added_items_question_reply,
     comment_scope_clarification_reply,
@@ -222,9 +233,9 @@ class ConversationEngine:
             and command.callback_revision is not None
             and command.callback_revision != state.ui_revision
         ):
-            unresolved = self._first_unresolved(state)
+            unresolved = first_unresolved_item(state)
             reply = (
-                issue_reply(unresolved, self._item_index(state, unresolved))
+                issue_reply(unresolved, state_item_index(state, unresolved))
                 if unresolved
                 else cart_reply(state)
             )
@@ -350,7 +361,7 @@ class ConversationEngine:
             if current is not None:
                 return EngineResult(
                     state=state,
-                    reply=issue_reply(current, self._item_index(state, current)),
+                    reply=issue_reply(current, state_item_index(state, current)),
                 )
         if (
             not new_order_interrupted
@@ -409,7 +420,7 @@ class ConversationEngine:
             if current is not None:
                 return EngineResult(
                     state=state,
-                    reply=issue_reply(current, self._item_index(state, current)),
+                    reply=issue_reply(current, state_item_index(state, current)),
                 )
         unit_mismatch_decision = self.state_compatibility_policy.evaluate(
             command,
@@ -425,7 +436,7 @@ class ConversationEngine:
             if current is not None:
                 return EngineResult(
                     state=state,
-                    reply=issue_reply(current, self._item_index(state, current)),
+                    reply=issue_reply(current, state_item_index(state, current)),
                 )
         if command.intent not in {
             Intent.ORDER_STATUS,
@@ -464,7 +475,7 @@ class ConversationEngine:
             command = ParsedCommand(
                 intent=Intent.PRODUCT_ADD,
                 text=event.text or command.text,
-                callback_target=str(self._item_index(state, current)),
+                callback_target=str(state_item_index(state, current)),
             )
 
         # n8n treats an unambiguous spoken/textual candidate name as a
@@ -496,7 +507,7 @@ class ConversationEngine:
                         intent=Intent.SELECT_CANDIDATE,
                         text=event.text or command.text,
                         selection_query=event.text or command.text,
-                        callback_target=str(self._item_index(state, current)),
+                        callback_target=str(state_item_index(state, current)),
                     )
                 elif event.input_type == InputKind.VOICE and not command.items:
                     # On an open candidate card every vague voice utterance
@@ -542,7 +553,7 @@ class ConversationEngine:
             if current is not None:
                 return EngineResult(
                     state=state,
-                    reply=issue_reply(current, self._item_index(state, current)),
+                    reply=issue_reply(current, state_item_index(state, current)),
                 )
 
         passive_result = self.passive_intent_handler.handle(command, state)
@@ -693,11 +704,11 @@ class ConversationEngine:
         if command.intent == Intent.BACK:
             if event.input_type == InputKind.CALLBACK or command.text.startswith("v2:back"):
                 return EngineResult(state=state, reply=cart_reply(state))
-            self._clear_transient_dialog_state(state)
+            clear_transient_dialog_state(state)
             state.stage = SessionStage.COLLECTING
             return EngineResult(state=state, reply=cart_reply(state))
         if command.intent == Intent.ADD_MORE:
-            self._clear_transient_dialog_state(state)
+            clear_transient_dialog_state(state)
             state.stage = SessionStage.COLLECTING
             return EngineResult(
                 state=state,
@@ -753,7 +764,7 @@ class ConversationEngine:
                         [
                             Button(
                                 text="Не добавлять",
-                                callback_data=f"v2:skip:{self._item_index(state, current)}",
+                                callback_data=f"v2:skip:{state_item_index(state, current)}",
                             )
                         ],
                         [Button(text="К черновику", callback_data="v2:back")],
@@ -773,7 +784,7 @@ class ConversationEngine:
             assert final_review_outcome.result is not None
             return final_review_outcome.result
         if command.intent == Intent.CANCEL:
-            self._clear_transient_dialog_state(state)
+            clear_transient_dialog_state(state)
             state.stage = SessionStage.COLLECTING
             return EngineResult(state=state, reply=cart_reply(state, title="Отправка отменена"))
 
@@ -1091,21 +1102,6 @@ class ConversationEngine:
         return None
 
     @staticmethod
-    def _clear_transient_dialog_state(state: ConversationState) -> None:
-        """Очищает временный диалог без удаления черновика."""
-        state.current_issue_item_id = ""
-        state.current_issue_kind = None
-        state.search_scope = SearchScope.SUPPLIER_ONLY
-        state.supplier_search_locked = False
-        state.supplier_hint_context = ""
-        state.manual_item_index = None
-        state.unit_item_index = None
-        state.edit_multiple_index = None
-        state.pending_added_items_count = 0
-        clear_pending_comment(state)
-        clear_product_add_pending(state)
-
-    @staticmethod
     def _repeat_add_more_prompt(state: ConversationState) -> BotReply:
         """Повторяет существующий вопрос о добавлении товаров без мутации state."""
         fallback = added_items_question_reply(state, 1)
@@ -1113,15 +1109,6 @@ class ConversationEngine:
             text=state.ui_message_text or fallback.text,
             rows=fallback.rows,
         )
-
-    @staticmethod
-    def _item_index(state: ConversationState, item: CartItem) -> int:
-        """Возвращает номер позиции по её идентификатору."""
-        return state_item_index(state, item)
-
-    def _first_unresolved(self, state: ConversationState) -> CartItem | None:
-        """Возвращает приоритетную нерешённую позицию."""
-        return first_unresolved_item(state)
 
     def _advance(
         self,
@@ -1135,23 +1122,9 @@ class ConversationEngine:
             added_count=added_count,
             preferred_issue_item_id=preferred_issue_item_id,
         )
-        if progression.kind is ProgressionKind.ISSUE:
-            assert progression.item is not None
-            return EngineResult(
-                state=state,
-                reply=issue_reply(progression.item, self._item_index(state, progression.item)),
-            )
-        if progression.kind is ProgressionKind.ADD_MORE_CONFIRM:
-            return EngineResult(
-                state=state,
-                reply=added_items_question_reply(state, progression.prompt_count),
-            )
-        title = (
-            f"Добавлено позиций: {progression.added_count}"
-            if progression.added_count
-            else "Черновик заявки"
-        )
-        return EngineResult(state=state, reply=cart_reply(state, title=title))
+        if progression.kind is ProgressionKind.DRAFT:
+            normalize_cart_page(state, page_size=CART_PAGE_SIZE)
+        return EngineResult(state=state, reply=render_progression(state, progression))
 
     def _resume_after_new_order_confirmation(self, state: ConversationState) -> EngineResult:
         """Показывает сохранённый underlying modal context после отказа."""
@@ -1271,7 +1244,7 @@ class ConversationEngine:
                     [
                         Button(
                             text="Не добавлять",
-                            callback_data=f"v2:skip:{self._item_index(state, item)}",
+                            callback_data=f"v2:skip:{state_item_index(state, item)}",
                         )
                     ],
                 ],
@@ -1302,66 +1275,20 @@ class ConversationEngine:
 
     def _skip_current(self, state: ConversationState) -> EngineResult:
         """Пропускает текущую позицию."""
-        item = state.current_item()
-        if item:
-            item.status = ItemStatus.SKIPPED
-            if state.pending_added_items_count:
-                state.pending_added_items_count -= 1
-        state.current_issue_item_id = ""
+        skip_current_item(state)
         return self._advance(state)
 
     def _confirm_current(self, state: ConversationState) -> EngineResult:
         """Подтверждает текущую позицию черновика."""
-        item = state.current_item()
-        if item and item.status == ItemStatus.DUPLICATE_PENDING:
-            existing = next((row for row in state.cart if row.id == item.issue_message), None)
-            if (
-                existing
-                and item.catalog_unit
-                and item.unit
-                and normalize_unit(item.unit) != normalize_unit(item.catalog_unit)
-            ):
-                return self._advance(state)
-            if existing:
-                existing.quantity = (existing.quantity or 0) + (item.quantity or 0)
-                item.status = ItemStatus.SKIPPED
-            state.current_issue_item_id = ""
+        confirm_duplicate_item(state)
         return self._advance(state)
 
     def _remove_item(self, command: ParsedCommand, state: ConversationState) -> EngineResult:
         """Удаляет выбранную позицию из черновика."""
-        target_query = clean_command_target(command.target_query)
-        target = normalize_text(target_query)
-        if not target and state.current_item():
-            state.current_item().status = ItemStatus.SKIPPED  # type: ignore[union-attr]
-            prune_pending_comment_item_ids(state)
+        outcome = remove_draft_item(command, state).outcome
+        if outcome is DraftActionOutcome.ADVANCE:
             return self._advance(state)
-        item = find_cart_item(state, target_query)
-        if item is not None:
-            was_current = item.id == state.current_issue_item_id
-            item.status = ItemStatus.SKIPPED
-            if was_current:
-                state.current_issue_item_id = ""
-                state.current_issue_kind = None
-            prune_pending_comment_item_ids(state)
-            return EngineResult(state=state, reply=cart_reply(state, title="Позиция удалена"))
-        pending_matches = sorted(
-            [
-                (
-                    contains_score(target, normalize_text(pending.product_query)),
-                    pending,
-                )
-                for pending in state.pending_comment_items
-            ],
-            key=lambda pair: pair[0],
-        )
-        pending_item = None
-        if pending_matches:
-            best_score = pending_matches[-1][0]
-            if best_score > 0 and sum(score == best_score for score, _ in pending_matches) == 1:
-                pending_item = pending_matches[-1][1]
-        if pending_item is not None:
-            state.pending_comment_items.remove(pending_item)
+        if outcome is DraftActionOutcome.REMOVED:
             return EngineResult(state=state, reply=cart_reply(state, title="Позиция удалена"))
         return EngineResult(state=state, reply=BotReply(text="Не нашёл такую позицию в черновике."))
 
@@ -1373,10 +1300,7 @@ class ConversationEngine:
         comment = " ".join(command.comment_text.split()).strip(" .,;:-—–")
         if command.comment_scope == "order":
             if command.comment_action == "remove":
-                for row in state.cart:
-                    if row.status != ItemStatus.SKIPPED:
-                        row.comment = ""
-                        row.comment_source = CommentSource.NONE
+                clear_all_active_comments(state)
                 return EngineResult(
                     state=state,
                     reply=cart_reply(state, notice="Общий комментарий удалён"),
@@ -1412,12 +1336,10 @@ class ConversationEngine:
                 ),
             )
         if command.comment_action == "remove":
-            item.comment = ""
-            item.comment_source = CommentSource.NONE
+            clear_item_comment(item)
             notice = "Комментарий удалён"
         else:
-            item.comment = merge_comments(item.comment, comment)
-            item.comment_source = CommentSource.SEMANTIC
+            append_item_comment(item, comment)
             notice = "Комментарий добавлен"
         return EngineResult(state=state, reply=cart_reply(state, notice=notice))
 

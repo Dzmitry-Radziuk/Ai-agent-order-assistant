@@ -1,9 +1,9 @@
 # Карта проекта
 
-## Current architecture after Block 5X
+## Current architecture after Block 5Y
 
-Block 5X завершил contextual/catalog boundary cleanup без изменения поведения;
-свежий полный suite: `1370 collected / 1370 passed`. Публичные методы
+Block 5Y завершил controlled cleanup draft/comment/progression seams без изменения
+поведения; свежий полный suite: `1377 collected / 1377 passed`. Публичные методы
 `ContextualCommandPolicy` сохраняют порядок pre-modal voice и contextual
 fallback. `input/telegram_visible_actions.py` — Telegram-only owner извлечения
 страниц из `visible_actions`; routing policy не импортирует transport,
@@ -11,10 +11,25 @@ presentation, integrations или services и не знает `v2:*`.
 
 `orders/catalog_resolution.py` — единственный owner `match_item`,
 `apply_catalog`, `refresh_cart_order_values`; engine/orchestrator вызывают его
-напрямую. `CandidateSelectionHandler` остаётся `KEEP_TEMP` presentation
-adapter, а quantity action seam пока помечен **NO SAFE QUANTITY ACTION SEAM**.
-После удаления catalog facades engine содержит `1613` строк, `76431` байт и
-`33` метода; порядок stateful orchestration сохранён.
+напрямую. Draft mutations принадлежат `conversation/draft_actions.py`, comment
+operations — `conversation/comments.py`, progression state —
+`conversation/progression.py`, Telegram rendering —
+`presentation/telegram/progression.py`, transient reset —
+`conversation/state/transitions.py`. Engine содержит `1535` строк, `72673` байта
+и `30` методов; state-mutating methods: `18 → 13`, `MISMATCHES = 0`.
+Порядок stateful orchestration и stale callback guard сохранены. Тонкие adapters
+`_build_item`, `_spoken_quantity`, `_cart_page`, `_callback_item_index` оставлены;
+`_spoken_quantity` имеет production caller в orchestrator. Quantity, new-order,
+product-add и submission остаются protected, candidate selection — `KEEP_TEMP`.
+Readiness: `ENGINE_PHASE_ACCEPTABLE`; следующая единственная кампания —
+analysis-only audit UpdateOrchestrator перед любым переносом кода.
+
+## Current architecture after Block 5X (архив)
+
+Block 5X завершил contextual/catalog boundary cleanup без изменения поведения;
+его опубликованный baseline: `1370 collected / 1370 passed`. Публичные методы
+`ContextualCommandPolicy` сохраняют прежние contracts, а catalog owners ниже
+являются историческим срезом перед Block 5Y.
 
 ## Current architecture after Block 5W (архив)
 

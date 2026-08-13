@@ -1,6 +1,21 @@
 # Аудит переходного слоя services/ и результат Block 5V
 
-## CURRENT ARCHITECTURE — Block 5X
+## CURRENT ARCHITECTURE — Block 5Y
+
+Block 5Y завершил controlled cleanup основных conversation seams. Свежий baseline:
+`1377 collected / 1377 passed`. Draft mutations находятся в
+`conversation/draft_actions.py`, cohesive comment operations — в
+`conversation/comments.py`, progression state — в `conversation/progression.py`,
+Telegram rendering — в `presentation/telegram/progression.py`, а exact transient
+reset — в `conversation/state/transitions.py`. Engine уменьшен до `1535` строк,
+`72673` байт и `30` методов; state-mutating methods: `18 → 13`; behavioral
+comparison: `MISMATCHES = 0`. Presenter не мутирует state, handle ordering и stale
+callback guard сохранены. Candidate selection, quantity, new-order, product-add и
+submission остаются `KEEP_TEMP`/protected seams. Readiness:
+`ENGINE_PHASE_ACCEPTABLE`; следующая единственная кампания — analysis-only audit
+UpdateOrchestrator, без переноса кода.
+
+## CURRENT ARCHITECTURE — Block 5X (архив)
 
 После Block 5X текущий baseline: `1370 collected / 1370 passed`. Контекстный
 маршрутизатор имеет channel-neutral public API, а Telegram page extraction
