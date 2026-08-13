@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 
@@ -8,6 +7,10 @@ import structlog
 from redis import Redis
 
 from restaurant_bot.config import Settings
+from restaurant_bot.application.venue_registration.contracts import (
+    RegistrationResult,
+    VenueContext,
+)
 from restaurant_bot.db import SessionLocal
 from restaurant_bot.db_models import VenueBinding
 from restaurant_bot.domain.models import BotReply, TelegramEvent
@@ -42,28 +45,6 @@ from restaurant_bot.venues.codes import normalize_code, valid_code
 from restaurant_bot.venues.contracts import Venue as _Venue
 
 logger = structlog.get_logger(__name__)
-
-
-@dataclass(slots=True, frozen=True)
-class VenueContext:
-    """Передаёт контекст активного заведения при обработке."""
-
-    venue_code: str
-    venue_name: str
-    spreadsheet_id: str
-    spreadsheet_url: str
-    telegram_user_id: str
-    telegram_chat_id: str
-
-
-@dataclass(slots=True)
-class RegistrationResult:
-    """Описывает результат привязки пользователя к заведению."""
-
-    handled: bool
-    reply: BotReply | None = None
-    context: VenueContext | None = None
-    reset_session: bool = False
 
 
 class VenueRegistrationService:
