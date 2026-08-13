@@ -1,7 +1,7 @@
 import pytest
 
+from restaurant_bot.parsing.numeric import to_float
 from restaurant_bot.parsing.products import parse_product_lines
-from restaurant_bot.services.text import to_float
 
 
 def test_semicolon_and_newline_lists_keep_every_product() -> None:

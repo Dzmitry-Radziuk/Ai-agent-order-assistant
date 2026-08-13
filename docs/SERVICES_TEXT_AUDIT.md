@@ -1,5 +1,25 @@
 # Block 5L — аудит `services/text.py`
 
+## Актуализация после Block 6C
+
+Этот исторический аудит зафиксировал прежнее решение оставить `to_float` в
+`services/text.py`. В Block 6C решение пересмотрено после отдельной проверки
+callers: функция механически перенесена в `parsing/numeric.py`, все production и
+test imports обновлены, а `services/text.py` удалён. Текущий источник истины по
+состоянию services — раздел `BLOCK 6C — FINAL SERVICES CLEANUP` в
+`docs/SERVICES_TRANSITION_AUDIT.md`; остальные разделы этого файла являются
+историческим снимком Block 5L/5S.
+
+## Актуализация после Block 6C
+
+Этот исторический аудит зафиксировал прежнее решение оставить `to_float` в
+`services/text.py`. В Block 6C решение пересмотрено после отдельной проверки
+callers: функция механически перенесена в `parsing/numeric.py`, все production и
+test imports обновлены, а `services/text.py` удалён. Текущий источник истины по
+состоянию services — раздел `BLOCK 6C — FINAL SERVICES CLEANUP` в
+`docs/SERVICES_TRANSITION_AUDIT.md`; остальные разделы этого файла являются
+историческим снимком Block 5L/5S.
+
 ## Block 5S — итог controlled multi-seam decomposition
 
 Block 5S завершил перенос доказанных чистых кластеров без изменения порядка

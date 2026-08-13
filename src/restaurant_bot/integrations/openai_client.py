@@ -44,8 +44,8 @@ from restaurant_bot.parsing.commands.dialogue import (
 )
 from restaurant_bot.parsing.commands.item_commands import has_explicit_add_items
 from restaurant_bot.parsing.comment_scope import has_explicit_global_comment_scope
+from restaurant_bot.parsing.numeric import to_float
 from restaurant_bot.parsing.numeric_ranges import numeric_range_spans
-from restaurant_bot.services.text import to_float
 from restaurant_bot.text_normalization import clean_text, normalize_text
 
 __all__ = [

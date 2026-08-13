@@ -1,5 +1,14 @@
 # Карта проекта
 
+## Актуальный статус после Block 6C
+
+`services/text.py` удалён после доказанного механического переноса `to_float` в
+`parsing/numeric.py`; baseline остаётся `1377 collected / 1377 passed`. Stateful и
+effectful services намеренно сохранены. Подробный текущий аудит находится в
+`docs/SERVICES_TRANSITION_AUDIT.md`; исторические разделы ниже не переопределяют
+этот статус. Следующая задача — `BLOCK 6D — STABILIZATION / REALISTIC SMOKE /
+ACCEPTANCE PREP`.
+
 ## IMPLEMENTED AFTER 5Z / BLOCK 6A
 
 Telegram-specific semantic input boundary теперь находится в
@@ -323,6 +332,18 @@ CommentScopeHandler их сохраняет.
 | `tests/docs/`, `tests/ci/` | Сценарии, docstring, ссылки и документационные контракты |
 
 Канонический каталог пользовательских сценариев: `docs/user-scenarios/scenarios.json`. Markdown и HTML генерируются из него, поэтому вручную редактировать производные файлы нельзя.
+## Block 6C — current services cleanup
+
+`services/text.py` удалён после переноса единственного символа `to_float` в
+`parsing/numeric.py`. Четыре lower/core AI-reconciliation модуля и два integration
+адаптера используют новый owner; baseline после переноса остаётся `1377/1377`.
+`engine.py`, `orchestrator.py`, `submission.py`, `venue_registration.py`,
+`input_recognition.py`, `order_review.py` и conversation handlers намеренно остаются
+в `services/`: они координируют state, внешние эффекты, Telegram presentation или
+надежностные contracts, и безопасного существующего owner для механического переноса
+нет. Следующая функциональная задача — `BLOCK 6D — STABILIZATION / REALISTIC SMOKE /
+ACCEPTANCE PREP`; новую декомпозицию не начинать.
+
 ## Block 5T — historical migration notes
 
 Канонический semantic text parser находится в `parsing/commands/api.py`, а

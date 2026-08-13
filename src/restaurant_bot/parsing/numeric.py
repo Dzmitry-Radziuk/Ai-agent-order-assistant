@@ -1,4 +1,4 @@
-"""Содержит переходные текстовые и числовые primitives без presentation-кода."""
+"""Содержит детерминированный разбор числовых значений."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ from restaurant_bot.text_normalization import clean_text
 
 
 def to_float(value: Any) -> float | None:
-    """Безопасно преобразует значение в число."""
+    """Безопасно преобразует значение в положительное число."""
     if value is None or value == "":
         return None
     raw = clean_text(value).replace(" ", "").replace(",", ".")
@@ -20,8 +20,7 @@ def to_float(value: Any) -> float | None:
         parts = raw.lstrip("-").split(".")
         # Google Sheets может добавлять к российской валюте букву и точку.
         # Последние одна-две цифры считаются десятичной частью, предыдущие
-        # точки — визуальными разделителями. Более длинная последняя группа
-        # означает, что все точки являются разделителями.
+        # точки — визуальными разделителями тысяч.
         if parts[-1] and len(parts[-1]) <= 2:
             raw = sign + "".join(parts[:-1]) + "." + parts[-1]
         else:

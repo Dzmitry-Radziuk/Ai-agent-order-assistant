@@ -16,7 +16,7 @@ from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_ex
 from restaurant_bot.config import Settings
 from restaurant_bot.domain.departments import normalize_department
 from restaurant_bot.domain.models import CatalogProduct, DepartmentQuantities
-from restaurant_bot.services.text import to_float
+from restaurant_bot.parsing.numeric import to_float
 from restaurant_bot.text_normalization import clean_text, normalize_text
 
 SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]

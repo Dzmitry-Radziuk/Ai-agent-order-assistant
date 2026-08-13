@@ -424,6 +424,67 @@ adapters и доказанные public facades могут временно ос
 алгоритмы callers, services/text.py, prompts, catalog thresholds, AI, callbacks,
 DB, Sheets, Docker, task bodies, decorators, names, retry settings и UX не
 менялись. Block 5I и Block 5G не переоткрывались; новый ADR не добавлялся.
+## BLOCK 6C — FINAL SERVICES CLEANUP
+
+### Зафиксированный baseline и границы
+
+Перед cleanup текущая ветка `decompose_bot` имела HEAD
+`fb6e9387a2fda0f520d1b884b3b26ee7390a4642` и baseline `1377 collected / 1377 passed`.
+Изменения этого блока структурные: state machine, parsing semantics, catalog thresholds,
+prompts, schemas, callbacks, submission checkpoints, database и DevOps не менялись.
+
+### Аудит дерева services
+
+| Файл | Lines / bytes | Classes / functions | Решение |
+|---|---:|---:|---|
+| `services/engine.py` | 1535 / 72673 | 1 / 31 | KEEP: координатор state machine и EngineResult; внутренние adapters имеют callers |
+| `services/orchestrator.py` | 1888 / 81567 | 2 / 49 | KEEP: durable claim/checkpoint, lock, input pipeline и side-effect ordering |
+| `services/submission.py` | 2051 / 84555 | 1 / 53 | KEEP: safety-critical Sheets/checkpoint/dispatch protocol |
+| `services/venue_registration.py` | 376 / 15677 | 3 / 11 | KEEP: DB/Sheets/cache/rollback coordinator |
+| `services/input_recognition.py` | 196 / 7709 | 1 / 9 | KEEP_TEMP: Telegram/OpenAI media, retry, progress и visible-action effects |
+| `services/order_review.py` | 169 / 7106 | 1 / 3 | KEEP: lease/DB/Sheets/Telegram review effect coordinator |
+| `services/conversation_handlers/candidate_selection.py` | 67 / 2543 | 2 / 1 | KEEP_TEMP: selection core adapter + presentation + EngineResult |
+| `services/conversation_handlers/comment_scope.py` | 142 / 5435 | 2 / 1 | KEEP_TEMP: pending state mutation + comment semantics + reply |
+| `services/conversation_handlers/final_review.py` | 108 / 4408 | 2 / 2 | KEEP_TEMP: review guards, pagination and submission preparation |
+| `services/conversation_handlers/navigation.py` | 147 / 5876 | 2 / 4 | KEEP_TEMP: passive replies, history state and background request flag |
+| `services/conversation_handlers/pending_quantity.py` | 173 / 5988 | 2 / 4 | KEEP: protected quantity modal behavior; no safe mechanical move |
+| `services/conversation_handlers/__init__.py` | 1 / 108 | 0 / 0 | KEEP: package marker |
+| `services/text.py` | 33 / 1500 | 0 / 1 | DELETE: proven transitional owner after moving `to_float` |
+
+### Единственный выполненный перенос
+
+`to_float` механически перенесён в `parsing/numeric.py`. До переноса callers были:
+`integrations/google_sheets.py`, `integrations/openai_client.py` и четыре
+`parsing/ai/*_reconciliation.py` модуля; прямой тестовый caller был
+`tests/input/test_input_edge_cases.py`. Поведение проверено для `None`, пустой строки,
+целых и дробных чисел, запятой и точки, пробелов/валютного суффикса, нескольких точек,
+отрицательных и нулевых значений и мусора. Результаты совпали 1:1.
+
+После переноса `services/text.py` удалён, старых import/patch/dynamic/re-export callers
+не осталось. Регрессионный тест `tests/ci/test_services_cleanup.py` запрещает возврат
+этого конкретного lower/core → services edge. Это не общий запрет на services: внешние
+application adapters по-прежнему могут импортировать реальные services owners.
+
+### Что намеренно не переносилось
+
+Handler-модули и крупные root services не имеют доказанного существующего owner без
+смешения state, presentation, внешних эффектов или надежностных contracts. Создание
+новых generic facade/helper модулей ради уменьшения числа файлов было бы изменением
+архитектуры и риском регрессии, поэтому они оставлены с решениями KEEP/KEEP_TEMP выше.
+Compatibility facades, удалённые в Block 5J, повторно не создавались.
+
+### Зависимости и результат
+
+До cleanup lower/core → `services` включал четыре AI reconciliation imports в
+`services/text.py:to_float`. После cleanup этот список пуст: AI parsing импортирует
+`parsing.numeric`, а workers → services и CLI → services остаются допустимыми внешними
+направлениями. AST-проверка циклов до и после не обнаружила циклов.
+
+Решение блока: `SERVICES_CLEANUP_PARTIAL_WITH_PROTECTED_ADAPTERS` — доказанный
+transitional leaf удалён, а stateful/effectful adapters защищены. Архитектурная
+декомпозиция на этом этапе остановлена; следующая задача — `BLOCK 6D — STABILIZATION /
+REALISTIC SMOKE / ACCEPTANCE PREP`.
+
 ## Block 5T — controlled cleanup transitional leaf boundaries
 
 Block 5T завершён в `9456e79` от `227ba6e`. Это механический перенос владельцев

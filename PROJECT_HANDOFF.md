@@ -17,15 +17,16 @@ orchestrator. Порядок callback/text/media, StateCompatibilityPolicy,
 `1377 collected / 1377 passed`; focused input/routing: `444 passed`.
 Коммит extraction: `c6feeb7`.
 
-### Текущий фокус — Block 6C
+### Текущий фокус — Block 6D
 
-Архитектурная декомпозиция завершена. Block 6C переключил цель на стабилизацию,
-проверку пользовательского поведения и acceptance readiness без нового refactor.
-Актуальный отчёт: [`docs/TESTING_READINESS.md`](docs/TESTING_READINESS.md).
-Единственный verdict: `READY_FOR_MANUAL_TESTING_WITH_KNOWN_NONBLOCKERS`.
-Известные nonblockers: live ASR/vision/Telegram smoke и отдельные realistic
-characterization tests для удаления всех комментариев и коррекции «не X, а Y».
-Новая архитектурная декомпозиция и history implementation не начинать.
+Архитектурная декомпозиция и Block 6C cleanup завершены. `services/text.py` удалён
+после механического переноса `to_float` в `parsing/numeric.py`; lower/core → services
+edge из AI reconciliation устранён. Stateful/effectful services и handlers оставлены
+защищёнными. Baseline: `1377 collected / 1377 passed`.
+Подробный аудит: [`docs/SERVICES_TRANSITION_AUDIT.md`](docs/SERVICES_TRANSITION_AUDIT.md).
+Решение: `SERVICES_CLEANUP_PARTIAL_WITH_PROTECTED_ADAPTERS`.
+Следующая задача: `BLOCK 6D — STABILIZATION / REALISTIC SMOKE / ACCEPTANCE PREP`.
+Не начинать новую декомпозицию и не исправлять acceptance bugs в Block 6C.
 
 ## POST-6A REASSESSMENT / BLOCK 6B
 
