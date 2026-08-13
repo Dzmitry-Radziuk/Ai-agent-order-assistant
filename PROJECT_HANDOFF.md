@@ -1,8 +1,8 @@
 # Передача проекта
 
-## CURRENT STATUS — BLOCK 6D
+## CURRENT STATUS — ARCHITECTURE FINALIZATION
 
-Проверенный текущий HEAD: `c1cc92e697704d49e221eaed4ea3a07a0e3782a9`, ветка
+Проверенный текущий HEAD: `54c45ac677b385efcfc44a22d707e710242e8b7e`, ветка
 `decompose_bot`, origin — GitHub. Свежий baseline до acceptance-тестов:
 `1378 collected / 1378 passed`; финальный suite после двух новых характеристик:
 `1380 collected / 1380 passed`. Baseline `1378/1378` снят на исходном Block 6D
@@ -11,16 +11,17 @@ HEAD `2fb1e6e03e5f889ba5034da013facd555fea138f4`. Ruff, format, mypy, markdown l
 использовался.
 
 Block 6D закрыл acceptance gaps «удали все комментарии» и локальной коррекции
-«не X, а Y». Тесты подтверждают сохранность cart, identities, quantity/unit,
-catalog bindings и независимых пожеланий. Production change ограничен
-канонической операцией comment mutation; новая декомпозиция engine/orchestrator
-не выполнялась. Архитектурный статус: `SERVICES_FINAL_FREEZE`.
+«не X, а Y». Финальная архитектурная кампания вынесла
+`VenueContext`/`RegistrationResult` в application contract и добавила
+architecture guards. Тесты подтверждают сохранность cart, identities,
+quantity/unit, catalog bindings и независимых пожеланий. Архитектурный статус:
+`ARCHITECTURE_FINALIZED_WITH_PROTECTED_DEBT`.
 
 ## NEXT STEP
 
-`CONTROLLED HUMAN PILOT` в изолированном окружении с отключённой внешней
-отправкой. Live Telegram, ASR, vision и Google остаются `MANUAL_LIVE_REQUIRED`.
-Новые архитектурные слои, history implementation и search redesign не начинать.
+Архитектурная кампания завершена. Live Telegram, ASR, vision и Google остаются
+`MANUAL_LIVE_REQUIRED`; новые каналы, history implementation, DB migrations и
+search redesign не начинать.
 
 ## IMPLEMENTED AFTER 5Z / BLOCK 6A
 

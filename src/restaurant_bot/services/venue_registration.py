@@ -6,11 +6,11 @@ from typing import Any
 import structlog
 from redis import Redis
 
-from restaurant_bot.config import Settings
 from restaurant_bot.application.venue_registration.contracts import (
     RegistrationResult,
     VenueContext,
 )
+from restaurant_bot.config import Settings
 from restaurant_bot.db import SessionLocal
 from restaurant_bot.db_models import VenueBinding
 from restaurant_bot.domain.models import BotReply, TelegramEvent
@@ -45,6 +45,8 @@ from restaurant_bot.venues.codes import normalize_code, valid_code
 from restaurant_bot.venues.contracts import Venue as _Venue
 
 logger = structlog.get_logger(__name__)
+
+__all__ = ["RegistrationResult", "VenueContext", "VenueRegistrationService"]
 
 
 class VenueRegistrationService:

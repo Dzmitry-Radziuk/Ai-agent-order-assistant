@@ -616,3 +616,13 @@ owner maturity / testability / diff size / future usefulness (1–5; для diff
 переносить handlers, объединять Venue-контракты или дробить submission/
 orchestrator. Следующий шаг ровно один: `BLOCK 6D — STABILIZATION / REALISTIC
 SMOKE / ACCEPTANCE PREP`.
+# Финальный reassessment после архитектурной кампании
+
+На текущем HEAD `54c45ac` сервисы разделены по фактической ответственности.
+`VenueContext` и `RegistrationResult` вынесены в
+`application/venue_registration/contracts.py`; `services/venue_registration.py`
+остаётся effect coordinator и предоставляет прежний импорт. Остальные сервисы
+не являются безопасными mechanical moves: они удерживают state routing,
+durable checkpoints, lease fencing, provider retry или внешние эффекты. Их
+удаление без нового use-case/ports proof ухудшило бы dependency direction.
+Подробная текущая карта находится в [`CURRENT_ARCHITECTURE.md`](CURRENT_ARCHITECTURE.md).

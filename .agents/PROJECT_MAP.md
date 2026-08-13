@@ -1,13 +1,14 @@
 # Карта проекта
 
-## Актуальный статус после Block 6D
+## Актуальный статус после финальной архитектурной кампании
 
 `services/text.py` удалён после доказанного механического переноса `to_float` в
 `parsing/numeric.py`; свежий baseline — `1378 collected / 1378 passed`, финальный
 suite после acceptance coverage — `1380 collected / 1380 passed`. Stateful и
 effectful services намеренно сохранены. Подробный текущий аудит находится в
 `docs/SERVICES_TRANSITION_AUDIT.md`; исторические разделы ниже не переопределяют
-этот статус. Block 6D завершён; следующий шаг — `CONTROLLED HUMAN PILOT`.
+этот статус. Block 6D и финальная архитектурная кампания завершены; защищённый
+долг перечислен в [`docs/CURRENT_ARCHITECTURE.md`](../docs/CURRENT_ARCHITECTURE.md).
 
 ## IMPLEMENTED AFTER 5Z / BLOCK 6A
 

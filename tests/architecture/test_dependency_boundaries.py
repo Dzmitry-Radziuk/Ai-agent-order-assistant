@@ -5,10 +5,16 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
-
 ROOT = Path(__file__).parents[2] / "src" / "restaurant_bot"
 CORE_PACKAGES = ("domain", "conversation", "catalog", "orders", "parsing")
-FORBIDDEN_CORE_IMPORTS = {"services", "workers", "api", "repositories", "integrations", "presentation"}
+FORBIDDEN_CORE_IMPORTS = {
+    "services",
+    "workers",
+    "api",
+    "repositories",
+    "integrations",
+    "presentation",
+}
 
 
 def _imports(path: Path) -> set[str]:

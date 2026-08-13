@@ -667,3 +667,12 @@ matching, prompts, schemas, persistence и DevOps не затрагивалис�
 `to_float` из четырёх AI reconciliation-модулей; она покрыта решением 5T-A.
 Исторические строки таблиц ниже описывают состояние до Block 5T; текущими
 считаются владельцы, перечисленные в этой секции.
+# Актуальный статус финальной архитектуры
+
+Текущая карта владельцев и dependency direction зафиксирована в
+[`CURRENT_ARCHITECTURE.md`](CURRENT_ARCHITECTURE.md). Финальная кампания не
+переносит защищённые effect coordinators (`engine`, `orchestrator`, `submission`,
+`order_review`, `venue_registration`, `input_recognition`) без отдельного proof
+checkpoint protocol. Контракты `VenueContext` и `RegistrationResult` теперь
+принадлежат `application/venue_registration/contracts.py`; старый service import
+сохранён для совместимости. Архитектурные границы core закреплены тестами.
