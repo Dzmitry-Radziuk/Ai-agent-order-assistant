@@ -10,12 +10,15 @@
 |---|---|
 | Дата | 2026-08-13 |
 | Ветка | `decompose_bot` |
-| Проверенный HEAD | `2fb1e6e03e5f889ba5034da013facd555fea138f4` |
+| Проверенный HEAD | `c1cc92e697704d49e221eaed4ea3a07a0e3782a9` |
 | Полный baseline | `1378 collected / 1378 passed` за `17.13 s` |
 | Финальная проверка после acceptance tests | `1380 collected / 1380 passed` за `17.87 s` |
 | Архитектурный статус | `SERVICES_FINAL_FREEZE`; Block 6C/6C.1 завершены |
 | Реальные Telegram/Google/OpenAI/supplier effects | не выполнялись |
 | `.env` | не tracked; значения не читались |
+
+Baseline `1378/1378` снят на исходном Block 6D HEAD `2fb1e6e03e5f889ba5034da013facd555fea138f4`;
+финальный документ и acceptance suite относятся к HEAD `c1cc92e697704d49e221eaed4ea3a07a0e3782a9`.
 
 Архитектурная декомпозиция завершена решениями `ENGINE_PHASE_ACCEPTABLE`,
 `ORCHESTRATOR_DECOMPOSITION_SUFFICIENT` и `SERVICES_FINAL_FREEZE`. Block 6D

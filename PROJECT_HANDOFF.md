@@ -2,10 +2,11 @@
 
 ## CURRENT STATUS — BLOCK 6D
 
-Проверенный текущий HEAD: `2fb1e6e03e5f889ba5034da013facd555fea138f4`, ветка
+Проверенный текущий HEAD: `c1cc92e697704d49e221eaed4ea3a07a0e3782a9`, ветка
 `decompose_bot`, origin — GitHub. Свежий baseline до acceptance-тестов:
 `1378 collected / 1378 passed`; финальный suite после двух новых характеристик:
-`1380 collected / 1380 passed`. Ruff, format, mypy, markdown links, compileall и
+`1380 collected / 1380 passed`. Baseline `1378/1378` снят на исходном Block 6D
+HEAD `2fb1e6e03e5f889ba5034da013facd555fea138f4`. Ruff, format, mypy, markdown links, compileall и
 `git diff --check` проходят. `.env` не tracked и не читался; GitLab не
 использовался.
 
