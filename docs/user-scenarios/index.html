@@ -130,9 +130,9 @@
   </header>
   <main>
     <section class="summary" aria-label="Сводка">
-      <div class="metric"><b>34</b><span>сценариев</span></div>
-      <div class="metric"><b>34</b><span>связаны с pytest</span></div>
-      <div class="metric"><b>23</b><span>критических</span></div>
+      <div class="metric"><b>40</b><span>сценариев</span></div>
+      <div class="metric"><b>40</b><span>связаны с pytest</span></div>
+      <div class="metric"><b>26</b><span>критических</span></div>
       <div class="metric"><b>7</b><span>разделов</span></div>
     </section>
 
@@ -146,13 +146,13 @@
       <h2>Как проходит заявка</h2>
       <p>Основные маршруты без технических деталей.</p>
     </div>
-    <div class="journeys"><section class="journey"><h3>Обычная заявка</h3><p>Основной путь сотрудника кафе от первого сообщения до записи заявки в таблицу заказа.</p><div class="journey-steps"><span><b>1</b>Добавить товары</span><span><b>2</b>Уточнить позиции</span><span><b>3</b>Проверить черновик</span><span><b>4</b>Проверить минималку</span><span><b>5</b>Перелистывать большую финальную проверку</span><span><b>6</b>Подтвердить</span><span><b>7</b>Получить подтверждение записи</span></div><div class="journey-tests"><b>Проверяется сценариями:</b> <a href="#scenario-INP-01">INP-01</a> <a href="#scenario-INP-02">INP-02</a> <a href="#scenario-REC-01">REC-01</a> <a href="#scenario-REC-02">REC-02</a> <a href="#scenario-REC-03">REC-03</a> <a href="#scenario-REC-04">REC-04</a> <a href="#scenario-REC-05">REC-05</a> <a href="#scenario-REC-06">REC-06</a> <a href="#scenario-DRF-01">DRF-01</a> <a href="#scenario-SUB-01">SUB-01</a> <a href="#scenario-SUB-02">SUB-02</a> <a href="#scenario-SUB-03">SUB-03</a> <a href="#scenario-SUB-04">SUB-04</a></div></section><section class="journey"><h3>Фотография таблицы</h3><p>Количество берётся только из фактически заполненных колонок заказа, а не из фасовки или справочных данных.</p><div class="journey-steps"><span><b>1</b>Получить фото</span><span><b>2</b>Определить тип таблицы</span><span><b>3</b>Прочитать Зал/Бар/Кухня</span><span><b>4</b>Учесть правки ручкой</span><span><b>5</b>Сохранить комментарии</span><span><b>6</b>Показать черновик</span></div><div class="journey-tests"><b>Проверяется сценариями:</b> <a href="#scenario-INP-03">INP-03</a> <a href="#scenario-INP-04">INP-04</a> <a href="#scenario-INP-05">INP-05</a> <a href="#scenario-REC-06">REC-06</a> <a href="#scenario-RCV-02">RCV-02</a></div></section><section class="journey"><h3>Команда с отрицанием</h3><p>Отрицание имеет приоритет: бот не должен добавлять, объединять или отправлять вопреки словам пользователя.</p><div class="journey-steps"><span><b>1</b>Получить фразу</span><span><b>2</b>Найти отрицание</span><span><b>3</b>Определить текущий экран</span><span><b>4</b>Отменить только текущее действие</span><span><b>5</b>Сохранить черновик</span></div><div class="journey-tests"><b>Проверяется сценариями:</b> <a href="#scenario-REC-05">REC-05</a> <a href="#scenario-SAF-01">SAF-01</a> <a href="#scenario-SAF-02">SAF-02</a> <a href="#scenario-SAF-03">SAF-03</a></div></section><section class="journey"><h3>Новая заявка</h3><p>После записи заявки новый заказ начинается сразу, а активный черновик очищается только после подтверждения.</p><div class="journey-steps"><span><b>1</b>Сказать «новый заказ»</span><span><b>2</b>Проверить состояние</span><span><b>3</b>Запросить подтверждение при черновике</span><span><b>4</b>Сохранить историю</span><span><b>5</b>Открыть пустую заявку</span></div><div class="journey-tests"><b>Проверяется сценариями:</b> <a href="#scenario-DRF-04">DRF-04</a> <a href="#scenario-DRF-05">DRF-05</a> <a href="#scenario-SUB-03">SUB-03</a></div></section></div>
+    <div class="journeys"><section class="journey"><h3>Обычная заявка</h3><p>Основной путь сотрудника кафе от первого сообщения до записи заявки в таблицу заказа.</p><div class="journey-steps"><span><b>1</b>Добавить товары</span><span><b>2</b>Уточнить позиции</span><span><b>3</b>Проверить черновик</span><span><b>4</b>Проверить минималку</span><span><b>5</b>Перелистывать большую финальную проверку</span><span><b>6</b>Подтвердить</span><span><b>7</b>Получить подтверждение записи</span></div><div class="journey-tests"><b>Проверяется сценариями:</b> <a href="#scenario-INP-01">INP-01</a> <a href="#scenario-INP-02">INP-02</a> <a href="#scenario-REC-01">REC-01</a> <a href="#scenario-REC-02">REC-02</a> <a href="#scenario-REC-03">REC-03</a> <a href="#scenario-REC-04">REC-04</a> <a href="#scenario-REC-05">REC-05</a> <a href="#scenario-REC-06">REC-06</a> <a href="#scenario-DRF-01">DRF-01</a> <a href="#scenario-SUB-01">SUB-01</a> <a href="#scenario-SUB-02">SUB-02</a> <a href="#scenario-SUB-03">SUB-03</a> <a href="#scenario-SUB-04">SUB-04</a> <a href="#scenario-REC-07">REC-07</a> <a href="#scenario-REC-08">REC-08</a> <a href="#scenario-REC-09">REC-09</a> <a href="#scenario-REC-10">REC-10</a> <a href="#scenario-SUB-06">SUB-06</a></div></section><section class="journey"><h3>Фотография таблицы</h3><p>Количество берётся только из фактически заполненных колонок заказа, а не из фасовки или справочных данных.</p><div class="journey-steps"><span><b>1</b>Получить фото</span><span><b>2</b>Определить тип таблицы</span><span><b>3</b>Прочитать Зал/Бар/Кухня</span><span><b>4</b>Учесть правки ручкой</span><span><b>5</b>Сохранить комментарии</span><span><b>6</b>Показать черновик</span></div><div class="journey-tests"><b>Проверяется сценариями:</b> <a href="#scenario-INP-03">INP-03</a> <a href="#scenario-INP-04">INP-04</a> <a href="#scenario-INP-05">INP-05</a> <a href="#scenario-REC-06">REC-06</a> <a href="#scenario-RCV-02">RCV-02</a></div></section><section class="journey"><h3>Команда с отрицанием</h3><p>Отрицание имеет приоритет: бот не должен добавлять, объединять или отправлять вопреки словам пользователя.</p><div class="journey-steps"><span><b>1</b>Получить фразу</span><span><b>2</b>Найти отрицание</span><span><b>3</b>Определить текущий экран</span><span><b>4</b>Отменить только текущее действие</span><span><b>5</b>Сохранить черновик</span></div><div class="journey-tests"><b>Проверяется сценариями:</b> <a href="#scenario-REC-05">REC-05</a> <a href="#scenario-SAF-01">SAF-01</a> <a href="#scenario-SAF-02">SAF-02</a> <a href="#scenario-SAF-03">SAF-03</a></div></section><section class="journey"><h3>Новая заявка</h3><p>После записи заявки новый заказ начинается сразу, а активный черновик очищается только после подтверждения.</p><div class="journey-steps"><span><b>1</b>Сказать «новый заказ»</span><span><b>2</b>Проверить состояние</span><span><b>3</b>Запросить подтверждение при черновике</span><span><b>4</b>Сохранить историю</span><span><b>5</b>Открыть пустую заявку</span></div><div class="journey-tests"><b>Проверяется сценариями:</b> <a href="#scenario-DRF-04">DRF-04</a> <a href="#scenario-DRF-05">DRF-05</a> <a href="#scenario-SUB-03">SUB-03</a></div></section></div>
 
     <div class="section-heading">
       <h2>Как бот принимает решения</h2>
       <p>Откройте нужную схему — внутри только основные шаги.</p>
     </div>
-    <section class="system-flows"><details class="system-flow"><summary>Как бот понимает сообщение</summary><p>Канал ввода меняется, но решение всегда зависит от смысла фразы и текущего состояния диалога.</p><div class="journey-steps"><span><b>1</b>Получить сообщение</span><span><b>2</b>Распознать смысл</span><span><b>3</b>Проверить контекст</span><span><b>4</b>Проверить доступ</span><span><b>5</b>Выполнить или уточнить</span></div><div class="journey-tests"><b>Связанные сценарии:</b> <a href="#scenario-INP-01">INP-01</a> <a href="#scenario-INP-02">INP-02</a> <a href="#scenario-INP-03">INP-03</a> <a href="#scenario-DRF-01">DRF-01</a> <a href="#scenario-SUB-01">SUB-01</a> <a href="#scenario-SAF-01">SAF-01</a></div></details><details class="system-flow"><summary>Голосовое сообщение</summary><p>Бот сначала получает расшифровку, затем обрабатывает её так же, как обычный человеческий текст.</p><div class="journey-steps"><span><b>1</b>Скачать аудио</span><span><b>2</b>Получить расшифровку</span><span><b>3</b>Определить команду</span><span><b>4</b>Извлечь товары и числа</span><span><b>5</b>Уточнить сомнительное</span></div><div class="journey-tests"><b>Связанные сценарии:</b> <a href="#scenario-INP-02">INP-02</a> <a href="#scenario-REC-01">REC-01</a> <a href="#scenario-REC-02">REC-02</a> <a href="#scenario-REC-03">REC-03</a> <a href="#scenario-RCV-01">RCV-01</a></div></details><details class="system-flow"><summary>Когда требуется подтверждение</summary><p>Просмотр выполняется сразу, работа с черновиком обратима, а запись или очистка требуют явного согласия.</p><div class="journey-steps"><span><b>1</b>Определить действие</span><span><b>2</b>Оценить последствия</span><span><b>3</b>Показать результат</span><span><b>4</b>Запросить подтверждение</span><span><b>5</b>Изменить данные</span></div><div class="journey-tests"><b>Связанные сценарии:</b> <a href="#scenario-REG-02">REG-02</a> <a href="#scenario-REC-05">REC-05</a> <a href="#scenario-DRF-03">DRF-03</a> <a href="#scenario-DRF-04">DRF-04</a> <a href="#scenario-SUB-02">SUB-02</a> <a href="#scenario-SUB-03">SUB-03</a></div></details><details class="system-flow"><summary>Ошибка и восстановление</summary><p>Бот возвращает пользователя к безопасной точке и не повторяет действие, если результат предыдущей попытки неизвестен.</p><div class="journey-steps"><span><b>1</b>Зафиксировать этап</span><span><b>2</b>Определить результат</span><span><b>3</b>Сохранить черновик</span><span><b>4</b>Предложить безопасный шаг</span><span><b>5</b>Не создавать дубль</span></div><div class="journey-tests"><b>Связанные сценарии:</b> <a href="#scenario-SUB-05">SUB-05</a> <a href="#scenario-RCV-01">RCV-01</a> <a href="#scenario-RCV-02">RCV-02</a> <a href="#scenario-RCV-03">RCV-03</a> <a href="#scenario-RCV-04">RCV-04</a></div></details><details class="system-flow"><summary>Состояния заявки</summary><p>Каждая команда обрабатывается с учётом текущего этапа, поэтому одинаковая фраза не должна запускать неверное действие.</p><div class="journey-steps"><span><b>1</b>Пустая заявка</span><span><b>2</b>Сбор товаров</span><span><b>3</b>Уточнение</span><span><b>4</b>Финальная проверка</span><span><b>5</b>Записано</span></div><div class="journey-tests"><b>Связанные сценарии:</b> <a href="#scenario-DRF-01">DRF-01</a> <a href="#scenario-DRF-02">DRF-02</a> <a href="#scenario-DRF-03">DRF-03</a> <a href="#scenario-DRF-04">DRF-04</a> <a href="#scenario-SUB-01">SUB-01</a> <a href="#scenario-SUB-03">SUB-03</a> <a href="#scenario-SAF-04">SAF-04</a></div></details></section>
+    <section class="system-flows"><details class="system-flow"><summary>Как бот понимает сообщение</summary><p>Канал ввода меняется, но решение всегда зависит от смысла фразы и текущего состояния диалога.</p><div class="journey-steps"><span><b>1</b>Получить сообщение</span><span><b>2</b>Распознать смысл</span><span><b>3</b>Проверить контекст</span><span><b>4</b>Проверить доступ</span><span><b>5</b>Выполнить или уточнить</span></div><div class="journey-tests"><b>Связанные сценарии:</b> <a href="#scenario-INP-01">INP-01</a> <a href="#scenario-INP-02">INP-02</a> <a href="#scenario-INP-03">INP-03</a> <a href="#scenario-DRF-01">DRF-01</a> <a href="#scenario-SUB-01">SUB-01</a> <a href="#scenario-SAF-01">SAF-01</a></div></details><details class="system-flow"><summary>Голосовое сообщение</summary><p>Бот сначала получает расшифровку, затем обрабатывает её так же, как обычный человеческий текст.</p><div class="journey-steps"><span><b>1</b>Скачать аудио</span><span><b>2</b>Получить расшифровку</span><span><b>3</b>Определить команду</span><span><b>4</b>Извлечь товары и числа</span><span><b>5</b>Уточнить сомнительное</span></div><div class="journey-tests"><b>Связанные сценарии:</b> <a href="#scenario-INP-02">INP-02</a> <a href="#scenario-REC-01">REC-01</a> <a href="#scenario-REC-02">REC-02</a> <a href="#scenario-REC-03">REC-03</a> <a href="#scenario-RCV-01">RCV-01</a></div></details><details class="system-flow"><summary>Когда требуется подтверждение</summary><p>Просмотр выполняется сразу, работа с черновиком обратима, а запись или очистка требуют явного согласия.</p><div class="journey-steps"><span><b>1</b>Определить действие</span><span><b>2</b>Оценить последствия</span><span><b>3</b>Показать результат</span><span><b>4</b>Запросить подтверждение</span><span><b>5</b>Изменить данные</span></div><div class="journey-tests"><b>Связанные сценарии:</b> <a href="#scenario-REG-02">REG-02</a> <a href="#scenario-REC-05">REC-05</a> <a href="#scenario-DRF-03">DRF-03</a> <a href="#scenario-DRF-04">DRF-04</a> <a href="#scenario-SUB-02">SUB-02</a> <a href="#scenario-SUB-03">SUB-03</a></div></details><details class="system-flow"><summary>Ошибка и восстановление</summary><p>Бот возвращает пользователя к безопасной точке и не повторяет действие, если результат предыдущей попытки неизвестен.</p><div class="journey-steps"><span><b>1</b>Зафиксировать этап</span><span><b>2</b>Определить результат</span><span><b>3</b>Сохранить черновик</span><span><b>4</b>Предложить безопасный шаг</span><span><b>5</b>Не создавать дубль</span></div><div class="journey-tests"><b>Связанные сценарии:</b> <a href="#scenario-SUB-05">SUB-05</a> <a href="#scenario-RCV-01">RCV-01</a> <a href="#scenario-RCV-02">RCV-02</a> <a href="#scenario-RCV-03">RCV-03</a> <a href="#scenario-RCV-04">RCV-04</a> <a href="#scenario-REC-09">REC-09</a> <a href="#scenario-SUB-06">SUB-06</a> <a href="#scenario-SAF-05">SAF-05</a></div></details><details class="system-flow"><summary>Состояния заявки</summary><p>Каждая команда обрабатывается с учётом текущего этапа, поэтому одинаковая фраза не должна запускать неверное действие.</p><div class="journey-steps"><span><b>1</b>Пустая заявка</span><span><b>2</b>Сбор товаров</span><span><b>3</b>Уточнение</span><span><b>4</b>Финальная проверка</span><span><b>5</b>Записано</span></div><div class="journey-tests"><b>Связанные сценарии:</b> <a href="#scenario-DRF-01">DRF-01</a> <a href="#scenario-DRF-02">DRF-02</a> <a href="#scenario-DRF-03">DRF-03</a> <a href="#scenario-DRF-04">DRF-04</a> <a href="#scenario-SUB-01">SUB-01</a> <a href="#scenario-SUB-03">SUB-03</a> <a href="#scenario-SAF-04">SAF-04</a> <a href="#scenario-SAF-05">SAF-05</a></div></details></section>
 
     <div class="section-heading">
       <h2>Все пользовательские сценарии</h2>
@@ -191,6 +191,8 @@
           <div><dt>Пользователь</dt><dd>Отправляет код заведения и подтверждает найденное название.</dd></div>
           <div><dt>Бот</dt><dd>Показывает название заведения, спрашивает подтверждение и только после согласия сохраняет привязку.</dd></div>
           <div class="result"><dt>Итог</dt><dd>Пользователь получает доступ только к каталогу и таблице выбранного заведения.</dd></div>
+          <div><dt>Статус проверки</dt><dd><code>AUTOMATED_PASS</code> — Контракт полностью подтверждён локальными автоматическими тестами</dd></div>
+          <div><dt>Ручная проверка</dt><dd>Не требуется для подтверждения локального контракта; общий Telegram smoke выполняется перед пилотом.</dd></div>
         </dl>
         <details>
           <summary>Что важно</summary>
@@ -230,6 +232,8 @@
           <div><dt>Пользователь</dt><dd>Отказывается или подтверждает смену заведения.</dd></div>
           <div><dt>Бот</dt><dd>При отказе ничего не записывает; для смены запрашивает дополнительное подтверждение.</dd></div>
           <div class="result"><dt>Итог</dt><dd>Случайное сообщение или нажатие не переключает пользователя на чужое заведение.</dd></div>
+          <div><dt>Статус проверки</dt><dd><code>AUTOMATED_PASS</code> — Контракт полностью подтверждён локальными автоматическими тестами</dd></div>
+          <div><dt>Ручная проверка</dt><dd>Не требуется для подтверждения локального контракта; общий Telegram smoke выполняется перед пилотом.</dd></div>
         </dl>
         <details>
           <summary>Что важно</summary>
@@ -269,6 +273,8 @@
           <div><dt>Пользователь</dt><dd>Отправляет боту сообщение после того, как ответственный сотрудник изменил поле «Активен» или удалил строку.</dd></div>
           <div><dt>Бот</dt><dd>При TRUE продолжает работу. При FALSE или отсутствии строки сообщает, что доступ отключён, и не читает и не изменяет таблицу заведения.</dd></div>
           <div class="result"><dt>Итог</dt><dd>Доступ каждого пользователя управляется строкой типа «Заведение»; строки поставщиков не дают доступ к ресторану. Повторное TRUE восстанавливает доступ. Временный сбой Google не блокирует ранее подтверждённых пользователей.</dd></div>
+          <div><dt>Статус проверки</dt><dd><code>AUTOMATED_PARTIAL</code> — Основной контракт подтверждён, но реальный внешний контур не проверен</dd></div>
+          <div><dt>Ручная проверка</dt><dd>Нужен live-прогон с тестовым реестром Google Sheets: отзыв и восстановление доступа.</dd></div>
         </dl>
         <details>
           <summary>Что важно</summary>
@@ -309,6 +315,8 @@
           <div><dt>Пользователь</dt><dd>Отправляет один товар или список товаров с количеством.</dd></div>
           <div><dt>Бот</dt><dd>Распознаёт отдельные позиции, сопоставляет их с каталогом и показывает результат.</dd></div>
           <div class="result"><dt>Итог</dt><dd>Найденные товары появляются в черновике с указанным количеством.</dd></div>
+          <div><dt>Статус проверки</dt><dd><code>AUTOMATED_PASS</code> — Контракт полностью подтверждён локальными автоматическими тестами</dd></div>
+          <div><dt>Ручная проверка</dt><dd>Не требуется для подтверждения локального контракта; общий Telegram smoke выполняется перед пилотом.</dd></div>
         </dl>
         <details>
           <summary>Что важно</summary>
@@ -349,6 +357,8 @@
           <div><dt>Пользователь</dt><dd>Называет товары, количества и комментарии обычной разговорной фразой, а на карточке уточнения отвечает коротко: «одна бутылка», «ладно, бутылка», «десять килограммов».</dd></div>
           <div><dt>Бот</dt><dd>Показывает этап распознавания, превращает речь в позиции, связывает короткий ответ с текущим товаром и не переносит количество между соседними товарами.</dd></div>
           <div class="result"><dt>Итог</dt><dd>В черновик попадают только произнесённые товары и количества. Диапазон размера или фасовка вроде «0,8–1,2 кг» остаётся характеристикой товара и не становится количеством заказа.</dd></div>
+          <div><dt>Статус проверки</dt><dd><code>AUTOMATED_PARTIAL</code> — Основной контракт подтверждён, но реальный внешний контур не проверен</dd></div>
+          <div><dt>Ручная проверка</dt><dd>Нужен live-прогон в Telegram с реальным аудио и основной/резервной ASR-моделью.</dd></div>
         </dl>
         <details>
           <summary>Что важно</summary>
@@ -388,6 +398,8 @@
           <div><dt>Пользователь</dt><dd>Отправляет фотографию распечатанной или заполненной таблицы.</dd></div>
           <div><dt>Бот</dt><dd>Берёт количество только из заполненных колонок заказа, сохраняет комментарии и игнорирует распознанного с фото поставщика, фасовку, остатки и справочные числа.</dd></div>
           <div class="result"><dt>Итог</dt><dd>Количество записывается в соответствующие колонки «Зал», «Бар» и «Кухня», а поставщик определяется по найденной строке актуального каталога. Строки без заказа не добавляются.</dd></div>
+          <div><dt>Статус проверки</dt><dd><code>AUTOMATED_PARTIAL</code> — Основной контракт подтверждён, но реальный внешний контур не проверен</dd></div>
+          <div><dt>Ручная проверка</dt><dd>Нужен live-прогон с фотографией реальной печатной таблицы и vision-провайдером.</dd></div>
         </dl>
         <details>
           <summary>Что важно</summary>
@@ -427,6 +439,8 @@
           <div><dt>Пользователь</dt><dd>Отправляет фотографию списка, написанного от руки.</dd></div>
           <div><dt>Бот</dt><dd>Использует только явно указанные количества и сопоставляет названия с каталогом.</dd></div>
           <div class="result"><dt>Итог</dt><dd>Позиции с количеством попадают в черновик; бот не придумывает отсутствующие значения.</dd></div>
+          <div><dt>Статус проверки</dt><dd><code>AUTOMATED_PARTIAL</code> — Основной контракт подтверждён, но реальный внешний контур не проверен</dd></div>
+          <div><dt>Ручная проверка</dt><dd>Нужен live-прогон с несколькими реальными рукописными списками.</dd></div>
         </dl>
         <details>
           <summary>Что важно</summary>
@@ -466,6 +480,8 @@
           <div><dt>Пользователь</dt><dd>Отправляет фотографию таблицы с ручной корректировкой.</dd></div>
           <div><dt>Бот</dt><dd>Считает зачёркнутое значение недействительным и использует только разборчивую рукописную замену.</dd></div>
           <div class="result"><dt>Итог</dt><dd>В черновике остаётся одно актуальное количество без сложения со старым.</dd></div>
+          <div><dt>Статус проверки</dt><dd><code>AUTOMATED_PARTIAL</code> — Основной контракт подтверждён, но реальный внешний контур не проверен</dd></div>
+          <div><dt>Ручная проверка</dt><dd>Нужен live-прогон с реальным зачёркиванием и рукописной заменой.</dd></div>
         </dl>
         <details>
           <summary>Что важно</summary>
@@ -505,6 +521,8 @@
           <div><dt>Пользователь</dt><dd>Отправляет название без количества, затем отвечает числом.</dd></div>
           <div><dt>Бот</dt><dd>Просит уточнить количество именно для текущего товара и не создаёт новую строку.</dd></div>
           <div class="result"><dt>Итог</dt><dd>После ответа товар один раз появляется в черновике с введённым количеством.</dd></div>
+          <div><dt>Статус проверки</dt><dd><code>AUTOMATED_PASS</code> — Контракт полностью подтверждён локальными автоматическими тестами</dd></div>
+          <div><dt>Ручная проверка</dt><dd>Не требуется для подтверждения локального контракта; общий Telegram smoke выполняется перед пилотом.</dd></div>
         </dl>
         <details>
           <summary>Что важно</summary>
@@ -544,6 +562,8 @@
           <div><dt>Пользователь</dt><dd>Выбирает единицу каталога либо вводит корректное количество.</dd></div>
           <div><dt>Бот</dt><dd>Не меняет единицу молча, показывает различие и предлагает безопасные варианты.</dd></div>
           <div class="result"><dt>Итог</dt><dd>В черновике хранится количество в допустимой единице каталога.</dd></div>
+          <div><dt>Статус проверки</dt><dd><code>AUTOMATED_PASS</code> — Контракт полностью подтверждён локальными автоматическими тестами</dd></div>
+          <div><dt>Ручная проверка</dt><dd>Не требуется для подтверждения локального контракта; общий Telegram smoke выполняется перед пилотом.</dd></div>
         </dl>
         <details>
           <summary>Что важно</summary>
@@ -583,6 +603,8 @@
           <div><dt>Пользователь</dt><dd>Выбирает номер, кнопку или однозначное название варианта.</dd></div>
           <div><dt>Бот</dt><dd>Показывает похожие товары как подсказки и не добавляет слабое совпадение автоматически.</dd></div>
           <div class="result"><dt>Итог</dt><dd>В черновик попадает только явно выбранный товар.</dd></div>
+          <div><dt>Статус проверки</dt><dd><code>AUTOMATED_PASS</code> — Контракт полностью подтверждён локальными автоматическими тестами</dd></div>
+          <div><dt>Ручная проверка</dt><dd>Не требуется для подтверждения локального контракта; общий Telegram smoke выполняется перед пилотом.</dd></div>
         </dl>
         <details>
           <summary>Что важно</summary>
@@ -622,6 +644,8 @@
           <div><dt>Пользователь</dt><dd>Меняет название, ищет у всех поставщиков, не добавляет позицию или отправляет запрос снабженцу.</dd></div>
           <div><dt>Бот</dt><dd>Показывает понятные варианты и не подставляет случайный товар.</dd></div>
           <div class="result"><dt>Итог</dt><dd>Неизвестная или противоречащая запросу позиция не загрязняет заявку; запрос снабженцу хранится отдельно от черновика.</dd></div>
+          <div><dt>Статус проверки</dt><dd><code>AUTOMATED_PASS</code> — Контракт полностью подтверждён локальными автоматическими тестами</dd></div>
+          <div><dt>Ручная проверка</dt><dd>Не требуется для подтверждения локального контракта; общий Telegram smoke выполняется перед пилотом.</dd></div>
         </dl>
         <details>
           <summary>Что важно</summary>
@@ -661,6 +685,8 @@
           <div><dt>Пользователь</dt><dd>Подтверждает прибавление нового количества или отказывается от повторного добавления.</dd></div>
           <div><dt>Бот</dt><dd>Показывает текущее и итоговое количество; без подтверждения значения не складывает.</dd></div>
           <div class="result"><dt>Итог</dt><dd>Количество увеличивается ровно на подтверждённое значение либо остаётся прежним.</dd></div>
+          <div><dt>Статус проверки</dt><dd><code>AUTOMATED_PASS</code> — Контракт полностью подтверждён локальными автоматическими тестами</dd></div>
+          <div><dt>Ручная проверка</dt><dd>Не требуется для подтверждения локального контракта; общий Telegram smoke выполняется перед пилотом.</dd></div>
         </dl>
         <details>
           <summary>Что важно</summary>
@@ -700,6 +726,8 @@
           <div><dt>Пользователь</dt><dd>Сообщает сорт, качество, упаковку, дату доставки или другое пожелание.</dd></div>
           <div><dt>Бот</dt><dd>Определяет, относится комментарий к одному товару, явно названной группе или всей заявке. Пожелание после последнего товара не расширяет на соседние позиции. Если фраза двусмысленна, временно сохраняет распознанные позиции вне черновика и просит уточнить область комментария.</dd></div>
           <div class="result"><dt>Итог</dt><dd>Пользователь может ответить названием, номером или обычной фразой — например, «для всех товаров», «только для огурцов» или «для всей заявки». Только после уверенного ответа товары и комментарий попадают в нужные строки; ответ не превращается в новый товар.</dd></div>
+          <div><dt>Статус проверки</dt><dd><code>AUTOMATED_PASS</code> — Контракт полностью подтверждён локальными автоматическими тестами</dd></div>
+          <div><dt>Ручная проверка</dt><dd>Не требуется для подтверждения локального контракта; общий Telegram smoke выполняется перед пилотом.</dd></div>
         </dl>
         <details>
           <summary>Что важно</summary>
@@ -721,6 +749,170 @@
         </details>
       </article>
 
+      <article id="scenario-REC-07" class="scenario-card"
+        data-category="recognition"
+        data-priority="important" data-search="rec-07 удаление комментариев без изменения товаров уточнение товаров просит удалить комментарии у одной позиции или у всей заявки. удаляет только комментарии выбранной области и показывает обновлённый черновик. пользователь подключён к заведению и работает со своим черновиком. товар вариант товара количество единица комментарий удали все комментарии убери комментарий у курицы">
+        <div class="card-top">
+          <span class="scenario-id">REC-07</span>
+          <span class="badges">
+            <span class="status status-live">Работает сейчас</span>
+            <span class="priority priority-important">Важный</span>
+          </span>
+        </div>
+        <h3>Удаление комментариев без изменения товаров</h3>
+        <p class="category-label">Уточнение товаров</p>
+        <div class="channels"><span>Текст</span><span>Голос</span></div>
+        <dl>
+          <div><dt>Перед началом</dt><dd>В черновике есть товары с комментариями и подтверждёнными позициями каталога.</dd></div>
+          <div><dt>Пользователь</dt><dd>Просит удалить комментарии у одной позиции или у всей заявки.</dd></div>
+          <div><dt>Бот</dt><dd>Удаляет только комментарии выбранной области и показывает обновлённый черновик.</dd></div>
+          <div class="result"><dt>Итог</dt><dd>Товары, количества, единицы и привязки к каталогу остаются без изменений.</dd></div>
+          <div><dt>Статус проверки</dt><dd><code>AUTOMATED_PASS</code> — Контракт полностью подтверждён локальными автоматическими тестами</dd></div>
+          <div><dt>Ручная проверка</dt><dd>Не требуется для локального контракта; голосовая формулировка входит в общий Telegram smoke.</dd></div>
+        </dl>
+        <details>
+          <summary>Что важно</summary>
+          <dl class="contract">
+            <div><dt>Доступ</dt><dd>Пользователь подключён к заведению и работает со своим черновиком.</dd></div>
+            <div><dt>Распознаём</dt><dd>товар, вариант товара, количество, единица, комментарий</dd></div>
+            <div><dt>Подтверждение</dt><dd>Нужно при выборе похожего товара, смене единицы и объединении повторной позиции.</dd></div>
+            <div><dt>Что изменится</dt><dd>Товары, количества, единицы и привязки к каталогу остаются без изменений.</dd></div>
+            <div><dt>Если произошла ошибка</dt><dd>Не подставлять похожий товар автоматически; показать варианты или разрешить ввести другое название.</dd></div>
+          </dl>
+        </details>
+        <details>
+          <summary>Примеры фраз</summary>
+          <ul><li>«Удали все комментарии»</li><li>«Убери комментарий у курицы»</li></ul>
+        </details>
+        <details>
+          <summary>Связанные pytest-тесты · 1</summary>
+          <ul class="tests"><li><a href="../../tests/conversation/test_acceptance_stabilization.py">tests/conversation/test_acceptance_stabilization.py</a><span>test_remove_all_comments_keeps_cart_and_catalog_bindings</span></li></ul>
+        </details>
+      </article>
+
+      <article id="scenario-REC-08" class="scenario-card"
+        data-category="recognition"
+        data-priority="important" data-search="rec-08 исправление одного факта в комментарии уточнение товаров исправляет один фрагмент формулировкой «не так, а иначе». заменяет только исправленный факт и сохраняет остальные пожелания. пользователь подключён к заведению и работает со своим черновиком. товар вариант товара количество единица комментарий не крупные куски, а средние не зелёные, а спелые">
+        <div class="card-top">
+          <span class="scenario-id">REC-08</span>
+          <span class="badges">
+            <span class="status status-live">Работает сейчас</span>
+            <span class="priority priority-important">Важный</span>
+          </span>
+        </div>
+        <h3>Исправление одного факта в комментарии</h3>
+        <p class="category-label">Уточнение товаров</p>
+        <div class="channels"><span>Текст</span><span>Голос</span></div>
+        <dl>
+          <div><dt>Перед началом</dt><dd>У товара уже есть комментарий из нескольких независимых пожеланий.</dd></div>
+          <div><dt>Пользователь</dt><dd>Исправляет один фрагмент формулировкой «не так, а иначе».</dd></div>
+          <div><dt>Бот</dt><dd>Заменяет только исправленный факт и сохраняет остальные пожелания.</dd></div>
+          <div class="result"><dt>Итог</dt><dd>Комментарий остаётся привязан к правильному товару и не теряет независимые детали.</dd></div>
+          <div><dt>Статус проверки</dt><dd><code>AUTOMATED_PASS</code> — Контракт полностью подтверждён локальными автоматическими тестами</dd></div>
+          <div><dt>Ручная проверка</dt><dd>Не требуется для локального контракта; естественная голосовая формулировка входит в общий Telegram smoke.</dd></div>
+        </dl>
+        <details>
+          <summary>Что важно</summary>
+          <dl class="contract">
+            <div><dt>Доступ</dt><dd>Пользователь подключён к заведению и работает со своим черновиком.</dd></div>
+            <div><dt>Распознаём</dt><dd>товар, вариант товара, количество, единица, комментарий</dd></div>
+            <div><dt>Подтверждение</dt><dd>Нужно при выборе похожего товара, смене единицы и объединении повторной позиции.</dd></div>
+            <div><dt>Что изменится</dt><dd>Комментарий остаётся привязан к правильному товару и не теряет независимые детали.</dd></div>
+            <div><dt>Если произошла ошибка</dt><dd>Не подставлять похожий товар автоматически; показать варианты или разрешить ввести другое название.</dd></div>
+          </dl>
+        </details>
+        <details>
+          <summary>Примеры фраз</summary>
+          <ul><li>«Не крупные куски, а средние»</li><li>«Не зелёные, а спелые»</li></ul>
+        </details>
+        <details>
+          <summary>Связанные pytest-тесты · 1</summary>
+          <ul class="tests"><li><a href="../../tests/conversation/test_acceptance_stabilization.py">tests/conversation/test_acceptance_stabilization.py</a><span>test_comment_correction_replaces_only_corrected_fact</span></li></ul>
+        </details>
+      </article>
+
+      <article id="scenario-REC-09" class="scenario-card"
+        data-category="recognition"
+        data-priority="critical" data-search="rec-09 запрос на добавление отсутствующего товара уточнение товаров выбирает запрос снабженцу и одним сообщением сообщает недостающие сведения. удаляет только неразрешённую позицию из черновика и создаёт отдельный запрос на добавление товара. пользователь подключён к заведению и работает со своим черновиком. товар вариант товара количество единица комментарий запросить добавление товара добавьте в каталог этот товар">
+        <div class="card-top">
+          <span class="scenario-id">REC-09</span>
+          <span class="badges">
+            <span class="status status-live">Работает сейчас</span>
+            <span class="priority priority-critical">Критический</span>
+          </span>
+        </div>
+        <h3>Запрос на добавление отсутствующего товара</h3>
+        <p class="category-label">Уточнение товаров</p>
+        <div class="channels"><span>Текст</span><span>Голос</span><span>Кнопка</span></div>
+        <dl>
+          <div><dt>Перед началом</dt><dd>Товар не найден или ни один предложенный вариант не подходит.</dd></div>
+          <div><dt>Пользователь</dt><dd>Выбирает запрос снабженцу и одним сообщением сообщает недостающие сведения.</dd></div>
+          <div><dt>Бот</dt><dd>Удаляет только неразрешённую позицию из черновика и создаёт отдельный запрос на добавление товара.</dd></div>
+          <div class="result"><dt>Итог</dt><dd>Запрос не маскируется похожим товаром; при неизвестном результате записи повтор не создаёт дубль.</dd></div>
+          <div><dt>Статус проверки</dt><dd><code>AUTOMATED_PARTIAL</code> — Основной контракт подтверждён, но реальный внешний контур не проверен</dd></div>
+          <div><dt>Ручная проверка</dt><dd>Нужен изолированный live-прогон записи в тестовый лист запросов и проверки неопределённого сетевого результата.</dd></div>
+        </dl>
+        <details>
+          <summary>Что важно</summary>
+          <dl class="contract">
+            <div><dt>Доступ</dt><dd>Пользователь подключён к заведению и работает со своим черновиком.</dd></div>
+            <div><dt>Распознаём</dt><dd>товар, вариант товара, количество, единица, комментарий</dd></div>
+            <div><dt>Подтверждение</dt><dd>Нужно при выборе похожего товара, смене единицы и объединении повторной позиции.</dd></div>
+            <div><dt>Что изменится</dt><dd>Запрос не маскируется похожим товаром; при неизвестном результате записи повтор не создаёт дубль.</dd></div>
+            <div><dt>Если произошла ошибка</dt><dd>Не подставлять похожий товар автоматически; показать варианты или разрешить ввести другое название.</dd></div>
+          </dl>
+        </details>
+        <details>
+          <summary>Примеры фраз</summary>
+          <ul><li>«Запросить добавление товара»</li><li>«Добавьте в каталог этот товар»</li></ul>
+        </details>
+        <details>
+          <summary>Связанные pytest-тесты · 3</summary>
+          <ul class="tests"><li><a href="../../tests/product_add/test_product_add.py">tests/product_add/test_product_add.py</a><span>test_product_add_request_removes_unresolved_item_and_enqueues_sheet_write</span></li><li><a href="../../tests/product_add/test_product_add.py">tests/product_add/test_product_add.py</a><span>test_product_add_retry_reuses_id_and_never_retries_uncertain_write</span></li><li><a href="../../tests/product_add/test_product_add.py">tests/product_add/test_product_add.py</a><span>test_product_add_worker_blocks_duplicate_after_uncertain_network_failure</span></li></ul>
+        </details>
+      </article>
+
+      <article id="scenario-REC-10" class="scenario-card"
+        data-category="recognition"
+        data-priority="important" data-search="rec-10 поиск товара у всех поставщиков уточнение товаров просит проверить остальных поставщиков. повторяет поиск той же позиции без создания второй строки и обновляет карточку результатом. пользователь подключён к заведению и работает со своим черновиком. товар вариант товара количество единица комментарий искать у всех поставщиков проверь у других">
+        <div class="card-top">
+          <span class="scenario-id">REC-10</span>
+          <span class="badges">
+            <span class="status status-live">Работает сейчас</span>
+            <span class="priority priority-important">Важный</span>
+          </span>
+        </div>
+        <h3>Поиск товара у всех поставщиков</h3>
+        <p class="category-label">Уточнение товаров</p>
+        <div class="channels"><span>Текст</span><span>Голос</span><span>Кнопка</span></div>
+        <dl>
+          <div><dt>Перед началом</dt><dd>Поиск ограничен выбранным поставщиком, а подходящего товара у него нет.</dd></div>
+          <div><dt>Пользователь</dt><dd>Просит проверить остальных поставщиков.</dd></div>
+          <div><dt>Бот</dt><dd>Повторяет поиск той же позиции без создания второй строки и обновляет карточку результатом.</dd></div>
+          <div class="result"><dt>Итог</dt><dd>Пользователь видит безопасный результат более широкого поиска; исходное количество и комментарий не теряются.</dd></div>
+          <div><dt>Статус проверки</dt><dd><code>AUTOMATED_PASS</code> — Контракт полностью подтверждён локальными автоматическими тестами</dd></div>
+          <div><dt>Ручная проверка</dt><dd>Не требуется для локального контракта; скорость на большом реальном каталоге проверяется отдельно перед масштабированием.</dd></div>
+        </dl>
+        <details>
+          <summary>Что важно</summary>
+          <dl class="contract">
+            <div><dt>Доступ</dt><dd>Пользователь подключён к заведению и работает со своим черновиком.</dd></div>
+            <div><dt>Распознаём</dt><dd>товар, вариант товара, количество, единица, комментарий</dd></div>
+            <div><dt>Подтверждение</dt><dd>Нужно при выборе похожего товара, смене единицы и объединении повторной позиции.</dd></div>
+            <div><dt>Что изменится</dt><dd>Пользователь видит безопасный результат более широкого поиска; исходное количество и комментарий не теряются.</dd></div>
+            <div><dt>Если произошла ошибка</dt><dd>Не подставлять похожий товар автоматически; показать варианты или разрешить ввести другое название.</dd></div>
+          </dl>
+        </details>
+        <details>
+          <summary>Примеры фраз</summary>
+          <ul><li>«Искать у всех поставщиков»</li><li>«Проверь у других»</li></ul>
+        </details>
+        <details>
+          <summary>Связанные pytest-тесты · 2</summary>
+          <ul class="tests"><li><a href="../../tests/supplier/test_supplier_lock.py">tests/supplier/test_supplier_lock.py</a><span>test_search_all_suppliers_retries_same_item_without_duplicate</span></li><li><a href="../../tests/conversation/test_orchestrator_pipeline.py">tests/conversation/test_orchestrator_pipeline.py</a><span>test_search_all_suppliers_deletes_old_card_and_edits_progress_with_result</span></li></ul>
+        </details>
+      </article>
+
       <article id="scenario-DRF-01" class="scenario-card"
         data-category="draft"
         data-priority="important" data-search="drf-01 показать текущий черновик работа с черновиком просит показать заявку или возвращается кнопкой. открывает актуальный черновик, не добавляя слова команды как товар. большой список разбит на страницы. пользователь подключён к заведению; доступен только черновик текущего чата. черновик позиция номер варианта команда управления покажи черновик что у меня в заявке? вернись в корзину следующая страница">
@@ -739,6 +931,8 @@
           <div><dt>Пользователь</dt><dd>Просит показать заявку или возвращается кнопкой.</dd></div>
           <div><dt>Бот</dt><dd>Открывает актуальный черновик, не добавляя слова команды как товар. Большой список разбит на страницы.</dd></div>
           <div class="result"><dt>Итог</dt><dd>Пользователь видит текущие позиции, количества и доступные действия; страницы можно листать кнопкой или голосом.</dd></div>
+          <div><dt>Статус проверки</dt><dd><code>AUTOMATED_PASS</code> — Контракт полностью подтверждён локальными автоматическими тестами</dd></div>
+          <div><dt>Ручная проверка</dt><dd>Не требуется для подтверждения локального контракта; общий Telegram smoke выполняется перед пилотом.</dd></div>
         </dl>
         <details>
           <summary>Что важно</summary>
@@ -778,6 +972,8 @@
           <div><dt>Пользователь</dt><dd>Просит добавить ещё товары и отправляет следующий список.</dd></div>
           <div><dt>Бот</dt><dd>Переходит в режим добавления, сохраняя существующий черновик.</dd></div>
           <div class="result"><dt>Итог</dt><dd>Новые позиции добавляются к текущей заявке.</dd></div>
+          <div><dt>Статус проверки</dt><dd><code>AUTOMATED_PASS</code> — Контракт полностью подтверждён локальными автоматическими тестами</dd></div>
+          <div><dt>Ручная проверка</dt><dd>Не требуется для подтверждения локального контракта; общий Telegram smoke выполняется перед пилотом.</dd></div>
         </dl>
         <details>
           <summary>Что важно</summary>
@@ -817,6 +1013,8 @@
           <div><dt>Пользователь</dt><dd>Явно просит полностью очистить заявку.</dd></div>
           <div><dt>Бот</dt><dd>Удаляет только текущий черновик и возвращает экран новой заявки.</dd></div>
           <div class="result"><dt>Итог</dt><dd>Черновик пуст; история ранее отправленных заявок не удаляется.</dd></div>
+          <div><dt>Статус проверки</dt><dd><code>AUTOMATED_PASS</code> — Контракт полностью подтверждён локальными автоматическими тестами</dd></div>
+          <div><dt>Ручная проверка</dt><dd>Не требуется для подтверждения локального контракта; общий Telegram smoke выполняется перед пилотом.</dd></div>
         </dl>
         <details>
           <summary>Что важно</summary>
@@ -856,6 +1054,8 @@
           <div><dt>Пользователь</dt><dd>Говорит «новый заказ», затем подтверждает или отменяет очистку.</dd></div>
           <div><dt>Бот</dt><dd>Предупреждает о сохранённом черновике и не очищает его без отдельного подтверждения.</dd></div>
           <div class="result"><dt>Итог</dt><dd>При подтверждении открывается пустая заявка; при отказе старый черновик сохраняется.</dd></div>
+          <div><dt>Статус проверки</dt><dd><code>AUTOMATED_PASS</code> — Контракт полностью подтверждён локальными автоматическими тестами</dd></div>
+          <div><dt>Ручная проверка</dt><dd>Не требуется для подтверждения локального контракта; общий Telegram smoke выполняется перед пилотом.</dd></div>
         </dl>
         <details>
           <summary>Что важно</summary>
@@ -895,6 +1095,8 @@
           <div><dt>Пользователь</dt><dd>Говорит «новый заказ» или нажимает кнопку «Новая заявка».</dd></div>
           <div><dt>Бот</dt><dd>Сразу открывает пустой черновик без лишнего подтверждения.</dd></div>
           <div class="result"><dt>Итог</dt><dd>История предыдущей заявки сохраняется, новая заявка начинается с нуля.</dd></div>
+          <div><dt>Статус проверки</dt><dd><code>AUTOMATED_PASS</code> — Контракт полностью подтверждён локальными автоматическими тестами</dd></div>
+          <div><dt>Ручная проверка</dt><dd>Не требуется для подтверждения локального контракта; общий Telegram smoke выполняется перед пилотом.</dd></div>
         </dl>
         <details>
           <summary>Что важно</summary>
@@ -934,6 +1136,8 @@
           <div><dt>Пользователь</dt><dd>Просит оформить или отправить заявку.</dd></div>
           <div><dt>Бот</dt><dd>Сначала проверяет незавершённые позиции и показывает итоговую карточку. Большая заявка разбивается на страницы с кнопками «Назад» и «Далее».</dd></div>
           <div class="result"><dt>Итог</dt><dd>До явного финального подтверждения запись в таблицу заказа не запускается; пользователь может просмотреть все страницы заявки.</dd></div>
+          <div><dt>Статус проверки</dt><dd><code>AUTOMATED_PASS</code> — Контракт полностью подтверждён локальными автоматическими тестами</dd></div>
+          <div><dt>Ручная проверка</dt><dd>Не требуется для подтверждения локального контракта; общий Telegram smoke выполняется перед пилотом.</dd></div>
         </dl>
         <details>
           <summary>Что важно</summary>
@@ -973,6 +1177,8 @@
           <div><dt>Пользователь</dt><dd>Открывает предупреждение и выбирает: добавить товары либо принять риск.</dd></div>
           <div><dt>Бот</dt><dd>Показывает поставщика и недостающую сумму, предлагает понятные действия.</dd></div>
           <div class="result"><dt>Итог</dt><dd>Пользователь осознанно дополняет заявку или отправляет её как есть.</dd></div>
+          <div><dt>Статус проверки</dt><dd><code>AUTOMATED_PASS</code> — Контракт полностью подтверждён локальными автоматическими тестами</dd></div>
+          <div><dt>Ручная проверка</dt><dd>Не требуется для подтверждения локального контракта; общий Telegram smoke выполняется перед пилотом.</dd></div>
         </dl>
         <details>
           <summary>Что важно</summary>
@@ -1012,6 +1218,8 @@
           <div><dt>Пользователь</dt><dd>Нажимает «Отправить в таблицу заказа» или подтверждает запись текстом либо голосом.</dd></div>
           <div><dt>Бот</dt><dd>Записывает товары и комментарии в лист «Заявка», запускает перерасчёт и сообщает «Заявка записана». Объясняет, что поставщикам её отправит ответственный сотрудник.</dd></div>
           <div class="result"><dt>Итог</dt><dd>Черновик завершается только после успешной записи и перерасчёта. При выключенной автоматической отправке центральный сервис не вызывается.</dd></div>
+          <div><dt>Статус проверки</dt><dd><code>AUTOMATED_PARTIAL</code> — Основной контракт подтверждён, но реальный внешний контур не проверен</dd></div>
+          <div><dt>Ручная проверка</dt><dd>Нужен изолированный live-прогон записи и перерасчёта в тестовой Google Sheets; внешняя отправка поставщику должна быть выключена.</dd></div>
         </dl>
         <details>
           <summary>Что важно</summary>
@@ -1051,6 +1259,8 @@
           <div><dt>Пользователь</dt><dd>Просит показать статусы.</dd></div>
           <div><dt>Бот</dt><dd>Показывает последние отслеживаемые заявки из листа «История»: отдельно по каждому поставщику, со списком товаров, статусом, датой поставки и контактом, если они заполнены.</dd></div>
           <div class="result"><dt>Итог</dt><dd>Пользователь видит понятный статус каждого поставщика, не затрагивая текущий черновик.</dd></div>
+          <div><dt>Статус проверки</dt><dd><code>AUTOMATED_PARTIAL</code> — Основной контракт подтверждён, но реальный внешний контур не проверен</dd></div>
+          <div><dt>Ручная проверка</dt><dd>Нужен live-прогон чтения тестового листа «История» текущего заведения.</dd></div>
         </dl>
         <details>
           <summary>Что важно</summary>
@@ -1090,6 +1300,8 @@
           <div><dt>Пользователь</dt><dd>Следует инструкции бота: безопасно повторяет ранний этап либо передаёт внутренний код менеджеру.</dd></div>
           <div><dt>Бот</dt><dd>До центрального POST предлагает безопасный повтор. После начала POST не отправляет заявку повторно и просит проверить результат через менеджера по снабжению.</dd></div>
           <div class="result"><dt>Итог</dt><dd>Неоднозначный сетевой ответ не приводит к автоматическому дублю заказа поставщикам.</dd></div>
+          <div><dt>Статус проверки</dt><dd><code>AUTOMATED_PARTIAL</code> — Основной контракт подтверждён, но реальный внешний контур не проверен</dd></div>
+          <div><dt>Ручная проверка</dt><dd>До включения функции нужен контролируемый прогон с отказами сети и операторской сверкой неопределённого результата.</dd></div>
         </dl>
         <details>
           <summary>Что важно</summary>
@@ -1111,6 +1323,47 @@
         </details>
       </article>
 
+      <article id="scenario-SUB-06" class="scenario-card"
+        data-category="submission"
+        data-priority="critical" data-search="sub-06 подтверждение записи не отправляется повторно проверка и запись заявки не выполняет дополнительного действия; система восстанавливает обработку update. отправляет итог не более одного раза; при неизвестном результате не повторяет его автоматически. пользователь подключён к заведению и видит только заявки своего заведения. заявка поставщик сумма статус дата поставки повторная доставка update после завершения потеря lease во время уведомления">
+        <div class="card-top">
+          <span class="scenario-id">SUB-06</span>
+          <span class="badges">
+            <span class="status status-live">Работает сейчас</span>
+            <span class="priority priority-critical">Критический</span>
+          </span>
+        </div>
+        <h3>Подтверждение записи не отправляется повторно</h3>
+        <p class="category-label">Проверка и запись заявки</p>
+        <div class="channels"><span>Системный</span><span>Telegram</span></div>
+        <dl>
+          <div><dt>Перед началом</dt><dd>Заявка завершена, но worker потерял lease или получил сбой около итогового сообщения.</dd></div>
+          <div><dt>Пользователь</dt><dd>Не выполняет дополнительного действия; система восстанавливает обработку update.</dd></div>
+          <div><dt>Бот</dt><dd>Отправляет итог не более одного раза; при неизвестном результате не повторяет его автоматически.</dd></div>
+          <div class="result"><dt>Итог</dt><dd>Заявка не откатывается, а повторный worker не создаёт дублирующее уведомление.</dd></div>
+          <div><dt>Статус проверки</dt><dd><code>AUTOMATED_PARTIAL</code> — Основной контракт подтверждён, но реальный внешний контур не проверен</dd></div>
+          <div><dt>Ручная проверка</dt><dd>Нужен fault-injection прогон с реальным Telegram transport перед широким production; локальная lifecycle-защита проверена.</dd></div>
+        </dl>
+        <details>
+          <summary>Что важно</summary>
+          <dl class="contract">
+            <div><dt>Доступ</dt><dd>Пользователь подключён к заведению и видит только заявки своего заведения.</dd></div>
+            <div><dt>Распознаём</dt><dd>заявка, поставщик, сумма, статус, дата поставки</dd></div>
+            <div><dt>Подтверждение</dt><dd>Нужно перед записью заявки в таблицу и перед продолжением при предупреждении о минимальной сумме.</dd></div>
+            <div><dt>Что изменится</dt><dd>Заявка не откатывается, а повторный worker не создаёт дублирующее уведомление.</dd></div>
+            <div><dt>Если произошла ошибка</dt><dd>До записи разрешить безопасный повтор; после неоднозначного результата не создавать возможный дубль.</dd></div>
+          </dl>
+        </details>
+        <details>
+          <summary>Примеры фраз</summary>
+          <ul><li>«Повторная доставка update после завершения»</li><li>«Потеря lease во время уведомления»</li></ul>
+        </details>
+        <details>
+          <summary>Связанные pytest-тесты · 3</summary>
+          <ul class="tests"><li><a href="../../tests/submission/test_submission_lease_fencing.py">tests/submission/test_submission_lease_fencing.py</a><span>test_completion_notification_gate_remains_at_most_once_after_lease_loss</span></li><li><a href="../../tests/submission/test_submission.py">tests/submission/test_submission.py</a><span>test_completion_notification_send_failure_marks_uncertain_without_retry</span></li><li><a href="../../tests/submission/test_submission.py">tests/submission/test_submission.py</a><span>test_completion_notification_started_or_completed_status_skips_send</span></li></ul>
+        </details>
+      </article>
+
       <article id="scenario-SUB-07" class="scenario-card"
         data-category="submission"
         data-priority="critical" data-search="sub-07 последние реальные заявки и голосовой выбор проверка и запись заявки просит показать статусы заявок. фильтрует «историю» по текущему заведению, показывает пять последних заявок и открывает выбранную кнопку или голосом. более старые заявки доступны на следующих страницах. пользователь подключён к заведению и видит только заявки своего заведения. заявка поставщик сумма статус дата поставки мои заявки покажи вторую заявку следующие вернись к списку заявок">
@@ -1129,6 +1382,8 @@
           <div><dt>Пользователь</dt><dd>Просит показать статусы заявок.</dd></div>
           <div><dt>Бот</dt><dd>Фильтрует «Историю» по текущему заведению, показывает пять последних заявок и открывает выбранную кнопку или голосом. Более старые заявки доступны на следующих страницах.</dd></div>
           <div class="result"><dt>Итог</dt><dd>Пользователь видит только реальные заявки своего заведения; просмотр ничего не записывает и не отправляет повторно.</dd></div>
+          <div><dt>Статус проверки</dt><dd><code>AUTOMATED_PARTIAL</code> — Основной контракт подтверждён, но реальный внешний контур не проверен</dd></div>
+          <div><dt>Ручная проверка</dt><dd>Нужен live-прогон с реальными тестовыми строками листа «История» и голосовым выбором.</dd></div>
         </dl>
         <details>
           <summary>Что важно</summary>
@@ -1168,6 +1423,8 @@
           <div><dt>Пользователь</dt><dd>Нажимает изображение в таблице и подтверждает текущую заявку.</dd></div>
           <div><dt>Бот</dt><dd>Открывает актуальный состав заявки, группирует позиции по поставщикам, показывает комментарии, а перед подтверждением повторно сверяет таблицу. Голосовые команды вроде «проверь», «покажи ещё раз», «отправляй» и «не отправляй» проходят через общий AI-маршрут.</dd></div>
           <div class="result"><dt>Итог</dt><dd>При выключенной отправке Web App не вызывается: таблица не изменяется, а пользователь получает понятное предупреждение.</dd></div>
+          <div><dt>Статус проверки</dt><dd><code>AUTOMATED_PARTIAL</code> — Основной контракт подтверждён, но реальный внешний контур не проверен</dd></div>
+          <div><dt>Ручная проверка</dt><dd>Нужен live-прогон deep link из тестовой Google Sheets с изменением снимка перед подтверждением.</dd></div>
         </dl>
         <details>
           <summary>Что важно</summary>
@@ -1207,6 +1464,8 @@
           <div><dt>Пользователь</dt><dd>Отказывается от текущей позиции естественной фразой.</dd></div>
           <div><dt>Бот</dt><dd>Пропускает только текущую позицию и не воспринимает отрицание как подтверждение.</dd></div>
           <div class="result"><dt>Итог</dt><dd>Товар не появляется в черновике, остальные позиции сохраняются.</dd></div>
+          <div><dt>Статус проверки</dt><dd><code>AUTOMATED_PASS</code> — Контракт полностью подтверждён локальными автоматическими тестами</dd></div>
+          <div><dt>Ручная проверка</dt><dd>Не требуется для подтверждения локального контракта; общий Telegram smoke выполняется перед пилотом.</dd></div>
         </dl>
         <details>
           <summary>Что важно</summary>
@@ -1246,6 +1505,8 @@
           <div><dt>Пользователь</dt><dd>Отказывается от отправки.</dd></div>
           <div><dt>Бот</dt><dd>Возвращает к безопасному экрану и не ставит задачу отправки.</dd></div>
           <div class="result"><dt>Итог</dt><dd>Google Sheets не изменяется, черновик остаётся доступным.</dd></div>
+          <div><dt>Статус проверки</dt><dd><code>AUTOMATED_PASS</code> — Контракт полностью подтверждён локальными автоматическими тестами</dd></div>
+          <div><dt>Ручная проверка</dt><dd>Не требуется для подтверждения локального контракта; общий Telegram smoke выполняется перед пилотом.</dd></div>
         </dl>
         <details>
           <summary>Что важно</summary>
@@ -1285,6 +1546,8 @@
           <div><dt>Пользователь</dt><dd>Произносит фразу с отрицанием либо товар, в названии которого встречаются командные слова.</dd></div>
           <div><dt>Бот</dt><dd>Учитывает отрицание и контекст; не очищает заявку и не маршрутизирует товар как команду.</dd></div>
           <div class="result"><dt>Итог</dt><dd>Состояние заявки не меняется ошибочно.</dd></div>
+          <div><dt>Статус проверки</dt><dd><code>AUTOMATED_PASS</code> — Контракт полностью подтверждён локальными автоматическими тестами</dd></div>
+          <div><dt>Ручная проверка</dt><dd>Не требуется для подтверждения локального контракта; общий Telegram smoke выполняется перед пилотом.</dd></div>
         </dl>
         <details>
           <summary>Что важно</summary>
@@ -1324,6 +1587,8 @@
           <div><dt>Пользователь</dt><dd>Нажимает ранее показанный вариант товара или действие.</dd></div>
           <div><dt>Бот</dt><dd>Проверяет ревизию состояния и отклоняет устаревшее действие.</dd></div>
           <div class="result"><dt>Итог</dt><dd>Актуальный черновик остаётся неизменным.</dd></div>
+          <div><dt>Статус проверки</dt><dd><code>AUTOMATED_PASS</code> — Контракт полностью подтверждён локальными автоматическими тестами</dd></div>
+          <div><dt>Ручная проверка</dt><dd>Не требуется для подтверждения локального контракта; общий Telegram smoke выполняется перед пилотом.</dd></div>
         </dl>
         <details>
           <summary>Что важно</summary>
@@ -1345,6 +1610,47 @@
         </details>
       </article>
 
+      <article id="scenario-SAF-05" class="scenario-card"
+        data-category="safety"
+        data-priority="critical" data-search="saf-05 устаревший worker не выполняет побочный эффект защита от неверного действия быстро отправляет сообщения или нажимает кнопки, пока предыдущий update ещё обрабатывается. сериализует изменения и не позволяет прежнему владельцу ставить внешнюю задачу после потери lease. те же права, что у текущего экрана; защитная проверка не расширяет доступ. отрицание текущее действие версия кнопки состояние диалога несколько быстрых сообщений подряд повторное нажатие кнопки во время обработки">
+        <div class="card-top">
+          <span class="scenario-id">SAF-05</span>
+          <span class="badges">
+            <span class="status status-live">Работает сейчас</span>
+            <span class="priority priority-critical">Критический</span>
+          </span>
+        </div>
+        <h3>Устаревший worker не выполняет побочный эффект</h3>
+        <p class="category-label">Защита от неверного действия</p>
+        <div class="channels"><span>Системный</span></div>
+        <dl>
+          <div><dt>Перед началом</dt><dd>Два worker последовательно получают право обрабатывать один чат, а первый теряет lease.</dd></div>
+          <div><dt>Пользователь</dt><dd>Быстро отправляет сообщения или нажимает кнопки, пока предыдущий update ещё обрабатывается.</dd></div>
+          <div><dt>Бот</dt><dd>Сериализует изменения и не позволяет прежнему владельцу ставить внешнюю задачу после потери lease.</dd></div>
+          <div class="result"><dt>Итог</dt><dd>Состояние и эффекты принадлежат только актуальному владельцу; разные чаты работают независимо.</dd></div>
+          <div><dt>Статус проверки</dt><dd><code>AUTOMATED_PARTIAL</code> — Основной контракт подтверждён, но реальный внешний контур не проверен</dd></div>
+          <div><dt>Ручная проверка</dt><dd>Нужен нагрузочный fault-injection прогон с реальными Redis, Celery и PostgreSQL перед широким production.</dd></div>
+        </dl>
+        <details>
+          <summary>Что важно</summary>
+          <dl class="contract">
+            <div><dt>Доступ</dt><dd>Те же права, что у текущего экрана; защитная проверка не расширяет доступ.</dd></div>
+            <div><dt>Распознаём</dt><dd>отрицание, текущее действие, версия кнопки, состояние диалога</dd></div>
+            <div><dt>Подтверждение</dt><dd>Не требуется: защитная команда останавливает действие.</dd></div>
+            <div><dt>Что изменится</dt><dd>Состояние и эффекты принадлежат только актуальному владельцу; разные чаты работают независимо.</dd></div>
+            <div><dt>Если произошла ошибка</dt><dd>Оставить данные без изменений и показать безопасный следующий шаг.</dd></div>
+          </dl>
+        </details>
+        <details>
+          <summary>Примеры фраз</summary>
+          <ul><li>«Несколько быстрых сообщений подряд»</li><li>«Повторное нажатие кнопки во время обработки»</li></ul>
+        </details>
+        <details>
+          <summary>Связанные pytest-тесты · 3</summary>
+          <ul class="tests"><li><a href="../../tests/workers/test_concurrency_block.py">tests/workers/test_concurrency_block.py</a><span>test_chat_lease_fences_changed_owner_and_old_close</span></li><li><a href="../../tests/workers/test_concurrency_block.py">tests/workers/test_concurrency_block.py</a><span>test_side_effect_enqueue_is_fenced_before_task_publish</span></li><li><a href="../../tests/submission/test_submission_lease_fencing.py">tests/submission/test_submission_lease_fencing.py</a><span>test_dispatch_loss_after_external_send_does_not_complete</span></li></ul>
+        </details>
+      </article>
+
       <article id="scenario-RCV-01" class="scenario-card"
         data-category="recovery"
         data-priority="edge" data-search="rcv-01 голос не удалось распознать сбои и восстановление отправляет голосовое сообщение. использует резервную модель, а при пустом результате просит повторить или написать текстом. сбой не должен обходить обычную проверку доступа к заведению. этап операции безопасная контрольная точка код ошибки неразборчивое аудио тихая запись пустая голосовая команда">
@@ -1363,6 +1669,8 @@
           <div><dt>Пользователь</dt><dd>Отправляет голосовое сообщение.</dd></div>
           <div><dt>Бот</dt><dd>Использует резервную модель, а при пустом результате просит повторить или написать текстом.</dd></div>
           <div class="result"><dt>Итог</dt><dd>Пустая транскрипция не выбирает товар и не меняет черновик.</dd></div>
+          <div><dt>Статус проверки</dt><dd><code>AUTOMATED_PARTIAL</code> — Основной контракт подтверждён, но реальный внешний контур не проверен</dd></div>
+          <div><dt>Ручная проверка</dt><dd>Нужен live-прогон с неразборчивым аудио и отказом основной ASR-модели.</dd></div>
         </dl>
         <details>
           <summary>Что важно</summary>
@@ -1402,6 +1710,8 @@
           <div><dt>Пользователь</dt><dd>Отправляет такую фотографию.</dd></div>
           <div><dt>Бот</dt><dd>Не использует фасовку, остаток или случайное число как количество заказа.</dd></div>
           <div class="result"><dt>Итог</dt><dd>В черновик не добавляются строки без доказанного положительного количества.</dd></div>
+          <div><dt>Статус проверки</dt><dd><code>AUTOMATED_PARTIAL</code> — Основной контракт подтверждён, но реальный внешний контур не проверен</dd></div>
+          <div><dt>Ручная проверка</dt><dd>Нужен live-прогон с реальным пустым бланком и фотографией, содержащей только справочные числа.</dd></div>
         </dl>
         <details>
           <summary>Что важно</summary>
@@ -1441,6 +1751,8 @@
           <div><dt>Пользователь</dt><dd>Отправляет код подключения.</dd></div>
           <div><dt>Бот</dt><dd>Сообщает, что код сейчас не удалось проверить, и предлагает повторить позже.</dd></div>
           <div class="result"><dt>Итог</dt><dd>Бот не создаёт ложную привязку и не показывает технический traceback пользователю.</dd></div>
+          <div><dt>Статус проверки</dt><dd><code>AUTOMATED_PARTIAL</code> — Основной контракт подтверждён, но реальный внешний контур не проверен</dd></div>
+          <div><dt>Ручная проверка</dt><dd>Нужен контролируемый live-прогон с временно недоступным тестовым реестром заведений.</dd></div>
         </dl>
         <details>
           <summary>Что важно</summary>
@@ -1480,6 +1792,8 @@
           <div><dt>Пользователь</dt><dd>Отправляет сообщение любого поддерживаемого типа.</dd></div>
           <div><dt>Бот</dt><dd>Фиксирует безопасную контрольную точку и показывает короткое сообщение без внутренних данных.</dd></div>
           <div class="result"><dt>Итог</dt><dd>Пользователь может повторить действие; секреты и traceback не попадают в обычный ответ.</dd></div>
+          <div><dt>Статус проверки</dt><dd><code>AUTOMATED_PASS</code> — Контракт полностью подтверждён локальными автоматическими тестами</dd></div>
+          <div><dt>Ручная проверка</dt><dd>Не требуется для подтверждения локального контракта; общий Telegram smoke выполняется перед пилотом.</dd></div>
         </dl>
         <details>
           <summary>Что важно</summary>
@@ -1502,8 +1816,8 @@
       </article>
     </section>
   </main>
-  <footer>Локальный каталог · версия 2.0 · работает без интернета</footer>
-  <script id="catalog-meta" type="application/json">{"version": "2.0", "total": 34, "linked": 34}</script>
+  <footer>Локальный каталог · версия 2.1 · работает без интернета</footer>
+  <script id="catalog-meta" type="application/json">{"version": "2.1", "total": 40, "linked": 40}</script>
   <script>
     (() => {
       const cards = [...document.querySelectorAll(".scenario-card")];

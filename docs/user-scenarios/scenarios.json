@@ -1,6 +1,6 @@
 {
   "title": "Пользовательские сценарии AutoSnab",
-  "version": "2.0",
+  "version": "2.1",
   "rules": [
     {
       "title": "Бот не угадывает",
@@ -30,7 +30,11 @@
       "description": "Первый вход, подтверждение заведения и безопасное переключение между заведениями.",
       "contract": {
         "permissions": "Личный чат и активная строка типа «Заведение» в реестре подключений.",
-        "entities": ["код заведения", "название заведения", "пользователь"],
+        "entities": [
+          "код заведения",
+          "название заведения",
+          "пользователь"
+        ],
         "confirmation": "Нужно перед созданием или заменой привязки к заведению.",
         "recovery": "Не сохранять привязку, объяснить причину и предложить повторить проверку кода."
       }
@@ -41,7 +45,13 @@
       "description": "Текст, голос, фотографии таблиц и рукописные списки.",
       "contract": {
         "permissions": "Пользователь подключён к активному заведению.",
-        "entities": ["товар", "количество", "единица", "поставщик", "комментарий"],
+        "entities": [
+          "товар",
+          "количество",
+          "единица",
+          "поставщик",
+          "комментарий"
+        ],
         "confirmation": "Не нужно для понятной позиции: товар добавляется только в черновик. Неоднозначность требует уточнения.",
         "recovery": "Сохранить уже распознанные позиции и попросить повторить только непонятную часть."
       }
@@ -52,7 +62,13 @@
       "description": "Количество, единицы, комментарии, дубликаты и выбор подходящего товара.",
       "contract": {
         "permissions": "Пользователь подключён к заведению и работает со своим черновиком.",
-        "entities": ["товар", "вариант товара", "количество", "единица", "комментарий"],
+        "entities": [
+          "товар",
+          "вариант товара",
+          "количество",
+          "единица",
+          "комментарий"
+        ],
         "confirmation": "Нужно при выборе похожего товара, смене единицы и объединении повторной позиции.",
         "recovery": "Не подставлять похожий товар автоматически; показать варианты или разрешить ввести другое название."
       }
@@ -63,7 +79,12 @@
       "description": "Просмотр, продолжение, очистка и начало новой заявки.",
       "contract": {
         "permissions": "Пользователь подключён к заведению; доступен только черновик текущего чата.",
-        "entities": ["черновик", "позиция", "номер варианта", "команда управления"],
+        "entities": [
+          "черновик",
+          "позиция",
+          "номер варианта",
+          "команда управления"
+        ],
         "confirmation": "Нужно перед очисткой непустого черновика или началом новой заявки вместо него.",
         "recovery": "При отказе и непонятной команде оставить черновик без изменений."
       }
@@ -74,7 +95,13 @@
       "description": "Минимальная сумма, подтверждение, запись в таблицу заказа и просмотр статуса.",
       "contract": {
         "permissions": "Пользователь подключён к заведению и видит только заявки своего заведения.",
-        "entities": ["заявка", "поставщик", "сумма", "статус", "дата поставки"],
+        "entities": [
+          "заявка",
+          "поставщик",
+          "сумма",
+          "статус",
+          "дата поставки"
+        ],
         "confirmation": "Нужно перед записью заявки в таблицу и перед продолжением при предупреждении о минимальной сумме.",
         "recovery": "До записи разрешить безопасный повтор; после неоднозначного результата не создавать возможный дубль."
       }
@@ -85,7 +112,12 @@
       "description": "Отрицания, устаревшие кнопки и фразы, которые нельзя маршрутизировать ошибочно.",
       "contract": {
         "permissions": "Те же права, что у текущего экрана; защитная проверка не расширяет доступ.",
-        "entities": ["отрицание", "текущее действие", "версия кнопки", "состояние диалога"],
+        "entities": [
+          "отрицание",
+          "текущее действие",
+          "версия кнопки",
+          "состояние диалога"
+        ],
         "confirmation": "Не требуется: защитная команда останавливает действие.",
         "recovery": "Оставить данные без изменений и показать безопасный следующий шаг."
       }
@@ -96,7 +128,11 @@
       "description": "Понятное и безопасное поведение при недоступности внешних сервисов.",
       "contract": {
         "permissions": "Сбой не должен обходить обычную проверку доступа к заведению.",
-        "entities": ["этап операции", "безопасная контрольная точка", "код ошибки"],
+        "entities": [
+          "этап операции",
+          "безопасная контрольная точка",
+          "код ошибки"
+        ],
         "confirmation": "Повтор разрешён только когда система уверена, что предыдущее действие не выполнилось.",
         "recovery": "Сохранить черновик, не показывать технические данные и предложить понятный вариант продолжения."
       }
@@ -128,7 +164,12 @@
         "SUB-01",
         "SUB-02",
         "SUB-03",
-        "SUB-04"
+        "SUB-04",
+        "REC-07",
+        "REC-08",
+        "REC-09",
+        "REC-10",
+        "SUB-06"
       ],
       "diagram": "flowchart LR\n    A[Текст, голос или фото] --> B[Распознавание товаров]\n    B --> C{Нужны уточнения?}\n    C -->|Да| D[Количество, единица или товар]\n    D --> C\n    C -->|Нет| E[Черновик]\n    E --> F[Финальная проверка]\n    F --> G[Запись в таблицу заказа]\n    G --> H[Подтверждение записи]"
     },
@@ -199,7 +240,14 @@
         "Проверить доступ",
         "Выполнить или уточнить"
       ],
-      "scenario_ids": ["INP-01", "INP-02", "INP-03", "DRF-01", "SUB-01", "SAF-01"],
+      "scenario_ids": [
+        "INP-01",
+        "INP-02",
+        "INP-03",
+        "DRF-01",
+        "SUB-01",
+        "SAF-01"
+      ],
       "diagram": "flowchart LR\n    A[Текст, голос или фото] --> B[Распознать действие и данные]\n    B --> C{Понятно однозначно?}\n    C -->|Нет| D[Задать вопрос или показать варианты]\n    C -->|Да| E[Проверить состояние диалога]\n    E --> F{Есть доступ?}\n    F -->|Нет| G[Объяснить ограничение]\n    F -->|Да| H[Выполнить безопасный шаг]"
     },
     {
@@ -212,7 +260,13 @@
         "Извлечь товары и числа",
         "Уточнить сомнительное"
       ],
-      "scenario_ids": ["INP-02", "REC-01", "REC-02", "REC-03", "RCV-01"],
+      "scenario_ids": [
+        "INP-02",
+        "REC-01",
+        "REC-02",
+        "REC-03",
+        "RCV-01"
+      ],
       "diagram": "flowchart LR\n    A[Голосовое сообщение] --> B[Расшифровка]\n    B --> C{Есть понятный текст?}\n    C -->|Нет| D[Резервная модель или просьба повторить]\n    C -->|Да| E[Команда и сущности]\n    E --> F{Уверенность достаточна?}\n    F -->|Нет| G[Показать варианты или переспросить]\n    F -->|Да| H[Продолжить текущий сценарий]"
     },
     {
@@ -225,7 +279,14 @@
         "Запросить подтверждение",
         "Изменить данные"
       ],
-      "scenario_ids": ["REG-02", "REC-05", "DRF-03", "DRF-04", "SUB-02", "SUB-03"],
+      "scenario_ids": [
+        "REG-02",
+        "REC-05",
+        "DRF-03",
+        "DRF-04",
+        "SUB-02",
+        "SUB-03"
+      ],
       "diagram": "flowchart LR\n    A[Понятная команда] --> B{Что изменится?}\n    B -->|Только просмотр| C[Показать сразу]\n    B -->|Черновик| D[Изменить и дать отменить]\n    B -->|Очистка или запись| E[Показать итог]\n    E --> F{Пользователь подтвердил?}\n    F -->|Нет| G[Ничего не менять]\n    F -->|Да| H[Выполнить один раз]"
     },
     {
@@ -238,7 +299,16 @@
         "Предложить безопасный шаг",
         "Не создавать дубль"
       ],
-      "scenario_ids": ["SUB-05", "RCV-01", "RCV-02", "RCV-03", "RCV-04"],
+      "scenario_ids": [
+        "SUB-05",
+        "RCV-01",
+        "RCV-02",
+        "RCV-03",
+        "RCV-04",
+        "REC-09",
+        "SUB-06",
+        "SAF-05"
+      ],
       "diagram": "flowchart LR\n    A[Произошла ошибка] --> B{Известно, выполнено ли действие?}\n    B -->|Точно нет| C[Разрешить безопасный повтор]\n    B -->|Неизвестно| D[Запретить автоматический повтор]\n    B -->|Да| E[Продолжить с сохранённого результата]\n    C --> F[Показать понятную инструкцию]\n    D --> F\n    E --> F"
     },
     {
@@ -251,7 +321,16 @@
         "Финальная проверка",
         "Записано"
       ],
-      "scenario_ids": ["DRF-01", "DRF-02", "DRF-03", "DRF-04", "SUB-01", "SUB-03", "SAF-04"],
+      "scenario_ids": [
+        "DRF-01",
+        "DRF-02",
+        "DRF-03",
+        "DRF-04",
+        "SUB-01",
+        "SUB-03",
+        "SAF-04",
+        "SAF-05"
+      ],
       "diagram": "stateDiagram-v2\n    [*] --> Пустая\n    Пустая --> Сбор: добавлен первый товар\n    Сбор --> Уточнение: данных недостаточно\n    Уточнение --> Сбор: ответ получен\n    Сбор --> Проверка: пользователь закончил\n    Проверка --> Сбор: вернуться к товарам\n    Проверка --> Записано: подтверждена запись\n    Записано --> Пустая: новая заявка"
     }
   ],
@@ -261,228 +340,364 @@
       "category": "registration",
       "title": "Подключение по коду заведения",
       "priority": "critical",
-      "channels": ["Текст", "Кнопка"],
+      "channels": [
+        "Текст",
+        "Кнопка"
+      ],
       "precondition": "Пользователь ещё не подключён к заведению и находится в личном чате с ботом.",
       "user_action": "Отправляет код заведения и подтверждает найденное название.",
       "bot_response": "Показывает название заведения, спрашивает подтверждение и только после согласия сохраняет привязку.",
       "result": "Пользователь получает доступ только к каталогу и таблице выбранного заведения.",
-      "examples": ["12345", "/start 12345", "Да, подключить"],
+      "examples": [
+        "12345",
+        "/start 12345",
+        "Да, подключить"
+      ],
       "test_refs": [
         "tests/venue/test_venue_registration.py::test_all_registration_entry_points_use_one_lookup",
         "tests/venue/test_venue_registration.py::test_successful_binding_is_synced_before_success_is_shown"
-      ]
+      ],
+      "automation_status": "AUTOMATED_PASS",
+      "manual_live_requirement": "Не требуется для подтверждения локального контракта; общий Telegram smoke выполняется перед пилотом."
     },
     {
       "id": "REG-02",
       "category": "registration",
       "title": "Отказ или смена заведения",
       "priority": "critical",
-      "channels": ["Текст", "Кнопка"],
+      "channels": [
+        "Текст",
+        "Кнопка"
+      ],
       "precondition": "Бот предлагает подключить новое заведение либо заменить действующую привязку.",
       "user_action": "Отказывается или подтверждает смену заведения.",
       "bot_response": "При отказе ничего не записывает; для смены запрашивает дополнительное подтверждение.",
       "result": "Случайное сообщение или нажатие не переключает пользователя на чужое заведение.",
-      "examples": ["Нет", "Отмена", "Да, изменить"],
+      "examples": [
+        "Нет",
+        "Отмена",
+        "Да, изменить"
+      ],
       "test_refs": [
         "tests/venue/test_venue_registration.py::test_declining_confirmation_never_writes",
         "tests/venue/test_venue_registration.py::test_switch_requires_an_extra_confirmation"
-      ]
+      ],
+      "automation_status": "AUTOMATED_PASS",
+      "manual_live_requirement": "Не требуется для подтверждения локального контракта; общий Telegram smoke выполняется перед пилотом."
     },
     {
       "id": "REG-03",
       "category": "registration",
       "title": "Управление доступом через таблицу",
       "priority": "critical",
-      "channels": ["Текст", "Голос", "Фото", "Кнопка"],
+      "channels": [
+        "Текст",
+        "Голос",
+        "Фото",
+        "Кнопка"
+      ],
       "precondition": "Пользователь ранее подключён к заведению, а его строка с типом компании «Заведение» находится в центральном листе «Чаты».",
       "user_action": "Отправляет боту сообщение после того, как ответственный сотрудник изменил поле «Активен» или удалил строку.",
       "bot_response": "При TRUE продолжает работу. При FALSE или отсутствии строки сообщает, что доступ отключён, и не читает и не изменяет таблицу заведения.",
       "result": "Доступ каждого пользователя управляется строкой типа «Заведение»; строки поставщиков не дают доступ к ресторану. Повторное TRUE восстанавливает доступ. Временный сбой Google не блокирует ранее подтверждённых пользователей.",
-      "examples": ["Тип компании = Заведение", "Активен = TRUE", "Активен = FALSE", "Строка пользователя удалена"],
+      "examples": [
+        "Тип компании = Заведение",
+        "Активен = TRUE",
+        "Активен = FALSE",
+        "Строка пользователя удалена"
+      ],
       "test_refs": [
         "tests/venue/test_venue_registration.py::test_access_registry_denies_missing_inactive_or_conflicting_rows",
         "tests/venue/test_venue_registration.py::test_context_revokes_access_removed_from_central_table",
         "tests/venue/test_venue_registration.py::test_context_restores_access_reenabled_in_central_table",
         "tests/submission/test_submission.py::test_revoked_access_stops_submission_before_google_write"
-      ]
+      ],
+      "automation_status": "AUTOMATED_PARTIAL",
+      "manual_live_requirement": "Нужен live-прогон с тестовым реестром Google Sheets: отзыв и восстановление доступа."
     },
     {
       "id": "INP-01",
       "category": "input",
       "title": "Добавление товаров текстом",
       "priority": "important",
-      "channels": ["Текст"],
+      "channels": [
+        "Текст"
+      ],
       "precondition": "Заведение подключено, каталог доступен.",
       "user_action": "Отправляет один товар или список товаров с количеством.",
       "bot_response": "Распознаёт отдельные позиции, сопоставляет их с каталогом и показывает результат.",
       "result": "Найденные товары появляются в черновике с указанным количеством.",
-      "examples": ["Картофель 5 кг", "Сливки 33% — 12 шт", "Сироп роза 6 шт\nГовядина 5 кг"],
+      "examples": [
+        "Картофель 5 кг",
+        "Сливки 33% — 12 шт",
+        "Сироп роза 6 шт\nГовядина 5 кг"
+      ],
       "test_refs": [
         "tests/conversation/test_engine.py::test_add_exact_product_to_draft",
         "tests/ai/test_ai_media.py::test_hyphenated_multiline_product_list_skips_ai_and_keeps_quantities"
-      ]
+      ],
+      "automation_status": "AUTOMATED_PASS",
+      "manual_live_requirement": "Не требуется для подтверждения локального контракта; общий Telegram smoke выполняется перед пилотом."
     },
     {
       "id": "INP-02",
       "category": "input",
       "title": "Добавление товаров голосом",
       "priority": "critical",
-      "channels": ["Голос"],
+      "channels": [
+        "Голос"
+      ],
       "precondition": "Заведение подключено, Telegram и сервис распознавания голоса доступны.",
       "user_action": "Называет товары, количества и комментарии обычной разговорной фразой, а на карточке уточнения отвечает коротко: «одна бутылка», «ладно, бутылка», «десять килограммов».",
       "bot_response": "Показывает этап распознавания, превращает речь в позиции, связывает короткий ответ с текущим товаром и не переносит количество между соседними товарами.",
       "result": "В черновик попадают только произнесённые товары и количества. Диапазон размера или фасовка вроде «0,8–1,2 кг» остаётся характеристикой товара и не становится количеством заказа.",
-      "examples": ["Добавь пять килограммов картофеля", "Сыр пармезан два килограмма и сливки десять штук", "Филе форели 0,8–1,2 кг, мне нужно 10 кг", "Ладно, бутылка"],
+      "examples": [
+        "Добавь пять килограммов картофеля",
+        "Сыр пармезан два килограмма и сливки десять штук",
+        "Филе форели 0,8–1,2 кг, мне нужно 10 кг",
+        "Ладно, бутылка"
+      ],
       "test_refs": [
         "tests/conversation/test_orchestrator_pipeline.py::test_voice_pipeline_shows_progress_before_transcription",
         "tests/input/test_voice_input_contract.py::test_shared_source_line_does_not_copy_last_quantity_to_every_product",
         "tests/conversation/test_engine.py::test_explicit_quantity_after_product_range_survives_catalog_reconciliation",
         "tests/quantity/test_voice_quantity_context.py::test_voice_short_container_answer_fills_missing_quantity_in_review"
-      ]
+      ],
+      "automation_status": "AUTOMATED_PARTIAL",
+      "manual_live_requirement": "Нужен live-прогон в Telegram с реальным аудио и основной/резервной ASR-моделью."
     },
     {
       "id": "INP-03",
       "category": "input",
       "title": "Фото оригинальной таблицы заказа",
       "priority": "critical",
-      "channels": ["Фото", "Файл-изображение"],
+      "channels": [
+        "Фото",
+        "Файл-изображение"
+      ],
       "precondition": "На фотографии есть таблица заказа с колонками «Зал», «Бар» или «Кухня».",
       "user_action": "Отправляет фотографию распечатанной или заполненной таблицы.",
       "bot_response": "Берёт количество только из заполненных колонок заказа, сохраняет комментарии и игнорирует распознанного с фото поставщика, фасовку, остатки и справочные числа.",
       "result": "Количество записывается в соответствующие колонки «Зал», «Бар» и «Кухня», а поставщик определяется по найденной строке актуального каталога. Строки без заказа не добавляются.",
-      "examples": ["Распечатанная таблица с количеством в колонке «Бар»", "Таблица с заполненными «Зал» и «Кухня»", "Фото, где у товара указан комментарий поставщику"],
+      "examples": [
+        "Распечатанная таблица с количеством в колонке «Бар»",
+        "Таблица с заполненными «Зал» и «Кухня»",
+        "Фото, где у товара указан комментарий поставщику"
+      ],
       "test_refs": [
         "tests/ai/test_ai_media.py::test_client_order_sheet_uses_the_selected_department_quantity",
         "tests/ai/test_ai_media.py::test_client_order_sheet_sums_only_filled_department_order_cells",
         "tests/ai/test_ai_media.py::test_client_order_sheet_ignores_supplier_recognized_from_a_neighbouring_row",
         "tests/ai/test_photo_prompt_contract.py::test_photo_prompt_excludes_packaging_and_stock_from_order_quantity"
-      ]
+      ],
+      "automation_status": "AUTOMATED_PARTIAL",
+      "manual_live_requirement": "Нужен live-прогон с фотографией реальной печатной таблицы и vision-провайдером."
     },
     {
       "id": "INP-04",
       "category": "input",
       "title": "Фото рукописного списка",
       "priority": "important",
-      "channels": ["Фото", "Файл-изображение"],
+      "channels": [
+        "Фото",
+        "Файл-изображение"
+      ],
       "precondition": "На фотографии нет стандартной таблицы, но видны названия и явно написанные количества.",
       "user_action": "Отправляет фотографию списка, написанного от руки.",
       "bot_response": "Использует только явно указанные количества и сопоставляет названия с каталогом.",
       "result": "Позиции с количеством попадают в черновик; бот не придумывает отсутствующие значения.",
-      "examples": ["Сироп роза — 6 шт", "Говядина — 5 кг", "Курица — 1 кг"],
+      "examples": [
+        "Сироп роза — 6 шт",
+        "Говядина — 5 кг",
+        "Курица — 1 кг"
+      ],
       "test_refs": [
         "tests/conversation/test_engine.py::test_handwritten_photo_quantity_survives_catalog_matching",
         "tests/ai/test_ai_media.py::test_free_list_keeps_explicit_quantity_even_if_model_calls_it_order_column"
-      ]
+      ],
+      "automation_status": "AUTOMATED_PARTIAL",
+      "manual_live_requirement": "Нужен live-прогон с несколькими реальными рукописными списками."
     },
     {
       "id": "INP-05",
       "category": "input",
       "title": "Зачёркнутое количество и правка ручкой",
       "priority": "critical",
-      "channels": ["Фото"],
+      "channels": [
+        "Фото"
+      ],
       "precondition": "Печатное количество зачёркнуто, рядом написано новое значение.",
       "user_action": "Отправляет фотографию таблицы с ручной корректировкой.",
       "bot_response": "Считает зачёркнутое значение недействительным и использует только разборчивую рукописную замену.",
       "result": "В черновике остаётся одно актуальное количество без сложения со старым.",
-      "examples": ["5 зачёркнуто, рядом написано 7", "100 кг зачёркнуто, от руки указано 10 шт"],
+      "examples": [
+        "5 зачёркнуто, рядом написано 7",
+        "100 кг зачёркнуто, от руки указано 10 шт"
+      ],
       "test_refs": [
         "tests/ai/test_ai_media.py::test_handwritten_replacement_wins_over_crossed_out_client_sheet_quantity",
         "tests/conversation/test_engine.py::test_crossed_out_photo_quantity_uses_only_handwritten_replacement"
-      ]
+      ],
+      "automation_status": "AUTOMATED_PARTIAL",
+      "manual_live_requirement": "Нужен live-прогон с реальным зачёркиванием и рукописной заменой."
     },
     {
       "id": "REC-01",
       "category": "recognition",
       "title": "Не указано количество",
       "priority": "critical",
-      "channels": ["Текст", "Голос", "Фото"],
+      "channels": [
+        "Текст",
+        "Голос",
+        "Фото"
+      ],
       "precondition": "Товар найден в каталоге, но положительное количество отсутствует.",
       "user_action": "Отправляет название без количества, затем отвечает числом.",
       "bot_response": "Просит уточнить количество именно для текущего товара и не создаёт новую строку.",
       "result": "После ответа товар один раз появляется в черновике с введённым количеством.",
-      "examples": ["Сыр пармезан", "Нужно 5 кг", "Пять"],
+      "examples": [
+        "Сыр пармезан",
+        "Нужно 5 кг",
+        "Пять"
+      ],
       "test_refs": [
         "tests/conversation/test_engine.py::test_missing_quantity_starts_clarification",
         "tests/quantity/test_quantity_flow.py::test_quantity_answer_completes_current_missing_item_without_new_cart_line"
-      ]
+      ],
+      "automation_status": "AUTOMATED_PASS",
+      "manual_live_requirement": "Не требуется для подтверждения локального контракта; общий Telegram smoke выполняется перед пилотом."
     },
     {
       "id": "REC-02",
       "category": "recognition",
       "title": "Единица не совпадает с каталогом",
       "priority": "critical",
-      "channels": ["Текст", "Голос", "Кнопка"],
+      "channels": [
+        "Текст",
+        "Голос",
+        "Кнопка"
+      ],
       "precondition": "Пользователь указал килограммы для товара, который заказывается в штуках, или наоборот.",
       "user_action": "Выбирает единицу каталога либо вводит корректное количество.",
       "bot_response": "Не меняет единицу молча, показывает различие и предлагает безопасные варианты.",
       "result": "В черновике хранится количество в допустимой единице каталога.",
-      "examples": ["Сыр Швейцарский 100 кг", "Используй как в каталоге", "Нужно 10 штук"],
+      "examples": [
+        "Сыр Швейцарский 100 кг",
+        "Используй как в каталоге",
+        "Нужно 10 штук"
+      ],
       "test_refs": [
         "tests/quantity/test_unit_handling.py::test_incompatible_unit_requires_confirmation_instead_of_silent_change",
         "tests/quantity/test_voice_quantity_context.py::test_voice_unit_mismatch_accepts_catalog_unit_and_spoken_quantity"
-      ]
+      ],
+      "automation_status": "AUTOMATED_PASS",
+      "manual_live_requirement": "Не требуется для подтверждения локального контракта; общий Telegram smoke выполняется перед пилотом."
     },
     {
       "id": "REC-03",
       "category": "recognition",
       "title": "Похожие товары требуют выбора",
       "priority": "critical",
-      "channels": ["Текст", "Голос", "Кнопка"],
+      "channels": [
+        "Текст",
+        "Голос",
+        "Кнопка"
+      ],
       "precondition": "По названию найден один или несколько похожих товаров, но точное совпадение не подтверждено.",
       "user_action": "Выбирает номер, кнопку или однозначное название варианта.",
       "bot_response": "Показывает похожие товары как подсказки и не добавляет слабое совпадение автоматически.",
       "result": "В черновик попадает только явно выбранный товар.",
-      "examples": ["Первый вариант", "Выбираю второй", "Кукуруза спелая — похожий вариант: крупа кукурузная"],
+      "examples": [
+        "Первый вариант",
+        "Выбираю второй",
+        "Кукуруза спелая — похожий вариант: крупа кукурузная"
+      ],
       "test_refs": [
         "tests/catalog/test_candidate_selection.py::test_explicit_candidate_selection_uses_selected_catalog_row",
         "tests/catalog/test_candidate_selection.py::test_common_candidate_word_does_not_silently_choose_a_product",
         "tests/ai/test_ai_pending.py::test_ai_does_not_auto_select_weak_single_corn_candidate"
-      ]
+      ],
+      "automation_status": "AUTOMATED_PASS",
+      "manual_live_requirement": "Не требуется для подтверждения локального контракта; общий Telegram smoke выполняется перед пилотом."
     },
     {
       "id": "REC-04",
       "category": "recognition",
       "title": "Товар не найден в каталоге",
       "priority": "important",
-      "channels": ["Текст", "Голос", "Кнопка"],
+      "channels": [
+        "Текст",
+        "Голос",
+        "Кнопка"
+      ],
       "precondition": "Ни один товар каталога не подходит достаточно уверенно.",
       "user_action": "Меняет название, ищет у всех поставщиков, не добавляет позицию или отправляет запрос снабженцу.",
       "bot_response": "Показывает понятные варианты и не подставляет случайный товар.",
       "result": "Неизвестная или противоречащая запросу позиция не загрязняет заявку; запрос снабженцу хранится отдельно от черновика.",
-      "examples": ["Свинина без костей — сало не подходит", "Изменить название", "Отправить запрос снабженцу"],
+      "examples": [
+        "Свинина без костей — сало не подходит",
+        "Изменить название",
+        "Отправить запрос снабженцу"
+      ],
       "test_refs": [
         "tests/catalog/test_candidate_selection.py::test_not_found_product_uses_human_copy_for_text_and_voice",
         "tests/product_add/test_product_add.py::test_product_add_request_list_keeps_request_separate_from_cart",
         "tests/ai/test_ai_pending.py::test_ai_rejects_semantically_conflicting_pork_candidate"
-      ]
+      ],
+      "automation_status": "AUTOMATED_PASS",
+      "manual_live_requirement": "Не требуется для подтверждения локального контракта; общий Telegram smoke выполняется перед пилотом."
     },
     {
       "id": "REC-05",
       "category": "recognition",
       "title": "Повтор уже добавленного товара",
       "priority": "critical",
-      "channels": ["Текст", "Голос", "Кнопка"],
+      "channels": [
+        "Текст",
+        "Голос",
+        "Кнопка"
+      ],
       "precondition": "В черновике уже есть такой же товар.",
       "user_action": "Подтверждает прибавление нового количества или отказывается от повторного добавления.",
       "bot_response": "Показывает текущее и итоговое количество; без подтверждения значения не складывает.",
       "result": "Количество увеличивается ровно на подтверждённое значение либо остаётся прежним.",
-      "examples": ["Добавить — будет 15 кг", "Не добавлять повторно", "Не объединяй"],
+      "examples": [
+        "Добавить — будет 15 кг",
+        "Не добавлять повторно",
+        "Не объединяй"
+      ],
       "test_refs": [
         "tests/quantity/test_duplicate_quantity.py::test_duplicate_merge_adds_only_the_confirmed_increment",
         "tests/conversation/test_voice_route_safety.py::test_negative_duplicate_phrases_never_merge_quantities"
-      ]
+      ],
+      "automation_status": "AUTOMATED_PASS",
+      "manual_live_requirement": "Не требуется для подтверждения локального контракта; общий Telegram smoke выполняется перед пилотом."
     },
     {
       "id": "REC-06",
       "category": "recognition",
       "title": "Комментарий к товару или ко всей заявке",
       "priority": "important",
-      "channels": ["Текст", "Голос", "Фото"],
+      "channels": [
+        "Текст",
+        "Голос",
+        "Фото"
+      ],
       "precondition": "Пользователь добавляет пожелание после товара или явно задаёт общий комментарий.",
       "user_action": "Сообщает сорт, качество, упаковку, дату доставки или другое пожелание.",
       "bot_response": "Определяет, относится комментарий к одному товару, явно названной группе или всей заявке. Пожелание после последнего товара не расширяет на соседние позиции. Если фраза двусмысленна, временно сохраняет распознанные позиции вне черновика и просит уточнить область комментария.",
       "result": "Пользователь может ответить названием, номером или обычной фразой — например, «для всех товаров», «только для огурцов» или «для всей заявки». Только после уверенного ответа товары и комментарий попадают в нужные строки; ответ не превращается в новый товар.",
-      "examples": ["Говядина 5 кг, обязательно мраморная", "Молоко 10 л, сливки 5 л, обязательно холодные", "Укроп 2 кг, петрушка 3 кг, срез корня не больше 5 см", "Оба товара положить отдельно", "Томаты 5 кг, огурцы 4 кг, положить отдельно", "Для всех товаров", "Только для огурцов", "Для второй позиции", "Комментарий ко всей заявке: привезти утром"],
+      "examples": [
+        "Говядина 5 кг, обязательно мраморная",
+        "Молоко 10 л, сливки 5 л, обязательно холодные",
+        "Укроп 2 кг, петрушка 3 кг, срез корня не больше 5 см",
+        "Оба товара положить отдельно",
+        "Томаты 5 кг, огурцы 4 кг, положить отдельно",
+        "Для всех товаров",
+        "Только для огурцов",
+        "Для второй позиции",
+        "Комментарий ко всей заявке: привезти утром"
+      ],
       "test_refs": [
         "tests/conversation/test_comment_handling.py::test_comment_is_not_part_of_product_name_and_reaches_submission_row",
         "tests/conversation/test_comment_handling.py::test_global_comment_is_appended_to_every_item_comment_and_order_row",
@@ -494,6 +709,105 @@
         "tests/conversation/test_comment_scope_clarification.py::test_natural_all_items_answer_applies_comment_to_every_pending_item",
         "tests/conversation/test_comment_scope_clarification.py::test_named_item_answer_changes_only_selected_pending_item",
         "tests/conversation/test_comment_scope_clarification.py::test_low_confidence_scope_keeps_pending_items_and_draft_unchanged"
+      ],
+      "automation_status": "AUTOMATED_PASS",
+      "manual_live_requirement": "Не требуется для подтверждения локального контракта; общий Telegram smoke выполняется перед пилотом."
+    },
+    {
+      "id": "REC-07",
+      "category": "recognition",
+      "title": "Удаление комментариев без изменения товаров",
+      "priority": "important",
+      "channels": [
+        "Текст",
+        "Голос"
+      ],
+      "precondition": "В черновике есть товары с комментариями и подтверждёнными позициями каталога.",
+      "user_action": "Просит удалить комментарии у одной позиции или у всей заявки.",
+      "bot_response": "Удаляет только комментарии выбранной области и показывает обновлённый черновик.",
+      "result": "Товары, количества, единицы и привязки к каталогу остаются без изменений.",
+      "automation_status": "AUTOMATED_PASS",
+      "manual_live_requirement": "Не требуется для локального контракта; голосовая формулировка входит в общий Telegram smoke.",
+      "examples": [
+        "Удали все комментарии",
+        "Убери комментарий у курицы"
+      ],
+      "test_refs": [
+        "tests/conversation/test_acceptance_stabilization.py::test_remove_all_comments_keeps_cart_and_catalog_bindings"
+      ]
+    },
+    {
+      "id": "REC-08",
+      "category": "recognition",
+      "title": "Исправление одного факта в комментарии",
+      "priority": "important",
+      "channels": [
+        "Текст",
+        "Голос"
+      ],
+      "precondition": "У товара уже есть комментарий из нескольких независимых пожеланий.",
+      "user_action": "Исправляет один фрагмент формулировкой «не так, а иначе».",
+      "bot_response": "Заменяет только исправленный факт и сохраняет остальные пожелания.",
+      "result": "Комментарий остаётся привязан к правильному товару и не теряет независимые детали.",
+      "automation_status": "AUTOMATED_PASS",
+      "manual_live_requirement": "Не требуется для локального контракта; естественная голосовая формулировка входит в общий Telegram smoke.",
+      "examples": [
+        "Не крупные куски, а средние",
+        "Не зелёные, а спелые"
+      ],
+      "test_refs": [
+        "tests/conversation/test_acceptance_stabilization.py::test_comment_correction_replaces_only_corrected_fact"
+      ]
+    },
+    {
+      "id": "REC-09",
+      "category": "recognition",
+      "title": "Запрос на добавление отсутствующего товара",
+      "priority": "critical",
+      "channels": [
+        "Текст",
+        "Голос",
+        "Кнопка"
+      ],
+      "precondition": "Товар не найден или ни один предложенный вариант не подходит.",
+      "user_action": "Выбирает запрос снабженцу и одним сообщением сообщает недостающие сведения.",
+      "bot_response": "Удаляет только неразрешённую позицию из черновика и создаёт отдельный запрос на добавление товара.",
+      "result": "Запрос не маскируется похожим товаром; при неизвестном результате записи повтор не создаёт дубль.",
+      "automation_status": "AUTOMATED_PARTIAL",
+      "manual_live_requirement": "Нужен изолированный live-прогон записи в тестовый лист запросов и проверки неопределённого сетевого результата.",
+      "examples": [
+        "Запросить добавление товара",
+        "Добавьте в каталог этот товар"
+      ],
+      "test_refs": [
+        "tests/product_add/test_product_add.py::test_product_add_request_removes_unresolved_item_and_enqueues_sheet_write",
+        "tests/product_add/test_product_add.py::test_product_add_retry_reuses_id_and_never_retries_uncertain_write",
+        "tests/product_add/test_product_add.py::test_product_add_worker_blocks_duplicate_after_uncertain_network_failure"
+      ]
+    },
+    {
+      "id": "REC-10",
+      "category": "recognition",
+      "title": "Поиск товара у всех поставщиков",
+      "priority": "important",
+      "channels": [
+        "Текст",
+        "Голос",
+        "Кнопка"
+      ],
+      "precondition": "Поиск ограничен выбранным поставщиком, а подходящего товара у него нет.",
+      "user_action": "Просит проверить остальных поставщиков.",
+      "bot_response": "Повторяет поиск той же позиции без создания второй строки и обновляет карточку результатом.",
+      "result": "Пользователь видит безопасный результат более широкого поиска; исходное количество и комментарий не теряются.",
+      "automation_status": "AUTOMATED_PASS",
+      "manual_live_requirement": "Не требуется для локального контракта; скорость на большом реальном каталоге проверяется отдельно перед масштабированием.",
+      "examples": [
+        "Искать у всех поставщиков",
+        "Проверь у других"
+      ],
+      "test_refs": [
+        "tests/supplier/test_supplier_lock.py::test_search_all_suppliers_retries_same_item_without_duplicate",
+        "tests/conversation/test_orchestrator_pipeline.py::test_search_all_suppliers_deletes_old_card_and_edits_progress_with_result"
       ]
     },
     {
@@ -501,39 +815,64 @@
       "category": "draft",
       "title": "Показать текущий черновик",
       "priority": "important",
-      "channels": ["Текст", "Голос", "Кнопка"],
+      "channels": [
+        "Текст",
+        "Голос",
+        "Кнопка"
+      ],
       "precondition": "Пользователь находится на любом шаге диалога.",
       "user_action": "Просит показать заявку или возвращается кнопкой.",
       "bot_response": "Открывает актуальный черновик, не добавляя слова команды как товар. Большой список разбит на страницы.",
       "result": "Пользователь видит текущие позиции, количества и доступные действия; страницы можно листать кнопкой или голосом.",
-      "examples": ["Покажи черновик", "Что у меня в заявке?", "Вернись в корзину", "Следующая страница"],
+      "examples": [
+        "Покажи черновик",
+        "Что у меня в заявке?",
+        "Вернись в корзину",
+        "Следующая страница"
+      ],
       "test_refs": [
         "tests/conversation/test_global_voice_navigation.py::test_global_voice_show_cart_works_from_every_stage",
         "tests/input/test_voice_route_matrix.py::test_free_form_navigation_does_not_consume_real_product_names"
-      ]
+      ],
+      "automation_status": "AUTOMATED_PASS",
+      "manual_live_requirement": "Не требуется для подтверждения локального контракта; общий Telegram smoke выполняется перед пилотом."
     },
     {
       "id": "DRF-02",
       "category": "draft",
       "title": "Продолжить добавление товаров",
       "priority": "important",
-      "channels": ["Текст", "Голос", "Кнопка"],
+      "channels": [
+        "Текст",
+        "Голос",
+        "Кнопка"
+      ],
       "precondition": "В черновике уже есть обработанные позиции.",
       "user_action": "Просит добавить ещё товары и отправляет следующий список.",
       "bot_response": "Переходит в режим добавления, сохраняя существующий черновик.",
       "result": "Новые позиции добавляются к текущей заявке.",
-      "examples": ["Добавить ещё товары", "Давай внесём ещё что-нибудь", "Хочу еще позиции"],
+      "examples": [
+        "Добавить ещё товары",
+        "Давай внесём ещё что-нибудь",
+        "Хочу еще позиции"
+      ],
       "test_refs": [
         "tests/input/test_voice_route_matrix.py::test_live_voice_wording_routes_before_product_parsing",
         "tests/conversation/test_add_more_prompt.py::test_successful_addition_asks_whether_to_add_more"
-      ]
+      ],
+      "automation_status": "AUTOMATED_PASS",
+      "manual_live_requirement": "Не требуется для подтверждения локального контракта; общий Telegram smoke выполняется перед пилотом."
     },
     {
       "id": "DRF-03",
       "category": "draft",
       "title": "Очистить текущую заявку",
       "priority": "critical",
-      "channels": ["Текст", "Голос", "Кнопка"],
+      "channels": [
+        "Текст",
+        "Голос",
+        "Кнопка"
+      ],
       "precondition": "В черновике есть товары или незавершённые уточнения.",
       "user_action": "Явно просит полностью очистить заявку.",
       "bot_response": "Удаляет только текущий черновик и возвращает экран новой заявки.",
@@ -542,17 +881,28 @@
         "confirmation": "Нужна явная команда очистки. Общая или неоднозначная фраза не должна удалять черновик.",
         "state_change": "Только текущий черновик переходит в пустое состояние. История не меняется."
       },
-      "examples": ["Очисти заявку", "Удали всё из корзины", "Сбрось черновик", "Сбросить и начать заново"],
+      "examples": [
+        "Очисти заявку",
+        "Удали всё из корзины",
+        "Сбрось черновик",
+        "Сбросить и начать заново"
+      ],
       "test_refs": [
         "tests/conversation/test_state_transitions.py::test_clear_cart_removes_draft_and_returns_to_collecting"
-      ]
+      ],
+      "automation_status": "AUTOMATED_PASS",
+      "manual_live_requirement": "Не требуется для подтверждения локального контракта; общий Telegram smoke выполняется перед пилотом."
     },
     {
       "id": "DRF-04",
       "category": "draft",
       "title": "Новая заявка при активном черновике",
       "priority": "critical",
-      "channels": ["Текст", "Голос", "Кнопка"],
+      "channels": [
+        "Текст",
+        "Голос",
+        "Кнопка"
+      ],
       "precondition": "Текущая заявка ещё не отправлена и содержит товары.",
       "user_action": "Говорит «новый заказ», затем подтверждает или отменяет очистку.",
       "bot_response": "Предупреждает о сохранённом черновике и не очищает его без отдельного подтверждения.",
@@ -561,34 +911,54 @@
         "confirmation": "Обязательно отдельной кнопкой «Да, начать новую» или равнозначной понятной фразой.",
         "state_change": "После подтверждения текущий черновик очищается; при отказе остаётся без изменений."
       },
-      "examples": ["Новый заказ", "Да, начать новую", "Нет, оставить черновик"],
+      "examples": [
+        "Новый заказ",
+        "Да, начать новую",
+        "Нет, оставить черновик"
+      ],
       "test_refs": [
         "tests/conversation/test_new_order_flow.py::test_new_order_with_active_draft_requires_confirmation",
         "tests/conversation/test_new_order_flow.py::test_rejecting_new_order_keeps_active_draft"
-      ]
+      ],
+      "automation_status": "AUTOMATED_PASS",
+      "manual_live_requirement": "Не требуется для подтверждения локального контракта; общий Telegram smoke выполняется перед пилотом."
     },
     {
       "id": "DRF-05",
       "category": "draft",
       "title": "Новая заявка после записи предыдущей",
       "priority": "critical",
-      "channels": ["Текст", "Голос", "Кнопка"],
+      "channels": [
+        "Текст",
+        "Голос",
+        "Кнопка"
+      ],
       "precondition": "Предыдущая заявка успешно записана в таблицу заказа.",
       "user_action": "Говорит «новый заказ» или нажимает кнопку «Новая заявка».",
       "bot_response": "Сразу открывает пустой черновик без лишнего подтверждения.",
       "result": "История предыдущей заявки сохраняется, новая заявка начинается с нуля.",
-      "examples": ["Новый заказ", "Хочу оформить ещё одну заявку", "Новая заявка"],
+      "examples": [
+        "Новый заказ",
+        "Хочу оформить ещё одну заявку",
+        "Новая заявка"
+      ],
       "test_refs": [
         "tests/conversation/test_new_order_flow.py::test_new_order_after_submission_starts_empty_draft_and_preserves_history",
         "tests/conversation/test_new_order_flow.py::test_success_card_new_order_callback_preserves_tracking"
-      ]
+      ],
+      "automation_status": "AUTOMATED_PASS",
+      "manual_live_requirement": "Не требуется для подтверждения локального контракта; общий Telegram smoke выполняется перед пилотом."
     },
     {
       "id": "SUB-01",
       "category": "submission",
       "title": "Переход к финальной проверке",
       "priority": "critical",
-      "channels": ["Текст", "Голос", "Кнопка"],
+      "channels": [
+        "Текст",
+        "Голос",
+        "Кнопка"
+      ],
       "precondition": "В черновике есть товары.",
       "user_action": "Просит оформить или отправить заявку.",
       "bot_response": "Сначала проверяет незавершённые позиции и показывает итоговую карточку. Большая заявка разбивается на страницы с кнопками «Назад» и «Далее».",
@@ -597,19 +967,31 @@
         "confirmation": "На этом шаге бот только показывает итог. Запись начнётся после следующего явного подтверждения.",
         "state_change": "Черновик переходит к финальной проверке, но данные в Google Sheets ещё не меняются."
       },
-      "examples": ["Оформи заявку", "Я всё добавил", "Перейти к проверке заявки", "Следующая страница", "Предыдущая страница"],
+      "examples": [
+        "Оформи заявку",
+        "Я всё добавил",
+        "Перейти к проверке заявки",
+        "Следующая страница",
+        "Предыдущая страница"
+      ],
       "test_refs": [
         "tests/conversation/test_state_transitions.py::test_submit_request_opens_final_review_without_enqueuing",
         "tests/submission/test_submission_guards.py::test_submit_request_stops_on_first_unresolved_item",
         "tests/telegram/test_telegram_commands.py::test_voice_pagination_stays_in_large_final_review"
-      ]
+      ],
+      "automation_status": "AUTOMATED_PASS",
+      "manual_live_requirement": "Не требуется для подтверждения локального контракта; общий Telegram smoke выполняется перед пилотом."
     },
     {
       "id": "SUB-02",
       "category": "submission",
       "title": "Не набрана минимальная сумма поставщика",
       "priority": "important",
-      "channels": ["Текст", "Голос", "Кнопка"],
+      "channels": [
+        "Текст",
+        "Голос",
+        "Кнопка"
+      ],
       "precondition": "Хотя бы у одного поставщика сумма заказа меньше минимальной.",
       "user_action": "Открывает предупреждение и выбирает: добавить товары либо принять риск.",
       "bot_response": "Показывает поставщика и недостающую сумму, предлагает понятные действия.",
@@ -618,17 +1000,27 @@
         "confirmation": "Нужно выбрать «Добавить товары» либо «Отправить как есть» для каждого предупреждения.",
         "state_change": "Черновик либо возвращается к добавлению товаров, либо продолжает финальную проверку."
       },
-      "examples": ["Проверь минималку", "Добавить товары поставщика", "Отправить как есть"],
+      "examples": [
+        "Проверь минималку",
+        "Добавить товары поставщика",
+        "Отправить как есть"
+      ],
       "test_refs": [
         "tests/supplier/test_supplier_minimum.py::test_supplier_minimum_warning_shows_gap_and_recovery_actions"
-      ]
+      ],
+      "automation_status": "AUTOMATED_PASS",
+      "manual_live_requirement": "Не требуется для подтверждения локального контракта; общий Telegram smoke выполняется перед пилотом."
     },
     {
       "id": "SUB-03",
       "category": "submission",
       "title": "Запись заявки в таблицу заказа",
       "priority": "critical",
-      "channels": ["Текст", "Голос", "Кнопка"],
+      "channels": [
+        "Текст",
+        "Голос",
+        "Кнопка"
+      ],
       "precondition": "Все обязательные уточнения завершены, открыта финальная проверка.",
       "user_action": "Нажимает «Отправить в таблицу заказа» или подтверждает запись текстом либо голосом.",
       "bot_response": "Записывает товары и комментарии в лист «Заявка», запускает перерасчёт и сообщает «Заявка записана». Объясняет, что поставщикам её отправит ответственный сотрудник.",
@@ -638,32 +1030,48 @@
         "state_change": "Заявка записывается и пересчитывается в таблице заведения. Технический номер остаётся только во внутренних данных.",
         "recovery": "Если запись точно не началась, можно повторить. При неизвестном результате бот не должен создавать возможный дубль."
       },
-      "examples": ["Отправить в таблицу заказа", "Запиши заявку", "Отправляй"],
+      "examples": [
+        "Отправить в таблицу заказа",
+        "Запиши заявку",
+        "Отправляй"
+      ],
       "test_refs": [
         "tests/submission/test_submission.py::test_disabled_dispatch_writes_and_recalculates_but_never_calls_submission_script",
         "tests/submission/test_submission.py::test_local_saved_reply_is_explicit_and_has_only_new_order_button",
         "tests/submission/test_submission_guards.py::test_disabled_external_dispatch_still_enqueues_local_table_write",
         "tests/conversation/test_state_transitions.py::test_submit_request_opens_final_review_without_enqueuing"
-      ]
+      ],
+      "automation_status": "AUTOMATED_PARTIAL",
+      "manual_live_requirement": "Нужен изолированный live-прогон записи и перерасчёта в тестовой Google Sheets; внешняя отправка поставщику должна быть выключена."
     },
     {
       "id": "SUB-04",
       "category": "submission",
       "title": "Статус отправленных заявок",
       "priority": "important",
-      "channels": ["Текст", "Голос", "Кнопка"],
+      "channels": [
+        "Текст",
+        "Голос",
+        "Кнопка"
+      ],
       "precondition": "У пользователя есть хотя бы одна отправленная заявка.",
       "user_action": "Просит показать статусы.",
       "bot_response": "Показывает последние отслеживаемые заявки из листа «История»: отдельно по каждому поставщику, со списком товаров, статусом, датой поставки и контактом, если они заполнены.",
       "result": "Пользователь видит понятный статус каждого поставщика, не затрагивая текущий черновик.",
-      "examples": ["Проверь статус последней заявки", "Мои заявки", "Заявка ушла?"],
+      "examples": [
+        "Проверь статус последней заявки",
+        "Мои заявки",
+        "Заявка ушла?"
+      ],
       "test_refs": [
         "tests/submission/test_submission.py::test_order_status_renderer_groups_rows_by_order_number",
         "tests/submission/test_submission.py::test_order_status_renderer_uses_aggregated_history_fields",
         "tests/submission/test_submission.py::test_order_status_renderer_shows_each_supplier_separately",
         "tests/submission/test_submission.py::test_order_status_renderer_handles_history_without_delivery_date",
         "tests/submission/test_submission.py::test_order_status_limits_to_ten_tracked_orders_and_formats_delivery_date"
-      ]
+      ],
+      "automation_status": "AUTOMATED_PARTIAL",
+      "manual_live_requirement": "Нужен live-прогон чтения тестового листа «История» текущего заведения."
     },
     {
       "id": "SUB-05",
@@ -671,17 +1079,50 @@
       "title": "Сбой внешней отправки, когда она будет включена",
       "priority": "critical",
       "status": "prepared",
-      "channels": ["Системный"],
+      "channels": [
+        "Системный"
+      ],
       "precondition": "Автоматическая внешняя отправка включена, а центральный скрипт или сеть временно не отвечают.",
       "user_action": "Следует инструкции бота: безопасно повторяет ранний этап либо передаёт внутренний код менеджеру.",
       "bot_response": "До центрального POST предлагает безопасный повтор. После начала POST не отправляет заявку повторно и просит проверить результат через менеджера по снабжению.",
       "result": "Неоднозначный сетевой ответ не приводит к автоматическому дублю заказа поставщикам.",
-      "examples": ["Повторить отправку", "Не отправляйте её повторно", "Сообщить код менеджеру"],
+      "examples": [
+        "Повторить отправку",
+        "Не отправляйте её повторно",
+        "Сообщить код менеджеру"
+      ],
       "test_refs": [
         "tests/submission/test_submission.py::test_transient_pre_dispatch_error_can_be_retried_safely",
         "tests/submission/test_submission.py::test_ambiguous_dispatch_failure_is_never_automatically_retried",
         "tests/submission/test_submission.py::test_redelivery_after_started_dispatch_does_not_send_second_post",
         "tests/submission/test_submission_guards.py::test_submission_retry_is_blocked_after_uncertain_dispatch"
+      ],
+      "automation_status": "AUTOMATED_PARTIAL",
+      "manual_live_requirement": "До включения функции нужен контролируемый прогон с отказами сети и операторской сверкой неопределённого результата."
+    },
+    {
+      "id": "SUB-06",
+      "category": "submission",
+      "title": "Подтверждение записи не отправляется повторно",
+      "priority": "critical",
+      "channels": [
+        "Системный",
+        "Telegram"
+      ],
+      "precondition": "Заявка завершена, но worker потерял lease или получил сбой около итогового сообщения.",
+      "user_action": "Не выполняет дополнительного действия; система восстанавливает обработку update.",
+      "bot_response": "Отправляет итог не более одного раза; при неизвестном результате не повторяет его автоматически.",
+      "result": "Заявка не откатывается, а повторный worker не создаёт дублирующее уведомление.",
+      "automation_status": "AUTOMATED_PARTIAL",
+      "manual_live_requirement": "Нужен fault-injection прогон с реальным Telegram transport перед широким production; локальная lifecycle-защита проверена.",
+      "examples": [
+        "Повторная доставка update после завершения",
+        "Потеря lease во время уведомления"
+      ],
+      "test_refs": [
+        "tests/submission/test_submission_lease_fencing.py::test_completion_notification_gate_remains_at_most_once_after_lease_loss",
+        "tests/submission/test_submission.py::test_completion_notification_send_failure_marks_uncertain_without_retry",
+        "tests/submission/test_submission.py::test_completion_notification_started_or_completed_status_skips_send"
       ]
     },
     {
@@ -689,26 +1130,40 @@
       "category": "submission",
       "title": "Последние реальные заявки и голосовой выбор",
       "priority": "critical",
-      "channels": ["Текст", "Голос", "Кнопка"],
+      "channels": [
+        "Текст",
+        "Голос",
+        "Кнопка"
+      ],
       "precondition": "Ответственный сотрудник отправил заявку, и её данные появились в листе «История».",
       "user_action": "Просит показать статусы заявок.",
       "bot_response": "Фильтрует «Историю» по текущему заведению, показывает пять последних заявок и открывает выбранную кнопку или голосом. Более старые заявки доступны на следующих страницах.",
       "result": "Пользователь видит только реальные заявки своего заведения; просмотр ничего не записывает и не отправляет повторно.",
-      "examples": ["Мои заявки", "Покажи вторую заявку", "Следующие", "Вернись к списку заявок"],
+      "examples": [
+        "Мои заявки",
+        "Покажи вторую заявку",
+        "Следующие",
+        "Вернись к списку заявок"
+      ],
       "test_refs": [
         "tests/submission/test_submission.py::test_statuses_show_five_recent_orders_of_current_venue",
         "tests/submission/test_submission.py::test_statuses_open_selected_order_from_shown_list",
         "tests/submission/test_google_sheets_mapping.py::test_latest_order_statuses_filter_foreign_venue_before_selecting_order",
         "tests/telegram/test_telegram_commands.py::test_voice_can_open_order_by_spoken_position",
         "tests/telegram/test_telegram_commands.py::test_voice_can_open_next_order_status_page"
-      ]
+      ],
+      "automation_status": "AUTOMATED_PARTIAL",
+      "manual_live_requirement": "Нужен live-прогон с реальными тестовыми строками листа «История» и голосовым выбором."
     },
     {
       "id": "SUB-08",
       "category": "submission",
       "title": "Проверка заявки по ссылке из таблицы",
       "priority": "critical",
-      "channels": ["Кнопка", "Google Sheets"],
+      "channels": [
+        "Кнопка",
+        "Google Sheets"
+      ],
       "precondition": "Пользователь привязан к заведению, а в листе «Заявка» есть товары с количеством.",
       "user_action": "Нажимает изображение в таблице и подтверждает текущую заявку.",
       "bot_response": "Открывает актуальный состав заявки, группирует позиции по поставщикам, показывает комментарии, а перед подтверждением повторно сверяет таблицу. Голосовые команды вроде «проверь», «покажи ещё раз», «отправляй» и «не отправляй» проходят через общий AI-маршрут.",
@@ -718,7 +1173,11 @@
         "state_change": "Снимок заявки хранится с одноразовым токеном и отпечатком; старая кнопка или изменившаяся таблица не отправляют прежний состав.",
         "recovery": "При изменении таблицы бот показывает обновлённый список и просит проверить его заново."
       },
-      "examples": ["https://t.me/имя_бота?start=review_6461W6", "✅ Отправить заявку", "↩️ Отмена"],
+      "examples": [
+        "https://t.me/имя_бота?start=review_6461W6",
+        "✅ Отправить заявку",
+        "↩️ Отмена"
+      ],
       "test_refs": [
         "tests/input/test_input_routing.py::test_review_deep_link_is_a_dedicated_command",
         "tests/input/test_input_routing.py::test_review_callbacks_keep_the_token_and_revision",
@@ -727,68 +1186,128 @@
         "tests/review/test_order_review.py::test_snapshot_reads_every_department_quantity_and_ignores_empty_rows",
         "tests/review/test_order_review.py::test_preview_lists_each_product_and_has_confirmation_buttons",
         "tests/review/test_order_review.py::test_preview_groups_products_by_supplier"
-      ]
+      ],
+      "automation_status": "AUTOMATED_PARTIAL",
+      "manual_live_requirement": "Нужен live-прогон deep link из тестовой Google Sheets с изменением снимка перед подтверждением."
     },
     {
       "id": "SAF-01",
       "category": "safety",
       "title": "«Не добавляй» не добавляет товар",
       "priority": "critical",
-      "channels": ["Текст", "Голос"],
+      "channels": [
+        "Текст",
+        "Голос"
+      ],
       "precondition": "Бот уточняет товар, единицу, дубликат или запрос снабженцу.",
       "user_action": "Отказывается от текущей позиции естественной фразой.",
       "bot_response": "Пропускает только текущую позицию и не воспринимает отрицание как подтверждение.",
       "result": "Товар не появляется в черновике, остальные позиции сохраняются.",
-      "examples": ["Не добавляй эту позицию", "Убери этот товар", "Нет, это не нужно"],
+      "examples": [
+        "Не добавляй эту позицию",
+        "Убери этот товар",
+        "Нет, это не нужно"
+      ],
       "test_refs": [
         "tests/conversation/test_voice_route_safety.py::test_negative_item_phrases_skip_unit_mismatch_without_confirming_quantity",
         "tests/input/test_voice_route_matrix.py::test_common_text_and_voice_phrasings_are_deterministic"
-      ]
+      ],
+      "automation_status": "AUTOMATED_PASS",
+      "manual_live_requirement": "Не требуется для подтверждения локального контракта; общий Telegram smoke выполняется перед пилотом."
     },
     {
       "id": "SAF-02",
       "category": "safety",
       "title": "«Не отправляй» отменяет отправку",
       "priority": "critical",
-      "channels": ["Текст", "Голос"],
+      "channels": [
+        "Текст",
+        "Голос"
+      ],
       "precondition": "Пользователь находится на финальной проверке или подтверждении отправки.",
       "user_action": "Отказывается от отправки.",
       "bot_response": "Возвращает к безопасному экрану и не ставит задачу отправки.",
       "result": "Google Sheets не изменяется, черновик остаётся доступным.",
-      "examples": ["Не отправляй", "Нет, не надо отправлять", "Я передумал"],
+      "examples": [
+        "Не отправляй",
+        "Нет, не надо отправлять",
+        "Я передумал"
+      ],
       "test_refs": [
         "tests/conversation/test_voice_route_safety.py::test_negative_submit_phrases_never_submit_order"
-      ]
+      ],
+      "automation_status": "AUTOMATED_PASS",
+      "manual_live_requirement": "Не требуется для подтверждения локального контракта; общий Telegram smoke выполняется перед пилотом."
     },
     {
       "id": "SAF-03",
       "category": "safety",
       "title": "Отрицание не запускает новую заявку",
       "priority": "critical",
-      "channels": ["Текст", "Голос"],
+      "channels": [
+        "Текст",
+        "Голос"
+      ],
       "precondition": "У пользователя есть активный или отправленный заказ.",
       "user_action": "Произносит фразу с отрицанием либо товар, в названии которого встречаются командные слова.",
       "bot_response": "Учитывает отрицание и контекст; не очищает заявку и не маршрутизирует товар как команду.",
       "result": "Состояние заявки не меняется ошибочно.",
-      "examples": ["Не начинай новый заказ", "Новый картофель 5 кг", "Не хочу новую заявку"],
+      "examples": [
+        "Не начинай новый заказ",
+        "Новый картофель 5 кг",
+        "Не хочу новую заявку"
+      ],
       "test_refs": [
         "tests/input/test_voice_route_matrix.py::test_new_order_navigation_does_not_override_negation_or_product_quantity",
         "tests/input/test_voice_route_matrix.py::test_command_words_inside_product_lines_remain_products"
-      ]
+      ],
+      "automation_status": "AUTOMATED_PASS",
+      "manual_live_requirement": "Не требуется для подтверждения локального контракта; общий Telegram smoke выполняется перед пилотом."
     },
     {
       "id": "SAF-04",
       "category": "safety",
       "title": "Устаревшая кнопка не меняет черновик",
       "priority": "critical",
-      "channels": ["Кнопка"],
+      "channels": [
+        "Кнопка"
+      ],
       "precondition": "Пользователь нажимает кнопку из старого сообщения после изменения заявки.",
       "user_action": "Нажимает ранее показанный вариант товара или действие.",
       "bot_response": "Проверяет ревизию состояния и отклоняет устаревшее действие.",
       "result": "Актуальный черновик остаётся неизменным.",
-      "examples": ["Нажатие старой кнопки выбора", "Повторное нажатие после обновления карточки"],
+      "examples": [
+        "Нажатие старой кнопки выбора",
+        "Повторное нажатие после обновления карточки"
+      ],
       "test_refs": [
         "tests/telegram/test_callback_contract.py::test_stale_callback_cannot_mutate_current_draft"
+      ],
+      "automation_status": "AUTOMATED_PASS",
+      "manual_live_requirement": "Не требуется для подтверждения локального контракта; общий Telegram smoke выполняется перед пилотом."
+    },
+    {
+      "id": "SAF-05",
+      "category": "safety",
+      "title": "Устаревший worker не выполняет побочный эффект",
+      "priority": "critical",
+      "channels": [
+        "Системный"
+      ],
+      "precondition": "Два worker последовательно получают право обрабатывать один чат, а первый теряет lease.",
+      "user_action": "Быстро отправляет сообщения или нажимает кнопки, пока предыдущий update ещё обрабатывается.",
+      "bot_response": "Сериализует изменения и не позволяет прежнему владельцу ставить внешнюю задачу после потери lease.",
+      "result": "Состояние и эффекты принадлежат только актуальному владельцу; разные чаты работают независимо.",
+      "automation_status": "AUTOMATED_PARTIAL",
+      "manual_live_requirement": "Нужен нагрузочный fault-injection прогон с реальными Redis, Celery и PostgreSQL перед широким production.",
+      "examples": [
+        "Несколько быстрых сообщений подряд",
+        "Повторное нажатие кнопки во время обработки"
+      ],
+      "test_refs": [
+        "tests/workers/test_concurrency_block.py::test_chat_lease_fences_changed_owner_and_old_close",
+        "tests/workers/test_concurrency_block.py::test_side_effect_enqueue_is_fenced_before_task_publish",
+        "tests/submission/test_submission_lease_fencing.py::test_dispatch_loss_after_external_send_does_not_complete"
       ]
     },
     {
@@ -796,64 +1315,97 @@
       "category": "recovery",
       "title": "Голос не удалось распознать",
       "priority": "edge",
-      "channels": ["Голос"],
+      "channels": [
+        "Голос"
+      ],
       "precondition": "Основная транскрипция пустая либо аудио не содержит понятной команды.",
       "user_action": "Отправляет голосовое сообщение.",
       "bot_response": "Использует резервную модель, а при пустом результате просит повторить или написать текстом.",
       "result": "Пустая транскрипция не выбирает товар и не меняет черновик.",
-      "examples": ["Неразборчивое аудио", "Тихая запись", "Пустая голосовая команда"],
+      "examples": [
+        "Неразборчивое аудио",
+        "Тихая запись",
+        "Пустая голосовая команда"
+      ],
       "test_refs": [
         "tests/ai/test_ai_media.py::test_voice_transcription_uses_fallback_when_primary_returns_empty",
         "tests/input/test_voice_input_contract.py::test_empty_voice_add_items_uses_the_source_recovery_card"
-      ]
+      ],
+      "automation_status": "AUTOMATED_PARTIAL",
+      "manual_live_requirement": "Нужен live-прогон с неразборчивым аудио и отказом основной ASR-модели."
     },
     {
       "id": "RCV-02",
       "category": "recovery",
       "title": "На фото нет заполненных количеств",
       "priority": "critical",
-      "channels": ["Фото", "Файл-изображение"],
+      "channels": [
+        "Фото",
+        "Файл-изображение"
+      ],
       "precondition": "На фотографии видны названия и справочные числа, но нет заполненного заказа.",
       "user_action": "Отправляет такую фотографию.",
       "bot_response": "Не использует фасовку, остаток или случайное число как количество заказа.",
       "result": "В черновик не добавляются строки без доказанного положительного количества.",
-      "examples": ["Пустой бланк заказа", "Таблица только с фасовкой", "Фото без рукописных количеств"],
+      "examples": [
+        "Пустой бланк заказа",
+        "Таблица только с фасовкой",
+        "Фото без рукописных количеств"
+      ],
       "test_refs": [
         "tests/ai/test_ai_media.py::test_photo_drops_every_item_without_actual_order_quantity",
         "tests/conversation/test_engine.py::test_photo_without_order_quantities_does_not_create_draft_items"
-      ]
+      ],
+      "automation_status": "AUTOMATED_PARTIAL",
+      "manual_live_requirement": "Нужен live-прогон с реальным пустым бланком и фотографией, содержащей только справочные числа."
     },
     {
       "id": "RCV-03",
       "category": "recovery",
       "title": "Недоступен справочник заведений",
       "priority": "edge",
-      "channels": ["Текст"],
+      "channels": [
+        "Текст"
+      ],
       "precondition": "Справочник не настроен или временно недоступен.",
       "user_action": "Отправляет код подключения.",
       "bot_response": "Сообщает, что код сейчас не удалось проверить, и предлагает повторить позже.",
       "result": "Бот не создаёт ложную привязку и не показывает технический traceback пользователю.",
-      "examples": ["12345", "/start 12345"],
+      "examples": [
+        "12345",
+        "/start 12345"
+      ],
       "test_refs": [
         "tests/venue/test_venue_registration.py::test_directory_reports_missing_configuration_before_http_call",
         "tests/venue/test_venue_registration.py::test_directory_does_not_cache_transport_errors"
-      ]
+      ],
+      "automation_status": "AUTOMATED_PARTIAL",
+      "manual_live_requirement": "Нужен контролируемый live-прогон с временно недоступным тестовым реестром заведений."
     },
     {
       "id": "RCV-04",
       "category": "recovery",
       "title": "Общая ошибка обработки сообщения",
       "priority": "edge",
-      "channels": ["Текст", "Голос", "Фото"],
+      "channels": [
+        "Текст",
+        "Голос",
+        "Фото"
+      ],
       "precondition": "Во время обработки возникает непредвиденная техническая ошибка.",
       "user_action": "Отправляет сообщение любого поддерживаемого типа.",
       "bot_response": "Фиксирует безопасную контрольную точку и показывает короткое сообщение без внутренних данных.",
       "result": "Пользователь может повторить действие; секреты и traceback не попадают в обычный ответ.",
-      "examples": ["Повторить сообщение", "Открыть черновик после ошибки"],
+      "examples": [
+        "Повторить сообщение",
+        "Открыть черновик после ошибки"
+      ],
       "test_refs": [
         "tests/conversation/test_orchestrator_pipeline.py::test_pipeline_failure_is_checkpointed_and_user_gets_safe_reply",
         "tests/conversation/test_orchestrator_pipeline.py::test_checkpointed_result_retries_only_telegram_delivery"
-      ]
+      ],
+      "automation_status": "AUTOMATED_PASS",
+      "manual_live_requirement": "Не требуется для подтверждения локального контракта; общий Telegram smoke выполняется перед пилотом."
     }
   ]
 }

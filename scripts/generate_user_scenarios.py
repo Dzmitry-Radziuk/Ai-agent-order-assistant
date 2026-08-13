@@ -27,6 +27,13 @@ STATUS_LABELS = {
     "prepared": "Подготовлено, но выключено",
 }
 
+AUTOMATION_LABELS = {
+    "AUTOMATED_PASS": "Контракт полностью подтверждён локальными автоматическими тестами",
+    "AUTOMATED_PARTIAL": "Основной контракт подтверждён, но реальный внешний контур не проверен",
+    "MANUAL_LIVE_REQUIRED": "Для подтверждения требуется ручная проверка в живом окружении",
+    "NOT_IMPLEMENTED": "Сценарий пока не реализован",
+}
+
 
 def _strip_trailing_whitespace(text: str) -> str:
     """Удаляет пробелы в концах строк, сохраняя финальный перевод строки."""
@@ -98,6 +105,8 @@ def validate_catalog(catalog: dict[str, Any], source_directory: Path) -> None:
             "user_action",
             "bot_response",
             "result",
+            "automation_status",
+            "manual_live_requirement",
             "examples",
             "test_refs",
         }
@@ -113,6 +122,10 @@ def validate_catalog(catalog: dict[str, Any], source_directory: Path) -> None:
             raise ValueError(f"{scenario['id']}: неизвестный приоритет")
         if scenario.get("status", "live") not in STATUS_LABELS:
             raise ValueError(f"{scenario['id']}: неизвестный статус доступности")
+        if scenario["automation_status"] not in AUTOMATION_LABELS:
+            raise ValueError(f"{scenario['id']}: неизвестный статус автоматической проверки")
+        if not scenario["manual_live_requirement"].strip():
+            raise ValueError(f"{scenario['id']}: нужно описать требование к ручной проверке")
         if scenario["priority"] == "critical" and not scenario["test_refs"]:
             raise ValueError(f"{scenario['id']}: критический сценарий должен иметь тест")
         if not scenario["channels"]:
@@ -287,6 +300,7 @@ def render_markdown(catalog: dict[str, Any]) -> str:
             channels = ", ".join(scenario["channels"])
             priority = PRIORITY_LABELS[scenario["priority"]]
             status = STATUS_LABELS[scenario.get("status", "live")]
+            automation_status = scenario["automation_status"]
             contract = _scenario_contract(scenario, category)
             lines.extend(
                 [
@@ -302,6 +316,11 @@ def render_markdown(catalog: dict[str, Any]) -> str:
                     f"**Ответ бота:** {scenario['bot_response']}",
                     "",
                     f"**Результат:** {scenario['result']}",
+                    "",
+                    f"**Статус проверки:** `{automation_status}` — "
+                    f"{AUTOMATION_LABELS[automation_status]}",
+                    "",
+                    "**Ручная проверка:** " + scenario["manual_live_requirement"],
                     "",
                     "<details>",
                     "<summary><strong>Что важно для системы</strong></summary>",
@@ -347,6 +366,7 @@ def _scenario_card(scenario: dict[str, Any], category: dict[str, Any]) -> str:
     """Создаёт одну HTML-карточку сценария."""
     priority = scenario["priority"]
     status = scenario.get("status", "live")
+    automation_status = scenario["automation_status"]
     category_title = category["title"]
     contract = _scenario_contract(scenario, category)
     search_text = " ".join(
@@ -392,6 +412,8 @@ def _scenario_card(scenario: dict[str, Any], category: dict[str, Any]) -> str:
           <div><dt>Пользователь</dt><dd>{html.escape(scenario["user_action"])}</dd></div>
           <div><dt>Бот</dt><dd>{html.escape(scenario["bot_response"])}</dd></div>
           <div class="result"><dt>Итог</dt><dd>{html.escape(scenario["result"])}</dd></div>
+          <div><dt>Статус проверки</dt><dd><code>{html.escape(automation_status)}</code> — {html.escape(AUTOMATION_LABELS[automation_status])}</dd></div>
+          <div><dt>Ручная проверка</dt><dd>{html.escape(scenario["manual_live_requirement"])}</dd></div>
         </dl>
         <details>
           <summary>Что важно</summary>
