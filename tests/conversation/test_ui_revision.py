@@ -1,9 +1,11 @@
+"""Проверяет поведение, связанное с модулем «test ui revision»."""
+
 from restaurant_bot.domain.models import BotReply, Button
 from restaurant_bot.services.orchestrator import UpdateOrchestrator
 
 
 def test_reply_callbacks_receive_one_ui_revision_suffix() -> None:
-    """Проверяет, что ответ callback receive один ui ревизия суффикс."""
+    """Проверяет, что ответ callback получает один суффикс ревизии интерфейса."""
     reply = BotReply(
         text="Черновик",
         rows=[

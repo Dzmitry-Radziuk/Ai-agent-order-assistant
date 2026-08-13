@@ -1,3 +1,5 @@
+"""Проверяет поведение, связанное с модулем «test voice route safety»."""
+
 import pytest
 
 from restaurant_bot.domain.models import (

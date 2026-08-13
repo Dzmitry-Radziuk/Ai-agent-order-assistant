@@ -1,3 +1,5 @@
+"""Проверяет поведение, связанное с модулем «test multiple existing stock»."""
+
 from restaurant_bot.domain.models import (
     CatalogProduct,
     ConversationState,
@@ -20,7 +22,7 @@ def _event() -> TelegramEvent:
 
 
 def test_multiple_recommendation_accounts_for_existing_department_stock(settings) -> None:  # type: ignore[no-untyped-def]
-    """Проверяет, что кратность recommendation accounts for существующий подразделение остаток."""
+    """Проверяет, что рекомендация кратности учитывает остаток выбранного подразделения."""
     engine = ConversationEngine(settings)
     catalog = [
         CatalogProduct(
@@ -81,7 +83,7 @@ def test_accepting_multiple_recommendation_changes_only_current_item(settings) -
 
 
 def test_manual_multiple_correction_keeps_quantity_until_user_enters_a_number(settings) -> None:  # type: ignore[no-untyped-def]
-    """Проверяет, что ручной кратность исправление сохраняет количество until пользователь enters a число."""
+    """Проверяет, что ручная корректировка кратности сохраняет количество до ввода числа пользователем."""
     engine = ConversationEngine(settings)
     state = ConversationState(
         current_issue_item_id="beef",

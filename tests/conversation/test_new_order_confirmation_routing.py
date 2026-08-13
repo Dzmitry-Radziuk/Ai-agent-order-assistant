@@ -1,3 +1,5 @@
+"""Проверяет поведение, связанное с модулем «test new order confirmation routing»."""
+
 from __future__ import annotations
 
 import pytest

@@ -1,3 +1,5 @@
+"""Формирует Telegram-представление «order review»."""
+
 from __future__ import annotations
 
 from restaurant_bot.application.order_review.contracts import ReviewItem, ReviewSnapshot

@@ -1,3 +1,5 @@
+"""Проверяет поведение, связанное с модулем «test completion notification state»."""
+
 from pathlib import Path
 
 from restaurant_bot.persistence.models import SubmissionRecord

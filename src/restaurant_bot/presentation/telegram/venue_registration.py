@@ -1,3 +1,5 @@
+"""Формирует Telegram-представление «venue registration»."""
+
 from __future__ import annotations
 
 from restaurant_bot.domain.models import BotReply, Button

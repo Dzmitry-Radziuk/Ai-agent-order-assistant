@@ -1,3 +1,5 @@
+"""Проверяет поведение, связанное с модулем «test telegram no emoji»."""
+
 from restaurant_bot.domain.models import BotReply, Button
 from restaurant_bot.integrations.telegram import TelegramClient
 

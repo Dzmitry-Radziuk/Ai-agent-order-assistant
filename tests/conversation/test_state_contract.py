@@ -1,3 +1,5 @@
+"""Проверяет поведение, связанное с модулем «test state contract»."""
+
 from restaurant_bot.domain.models import CartItem, ConversationState, ItemStatus
 
 

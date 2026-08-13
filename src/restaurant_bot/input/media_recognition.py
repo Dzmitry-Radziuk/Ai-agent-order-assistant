@@ -1,3 +1,5 @@
+"""Преобразует входные данные «media recognition»."""
+
 from __future__ import annotations
 
 import os

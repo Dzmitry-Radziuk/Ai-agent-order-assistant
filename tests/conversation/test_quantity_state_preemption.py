@@ -1,3 +1,5 @@
+"""Проверяет поведение, связанное с модулем «test quantity state preemption»."""
+
 from types import SimpleNamespace
 
 from restaurant_bot.conversation.routing.contracts import CompatibilityAction
@@ -23,7 +25,7 @@ from restaurant_bot.services.orchestrator import UpdateOrchestrator
 
 
 def _event(text: str, input_type: InputKind = InputKind.TEXT) -> TelegramEvent:
-    """Создаёт событие для проверки preemption quantity modal."""
+    """Создаёт событие для проверки прерывания modal-ожидания количества."""
     return TelegramEvent(
         update_id=1, chat_id="quantity-preemption", input_type=input_type, text=text
     )

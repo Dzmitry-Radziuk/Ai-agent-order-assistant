@@ -112,7 +112,7 @@ def test_not_found_policy_allows_existing_manual_clarification() -> None:
 
 
 def test_manual_details_context_has_priority_over_not_found() -> None:
-    """Выбирает semantic manual context раньше status-based NOT_FOUND."""
+    """Выбирает семантический ручной контекст раньше статуса NOT_FOUND."""
     state = _not_found_state(SessionStage.AWAIT_MANUAL_DETAILS)
 
     assert StateCompatibilityPolicy().context_for(state) is CompatibilityContext.MANUAL_DETAILS

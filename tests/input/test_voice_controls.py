@@ -1,3 +1,5 @@
+"""Проверяет поведение, связанное с модулем «test voice controls»."""
+
 import pytest
 
 from restaurant_bot.domain.models import (
@@ -33,7 +35,7 @@ def _candidates() -> list[Candidate]:
 
 @pytest.mark.parametrize("phrase", ["давай второй", "вариант два", "беру второй вариант"])
 def test_voice_selects_candidate_by_natural_number(settings, phrase: str) -> None:  # type: ignore[no-untyped-def]
-    """Проверяет, что голос выбирает кандидат by естественный число."""
+    """Проверяет, что голос выбирает кандидата по естественно произнесённому номеру."""
     item = CartItem(
         id="choice",
         source_query="сироп",
@@ -189,7 +191,7 @@ def test_voice_opens_and_retries_procurement_request(settings) -> None:  # type:
 
 @pytest.mark.parametrize("phrase", ["МБР", "эм бэ эр"])
 def test_voice_selects_visible_supplier_by_name_or_spoken_acronym(settings, phrase: str) -> None:  # type: ignore[no-untyped-def]
-    """Проверяет, что голос выбирает видимый поставщик by название или произнесённый acronym."""
+    """Проверяет, что голос выбирает видимого поставщика по названию или произнесённой аббревиатуре."""
     item = CartItem(
         id="supplier-item",
         source_query="Сироп",
@@ -225,7 +227,7 @@ def test_voice_selects_visible_supplier_by_name_or_spoken_acronym(settings, phra
 def test_global_add_more_voice_command_wins_on_local_issue_cards(
     settings, status: ItemStatus, phrase: str
 ) -> None:  # type: ignore[no-untyped-def]
-    """Проверяет, что общий добавление ещё голос команда wins on local уточнение cards."""
+    """Проверяет, что общая голосовая команда добавления имеет приоритет над локальными карточками уточнения."""
     item = CartItem(
         id="issue",
         source_query="Сироп Роза",
@@ -247,7 +249,7 @@ def test_global_add_more_voice_command_wins_on_local_issue_cards(
 
 
 def test_voice_adds_items_for_the_only_supplier_below_minimum(settings) -> None:  # type: ignore[no-untyped-def]
-    """Проверяет, что голос добавляет позиции for только поставщик below минимум."""
+    """Проверяет, что голос добавляет позиции только для поставщика с недостигнутым минимумом."""
     item = CartItem(
         id="supplier-item",
         source_query="Сироп",

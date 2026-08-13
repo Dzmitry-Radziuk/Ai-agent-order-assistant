@@ -1,3 +1,5 @@
+"""Координирует сервис «orchestrator»."""
+
 from __future__ import annotations
 
 import re
@@ -312,11 +314,10 @@ class UpdateOrchestrator:
                     timings["state_load_ms"] = round((perf_counter() - stage_started) * 1000)
                     log.info("conversation_state_loaded", **self._state_log(state))
 
-                    # n8n immediately acknowledges a new voice update with a
-                    # temporary card.  The transcription and structured
-                    # parsing can take several seconds; keeping the previous
-                    # keyboard active during that time invites stale clicks.
-                    # The final reply edits this same card below.
+                    # n8n сразу подтверждает новое голосовое обновление временной
+                    # карточкой. Транскрипция и структурированный разбор могут занять
+                    # несколько секунд; активная старая клавиатура провоцирует устаревшие
+                    # нажатия. Ниже итоговый ответ изменяет эту же карточку.
                     if event.input_type == InputKind.VOICE:
                         stage_started = perf_counter()
                         processing_message_id = self._send_processing_best_effort(
@@ -324,8 +325,8 @@ class UpdateOrchestrator:
                             event.chat_id,
                             self._voice_processing_reply(),
                         )
-                        # A slow Telegram edit must never postpone the visible
-                        # acknowledgement that the voice message was accepted.
+                        # Медленное изменение карточки Telegram не должно откладывать видимое
+                        # подтверждение того, что голосовое сообщение принято.
                         self._disable_keyboard_best_effort(log, event.chat_id, state.ui_message_id)
                         timings["processing_card_ms"] = round(
                             (perf_counter() - stage_started) * 1000
@@ -620,9 +621,9 @@ class UpdateOrchestrator:
                     and isinstance(exc, TELEGRAM_TRANSIENT_ERRORS)
                 )
                 if delivery_deferred:
-                    # State/result are already checkpointed. The Celery retry
-                    # will reload them and repeat only Telegram delivery, never
-                    # parsing or applying the user's items a second time.
+                    # Состояние и результат уже сохранены в checkpoint. Повтор Celery
+                    # перечитает их и повторит только доставку в Telegram, но не разбор
+                    # и не применение позиций пользователя.
                     log.warning(
                         "telegram_reply_delivery_deferred",
                         error_type=type(exc).__name__,
@@ -1334,7 +1335,7 @@ class UpdateOrchestrator:
         state: ConversationState,
         catalog: list[CatalogProduct],
     ) -> EngineResult:
-        """Передаёт Telegram-вход в общий conversation use case и рендерит ответ."""
+        """Передаёт вход Telegram в общий сценарий диалога и формирует ответ."""
         interaction: ConversationInput = to_conversation_input(event)
         application = getattr(self, "conversation_application", None)
         if application is None:
@@ -1638,10 +1639,10 @@ class UpdateOrchestrator:
                 decision.action == "not_found"
                 and decision.confidence >= _AI_MATCH_NOT_FOUND_MIN_CONFIDENCE
             ):
-                # AI can reject an unresolved qualifier while the deterministic
-                # shortlist still proves the requested base product. Preserve
-                # that evidence for clarification; only discard a shortlist
-                # that has no meaningful identity match at all.
+                # ИИ может отклонить неразрешённый признак, пока детерминированный
+                # shortlist подтверждает основной товар. Сохраняем это свидетельство
+                # для уточнения и удаляем shortlist только при полном отсутствии
+                # содержательного совпадения названия.
                 primary = item.candidates[0] if item.candidates else None
                 deterministic_evidence = (
                     query_evidence_tokens(search_query, primary.name)

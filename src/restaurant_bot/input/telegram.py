@@ -1,3 +1,5 @@
+"""Преобразует входные данные «telegram»."""
+
 from __future__ import annotations
 
 import re

@@ -1,3 +1,5 @@
+"""Проверяет поведение, связанное с модулем «test orchestrator pipeline»."""
+
 from contextlib import nullcontext
 from types import SimpleNamespace
 from unittest.mock import ANY, MagicMock

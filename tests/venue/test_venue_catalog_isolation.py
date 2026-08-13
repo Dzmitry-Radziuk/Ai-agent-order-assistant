@@ -1,3 +1,5 @@
+"""Проверяет поведение, связанное с модулем «test venue catalog isolation»."""
+
 import json
 from unittest.mock import MagicMock
 
@@ -9,7 +11,7 @@ from restaurant_bot.integrations.google_sheets import GoogleSheetsError
 
 
 def test_catalog_cache_is_isolated_by_spreadsheet(settings) -> None:  # type: ignore[no-untyped-def]
-    """Проверяет, что каталог кэш является isolated by таблица."""
+    """Проверяет, что кэш каталога изолирован по таблице заведения."""
     redis = MagicMock()
     redis.get.return_value = None
     sheets = MagicMock()

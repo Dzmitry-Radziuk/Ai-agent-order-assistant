@@ -20,7 +20,7 @@ from restaurant_bot.services.engine import ConversationEngine
 
 
 def test_text_order_uses_neutral_input_without_telegram_event(settings) -> None:
-    """Проводит текстовый заказ через общий use case без TelegramEvent."""
+    """Проводит текстовый заказ через общий сценарий без TelegramEvent."""
     interaction = ConversationInput(
         interaction_id=101,
         conversation_id="chat-101",
@@ -45,7 +45,7 @@ def test_text_order_uses_neutral_input_without_telegram_event(settings) -> None:
 
 
 def test_missing_quantity_modal_accepts_neutral_follow_up(settings) -> None:
-    """Проводит ответ на ожидаемое количество через тот же use case."""
+    """Проводит ответ на ожидаемое количество через тот же сценарий."""
     state = ConversationState()
     initial = ConversationApplication(ConversationEngine(settings)).process(
         ConversationInput(
@@ -93,7 +93,7 @@ def test_telegram_action_codec_preserves_callback_corpus() -> None:
 
 
 def test_comment_edit_uses_neutral_input(settings) -> None:
-    """Применяет комментарий через общий use case без TelegramEvent."""
+    """Применяет комментарий через общий сценарий без TelegramEvent."""
     state = ConversationState(
         cart=[
             CartItem(
@@ -129,7 +129,7 @@ def test_comment_edit_uses_neutral_input(settings) -> None:
 
 
 def test_candidate_selection_uses_neutral_input(settings) -> None:
-    """Выбирает кандидата через общий use case без TelegramEvent."""
+    """Выбирает кандидата через общий сценарий без TelegramEvent."""
     item = CartItem(
         id="cheese",
         source_query="сыр",

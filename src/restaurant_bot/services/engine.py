@@ -1,3 +1,5 @@
+"""Координирует сервис «engine»."""
+
 from __future__ import annotations
 
 import re
@@ -209,8 +211,8 @@ class ConversationEngine:
                     )
                 }
             )
-        # Keep the existing voice normalizer as a pre-policy normalization
-        # step for legacy/LLM commands that mislabel a submit phrase as add-more.
+        # Сохраняем существующую нормализацию голоса как шаг до policy
+        # для legacy/LLM-команд, которые принимают фразу отправки за add-more.
         if event.kind is InputKind.VOICE and (
             command.intent in {Intent.ADD_MORE, Intent.CONFIRM}
             or state.stage is SessionStage.AWAIT_SUBMIT_CONFIRM
@@ -226,8 +228,8 @@ class ConversationEngine:
             command,
             state,
         )
-        # A stale callback must be rejected before any modal transition or
-        # cleanup can mutate the current draft.
+        # Устаревший callback нужно отклонить до любого modal-перехода или
+        # очистки, способных изменить текущий черновик.
         if (
             event.kind == InputKind.CALLBACK
             and command.callback_revision is not None
@@ -466,9 +468,9 @@ class ConversationEngine:
             )
 
         # n8n treats an unambiguous spoken/textual candidate name as a
-        # contextual selection while the candidate card is open.  Do not turn
-        # a weak category match (for example, just "сироп") into a silent
-        # selection: only one strictly best candidate may be selected.
+        # контекстный выбор при открытой карточке кандидатов. Нельзя превращать
+        # слабое совпадение категории (например, только «сироп») в тихий
+        # выбор: разрешён только один строго лучший кандидат.
         candidate_decision = self.state_compatibility_policy.evaluate(
             command,
             state,
@@ -497,24 +499,24 @@ class ConversationEngine:
                         callback_target=str(state_item_index(state, current)),
                     )
                 elif event.kind == InputKind.VOICE and not command.items:
-                    # On an open candidate card every vague voice utterance
-                    # is a possible choice, never a new product.  Keeping the
-                    # same card is safer than polluting the draft with a bad
+                    # В открытой карточке кандидатов любая неясная голосовая фраза  # noqa: RUF003
+                    # может быть выбором, но не новым товаром. Сохранить ту же карточку
+                    # безопаснее, чем засорить черновик ошибочной
                     # transcription such as "Был вариант".
                     command = ParsedCommand(
                         intent=Intent.CONTINUE_CURRENT, text=event.text or command.text
                     )
                 elif candidate_decision.action is CompatibilityAction.AMBIGUOUS:
                     # A tied category-like phrase is contextual clarification,
-                    # not a second product line and not an implicit candidate.
+                    # это не вторая строка товара и не неявный кандидат.
                     command = ParsedCommand(
                         intent=Intent.CONTINUE_CURRENT, text=event.text or command.text
                     )
 
-        # A delivery retry of product-add details must not be interpreted as a
-        # fresh product line after the first attempt has already created the
-        # stable request. The orchestration inbox also deduplicates updates,
-        # but this preserves the n8n contract at the state-machine boundary.
+        # Повтор доставки сведений о добавлении товара нельзя считать новой  # noqa: RUF003
+        # строкой после создания устойчивого запроса. Входящий ящик orchestration
+        # также устраняет дубликаты, но это сохраняет контракт n8n на границе
+        # state machine.
         if any(
             str(request.get("description_event_key") or "") == str(event.interaction_id)
             for request in state.product_add_requests
@@ -847,8 +849,8 @@ class ConversationEngine:
                     None,
                 )
                 if same_missing is not None:
-                    # n8n treats a repeated product without a quantity as the
-                    # same open question, not as another line in the draft.
+                    # n8n считает повтор товара без количества тем же открытым вопросом,
+                    # а не новой строкой в черновике.  # noqa: RUF003
                     if item.quantity is not None:
                         same_missing.quantity = item.quantity
                         same_missing.unit = item.unit or same_missing.catalog_unit
@@ -978,7 +980,7 @@ class ConversationEngine:
 
     @staticmethod
     def _spoken_quantity(text: str) -> tuple[float | None, str]:
-        """Сохраняет контракт аналитического voice-recovery для старых callers."""
+        """Сохраняет аналитический контракт восстановления голоса для старых вызывающих сторон."""
         return PendingQuantityHandler.spoken_quantity(text)
 
     @staticmethod

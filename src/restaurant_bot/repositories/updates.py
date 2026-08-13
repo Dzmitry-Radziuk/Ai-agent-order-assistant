@@ -1,3 +1,5 @@
+"""Читает и сохраняет данные через репозиторий «updates»."""
+
 from __future__ import annotations
 
 from datetime import datetime, timedelta

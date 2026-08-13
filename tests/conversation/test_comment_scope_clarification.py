@@ -1,3 +1,5 @@
+"""Проверяет поведение, связанное с модулем «test comment scope clarification»."""
+
 from restaurant_bot.domain.models import (
     CartItem,
     CatalogProduct,

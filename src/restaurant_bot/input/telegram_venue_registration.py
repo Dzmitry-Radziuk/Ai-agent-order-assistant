@@ -1,3 +1,5 @@
+"""Преобразует входные данные «telegram venue registration»."""
+
 from __future__ import annotations
 
 import re

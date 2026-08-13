@@ -1,3 +1,5 @@
+"""Проверяет поведение, связанное с модулем «test tasks»."""
+
 from unittest.mock import MagicMock
 
 from restaurant_bot.integrations.cache import ChatLeaseLostError, ChatLockBusyError

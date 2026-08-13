@@ -1,3 +1,5 @@
+"""Координирует сервис «submission»."""
+
 from __future__ import annotations
 
 from datetime import UTC, datetime
@@ -1466,7 +1468,7 @@ class SubmissionService:
         *,
         lease: ChatLease | None = None,
     ) -> bool:
-        """Разрешает одну запись только после подтверждения состояния before."""
+        """Разрешает одну запись только после подтверждения исходного состояния."""
         _ensure_lease(lease)
         try:
             self.sheets.apply_catalog_mutation(plan)

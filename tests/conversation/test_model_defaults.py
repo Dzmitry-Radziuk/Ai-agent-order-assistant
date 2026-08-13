@@ -1,3 +1,5 @@
+"""Проверяет поведение, связанное с модулем «test model defaults»."""
+
 from restaurant_bot.domain.models import CartItem, ConversationState, DepartmentQuantities
 
 
@@ -7,7 +9,7 @@ def test_conversation_state_uses_kitchen_as_default_department() -> None:
 
 
 def test_department_defaults_and_quantity_lookup_use_normal_russian_names() -> None:
-    """Проверяет, что подразделение значения по умолчанию и количество поиск use normal русские names."""
+    """Проверяет, что значения подразделения и количество по умолчанию используют обычные русские названия."""
     quantities = DepartmentQuantities(hall=1, bar=2, kitchen=3)
 
     assert CartItem(id="item", source_query="Товар").department == "Кухня"

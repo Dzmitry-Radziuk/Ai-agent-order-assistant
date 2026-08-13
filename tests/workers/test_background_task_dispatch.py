@@ -1,3 +1,5 @@
+"""Проверяет поведение, связанное с модулем «test background task dispatch»."""
+
 from __future__ import annotations
 
 from types import SimpleNamespace

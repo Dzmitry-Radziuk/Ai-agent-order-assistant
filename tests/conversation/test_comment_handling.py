@@ -1,3 +1,5 @@
+"""Проверяет поведение, связанное с модулем «test comment handling»."""
+
 import pytest
 
 from restaurant_bot.conversation.comments import merge_comments, remove_cart_comment_shadows
@@ -440,7 +442,7 @@ def test_legacy_merged_catalog_comment_is_split_before_submission(settings) -> N
 
 
 def test_parser_keeps_multiword_delivery_preferences_as_a_single_comment() -> None:
-    """Проверяет, что парсер сохраняет многословный delivery preferences как a один комментарий."""
+    """Проверяет, что парсер сохраняет многофразовые пожелания доставки одним комментарием."""
     cases = [
         ("сироп роза 5 штук желательно охлаждённым", "желательно охлаждённым"),
         (
@@ -479,8 +481,8 @@ def test_unmarked_attribute_before_quantity_requires_catalog_clarification(setti
     ]
     parsed_items = parse_product_lines("сироп роза холодным 10 штук")
 
-    # Reproduce the actual failure: the basic parser cannot know where the
-    # catalog name ends, so it initially leaves the comment in product_query.
+    # Воспроизводим исходную ошибку: простой парсер не знает, где заканчивается
+    # название товара, поэтому сначала оставляет комментарий в product_query.
     assert parsed_items[0].product_query == "сироп роза холодным"
     assert parsed_items[0].comment == ""
 
@@ -663,7 +665,7 @@ def test_catalog_evidence_separates_many_product_typos_from_free_comments(
 
 
 def test_existing_comment_shadow_is_removed_from_persisted_draft(settings) -> None:  # type: ignore[no-untyped-def]
-    """Проверяет, что существующий комментарий ложная позиция является removed из persisted черновик."""
+    """Проверяет, что существующий комментарий ошибочной позиции удаляется из сохранённого черновика."""
     engine = ConversationEngine(settings)
     owner = engine._build_item(
         ExtractedItem(product_query="сироп роза", quantity=3, unit="шт", comment="холодным")

@@ -1,3 +1,5 @@
+"""Проверяет поведение, связанное с модулем «test voice quantity recovery»."""
+
 from restaurant_bot.domain.models import Intent
 from restaurant_bot.integrations.openai_client import (
     recover_omitted_explicit_items,
@@ -706,7 +708,7 @@ def test_empty_voice_model_result_recovers_every_explicit_product() -> None:
 
 
 def test_navigation_intent_can_never_be_recovered_as_a_product() -> None:
-    """Проверяет, что навигация намерение может никогда не be recovered как a товар."""
+    """Проверяет, что навигационное намерение никогда не восстанавливается как товар."""
     payload = {"intent": Intent.SHOW_CART, "items": []}
 
     restored = recover_omitted_explicit_items(payload, "Показать товары поставщика.")
@@ -781,7 +783,7 @@ def test_pair_of_apples_uses_its_own_spoken_quantity() -> None:
 
 
 def test_voice_recovery_removes_a_model_invented_quantity() -> None:
-    """Проверяет, что голос восстановление удаляет a модель выдуманное количество."""
+    """Проверяет, что восстановление голоса удаляет выдуманное моделью количество."""
     source = "Сироп роза пять штук и бутылка воды."
     items = [
         {

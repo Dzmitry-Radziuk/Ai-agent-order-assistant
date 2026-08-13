@@ -59,7 +59,7 @@ class ActionMapper(Protocol):
 
 
 class ConversationApplication:
-    """Координирует общий диалоговый use case для разных каналов."""
+    """Координирует общий сценарий диалога для разных каналов."""
 
     def __init__(
         self,

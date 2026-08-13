@@ -1,3 +1,5 @@
+"""Проверяет поведение, связанное с модулем «test health and webhook»."""
+
 from __future__ import annotations
 
 from typing import Any
@@ -58,7 +60,7 @@ def test_liveness_reports_running_process() -> None:
 
 
 def test_readiness_checks_postgres_and_redis(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Проверяет, что readiness checks postgres и redis."""
+    """Проверяет готовность PostgreSQL и Redis."""
     redis = _RedisClient()
     monkeypatch.setattr(api_module, "SessionLocal", _SessionFactory())
     monkeypatch.setattr(api_module.Redis, "from_url", lambda *_args, **_kwargs: redis)
@@ -69,7 +71,7 @@ def test_readiness_checks_postgres_and_redis(monkeypatch: pytest.MonkeyPatch) ->
 
 
 def test_webhook_rejects_an_invalid_secret() -> None:
-    """Проверяет, что webhook отклоняет an неверный секрет."""
+    """Проверяет, что webhook отклоняет неверный секрет."""
     with pytest.raises(HTTPException) as error:
         api_module.telegram_webhook({"update_id": 1}, "invalid")
 
@@ -79,7 +81,7 @@ def test_webhook_rejects_an_invalid_secret() -> None:
 def test_duplicate_webhook_is_acknowledged_without_a_second_task(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Проверяет, что дубликат webhook является acknowledged без a второй task."""
+    """Проверяет, что дубликат webhook подтверждается без запуска второй задачи."""
 
     class DuplicateRepository:
         """Имитирует обнаружение повторного Telegram update."""

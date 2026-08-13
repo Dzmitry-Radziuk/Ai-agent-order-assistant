@@ -1,3 +1,5 @@
+"""Определяет доменные правила и данные «text»."""
+
 from __future__ import annotations
 
 import re

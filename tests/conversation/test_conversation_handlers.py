@@ -1,3 +1,5 @@
+"""Проверяет поведение, связанное с модулем «test conversation handlers»."""
+
 from restaurant_bot.domain.models import (
     Candidate,
     CartItem,

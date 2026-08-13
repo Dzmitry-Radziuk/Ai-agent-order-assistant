@@ -1,3 +1,5 @@
+"""Проверяет поведение, связанное с модулем «test candidate selection»."""
+
 import pytest
 
 from restaurant_bot.domain.models import (
@@ -79,7 +81,7 @@ def test_unique_partial_candidate_name_selects_only_that_candidate(settings) -> 
 
 
 def test_common_candidate_word_does_not_silently_choose_a_product(settings) -> None:  # type: ignore[no-untyped-def]
-    """Проверяет, что common кандидат слово выполняет не без подтверждения choose a товар."""
+    """Проверяет, что общее слово кандидата не выбирает товар без подтверждения."""
     engine = ConversationEngine(settings)
     item = CartItem(
         id="choice",
@@ -106,7 +108,7 @@ def test_common_candidate_word_does_not_silently_choose_a_product(settings) -> N
 
 
 def test_unrecognized_voice_on_candidate_card_cannot_create_a_new_product(settings) -> None:  # type: ignore[no-untyped-def]
-    """Проверяет, что нераспознанный голос on кандидат карточка не может create a новый товар."""
+    """Проверяет, что нераспознанная голосовая фраза в карточке кандидатов не создаёт новый товар."""
     item = CartItem(
         id="choice",
         source_query="сироп",

@@ -51,7 +51,7 @@ def _catalog() -> list[CatalogProduct]:
 
 
 def test_new_product_does_not_select_matching_old_candidate(settings) -> None:  # type: ignore[no-untyped-def]
-    """Проверяет, что конкретный ADD_ITEMS прерывает старый candidate context."""
+    """Проверяет, что конкретный ADD_ITEMS прерывает старый контекст кандидата."""
     state = _candidate_state()
     result = ConversationEngine(settings).handle(
         _event("пармезан 3 кг"),
@@ -80,7 +80,7 @@ def test_new_product_does_not_select_matching_old_candidate(settings) -> None:  
 def test_new_product_with_voice_or_text_keeps_old_candidate_context(
     settings, input_type: InputKind
 ) -> None:  # type: ignore[no-untyped-def]
-    """Проверяет одинаковое прерывание candidate context для текста и голоса."""
+    """Проверяет одинаковое прерывание контекста кандидата для текста и голоса."""
     state = _candidate_state()
     text = "пармезан три килограмма" if input_type is InputKind.VOICE else "пармезан 3 кг"
     command_text = text
@@ -104,7 +104,7 @@ def test_new_product_with_voice_or_text_keeps_old_candidate_context(
 
 
 def test_unique_candidate_name_can_continue_context(settings) -> None:  # type: ignore[no-untyped-def]
-    """Проверяет, что однозначное имя кандидата остаётся contextual selection."""
+    """Проверяет, что однозначное имя кандидата остаётся контекстным выбором."""
     state = _candidate_state()
     result = ConversationEngine(settings).handle(
         _event("гауда"),

@@ -1,3 +1,5 @@
+"""Проверяет поведение, связанное с модулем «test telegram transport»."""
+
 from unittest.mock import MagicMock
 
 import httpx
@@ -71,7 +73,7 @@ def test_callback_progress_edit_clears_the_obsolete_keyboard() -> None:
 
 
 def test_disable_keyboard_ignores_a_card_without_inline_keyboard() -> None:
-    """Проверяет, что disable keyboard игнорирует a карточка без inline keyboard."""
+    """Проверяет, что отключение клавиатуры игнорирует карточку без inline-клавиатуры."""
     client = object.__new__(TelegramClient)
     client._call = MagicMock(
         side_effect=TelegramAPIError("Telegram editMessageReplyMarkup failed (400)")

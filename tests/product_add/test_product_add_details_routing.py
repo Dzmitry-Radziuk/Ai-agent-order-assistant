@@ -1,3 +1,5 @@
+"""Проверяет поведение, связанное с модулем «test product add details routing»."""
+
 from restaurant_bot.conversation.routing.contracts import (
     CompatibilityAction,
     CompatibilityContext,

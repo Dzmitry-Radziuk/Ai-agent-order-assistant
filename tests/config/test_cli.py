@@ -1,3 +1,5 @@
+"""Проверяет поведение, связанное с модулем «test cli»."""
+
 import sys
 
 from restaurant_bot import cli

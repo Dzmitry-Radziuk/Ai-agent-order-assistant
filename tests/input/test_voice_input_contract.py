@@ -1,3 +1,5 @@
+"""Проверяет поведение, связанное с модулем «test voice input contract»."""
+
 from restaurant_bot.domain.models import (
     CatalogProduct,
     ConversationState,
@@ -113,7 +115,7 @@ def test_unknown_empty_voice_uses_the_same_source_recovery_card(settings) -> Non
 
 
 def test_voice_comment_shadow_is_not_created_as_a_separate_product() -> None:
-    """Проверяет, что голос комментарий ложная позиция является не created как a отдельно товар."""
+    """Проверяет, что голосовой комментарий ошибочной позиции не создаётся отдельным товаром."""
     payload = {
         "intent": Intent.ADD_ITEMS,
         "items": [
@@ -183,7 +185,7 @@ def test_real_audio_cross_item_shadow_is_removed() -> None:
 
 
 def test_global_comment_is_not_duplicated_as_a_product() -> None:
-    """Проверяет, что общий комментарий является не duplicated как a товар."""
+    """Проверяет, что общий комментарий не дублируется как товар."""
     source = (
         "Сироп роза 5 штук только охлаждённый и говядина 10 килограмм без кожи. "
         "Всё привезти после девяти утра без звонка."
@@ -962,7 +964,7 @@ def test_uncertain_comment_scope_requests_clarification_without_changing_draft(
 
 
 def test_voice_beef_cannot_gain_an_unspoken_qualifier_or_auto_select(settings) -> None:  # type: ignore[no-untyped-def]
-    """Проверяет, что голос говядина не может получает an unspoken qualifier или auto select."""
+    """Проверяет, что голосовой запрос говядины не получает невысказанный признак и не выбирается автоматически."""
     payload = {
         "intent": Intent.ADD_ITEMS,
         "items": [

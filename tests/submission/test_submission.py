@@ -1,3 +1,5 @@
+"""Проверяет поведение, связанное с модулем «test submission»."""
+
 from contextlib import nullcontext
 from types import SimpleNamespace
 from unittest.mock import MagicMock
@@ -122,7 +124,7 @@ def test_catalog_recovery_replies_are_clear_and_have_no_retry_button() -> None:
 
 
 def test_order_status_renderer_groups_rows_by_order_number() -> None:
-    """Проверяет, что заказ статус renderer группирует строки by заказ число."""
+    """Проверяет, что представление статуса заказа группирует строки по номеру заказа."""
     text = build_order_status_text(
         [
             {"order_no": "A-1", "product_name": "Сироп Роза", "status": "Новая заявка"},

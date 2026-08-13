@@ -1,3 +1,5 @@
+"""Проверяет поведение, связанное с модулем «test history rows»."""
+
 from restaurant_bot.domain.models import (
     CatalogProduct,
     ConversationState,

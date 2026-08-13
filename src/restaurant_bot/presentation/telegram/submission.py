@@ -1,3 +1,5 @@
+"""Формирует Telegram-представление «submission»."""
+
 from __future__ import annotations
 
 from datetime import datetime

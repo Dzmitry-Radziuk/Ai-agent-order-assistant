@@ -1,3 +1,5 @@
+"""Формирует Telegram-представление «formatting»."""
+
 from __future__ import annotations
 
 import html

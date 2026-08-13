@@ -1,3 +1,5 @@
+"""Проверяет поведение, связанное с модулем «test draft actions»."""
+
 from copy import deepcopy
 
 from restaurant_bot.conversation.draft_actions import (

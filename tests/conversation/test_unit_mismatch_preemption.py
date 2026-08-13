@@ -1,3 +1,5 @@
+"""Проверяет поведение, связанное с модулем «test unit mismatch preemption»."""
+
 from __future__ import annotations
 
 import pytest

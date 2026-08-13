@@ -1,3 +1,5 @@
+"""Проверяет поведение, связанное с модулем «conftest»."""
+
 from __future__ import annotations
 
 import os

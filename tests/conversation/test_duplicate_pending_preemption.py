@@ -1,3 +1,5 @@
+"""Проверяет поведение, связанное с модулем «test duplicate pending preemption»."""
+
 from __future__ import annotations
 
 import pytest
@@ -24,7 +26,7 @@ from restaurant_bot.services.engine import ConversationEngine
 
 
 def _event(text: str, input_type: InputKind = InputKind.TEXT) -> TelegramEvent:
-    """Создаёт событие для проверки duplicate routing."""
+    """Создаёт событие для проверки маршрутизации дубликата."""
     return TelegramEvent(update_id=1, chat_id="1", input_type=input_type, text=text)
 
 
@@ -74,7 +76,7 @@ def _new_item_command(text: str, query: str = "Пармезан") -> ParsedComma
 
 
 def test_duplicate_policy_interrupts_concrete_add_items() -> None:
-    """Прерывает duplicate flow для конкретной новой товарной позиции."""
+    """Прерывает поток дубликата для конкретной новой товарной позиции."""
     command = _new_item_command("Пармезан 3 кг")
     decision = StateCompatibilityPolicy().evaluate(
         command,
@@ -139,7 +141,7 @@ def test_independent_navigation_does_not_apply_duplicate_context(
 
 
 def test_duplicate_random_add_items_is_safe_and_does_not_mutate_draft(settings) -> None:  # type: ignore[no-untyped-def]
-    """Неопределённый товарный fallback повторяет duplicate prompt без mutation."""
+    """Неопределённый товарный fallback повторяет запрос о дубликате без изменения состояния."""
     state = _duplicate_state()
     decision = StateCompatibilityPolicy().evaluate(
         ParsedCommand(intent=Intent.UNKNOWN, text="Ну ладно потом"),

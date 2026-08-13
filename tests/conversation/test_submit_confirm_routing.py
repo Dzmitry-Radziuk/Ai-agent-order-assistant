@@ -1,3 +1,5 @@
+"""Проверяет поведение, связанное с модулем «test submit confirm routing»."""
+
 from __future__ import annotations
 
 from typing import Any
@@ -226,7 +228,7 @@ def test_fresh_submit_callback_reaches_existing_submission_boundary(settings) ->
 
 @pytest.mark.parametrize("callback", ["v2:submit:r2", "v2:back:r2", "v2:finalpage:1:r2"])
 def test_stale_submit_review_callbacks_do_not_mutate_state(settings, callback: str) -> None:  # type: ignore[no-untyped-def]
-    """Устаревший callback отклоняется до modal mutation и enqueue."""
+    """Устаревший callback отклоняется до изменения modal-состояния и постановки задачи."""
     state = _state(ui_revision=3)
     command = parse_callback(callback)
     before = state.model_dump_json()

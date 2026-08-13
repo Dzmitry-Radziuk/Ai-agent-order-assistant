@@ -1,3 +1,5 @@
+"""Проверяет поведение, связанное с модулем «test repositories»."""
+
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from unittest.mock import MagicMock

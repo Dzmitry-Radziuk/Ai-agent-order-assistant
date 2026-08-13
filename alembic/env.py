@@ -1,3 +1,5 @@
+"""Описывает служебную конфигурацию и миграции Alembic."""
+
 from __future__ import annotations
 
 from logging.config import fileConfig

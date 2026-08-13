@@ -1,3 +1,5 @@
+"""Проверяет поведение, связанное с модулем «test ai media»."""
+
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -248,7 +250,7 @@ def test_voice_transcription_does_not_repeat_the_same_model(settings, tmp_path: 
 
 
 def test_voice_transcription_receives_context_prompt(settings, tmp_path: Path) -> None:  # type: ignore[no-untyped-def]
-    """Проверяет, что голос распознавание голоса receives контекст инструкция модели."""
+    """Проверяет, что распознавание голоса получает контекстную инструкцию модели."""
     transcriptions = _Transcriptions(["первый вариант"])
     service = _service(
         settings, SimpleNamespace(audio=SimpleNamespace(transcriptions=transcriptions))
@@ -263,7 +265,7 @@ def test_voice_transcription_receives_context_prompt(settings, tmp_path: Path) -
 def test_high_accuracy_voice_transcription_uses_the_stronger_model(
     settings, tmp_path: Path
 ) -> None:  # type: ignore[no-untyped-def]
-    """Проверяет, что повышенная accuracy голос распознавание голоса использует stronger модель."""
+    """Проверяет, что точное распознавание голоса использует усиленную модель."""
     transcriptions = _Transcriptions(["добавить товары"])
     service = _service(
         settings, SimpleNamespace(audio=SimpleNamespace(transcriptions=transcriptions))
@@ -1030,7 +1032,7 @@ def test_free_form_navigation_skips_ai_product_extraction(
     ],
 )
 def test_ambiguous_product_lists_still_use_structured_ai(settings, text: str) -> None:  # type: ignore[no-untyped-def]
-    """Проверяет, что неоднозначный товар списки still use структурированный ИИ."""
+    """Проверяет, что для списка неоднозначных товаров по-прежнему используется структурированный ИИ."""
     service = _service(settings, SimpleNamespace(responses=_FailingResponses()))
 
     with pytest.raises(RuntimeError, match="OpenAI HTTP 429"):
@@ -1038,7 +1040,7 @@ def test_ambiguous_product_lists_still_use_structured_ai(settings, text: str) ->
 
 
 def test_openai_parse_error_is_not_silently_replaced_with_an_empty_command(settings) -> None:  # type: ignore[no-untyped-def]
-    """Проверяет, что openai parse ошибка является не без подтверждения заменяется with an пустой результат команда."""
+    """Проверяет, что ошибка разбора OpenAI без подтверждённого результата заменяется пустой командой."""
     service = _service(settings, SimpleNamespace(responses=_FailingResponses()))
 
     with pytest.raises(RuntimeError, match="OpenAI HTTP 429"):
@@ -1350,7 +1352,7 @@ def test_photo_never_keeps_product_without_positive_quantity(
 
 
 def test_handwritten_replacement_wins_over_crossed_out_client_sheet_quantity(settings) -> None:  # type: ignore[no-untyped-def]
-    """Проверяет, что рукописное замена wins over зачёркнутое исключено клиент таблица количество."""
+    """Проверяет, что рукописная замена имеет приоритет над зачёркнутым количеством в клиентской таблице."""
     service = _service(settings, SimpleNamespace())
     command = service._normalise_photo_command(
         ParsedCommand(

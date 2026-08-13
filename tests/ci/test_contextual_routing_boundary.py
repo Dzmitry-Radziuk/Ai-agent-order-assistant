@@ -1,3 +1,5 @@
+"""Проверяет поведение, связанное с модулем «test contextual routing boundary»."""
+
 from __future__ import annotations
 
 import ast

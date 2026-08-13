@@ -1,3 +1,5 @@
+"""Проверяет поведение, связанное с модулем «test quantity contract»."""
+
 from restaurant_bot.parsing.quantities import parse_quantity_unit
 
 

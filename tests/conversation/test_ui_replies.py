@@ -1,3 +1,5 @@
+"""Проверяет поведение, связанное с модулем «test ui replies»."""
+
 from restaurant_bot.domain.models import Candidate, CartItem, ConversationState, ItemStatus
 from restaurant_bot.presentation.telegram.replies import (
     cart_reply,

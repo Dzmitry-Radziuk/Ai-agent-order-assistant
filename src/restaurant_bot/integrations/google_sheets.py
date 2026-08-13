@@ -1,3 +1,5 @@
+"""Предоставляет интеграцию «google sheets»."""
+
 from __future__ import annotations
 
 from collections import defaultdict
@@ -111,9 +113,9 @@ class GoogleSheetsGateway:
         for row_number, values_row in enumerate(values[1:], start=2):
             padded = list(values_row) + [""] * max(0, len(headers) - len(values_row))
             # A live history sheet contains duplicate technical headers after
-            # the n8n-managed A:S block. Keep the first occurrence, matching
+            # блок A:S, которым управляет n8n. Сохраняем первое вхождение,
             # n8n's explicit column mapping, instead of letting an empty later
-            # duplicate overwrite a real status or timestamp.
+            # чтобы дубликат не перезаписал настоящий статус или время.
             row: dict[str, Any] = {}
             for header, value in zip(headers, padded, strict=False):
                 if header and header not in row:
@@ -149,7 +151,7 @@ class GoogleSheetsGateway:
                     ),
                     unit=self._first(
                         row,
-                        # Exact header of the live n8n "ЗАЯВКА" sheet.
+                        # Точный заголовок рабочего листа n8n «ЗАЯВКА».
                         "Ед.Изм. для заказа",
                         "Ед. Изм. для заказа",
                         "Единица измерения",

@@ -1,3 +1,5 @@
+"""Проверяет поведение, связанное с модулем «test transient state reset»."""
+
 from copy import deepcopy
 
 from restaurant_bot.conversation.state.transitions import clear_transient_dialog_state

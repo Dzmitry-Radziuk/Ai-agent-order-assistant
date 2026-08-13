@@ -1,9 +1,11 @@
+"""Проверяет поведение, связанное с модулем «test ai result integrity»."""
+
 from restaurant_bot.domain.models import Intent
 from restaurant_bot.integrations.openai_parsing import recover_omitted_explicit_items
 
 
 def _item_payload(source: str, product_query: str, comment: str = "") -> dict:
-    """Создаёт raw AI payload для проверки сохранения товара и комментария."""
+    """Создаёт исходные данные ИИ для проверки сохранения товара и комментария."""
     payload = {
         "intent": Intent.ADD_ITEMS,
         "items": [
@@ -60,7 +62,7 @@ def test_structured_comments_are_preserved_for_common_product_constraints() -> N
 
 
 def test_absent_comment_is_not_invented_by_postprocessing() -> None:
-    """Не добавляет комментарий, если raw AI output его не содержит."""
+    """Не добавляет комментарий, если исходный результат ИИ его не содержит."""
     source = "свиная шея 5 кг"
     payload = _item_payload(source, "свиная шея")
     restored = recover_omitted_explicit_items(payload, source)

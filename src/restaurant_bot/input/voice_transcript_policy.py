@@ -1,3 +1,5 @@
+"""Преобразует входные данные «voice transcript policy»."""
+
 from __future__ import annotations
 
 import re

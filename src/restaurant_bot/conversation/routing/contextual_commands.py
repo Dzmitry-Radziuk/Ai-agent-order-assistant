@@ -1,3 +1,5 @@
+"""Содержит операции диалога «contextual commands»."""
+
 from __future__ import annotations
 
 import re

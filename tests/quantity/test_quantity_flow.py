@@ -1,3 +1,5 @@
+"""Проверяет поведение, связанное с модулем «test quantity flow»."""
+
 from restaurant_bot.domain.models import (
     CartItem,
     CatalogProduct,
@@ -41,7 +43,7 @@ def test_quantity_answer_completes_current_missing_item_without_new_cart_line(se
 
 
 def test_repeating_same_missing_item_does_not_create_duplicate(settings) -> None:  # type: ignore[no-untyped-def]
-    """Проверяет, что повторение тот же отсутствующий позиция выполняет не create дубликат."""
+    """Проверяет, что повторение той же отсутствующей позиции не создаёт дубликат."""
     engine = ConversationEngine(settings)
     catalog = [CatalogProduct(product_id="rose", name="Сироп Роза", supplier="Сиропы", unit="шт")]
     first = engine.handle(

@@ -1,3 +1,5 @@
+"""Проверяет поведение, связанное с модулем «test docstrings»."""
+
 from __future__ import annotations
 
 import ast

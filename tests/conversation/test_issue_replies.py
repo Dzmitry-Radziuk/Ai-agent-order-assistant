@@ -1,3 +1,5 @@
+"""Проверяет поведение, связанное с модулем «test issue replies»."""
+
 from restaurant_bot.domain.models import CartItem, ItemStatus
 from restaurant_bot.presentation.telegram.replies import issue_reply
 

@@ -1,3 +1,5 @@
+"""Проверяет поведение, связанное с модулем «test state aware resolution»."""
+
 from restaurant_bot.conversation.state.queries import first_unresolved
 from restaurant_bot.domain.models import CartItem, ConversationState, ItemStatus
 from restaurant_bot.services.engine import ConversationEngine
@@ -14,7 +16,7 @@ def test_current_issue_uses_state_item_id_before_cart_order(settings) -> None:  
 
 
 def test_unresolved_priority_handles_duplicate_before_quantity(settings) -> None:  # type: ignore[no-untyped-def]
-    """Проверяет, что неразрешённая priority handles дубликат до количество."""
+    """Проверяет, что неразрешённое уточнение обрабатывает дубликат раньше количества."""
     duplicate = CartItem(id="duplicate", source_query="Дубль", status=ItemStatus.DUPLICATE_PENDING)
     missing = CartItem(id="missing", source_query="Количество", status=ItemStatus.MISSING_QTY)
 

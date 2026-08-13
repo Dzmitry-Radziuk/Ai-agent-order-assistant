@@ -1,3 +1,5 @@
+"""Проверяет поведение, связанное с модулем «test settings»."""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -16,7 +18,7 @@ def test_only_production_selects_dotenv_file() -> None:
 
 
 def test_user_content_logging_is_private_by_default() -> None:
-    """Проверяет, что пользователь content логирование является личный by по умолчанию."""
+    """Проверяет, что содержимое пользовательских сообщений по умолчанию скрыто в журналах."""
     settings = Settings(
         telegram_bot_token="test-token",
         telegram_webhook_secret="test-secret",
@@ -86,7 +88,7 @@ def test_get_settings_reads_dotenv_in_production(
 
 
 def test_production_rejects_an_insecure_public_url() -> None:
-    """Проверяет, что production отклоняет an небезопасный public URL."""
+    """Проверяет, что production отклоняет небезопасный публичный URL."""
     with pytest.raises(ValidationError, match="must use HTTPS"):
         Settings(
             app_env="production",

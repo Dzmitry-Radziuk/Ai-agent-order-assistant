@@ -1,3 +1,5 @@
+"""Проверяет поведение, связанное с модулем «test order review»."""
+
 import re
 from unittest.mock import MagicMock
 

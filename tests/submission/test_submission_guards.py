@@ -1,3 +1,5 @@
+"""Проверяет поведение, связанное с модулем «test submission guards»."""
+
 from restaurant_bot.domain.models import (
     CatalogProduct,
     ConversationState,
@@ -18,7 +20,7 @@ def _event() -> TelegramEvent:
 
 
 def test_submit_request_stops_on_first_unresolved_item(settings) -> None:  # type: ignore[no-untyped-def]
-    """Проверяет, что отправка запрос останавливает on первый неразрешённая позиция."""
+    """Проверяет, что отправка заявки останавливается на первой нерешённой позиции."""
     engine = ConversationEngine(settings)
     result = engine.handle(
         _event(),
@@ -62,7 +64,7 @@ def test_submit_as_is_cannot_bypass_unresolved_item_guard(settings) -> None:  # 
 
 
 def test_submission_retry_reuses_checkpoint_without_clearing_draft(settings) -> None:  # type: ignore[no-untyped-def]
-    """Проверяет, что отправка заявки повтор reuses checkpoint без clearing черновик."""
+    """Проверяет, что повторная отправка использует checkpoint без очистки черновика."""
     engine = ConversationEngine(settings)
     cart_item = engine._build_item(ExtractedItem(product_query="Сироп Роза", quantity=5, unit="шт"))
     cart_item.status = ItemStatus.MATCHED

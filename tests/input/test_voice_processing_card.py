@@ -1,3 +1,5 @@
+"""Проверяет поведение, связанное с модулем «test voice processing card»."""
+
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
@@ -78,7 +80,7 @@ def test_voice_transcript_rejects_unrelated_script() -> None:
 
 
 def test_generic_voice_prompt_explicitly_preserves_navigation_commands() -> None:
-    """Проверяет, что общий голос инструкция модели explicitly сохраняет навигация команды."""
+    """Проверяет, что общая инструкция голосовой модели явно сохраняет навигационные команды."""
     prompt = UpdateOrchestrator._voice_transcription_prompt(
         type("State", (), {"current_item": lambda self: None})()
     )
@@ -88,7 +90,7 @@ def test_generic_voice_prompt_explicitly_preserves_navigation_commands() -> None
 
 
 def test_placeholder_transcription_is_retried_with_high_accuracy_model() -> None:
-    """Проверяет, что заглушка распознавание голоса является повторяется with повышенная accuracy модель."""
+    """Проверяет, что заглушка распознавания голоса повторяется с более точной моделью."""
     state = type("State", (), {"current_item": lambda self: None})()
 
     assert UpdateOrchestrator._requires_high_accuracy_transcription("Тестовый товар", state)

@@ -1,3 +1,5 @@
+"""Проверяет поведение, связанное с модулем «test add more prompt»."""
+
 from restaurant_bot.domain.models import (
     CatalogProduct,
     ConversationState,
@@ -83,7 +85,7 @@ def test_voice_yes_continues_product_collection(settings) -> None:  # type: igno
 
 
 def test_text_yes_continues_product_collection(settings) -> None:  # type: ignore[no-untyped-def]
-    """Текстовый ответ использует тот же semantic routing, что и голосовой."""
+    """Текстовый ответ использует ту же семантическую маршрутизацию, что и голосовой."""
     added = _add_syrup(settings)
     phrase = "Да, давай добавим ещё"
     result = ConversationEngine(settings).handle(
@@ -185,7 +187,7 @@ def test_product_sent_from_add_more_prompt_opens_duplicate_in_collecting_stage(
 
 
 def test_add_more_dialogue_responses_are_normalized_before_state_policy() -> None:
-    """Нормализует короткие ответы независимо от текущего modal state."""
+    """Нормализует короткие ответы независимо от текущего modal-состояния."""
     expected = {
         "да": DialogueResponse.AFFIRM,
         "да, давай добавим ещё": DialogueResponse.AFFIRM,
@@ -204,7 +206,7 @@ def test_add_more_dialogue_responses_are_normalized_before_state_policy() -> Non
 
 
 def test_new_product_preempts_add_more_prompt_without_reusing_old_context(settings) -> None:
-    """Новый товар прерывает вопрос и не наследует старый modal context."""
+    """Новый товар прерывает вопрос и не наследует старый modal-контекст."""
     added = _add_syrup(settings)
     phrase = "Пармезан 3 кг"
     result = ConversationEngine(settings).handle(
@@ -272,7 +274,7 @@ def test_thanks_interrupts_add_more_prompt_without_adding_item(settings) -> None
 
 
 def test_add_more_callbacks_respect_revision(settings) -> None:
-    """Свежие callbacks меняют modal state, а устаревшие ничего не меняют."""
+    """Свежие callbacks меняют modal-состояние, а устаревшие ничего не меняют."""
     added = _add_syrup(settings)
     added.state.ui_revision = 3
     stale = ConversationEngine(settings).handle(

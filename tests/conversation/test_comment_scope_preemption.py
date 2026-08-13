@@ -1,3 +1,5 @@
+"""Проверяет поведение, связанное с модулем «test comment scope preemption»."""
+
 from __future__ import annotations
 
 from types import SimpleNamespace
@@ -31,7 +33,7 @@ from restaurant_bot.services.orchestrator import UpdateOrchestrator
 
 
 def _interpreter(service: UpdateOrchestrator) -> TelegramInputInterpreter:
-    """Создаёт интерпретатор для проверки contextual comment routing."""
+    """Создаёт интерпретатор для проверки контекстной маршрутизации комментария."""
     return TelegramInputInterpreter(
         service.openai,
         lambda: Mock(),
@@ -76,7 +78,7 @@ def _pending_state() -> ConversationState:
 
 
 def test_comment_scope_policy_classifies_contextual_and_independent_commands() -> None:
-    """Центральная policy различает fallback области и независимый intent."""
+    """Центральная policy различает fallback области и независимое намерение."""
     policy = StateCompatibilityPolicy()
     state = _pending_state()
 
@@ -324,7 +326,7 @@ def test_independent_global_intents_skip_comment_scope_fallback(intent: Intent) 
 
 
 def test_unknown_global_parse_uses_comment_scope_fallback() -> None:
-    """Ответ области комментария передаётся contextual resolver-у после global parse."""
+    """Ответ области комментария передаётся контекстному resolver после глобального разбора."""
     service = object.__new__(UpdateOrchestrator)
     service.openai = Mock()
     service.openai.parse_text.return_value = ParsedCommand(

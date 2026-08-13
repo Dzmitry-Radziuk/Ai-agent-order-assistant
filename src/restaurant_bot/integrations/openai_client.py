@@ -1,3 +1,5 @@
+"""Предоставляет интеграцию «openai client»."""
+
 from __future__ import annotations
 
 import json
@@ -310,9 +312,9 @@ class OpenAIService:
         )
         if command.global_comment and not command.items:
             # A standalone request such as «добавь общий комментарий:
-            # желательно на завтра» modifies the current draft.  It is not a
-            # request to add products, even if the deterministic fallback
-            # split the words «комментарий» and «общий» into fake items.
+            # желательно на завтра» изменяет текущий черновик. Это не запрос
+            # на добавление товаров, даже если детерминированный fallback
+            # разделил слова «комментарий» и «общий» на ложные позиции.
             command = command.model_copy(update={"intent": Intent.ADD_ITEMS})
         if (
             command.intent == Intent.ADD_MORE
@@ -349,9 +351,9 @@ class OpenAIService:
         """Проверяет возможность разбора списка без вызова ИИ."""
         if command.intent != Intent.ADD_ITEMS or len(command.items) < 2:
             return False
-        # A numeric range may be a size, package, or product code. Keep these
-        # lines on the semantic path so supplier and product qualifiers are
-        # not swallowed into one deterministic product name.
+        # Числовой диапазон может быть размером, фасовкой или кодом товара.
+        # Оставляем такие строки на семантическом пути, чтобы признаки
+        # поставщика и товара не слились в одно детерминированное название.
         if numeric_range_spans(text):
             return False
         if OpenAIService._has_conversational_product_leadin(text):
@@ -387,7 +389,7 @@ class OpenAIService:
             if not name or re.search(r"\d", name) or suspicious_words.search(name):
                 return False
             if has_product_variant_qualifier(name):
-                # Keep product variants on the catalog-verified semantic path.
+                # Оставляем варианты товара на семантическом пути с проверкой каталога.  # noqa: RUF003
                 return False
             if normalize_text(item.product_query) != name:
                 return False
@@ -415,8 +417,8 @@ class OpenAIService:
         source = raw_source.rstrip(" .!?")
         item_source = clean_text(item.source_line).rstrip(" .!?")
         if numeric_range_spans(source):
-            # Do not bypass semantic parsing: this form can contain both a
-            # supplier name and product qualifiers after the numeric range.
+            # Не обходить семантический разбор: после числового диапазона здесь  # noqa: RUF003
+            # могут находиться и название поставщика, и признаки товара.
             return False
         if has_product_variant_qualifier(item.product_query):
             return False

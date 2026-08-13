@@ -1,3 +1,5 @@
+"""Проверяет поведение, связанное с модулем «test catalog search boundary»."""
+
 from restaurant_bot.catalog.resolver import CatalogResolver
 from restaurant_bot.catalog.search import ListCatalogSearch
 from restaurant_bot.domain.models import CatalogProduct, SearchScope

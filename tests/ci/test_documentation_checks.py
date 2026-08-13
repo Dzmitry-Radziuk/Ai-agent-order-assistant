@@ -1,3 +1,5 @@
+"""Проверяет поведение, связанное с модулем «test documentation checks»."""
+
 from pathlib import Path
 
 from scripts.check_docs_updated import evaluate_documentation_impact
@@ -30,7 +32,7 @@ def test_code_and_docs_change_passes_impact_classification() -> None:
 
 
 def test_tests_only_do_not_require_documentation() -> None:
-    """Проверяет, что tests только do не require documentation."""
+    """Проверяет, что тесты сами по себе не требуют документации."""
     code, docs = evaluate_documentation_impact({"tests/services/test_engine.py"})
 
     assert code == set()

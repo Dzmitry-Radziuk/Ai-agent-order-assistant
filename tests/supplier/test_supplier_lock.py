@@ -1,3 +1,5 @@
+"""Проверяет поведение, связанное с модулем «test supplier lock»."""
+
 from restaurant_bot.domain.models import (
     CatalogProduct,
     ConversationState,
@@ -19,7 +21,7 @@ def _event() -> TelegramEvent:
 def test_selected_supplier_is_strict_filter_and_other_supplier_is_only_a_suggestion(
     settings,
 ) -> None:  # type: ignore[no-untyped-def]
-    """Проверяет, что выбранный поставщик является строгий filter и другое поставщик является только a предложение."""
+    """Проверяет, что выбранный поставщик является строгим фильтром, а другой — только предложением."""
     engine = ConversationEngine(settings)
     catalog = [
         CatalogProduct(

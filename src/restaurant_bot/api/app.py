@@ -1,3 +1,5 @@
+"""Определяет HTTP-интерфейс «app»."""
+
 from __future__ import annotations
 
 import secrets

@@ -1,3 +1,5 @@
+"""Проверяет поведение, связанное с модулем «test telegram commands»."""
+
 import pytest
 
 from restaurant_bot.domain.models import (
@@ -31,7 +33,7 @@ def test_primary_telegram_commands_have_deterministic_intents(command: str, inte
 
 
 def test_command_with_bot_suffix_has_same_intent() -> None:
-    """Проверяет, что команда with бота суффикс имеет тот же намерение."""
+    """Проверяет, что команда с суффиксом имени бота сохраняет то же намерение."""
     assert infer_intent("/submit@restaurant_order_bot").intent is Intent.SUBMIT_REQUEST
 
 

@@ -1,1 +1,1 @@
-"""Restaurant procurement Telegram bot."""
+"""Telegram-бот для закупок ресторана."""

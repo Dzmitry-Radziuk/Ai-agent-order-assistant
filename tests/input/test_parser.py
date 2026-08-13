@@ -1,3 +1,5 @@
+"""Проверяет поведение, связанное с модулем «test parser»."""
+
 import pytest
 
 from restaurant_bot.domain.models import Intent
@@ -6,7 +8,7 @@ from restaurant_bot.parsing.products import parse_product_lines
 
 
 def test_parses_quantity_and_unit_after_product_name() -> None:
-    """Проверяет, что разбирает количество и единица измерения after товар название."""
+    """Проверяет, что парсер разбирает количество и единицу измерения после названия товара."""
     item = parse_product_lines("Сироп роза 10 штук")[0]
     assert item.product_query == "Сироп роза"
     assert item.quantity == 10
@@ -36,13 +38,13 @@ def test_parses_multiple_products_in_one_message() -> None:
 
 
 def test_submit_phrases_are_not_treated_as_product_search() -> None:
-    """Проверяет, что отправка phrases являются не treated как товар поиск."""
+    """Проверяет, что фразы отправки не принимаются за поиск товара."""
     assert infer_intent("отправить").intent is Intent.SUBMIT_REQUEST
     assert infer_intent("отправить поставщику").intent is Intent.SUBMIT_AS_IS
 
 
 def test_parses_trailing_supplier_comment_after_quantity() -> None:
-    """Проверяет, что разбирает после количества поставщик комментарий after количество."""
+    """Проверяет, что парсер разбирает комментарий поставщика после количества."""
     item = parse_product_lines("Сироп роза 5 шт, желательно охлаждённым")[0]
     assert (item.product_query, item.quantity, item.unit) == ("Сироп роза", 5, "шт")
     assert item.comment == "желательно охлаждённым"
@@ -64,7 +66,7 @@ def test_parses_spoken_word_quantity_between_product_and_comment() -> None:
 
 
 def test_parser_keeps_multiword_comment_after_quantity_without_punctuation() -> None:
-    """Проверяет, что парсер сохраняет многословный комментарий after количество без punctuation."""
+    """Проверяет, что парсер сохраняет многофразовый комментарий после количества без знаков препинания."""
     item = parse_product_lines("Сироп роза 5 штук обязательно позвонить перед доставкой")[0]
 
     assert (item.product_query, item.quantity, item.unit) == ("Сироп роза", 5, "шт")
@@ -73,7 +75,7 @@ def test_parser_keeps_multiword_comment_after_quantity_without_punctuation() -> 
 
 
 def test_parser_recovers_every_product_in_a_conjoined_spoken_list() -> None:
-    """Проверяет, что парсер восстанавливает каждый товар в a соединённый союзом произнесённый список."""
+    """Проверяет, что парсер восстанавливает каждый товар в списке, соединённом союзом."""
     items = parse_product_lines("Сироп роза 10 штук говядина 5 кг и джем 10 штук")
 
     assert [(item.product_query, item.quantity, item.unit) for item in items] == [

@@ -1,3 +1,5 @@
+"""Проверяет поведение, связанное с модулем «test product add flow»."""
+
 import re
 
 from restaurant_bot.conversation.product_add import clear_product_add_pending

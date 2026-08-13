@@ -1,3 +1,5 @@
+"""Проверяет поведение, связанное с модулем «test supplier minimum»."""
+
 from restaurant_bot.domain.models import (
     CartItem,
     CatalogProduct,

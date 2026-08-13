@@ -1,3 +1,5 @@
+"""Хранит и проверяет настройки приложения."""
+
 from __future__ import annotations
 
 import os

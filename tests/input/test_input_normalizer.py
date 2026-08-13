@@ -1,3 +1,5 @@
+"""Проверяет поведение, связанное с модулем «test input normalizer»."""
+
 from restaurant_bot.domain.models import InputKind
 from restaurant_bot.input.telegram import normalize_telegram_update
 

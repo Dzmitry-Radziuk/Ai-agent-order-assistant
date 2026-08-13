@@ -1,3 +1,5 @@
+"""Проверяет поведение, связанное с модулем «test catalog resolver»."""
+
 from restaurant_bot.catalog.evidence import remove_phrase_overlap
 from restaurant_bot.catalog.resolver import CatalogDecision, CatalogResolver
 from restaurant_bot.domain.models import CatalogProduct, SearchScope

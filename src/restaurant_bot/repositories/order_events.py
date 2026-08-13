@@ -1,3 +1,5 @@
+"""Читает и сохраняет данные через репозиторий «order events»."""
+
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta

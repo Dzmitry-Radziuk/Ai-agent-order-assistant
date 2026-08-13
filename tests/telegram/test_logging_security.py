@@ -1,3 +1,5 @@
+"""Проверяет поведение, связанное с модулем «test logging security»."""
+
 import logging
 
 from restaurant_bot.observability import configure_logging, sanitize_log_value
@@ -37,7 +39,7 @@ def test_log_sanitizer_hashes_identifiers() -> None:
 
 
 def test_user_content_is_hidden_by_default() -> None:
-    """Проверяет, что пользователь content является скрыто by по умолчанию."""
+    """Проверяет, что содержимое пользовательских сообщений по умолчанию скрыто."""
     sanitized = sanitize_log_value("Сироп Роза 10 штук", key="text")
 
     assert sanitized.startswith("<content sha256:")

@@ -1,3 +1,5 @@
+"""Проверяет поведение, связанное с модулем «test venue registration»."""
+
 from __future__ import annotations
 
 import json
@@ -327,14 +329,14 @@ def test_all_registration_entry_points_use_one_lookup(
 
 
 def test_arbitrary_text_is_not_an_invite_code(settings) -> None:  # type: ignore[no-untyped-def]
-    """Проверяет, что произвольный текст является не an пригласительный код."""
+    """Проверяет, что произвольный текст не является пригласительным кодом."""
     result = _service(settings, []).handle(_event("добавить товары"))
     assert result.handled is False
     assert valid_code("добавить") is False
 
 
 def test_start_without_code_explains_how_to_connect(settings) -> None:  # type: ignore[no-untyped-def]
-    """Проверяет, что start без код explains how в подключение."""
+    """Проверяет, что start без кода объясняет порядок подключения."""
     result = _service(settings, []).handle(_event("/start"))
     assert result.handled is True
     assert result.reply is not None
@@ -378,7 +380,7 @@ def test_confirmation_escapes_venue_html(settings) -> None:  # type: ignore[no-u
 
 
 def test_callback_revision_is_ignored_and_code_is_looked_up_again(settings) -> None:  # type: ignore[no-untyped-def]
-    """Проверяет, что callback ревизия является игнорируется и код является looked up again."""
+    """Проверяет, что при старой ревизии callback игнорируется, а код запрашивается заново."""
     service = _service(settings, [_venue()])
     service._bind = MagicMock()  # type: ignore[method-assign]
     service._bind.return_value.handled = True
@@ -401,7 +403,7 @@ def test_declining_confirmation_never_writes(settings) -> None:  # type: ignore[
 
 
 def test_switch_requires_an_extra_confirmation(settings) -> None:  # type: ignore[no-untyped-def]
-    """Проверяет, что смена требует an extra подтверждение."""
+    """Проверяет, что смена требует дополнительного подтверждения."""
     service = _service(settings, [_venue()])
     service.current = VenueContext(
         venue_code="OLD123",
@@ -533,7 +535,7 @@ def test_spreadsheet_id_parser_does_not_accept_arbitrary_url() -> None:
 
 
 def test_successful_binding_is_synced_before_success_is_shown(settings, monkeypatch) -> None:  # type: ignore[no-untyped-def]
-    """Проверяет, что успешная привязка является synced до успех является shown."""
+    """Проверяет, что успешная привязка синхронизируется до показа сообщения об успехе."""
     binding = SimpleNamespace(
         id=5,
         channel="telegram",

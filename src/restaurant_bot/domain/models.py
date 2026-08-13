@@ -1,3 +1,5 @@
+"""Определяет доменные правила и данные «models»."""
+
 from __future__ import annotations
 
 from datetime import UTC, datetime
@@ -484,10 +486,10 @@ class ConversationState(BaseModel):
     review_snapshot_hash: str = ""
     review_venue_code: str = ""
     review_submission_in_progress: bool = False
-    # ``cart`` is the regular draft review.  ``sheet_link`` is reserved for
-    # the review card opened from a Google Sheets Telegram deep-link.  Keeping
-    # the origin in persisted state prevents a voice command in the regular
-    # draft from being routed to the sheet-review handler.
+    # ``cart`` — обычная проверка черновика. ``sheet_link`` используется только
+    # для карточки проверки, открытой по Telegram-ссылке из Google Sheets.
+    # Сохранение источника в состоянии не даёт голосовой команде обычного
+    # черновика попасть в обработчик проверки по ссылке из таблицы.
     review_mode: str = "cart"
 
     def current_item(self) -> CartItem | None:

@@ -1,3 +1,5 @@
+"""Проверяет поведение, связанное с модулем «test switch supplier»."""
+
 from restaurant_bot.domain.models import (
     CartItem,
     ConversationState,
@@ -11,7 +13,7 @@ from restaurant_bot.services.engine import ConversationEngine
 
 
 def test_switch_supplier_skips_failed_item_and_shows_supplier_choices(settings) -> None:  # type: ignore[no-untyped-def]
-    """Проверяет, что смена поставщик пропускает failed позиция и показывает поставщик choices."""
+    """Проверяет, что смена поставщика пропускает ошибочную позицию и показывает варианты поставщиков."""
     engine = ConversationEngine(settings)
     state = ConversationState(
         supplier_hint_context="Поставщик А",

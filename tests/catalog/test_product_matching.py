@@ -1,3 +1,5 @@
+"""Проверяет поведение, связанное с модулем «test product matching»."""
+
 import pytest
 
 from restaurant_bot.catalog.evidence import has_complete_query_evidence, unverified_product_terms
@@ -71,7 +73,7 @@ def test_safe_equivalence_requires_user_named_size_range() -> None:
 
 
 def test_exact_product_is_auto_selected_but_category_query_is_not() -> None:
-    """Проверяет, что точный товар является auto выбранный but категория query является не."""
+    """Проверяет, что точный товар выбирается автоматически, а запрос категории — нет."""
     catalog = [
         CatalogProduct(product_id="rose", name="Сироп Роза", supplier="Сиропы", unit="шт"),
         CatalogProduct(product_id="feijoa", name="Сироп Фейхоа", supplier="Сиропы", unit="шт"),
@@ -673,14 +675,14 @@ def test_inflected_one_word_category_never_auto_selects_catalog_variant(
 
 
 def test_exact_one_word_catalog_product_is_not_treated_as_a_category() -> None:
-    """Проверяет, что точный один слово каталог товар является не treated как a категория."""
+    """Проверяет, что точный однословный товар каталога не принимается за категорию."""
     product = CatalogProduct(product_id="milk", name="Молоко", unit="л")
 
     assert not is_broad_category_query("молоко", rank_candidates("молоко", [product]))
 
 
 def test_unsupported_beef_qualifier_cannot_choose_between_equal_category_matches() -> None:
-    """Проверяет, что неподдерживаемый говядина qualifier не может choose between equal категория соответствует."""
+    """Проверяет, что неподдерживаемый признак говядины не выбирает между равными категориями."""
     catalog = [
         CatalogProduct(product_id="thin", name="Говядина Тонкий край", unit="кг"),
         CatalogProduct(product_id="bones", name="Говядина Кости ПРОДОЛЬНЫЙ распил", unit="кг"),

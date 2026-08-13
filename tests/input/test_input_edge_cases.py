@@ -1,3 +1,5 @@
+"""Проверяет поведение, связанное с модулем «test input edge cases»."""
+
 import pytest
 
 from restaurant_bot.parsing.numeric import to_float
@@ -5,7 +7,7 @@ from restaurant_bot.parsing.products import parse_product_lines
 
 
 def test_semicolon_and_newline_lists_keep_every_product() -> None:
-    """Проверяет, что точка с запятой и перенос строки списки keep каждый товар."""
+    """Проверяет, что точка с запятой и перенос строки сохраняют каждый товар отдельной позицией."""
     items = parse_product_lines("Сироп роза 10 шт; говядина 5 кг\nДжем 3 банки")
 
     assert [(item.product_query, item.quantity, item.unit) for item in items] == [
@@ -183,6 +185,6 @@ def test_multiple_products_still_split_on_independent_names(
 
 
 def test_russian_google_sheets_currency_is_parsed_like_n8n() -> None:
-    """Проверяет, что русские Google таблицы валюта является parsed like n8n."""
+    """Проверяет, что валюта русских таблиц Google разбирается так же, как в n8n."""
     assert to_float("р.100,0") == 100
     assert to_float("р.1.200,50") == 1200.5

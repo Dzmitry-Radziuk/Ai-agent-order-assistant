@@ -1,3 +1,5 @@
+"""Проверяет поведение, связанное с модулем «test voice route matrix»."""
+
 import pytest
 
 from restaurant_bot.domain.models import Intent
@@ -5,7 +7,7 @@ from restaurant_bot.parsing.commands.api import infer_intent
 
 
 def test_voice_add_more_command_with_transcriber_terminal_punctuation() -> None:
-    """Проверяет, что голос добавление ещё команда with транскриптор конечная punctuation."""
+    """Проверяет, что голосовая команда добавления ещё одного товара учитывает конечную пунктуацию транскрипта."""
     command = infer_intent("Добавить еще товары.")
 
     assert command.intent is Intent.ADD_MORE

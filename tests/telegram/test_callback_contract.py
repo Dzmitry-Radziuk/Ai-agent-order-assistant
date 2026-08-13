@@ -1,3 +1,5 @@
+"""Проверяет поведение, связанное с модулем «test callback contract»."""
+
 from restaurant_bot.domain.models import (
     CartItem,
     ConversationState,
@@ -37,7 +39,7 @@ def test_pagination_callbacks_have_explicit_targets() -> None:
 
 
 def test_candidate_callbacks_use_human_numbering_and_keep_revision() -> None:
-    """Проверяет, что кандидат callback use human numbering и keep ревизия."""
+    """Проверяет, что callback кандидата использует нумерацию для человека и сохраняет ревизию."""
     command = parse_callback("v2:sel:4:0:r7")
 
     assert command.intent is Intent.SELECT_CANDIDATE

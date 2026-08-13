@@ -1,3 +1,5 @@
+"""Проверяет поведение, связанное с модулем «test submission failed routing»."""
+
 from __future__ import annotations
 
 import pytest
@@ -63,7 +65,7 @@ def _run(
     phrase: str,
     kind: InputKind = InputKind.TEXT,
 ) -> EngineResult:
-    """Прогоняет структурированную команду через engine recovery lock."""
+    """Прогоняет структурированную команду через блокировку восстановления движка."""
     command = infer_intent(phrase)
     return ConversationEngine(settings).handle(
         TelegramEvent(update_id=1, chat_id="failed", input_type=kind, text=phrase),

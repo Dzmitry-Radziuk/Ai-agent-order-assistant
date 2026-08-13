@@ -1,3 +1,5 @@
+"""Предоставляет интеграцию «telegram»."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -61,9 +63,9 @@ class TelegramClient:
         )
 
     @retry(
-        # Retrying a read timeout can duplicate a Telegram message: the server
-        # may have accepted it even though the response never reached us.
-        # Connection failures are safe to repeat because no request was sent.
+        # Повтор после тайм-аута чтения может продублировать сообщение Telegram:
+        # сервер мог принять его, хотя ответ до нас не дошёл.  # noqa: RUF003
+        # Ошибку соединения безопасно повторить, потому что запрос не отправлялся.
         retry=retry_if_exception_type(TELEGRAM_TRANSIENT_ERRORS),
         stop=stop_after_attempt(3),
         wait=wait_exponential_jitter(initial=0.25, max=2.0),
@@ -75,9 +77,9 @@ class TelegramClient:
         try:
             response = self.client.post(f"{self.base_url}/{method}", json=payload)
         except httpx.HTTPError as exc:
-            # Do not log the URL or payload: both can contain the bot token or
-            # Telegram identifiers.  The exception class is enough to tell a
-            # connection failure from an HTTP response failure.
+            # Не записываем URL и payload: в них могут быть токен бота или  # noqa: RUF003
+            # идентификаторы Telegram. Класса исключения достаточно, чтобы
+            # отличить ошибку соединения от ошибки HTTP-ответа.
             logger.warning(
                 "telegram_api_transport_failed",
                 method=method,
@@ -85,9 +87,9 @@ class TelegramClient:
             )
             raise
         finally:
-            # Payloads and URLs are intentionally excluded: both may contain
-            # Telegram identifiers or the bot token.  The duration identifies
-            # slow callback cards without exposing either.
+            # Payload и URL намеренно не записываем: в них могут быть
+            # идентификаторы Telegram или токен бота. Длительность показывает
+            # медленные карточки callback, не раскрывая эти данные.
             logger.info(
                 "telegram_api_call_finished",
                 method=method,
@@ -118,8 +120,8 @@ class TelegramClient:
         try:
             self._call("answerCallbackQuery", {"callback_query_id": callback_query_id})
         except TelegramAPIError as exc:
-            # Telegram accepts callback answers for a short window only.  An
-            # expired callback is already harmless and must not retry the
+            # Telegram принимает ответы на callback только короткое время.
+            # Просроченный callback уже безопасен и не должен повторно
             # complete business action (clear cart, select product, etc.).
             description = str(exc).lower()
             if "query is too old" in description or "query id is invalid" in description:
@@ -128,8 +130,8 @@ class TelegramClient:
             raise
 
     def send_reply(self, chat_id: str, reply: BotReply) -> int | None:
-        # The n8n workflow deliberately uses visual symbols as card and action
-        # anchors. Telegram must receive the exact rendered copy, not a
+        # В workflow n8n визуальные символы намеренно используются как якоря  # noqa: RUF003
+        # карточек и действий. Telegram должен получить точный текст, а не  # noqa: RUF003
         # sanitised variant.
         """Отправляет ответ пользователю в Telegram."""
         chunks = self._split_text(reply.text)
@@ -142,23 +144,23 @@ class TelegramClient:
                 "parse_mode": reply.parse_mode,
                 "disable_web_page_preview": True,
             }
-            # n8n keeps the inline keyboard on the final visible card only.
+            # n8n оставляет inline-клавиатуру только на последней видимой карточке.
             if index == len(chunks) - 1:
                 if reply_markup:
                     payload["reply_markup"] = reply_markup
                 elif reply.edit_message_id:
-                    # n8n replaces a callback card with the progress card and
-                    # explicitly removes the obsolete inline keyboard.
+                    # n8n заменяет карточку callback карточкой прогресса и явно
+                    # удаляет устаревшую inline-клавиатуру.
                     payload["reply_markup"] = {"inline_keyboard": []}
             if index == 0 and reply.edit_message_id:
                 payload["message_id"] = reply.edit_message_id
                 try:
                     result = self._call("editMessageText", payload)
                 except TELEGRAM_CONNECT_ERRORS as exc:
-                    # A connect failure happens before Telegram receives the
-                    # request, so falling back to a new message cannot duplicate
+                    # Ошибка соединения возникает до получения запроса Telegram, поэтому
+                    # переход к новому сообщению не может продублировать
                     # an already edited card. It also avoids losing a completed
-                    # result merely because one old progress card was unreachable.
+                    # результат только из-за недоступности старой карточки прогресса.
                     logger.warning(
                         "telegram_edit_fallback_to_send",
                         error_type=type(exc).__name__,

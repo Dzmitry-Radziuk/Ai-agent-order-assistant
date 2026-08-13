@@ -1,3 +1,5 @@
+"""Проверяет поведение, связанное с модулем «test sheet review routing»."""
+
 from __future__ import annotations
 
 import pytest

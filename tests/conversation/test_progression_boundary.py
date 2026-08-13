@@ -1,3 +1,5 @@
+"""Проверяет поведение, связанное с модулем «test progression boundary»."""
+
 from copy import deepcopy
 
 from restaurant_bot.conversation.progression import ProgressionKind, ProgressionResult

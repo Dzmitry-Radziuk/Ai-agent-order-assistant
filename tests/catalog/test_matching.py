@@ -1,3 +1,5 @@
+"""Проверяет поведение, связанное с модулем «test matching»."""
+
 from restaurant_bot.catalog.evidence import has_catalog_search_evidence, remove_phrase_overlap
 from restaurant_bot.catalog.retrieval import rank_candidates
 from restaurant_bot.catalog.safety import can_auto_select
@@ -13,14 +15,14 @@ def _catalog() -> list[CatalogProduct]:
 
 
 def test_close_product_typo_keeps_only_relevant_candidate() -> None:
-    """Проверяет, что close товар опечатка сохраняет только relevant кандидат."""
+    """Проверяет, что близкая опечатка товара сохраняет только подходящего кандидата."""
     candidates = rank_candidates("сироп роза", _catalog())
     assert candidates[0].product_id == "rose"
     assert can_auto_select(candidates)
 
 
 def test_unrelated_words_do_not_create_false_candidate() -> None:
-    """Проверяет, что несвязанные слова do не create false кандидат."""
+    """Проверяет, что несвязанные слова не создают ложного кандидата."""
     assert rank_candidates("пару яблок", _catalog()) == []
 
 
@@ -50,14 +52,14 @@ def test_category_word_shows_related_suggestions_without_auto_replacement() -> N
 
 
 def test_vowelless_voice_typo_keeps_only_relevant_syrup_suggestion() -> None:
-    """Проверяет, что vowelless голос опечатка сохраняет только relevant syrup предложение."""
+    """Проверяет, что голосовая опечатка без гласных сохраняет только подходящее предложение сиропа."""
     candidates = rank_candidates("српроза", _catalog())
 
     assert [candidate.product_id for candidate in candidates] == ["rose"]
 
 
 def test_catalog_packaging_number_is_not_treated_as_ordered_quantity() -> None:
-    """Проверяет, что каталог фасовка число является не treated как ordered количество."""
+    """Проверяет, что число фасовки каталога не принимается за заказанное количество."""
     candidates = rank_candidates(
         "Сироп Роза 1 л",
         [CatalogProduct(product_id="rose", name="Сироп Роза, 1 л", supplier="Сиропы", unit="шт")],

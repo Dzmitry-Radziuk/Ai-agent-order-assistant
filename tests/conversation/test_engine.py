@@ -1,3 +1,5 @@
+"""Проверяет поведение, связанное с модулем «test engine»."""
+
 from restaurant_bot.domain.models import (
     CatalogProduct,
     ConversationState,
@@ -381,7 +383,7 @@ def test_empty_draft_uses_the_source_n8n_start_card(settings) -> None:  # type: 
 
 
 def test_manual_action_without_an_open_item_uses_source_recovery_card(settings) -> None:  # type: ignore[no-untyped-def]
-    """Проверяет, что ручной действие без an открытый позиция использует исходный восстановление карточка."""
+    """Проверяет, что ручное действие без открытой позиции использует исходную карточку восстановления."""
     result = ConversationEngine(settings).handle(
         _event(),
         ParsedCommand(intent=Intent.MANUAL_CURRENT),

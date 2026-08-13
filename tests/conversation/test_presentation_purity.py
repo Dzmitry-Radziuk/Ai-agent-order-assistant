@@ -1,3 +1,5 @@
+"""Проверяет поведение, связанное с модулем «test presentation purity»."""
+
 from copy import deepcopy
 
 from restaurant_bot.conversation.state.transitions import normalize_cart_page

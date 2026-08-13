@@ -1,3 +1,5 @@
+"""Читает и сохраняет данные через репозиторий «sessions»."""
+
 from __future__ import annotations
 
 from sqlalchemy import select

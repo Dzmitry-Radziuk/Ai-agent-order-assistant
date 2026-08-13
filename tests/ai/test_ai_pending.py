@@ -1,3 +1,5 @@
+"""Проверяет поведение, связанное с модулем «test ai pending»."""
+
 from restaurant_bot.catalog.retrieval import rank_candidates
 from restaurant_bot.domain.models import (
     Candidate,
@@ -82,7 +84,7 @@ def test_ai_can_apply_only_catalog_candidate_from_its_shortlist(settings) -> Non
 
 
 def test_low_confidence_ai_not_found_keeps_candidate_choice_for_user(settings) -> None:  # type: ignore[no-untyped-def]
-    """Проверяет, что ИИ не found сохраняет кандидат выбор for пользователь."""
+    """Проверяет, что при отказе ИИ выбор кандидата сохраняется для пользователя."""
     candidate = Candidate(product_id="rose", name="Сироп Роза", supplier="Сиропы", unit="шт")
     item = CartItem(
         id="voice",
@@ -406,7 +408,7 @@ def test_ai_cannot_fill_missing_full_name_term(settings) -> None:  # type: ignor
 
 
 def test_ai_reranker_never_replaces_a_one_word_category_query(settings) -> None:  # type: ignore[no-untyped-def]
-    """Проверяет, что ИИ reranker никогда не replaces a один слово категория query."""
+    """Проверяет, что переранжирование ИИ не заменяет однословный запрос категории."""
     candidate = Candidate(
         product_id="beef", name="Говядина Тонкий край", supplier="Мясо", unit="кг"
     )

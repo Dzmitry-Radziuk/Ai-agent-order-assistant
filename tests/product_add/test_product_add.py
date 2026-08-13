@@ -1,3 +1,5 @@
+"""Проверяет поведение, связанное с модулем «test product add»."""
+
 from contextlib import nullcontext
 from types import SimpleNamespace
 from unittest.mock import MagicMock
@@ -31,7 +33,7 @@ def _event(update_id: int = 1, text: str = "") -> TelegramEvent:
 
 
 def test_product_add_request_removes_unresolved_item_and_enqueues_sheet_write(settings) -> None:  # type: ignore[no-untyped-def]
-    """Проверяет, что товар добавление запрос удаляет неразрешённая позиция и enqueues таблица запись."""
+    """Проверяет, что запрос добавления товара удаляет нерешённую позицию и ставит запись таблицы в очередь."""
     engine = ConversationEngine(settings)
     missing = engine.handle(
         _event(),
@@ -177,7 +179,7 @@ def test_product_add_description_event_is_idempotent(settings) -> None:  # type:
 
 
 def test_voice_product_add_details_keep_sender_and_are_idempotent(settings) -> None:  # type: ignore[no-untyped-def]
-    """Проверяет, что голос товар добавление details keep отправитель и являются idempotent."""
+    """Проверяет, что сведения о товаре из голоса сохраняют отправителя и обрабатываются идемпотентно."""
     engine = ConversationEngine(settings)
     state = ConversationState(
         stage=SessionStage.AWAIT_PRODUCT_ADD_DETAILS,
@@ -218,7 +220,7 @@ def test_voice_product_add_details_keep_sender_and_are_idempotent(settings) -> N
 
 
 def test_product_add_retry_reuses_id_and_never_retries_uncertain_write(settings) -> None:  # type: ignore[no-untyped-def]
-    """Проверяет, что товар добавление повтор reuses идентификатор и никогда не повторяет uncertain запись."""
+    """Проверяет, что повтор добавления товара использует тот же идентификатор и не повторяет неопределённую запись."""
     engine = ConversationEngine(settings)
     state = ConversationState(
         product_add_requests=[
@@ -248,7 +250,7 @@ def test_product_add_retry_reuses_id_and_never_retries_uncertain_write(settings)
 
 
 def test_product_add_write_outcomes_are_persisted_before_the_reply_is_built() -> None:
-    """Проверяет, что товар добавление запись результаты являются persisted до ответ является built."""
+    """Проверяет, что результат записи нового товара сохраняется до формирования ответа."""
     state = ConversationState(
         stage=SessionStage.AWAIT_PRODUCT_ADD_DETAILS,
         status="await_product_add_details",
@@ -284,7 +286,7 @@ def test_product_add_write_outcomes_are_persisted_before_the_reply_is_built() ->
 
 
 def test_product_add_success_is_shown_before_a_fresh_draft() -> None:
-    """Проверяет, что товар добавление успех является shown до a fresh черновик."""
+    """Проверяет, что успех добавления товара показывается до чтения свежего черновика."""
     service = object.__new__(SubmissionService)
     service.telegram = MagicMock()
     service.telegram.send_reply.side_effect = [77, 88]

@@ -1,3 +1,5 @@
+"""Проверяет поведение, связанное с модулем «test supplier search»."""
+
 from restaurant_bot.catalog.retrieval import rank_candidates
 from restaurant_bot.domain.models import CatalogProduct
 

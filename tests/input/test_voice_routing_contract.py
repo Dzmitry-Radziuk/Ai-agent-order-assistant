@@ -1,3 +1,5 @@
+"""Проверяет поведение, связанное с модулем «test voice routing contract»."""
+
 from restaurant_bot.domain.models import (
     CartItem,
     ConversationState,
@@ -22,7 +24,7 @@ def test_voice_add_product_phrase_is_not_interpreted_as_candidate_selection() ->
 
 
 def test_empty_voice_transcript_cannot_select_a_candidate() -> None:
-    """Проверяет, что пустой результат голос транскрипция не может select a кандидат."""
+    """Проверяет, что пустой результат голосовой транскрипции не выбирает кандидата."""
     command = infer_intent("")
 
     assert command.intent is Intent.UNKNOWN

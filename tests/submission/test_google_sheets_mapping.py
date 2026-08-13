@@ -1,3 +1,5 @@
+"""Проверяет поведение, связанное с модулем «test google sheets mapping»."""
+
 from unittest.mock import MagicMock
 
 import pytest
@@ -345,7 +347,7 @@ def test_catalog_update_writes_quantity_and_merged_comment(settings) -> None:  #
 
 
 def test_catalog_mutation_plan_contains_all_writes_and_is_deterministic(settings) -> None:  # type: ignore[no-untyped-def]
-    """Сохраняет quantity и comment mutations с before/expected-after."""
+    """Сохраняет изменения количества и комментария вместе с исходными и ожидаемыми значениями."""
     gateway = GoogleSheetsGateway(settings)
     gateway.service = MagicMock()
     gateway.load_catalog = MagicMock(  # type: ignore[method-assign]
@@ -455,7 +457,7 @@ def _readback_plan() -> dict[str, object]:
 
 
 def test_catalog_readback_returns_applied_for_expected_values(settings) -> None:  # type: ignore[no-untyped-def]
-    """Возвращает APPLIED, если все ячейки совпали с expected_after."""
+    """Возвращает APPLIED, если все ячейки совпали с ожидаемыми значениями."""
     gateway = GoogleSheetsGateway(settings)
     gateway.service = MagicMock()
     gateway.service.spreadsheets.return_value.values.return_value.batchGet.return_value.execute.return_value = {
@@ -466,7 +468,7 @@ def test_catalog_readback_returns_applied_for_expected_values(settings) -> None:
 
 
 def test_catalog_readback_returns_not_applied_for_before_values(settings) -> None:  # type: ignore[no-untyped-def]
-    """Возвращает NOT_APPLIED, если все ячейки остались в состоянии before."""
+    """Возвращает NOT_APPLIED, если все ячейки остались в исходном состоянии."""
     gateway = GoogleSheetsGateway(settings)
     gateway.service = MagicMock()
     gateway.service.spreadsheets.return_value.values.return_value.batchGet.return_value.execute.return_value = {
@@ -490,7 +492,7 @@ def test_catalog_readback_returns_conflict_for_changed_value(settings) -> None: 
 
 
 def test_catalog_readback_returns_conflict_for_mixed_before_and_after(settings) -> None:  # type: ignore[no-untyped-def]
-    """Возвращает CONFLICT для смешанного before/expected_after результата."""
+    """Возвращает CONFLICT для результата, смешивающего исходные и ожидаемые значения."""
     gateway = GoogleSheetsGateway(settings)
     gateway.service = MagicMock()
     gateway.service.spreadsheets.return_value.values.return_value.batchGet.return_value.execute.return_value = {

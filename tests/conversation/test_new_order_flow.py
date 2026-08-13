@@ -1,3 +1,5 @@
+"""Проверяет поведение, связанное с модулем «test new order flow»."""
+
 import pytest
 
 from restaurant_bot.domain.models import (
@@ -49,7 +51,7 @@ def test_new_order_after_submission_starts_empty_draft_and_preserves_history(
     phrase: str,
     input_type: InputKind,
 ) -> None:  # type: ignore[no-untyped-def]
-    """Проверяет, что новый заказ after отправка заявки начинает пустой результат черновик и сохраняет история."""
+    """Проверяет, что после отправки новый заказ начинает пустой черновик и сохраняет историю."""
     state = ConversationState(
         stage=SessionStage.SUBMITTED,
         status="submitted",
@@ -110,7 +112,7 @@ def test_new_order_after_submission_starts_empty_draft_and_preserves_history(
 
 
 def test_new_order_with_active_draft_requires_confirmation(settings) -> None:  # type: ignore[no-untyped-def]
-    """Проверяет, что новый заказ with активный черновик требует подтверждение."""
+    """Проверяет, что новый заказ при активном черновике требует подтверждения."""
     state = ConversationState(
         stage=SessionStage.REVIEW,
         status="review",

@@ -1,3 +1,5 @@
+"""Описывает фоновые задачи «celery app»."""
+
 from __future__ import annotations
 
 from celery import Celery

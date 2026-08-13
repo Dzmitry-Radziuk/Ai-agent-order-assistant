@@ -1,3 +1,5 @@
+"""Проверяет поведение, связанное с модулем «test photo prompt contract»."""
+
 from restaurant_bot.integrations.openai_client import _PHOTO_SYSTEM
 
 

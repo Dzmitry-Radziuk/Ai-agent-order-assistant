@@ -1,3 +1,5 @@
+"""Проверяет поведение, связанное с модулем «test concurrency block»."""
+
 from datetime import UTC, datetime
 from threading import Event
 from types import SimpleNamespace

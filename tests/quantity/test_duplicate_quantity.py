@@ -1,3 +1,5 @@
+"""Проверяет поведение, связанное с модулем «test duplicate quantity»."""
+
 import pytest
 
 from restaurant_bot.conversation.draft import remove_exact_cart_duplicates
@@ -31,7 +33,7 @@ def _voice(text: str) -> TelegramEvent:
 
 
 def test_repeated_product_with_quantity_requires_explicit_merge(settings) -> None:  # type: ignore[no-untyped-def]
-    """Проверяет, что повторный товар with количество требует явный merge."""
+    """Проверяет, что повторный товар с количеством требует явного объединения."""
     engine = ConversationEngine(settings)
     catalog = [CatalogProduct(product_id="rose", name="Сироп Роза", supplier="Сиропы", unit="шт")]
     first = engine.handle(

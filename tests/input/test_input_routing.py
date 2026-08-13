@@ -1,3 +1,5 @@
+"""Проверяет поведение, связанное с модулем «test input routing»."""
+
 from unittest.mock import MagicMock
 
 from restaurant_bot.application.order_review.contracts import ReviewSnapshot
@@ -69,7 +71,7 @@ def test_final_checks_require_fresh_catalog_values() -> None:
 
 
 def test_callback_input_preserves_callback_data_for_engine() -> None:
-    """Проверяет, что callback ввод сохраняет callback data for engine."""
+    """Проверяет, что ввод callback сохраняет данные callback для движка."""
     event = normalize_telegram_update(
         {
             "update_id": 2,

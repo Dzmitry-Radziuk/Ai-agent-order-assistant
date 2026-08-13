@@ -1,3 +1,5 @@
+"""Проверяет поведение, связанное с модулем «test order events»."""
+
 from unittest.mock import MagicMock
 
 from restaurant_bot.domain.models import (
@@ -28,7 +30,7 @@ def test_audit_details_hide_content_secrets_and_bound_large_values() -> None:
 
 
 def test_order_transition_uses_one_trace_for_start_action_and_submission() -> None:
-    """Проверяет, что заказ переход использует один trace for start действие и отправка заявки."""
+    """Проверяет, что переход заказа использует одну трассу для запуска и отправки заявки."""
     events = MagicMock()
     state = ConversationState(
         order_trace_id="trace-1",

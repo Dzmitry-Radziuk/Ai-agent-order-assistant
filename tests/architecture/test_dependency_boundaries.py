@@ -56,7 +56,7 @@ def test_venue_application_contract_has_no_infrastructure_imports() -> None:
 
 
 def test_conversation_application_contract_has_no_channel_adapters() -> None:
-    """Не допускает Telegram и инфраструктуру в общем conversation use case."""
+    """Не допускает Telegram и инфраструктуру в общем сценарии диалога."""
     forbidden = {
         "presentation",
         "integrations",
@@ -74,7 +74,7 @@ def test_conversation_application_contract_has_no_channel_adapters() -> None:
 
 
 def test_conversation_application_source_has_no_telegram_protocol_types() -> None:
-    """Проверяет, что общий use case не требует TelegramEvent или callback-протокола."""
+    """Проверяет, что общий сценарий не требует TelegramEvent или callback-протокола."""
     for path in CHANNEL_NEUTRAL_APPLICATION_FILES:
         source = path.read_text(encoding="utf-8")
         assert "TelegramEvent" not in source

@@ -1,3 +1,5 @@
+"""Координирует сервис «venue registration»."""
+
 from __future__ import annotations
 
 from datetime import UTC, datetime
