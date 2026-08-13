@@ -336,7 +336,8 @@ CommentScopeHandler их сохраняет.
 
 `services/text.py` удалён после переноса единственного символа `to_float` в
 `parsing/numeric.py`. Четыре lower/core AI-reconciliation модуля и два integration
-адаптера используют новый owner; baseline после переноса остаётся `1377/1377`.
+адаптера используют новый owner; функциональный baseline после переноса остаётся
+`1377/1377`, финальный suite с новым regression test — `1378 passed`.
 `engine.py`, `orchestrator.py`, `submission.py`, `venue_registration.py`,
 `input_recognition.py`, `order_review.py` и conversation handlers намеренно остаются
 в `services/`: они координируют state, внешние эффекты, Telegram presentation или

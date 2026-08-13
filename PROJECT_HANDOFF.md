@@ -22,7 +22,8 @@ orchestrator. Порядок callback/text/media, StateCompatibilityPolicy,
 Архитектурная декомпозиция и Block 6C cleanup завершены. `services/text.py` удалён
 после механического переноса `to_float` в `parsing/numeric.py`; lower/core → services
 edge из AI reconciliation устранён. Stateful/effectful services и handlers оставлены
-защищёнными. Baseline: `1377 collected / 1377 passed`.
+защищёнными. Baseline до добавления guard-теста: `1377 collected / 1377 passed`;
+финальный suite: `1378 passed`.
 Подробный аудит: [`docs/SERVICES_TRANSITION_AUDIT.md`](docs/SERVICES_TRANSITION_AUDIT.md).
 Решение: `SERVICES_CLEANUP_PARTIAL_WITH_PROTECTED_ADAPTERS`.
 Следующая задача: `BLOCK 6D — STABILIZATION / REALISTIC SMOKE / ACCEPTANCE PREP`.

@@ -430,6 +430,7 @@ DB, Sheets, Docker, task bodies, decorators, names, retry settings и UX не
 
 Перед cleanup текущая ветка `decompose_bot` имела HEAD
 `fb6e9387a2fda0f520d1b884b3b26ee7390a4642` и baseline `1377 collected / 1377 passed`.
+Финальный suite после добавления архитектурного regression test: `1378 passed`.
 Изменения этого блока структурные: state machine, parsing semantics, catalog thresholds,
 prompts, schemas, callbacks, submission checkpoints, database и DevOps не менялись.
 
