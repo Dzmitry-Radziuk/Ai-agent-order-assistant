@@ -50,6 +50,7 @@ from restaurant_bot.domain.models import (
     TelegramEvent,
 )
 from restaurant_bot.domain.text import clean_text, normalize_text
+from restaurant_bot.input.media_recognition import InputRecognitionService
 from restaurant_bot.input.telegram import normalize_telegram_update, to_conversation_input
 from restaurant_bot.input.telegram_interpretation import TelegramInputInterpreter
 from restaurant_bot.integrations.cache import (
@@ -79,7 +80,6 @@ from restaurant_bot.repositories.updates import (
     UpdateSequenceDeferred,
 )
 from restaurant_bot.services.engine import ConversationEngine
-from restaurant_bot.services.input_recognition import InputRecognitionService
 from restaurant_bot.services.order_review import OrderReviewService
 from restaurant_bot.services.venue_registration import (
     RegistrationResult,
