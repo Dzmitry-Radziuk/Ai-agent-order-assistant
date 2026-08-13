@@ -4,6 +4,14 @@ from restaurant_bot.domain.models import Intent
 from restaurant_bot.parsing.commands.api import infer_intent
 
 
+def test_voice_add_more_command_with_transcriber_terminal_punctuation() -> None:
+    """Проверяет, что голос добавление ещё команда with транскриптор конечная punctuation."""
+    command = infer_intent("Добавить еще товары.")
+
+    assert command.intent is Intent.ADD_MORE
+    assert command.items == []
+
+
 @pytest.mark.parametrize(
     ("phrase", "intent"),
     [
@@ -19,27 +27,6 @@ from restaurant_bot.parsing.commands.api import infer_intent
         ("отправить в корзину", Intent.SUBMIT_REQUEST),
         ("отправить поставщику", Intent.SUBMIT_AS_IS),
         ("отменить", Intent.CANCEL),
-    ],
-)
-def test_n8n_global_voice_routes_are_deterministic(phrase: str, intent: Intent) -> None:
-    """Проверяет голосовой маршрут каждой команды меню до вызова ИИ."""
-    command = infer_intent(phrase)
-
-    assert command.intent is intent
-    assert command.items == []
-
-
-def test_voice_add_more_command_with_transcriber_terminal_punctuation() -> None:
-    """Проверяет, что голос добавление ещё команда with транскриптор конечная punctuation."""
-    command = infer_intent("Добавить еще товары.")
-
-    assert command.intent is Intent.ADD_MORE
-    assert command.items == []
-
-
-@pytest.mark.parametrize(
-    ("phrase", "intent"),
-    [
         ("Ну давай добавим ещё товары, пожалуйста.", Intent.ADD_MORE),
         ("Хочу еще позиции", Intent.ADD_MORE),
         ("Можно добавить ещё что-нибудь?", Intent.ADD_MORE),
