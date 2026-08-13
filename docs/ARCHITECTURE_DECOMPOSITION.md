@@ -1,6 +1,24 @@
 # План декомпозиции архитектуры
 
-## CURRENT ARCHITECTURE — Block 5W
+## CURRENT ARCHITECTURE — Block 5X
+
+Block 5X завершён как поведенчески нейтральная доводка границ contextual routing
+и catalog resolution. Свежий полный baseline: `1370 collected / 1370 passed`.
+Публичный API `ContextualCommandPolicy` сохраняет порядок transforms, а
+Telegram-specific page extraction находится в `input/telegram_visible_actions.py`.
+`contextual_commands.py` не знает `TelegramEvent`, presentation/input/services или
+callback-протокол `v2:*`; добавлен architectural import-boundary regression test.
+
+`CatalogResolutionService` стал единственным production owner для
+`match_item`, `apply_catalog` и `refresh_cart_order_values`; engine wrappers и
+тестовые вызовы удалены/переведены на owner без изменения алгоритмов.
+`CandidateSelectionHandler` оставлен `KEEP_TEMP` как presentation adapter,
+а quantity action group — **NO SAFE QUANTITY ACTION SEAM**: текущая граница
+смешивает state mutation, reply и Block C ordering. Следующий функциональный
+этап не назначается этим рефакторингом. После удаления wrappers engine содержит
+`1613` строк, `76431` байт и `33` метода.
+
+## CURRENT ARCHITECTURE — Block 5W (архив текущего среза до 5X)
 
 Актуальный baseline после Block 5V-A и до итогового commit Block 5W: `1369 collected /
 1369 passed`. Block 5W-A закрепил нейтральные `venues/contracts.py` и `venues/codes.py`,

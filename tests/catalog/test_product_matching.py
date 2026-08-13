@@ -163,7 +163,7 @@ def test_size_range_requires_an_equivalent_catalog_row(settings: Settings) -> No
         source_line="Филе форели 0,9-1,3 килограмма",
     )
 
-    engine._match_item(
+    engine.catalog_resolution.match_item(
         item,
         [CatalogProduct(product_id="plain-trout", name="Филе форели", unit="кг")],
     )
@@ -187,7 +187,7 @@ def test_size_range_matches_the_same_catalog_variant_without_becoming_comment(
         ),
     ]
 
-    engine._match_item(item, catalog)
+    engine.catalog_resolution.match_item(item, catalog)
 
     assert item.catalog_product_id == "range-trout"
     assert item.comment == ""
@@ -214,7 +214,7 @@ def test_conflicting_product_qualifier_blocks_automatic_catalog_selection(
         quantity=5,
         unit="кг",
     )
-    ConversationEngine(settings)._match_item(
+    ConversationEngine(settings).catalog_resolution.match_item(
         item,
         [
             CatalogProduct(
@@ -248,7 +248,7 @@ def test_full_name_term_missing_from_catalog_is_not_saved_as_comment(
         )
     ]
 
-    ConversationEngine(settings)._match_item(item, catalog)
+    ConversationEngine(settings).catalog_resolution.match_item(item, catalog)
 
     assert item.catalog_product_id == ""
     assert item.status is ItemStatus.AMBIGUOUS
@@ -270,7 +270,7 @@ def test_product_variant_is_not_replaced_by_the_only_similar_catalog_row(
     """Не выбирает единственную похожую строку при несовпадении характеристики."""
     item = CartItem(id="variant", source_query=query, quantity=1, unit="кг")
 
-    ConversationEngine(settings)._match_item(
+    ConversationEngine(settings).catalog_resolution.match_item(
         item,
         [CatalogProduct(product_id="similar", name=catalog_name, unit="кг")],
     )
@@ -299,7 +299,7 @@ def test_catalog_packaging_attribute_must_match_candidate(settings: Settings) ->
         unit="кг",
     )
 
-    ConversationEngine(settings)._match_item(
+    ConversationEngine(settings).catalog_resolution.match_item(
         item,
         [CatalogProduct(product_id="trout", name="Форель филе 1,5-2 кг", unit="кг")],
     )
@@ -322,7 +322,7 @@ def test_spoken_catalog_packaging_is_not_used_as_order_quantity(settings: Settin
         CatalogProduct(product_id="large", name="Марципан 1/5кг", unit="кг"),
     ]
 
-    ConversationEngine(settings)._match_item(item, catalog)
+    ConversationEngine(settings).catalog_resolution.match_item(item, catalog)
 
     assert item.quantity is None
     assert item.unit == ""
@@ -342,7 +342,7 @@ def test_explicit_order_quantity_is_not_reclassified_as_packaging(settings: Sett
     )
     catalog = [CatalogProduct(product_id="small", name="Марципан 65гр", unit="кг")]
 
-    ConversationEngine(settings)._match_item(item, catalog)
+    ConversationEngine(settings).catalog_resolution.match_item(item, catalog)
 
     assert item.quantity == 65
     assert item.unit == "г"
@@ -380,8 +380,8 @@ def test_catalog_product_facts_are_not_saved_as_supplier_comments(settings: Sett
         unit="шт",
     )
 
-    engine._match_item(white_wine, catalog)
-    engine._match_item(cuvee, catalog)
+    engine.catalog_resolution.match_item(white_wine, catalog)
+    engine.catalog_resolution.match_item(cuvee, catalog)
 
     assert white_wine.comment == ""
     assert cuvee.comment == ""
@@ -403,7 +403,7 @@ def test_catalog_backed_multiword_descriptor_comment_is_not_retained(
     )
     product = CatalogProduct(product_id="ribs", name=source_query, unit="кг")
 
-    engine._match_item(item, [product])
+    engine.catalog_resolution.match_item(item, [product])
 
     assert item.catalog_product_id == "ribs"
     assert item.comment == ""
@@ -424,7 +424,7 @@ def test_asr_product_residue_is_not_saved_as_supplier_comment(settings: Settings
         unit="шт",
     )
 
-    engine._apply_catalog(
+    engine.catalog_resolution.apply_catalog(
         item,
         Candidate(
             product_id=product.product_id,
@@ -458,7 +458,7 @@ def test_catalog_title_facts_are_not_quantity_or_comment(settings: Settings) -> 
         packaging_role="catalog_attribute",
     )
 
-    engine._match_item(item, [product])
+    engine.catalog_resolution.match_item(item, [product])
 
     assert item.catalog_product_id == ""
     assert item.candidates[0].product_id == product.product_id
@@ -486,7 +486,7 @@ def test_quantity_only_comment_residue_is_removed(settings: Settings) -> None:
         comment="один килограмм десять килограмм",
     )
 
-    engine._match_item(item, [product])
+    engine.catalog_resolution.match_item(item, [product])
 
     assert item.comment == ""
 
@@ -525,7 +525,7 @@ def test_exact_catalog_title_number_requires_explicit_order_quantity(settings: S
         comment="дп",
     )
 
-    engine._match_item(item, [product])
+    engine.catalog_resolution.match_item(item, [product])
 
     assert item.catalog_product_id == product.product_id
     assert item.quantity is None
@@ -551,7 +551,7 @@ def test_explicit_quantity_after_catalog_title_is_preserved(settings: Settings) 
         unit="шт",
     )
 
-    engine._match_item(item, [product])
+    engine.catalog_resolution.match_item(item, [product])
 
     assert item.catalog_product_id == product.product_id
     assert item.quantity == 2
@@ -580,7 +580,7 @@ def test_catalog_apply_preserves_user_provenance_and_is_idempotent(settings: Set
         comment="привезти холодным",
     )
 
-    engine._match_item(item, [product])
+    engine.catalog_resolution.match_item(item, [product])
     first_snapshot = (
         item.source_query,
         item.source_line,
@@ -592,7 +592,7 @@ def test_catalog_apply_preserves_user_provenance_and_is_idempotent(settings: Set
         item.catalog_comment,
     )
 
-    engine._apply_catalog(
+    engine.catalog_resolution.apply_catalog(
         item,
         Candidate(product_id=product.product_id, name=product.name, unit=product.unit),
         [product],
@@ -628,7 +628,7 @@ def test_source_owned_product_fact_comment_survives_catalog_cleanup(settings: Se
         comment="без костей",
     )
 
-    engine._match_item(item, [product])
+    engine.catalog_resolution.match_item(item, [product])
 
     assert item.source_query == "Шея свиная без костей"
     assert item.source_line == "Шея свиная 5 кг без костей"
@@ -647,7 +647,7 @@ def test_one_word_category_never_auto_selects_the_only_catalog_candidate(
 
     for query, product in cases:
         item = CartItem(id=query, source_query=query, quantity=10, unit=product.unit)
-        engine._match_item(item, [product])
+        engine.catalog_resolution.match_item(item, [product])
 
         assert item.status is ItemStatus.AMBIGUOUS
         assert item.catalog_product_id == ""
@@ -665,7 +665,7 @@ def test_inflected_one_word_category_never_auto_selects_catalog_variant(
     ]
     item = CartItem(id="beef", source_query="говядины", quantity=10, unit="кг")
 
-    engine._match_item(item, catalog)
+    engine.catalog_resolution.match_item(item, catalog)
 
     assert item.status is ItemStatus.AMBIGUOUS
     assert item.catalog_product_id == ""
@@ -706,7 +706,7 @@ def test_unsupported_beef_qualifier_becomes_comment_before_candidate_choice(
         unit="кг",
     )
 
-    engine._match_item(item, catalog)
+    engine.catalog_resolution.match_item(item, catalog)
 
     assert item.source_query == "говядина мраморная"
     assert item.comment == ""
@@ -726,7 +726,7 @@ def test_misspelled_product_variant_is_not_moved_to_supplier_comment(
     ]
     item = CartItem(id="syrup", source_query="Сироп Снгря", quantity=2, unit="шт")
 
-    engine._match_item(item, catalog)
+    engine.catalog_resolution.match_item(item, catalog)
 
     assert item.source_query == "Сироп Снгря"
     assert item.comment == ""
@@ -746,7 +746,7 @@ def test_unknown_product_variant_is_not_moved_to_supplier_comment(
     ]
     item = CartItem(id="syrup", source_query="Сироп Рамбутан", quantity=3, unit="кг")
 
-    engine._match_item(item, catalog)
+    engine.catalog_resolution.match_item(item, catalog)
 
     assert item.source_query == "Сироп Рамбутан"
     assert item.comment == ""
@@ -768,7 +768,7 @@ def test_short_variant_typo_is_preserved_for_safe_candidate_resolution(
     ]
     item = CartItem(id="syrup", source_query="сироп рза")
 
-    engine._match_item(item, catalog)
+    engine.catalog_resolution.match_item(item, catalog)
 
     assert item.source_query == "сироп рза"
     assert item.comment == ""
@@ -799,7 +799,7 @@ def test_multiword_product_family_requires_user_choice(settings: Settings) -> No
     ]
     item = CartItem(id="cordial", source_query="Кордиал ЛЬЮ")
 
-    engine._match_item(item, catalog)
+    engine.catalog_resolution.match_item(item, catalog)
 
     assert item.status is ItemStatus.AMBIGUOUS
     assert item.catalog_product_id == ""
@@ -832,7 +832,7 @@ def test_exact_product_inside_multiword_family_is_auto_selected(settings: Settin
         unit="шт",
     )
 
-    engine._match_item(item, catalog)
+    engine.catalog_resolution.match_item(item, catalog)
 
     assert item.status is ItemStatus.MATCHED
     assert item.catalog_product_id == "cherry-shiso"
@@ -859,7 +859,7 @@ def test_product_family_rule_scales_to_large_catalog(settings: Settings) -> None
     )
     item = CartItem(id="cordial", source_query="Кордиал ЛЬЮ")
 
-    engine._match_item(item, catalog)
+    engine.catalog_resolution.match_item(item, catalog)
 
     assert item.status is ItemStatus.AMBIGUOUS
     assert item.catalog_product_id == ""

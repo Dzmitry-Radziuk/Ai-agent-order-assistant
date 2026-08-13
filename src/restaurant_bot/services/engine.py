@@ -54,7 +54,6 @@ from restaurant_bot.domain.departments import normalize_department
 from restaurant_bot.domain.models import (
     BotReply,
     Button,
-    Candidate,
     CartItem,
     CatalogProduct,
     CommentSource,
@@ -73,6 +72,10 @@ from restaurant_bot.domain.models import (
 )
 from restaurant_bot.domain.unit_conversion import convert_quantity
 from restaurant_bot.domain.units import normalize_unit
+from restaurant_bot.input.telegram_visible_actions import (
+    available_cart_pages,
+    available_final_review_pages,
+)
 from restaurant_bot.orders.catalog_resolution import CatalogResolutionService
 from restaurant_bot.orders.product_add import new_product_add_request_id
 from restaurant_bot.orders.supplier_minimums import supplier_minimum_warnings
@@ -85,7 +88,6 @@ from restaurant_bot.parsing.commands.item_commands import (
 from restaurant_bot.parsing.commands.normalization import (
     has_negated_action,
 )
-from restaurant_bot.parsing.comment_policy import supplier_comment_start
 from restaurant_bot.presentation.telegram.formatting import escape
 from restaurant_bot.presentation.telegram.pagination import CART_PAGE_SIZE
 from restaurant_bot.presentation.telegram.product_add import product_add_prompt
@@ -202,8 +204,11 @@ class ConversationEngine:
             command.intent in {Intent.ADD_MORE, Intent.CONFIRM}
             or state.stage is SessionStage.AWAIT_SUBMIT_CONFIRM
         ):
-            command = self.contextual_command_policy._contextual_voice_command(
-                command, event, state
+            command = self.contextual_command_policy.normalize_pre_modal_voice(
+                command,
+                input_kind=event.input_type,
+                raw_text=event.text or "",
+                state=state,
             )
         modal_decision = evaluate_modal_routing(
             self.state_compatibility_policy,
@@ -279,7 +284,7 @@ class ConversationEngine:
             }:
                 command = command.model_copy(update={"intent": Intent.SUBMIT_AS_IS})
             elif command.intent is Intent.SHOW_CART:
-                if self.contextual_command_policy._is_generic_show_products_command(command.text):
+                if self.contextual_command_policy.is_generic_show_products_command(command.text):
                     return EngineResult(
                         state=state,
                         reply=supplier_warning_details_reply(state),
@@ -381,23 +386,13 @@ class ConversationEngine:
             and not modal_decision.product_add_details_interrupted
             and not modal_decision.add_more_confirm_active
         ):
-            command = self.contextual_command_policy._contextual_negative_command(
-                command, event, state
-            )
-            command = self.contextual_command_policy._contextual_quantity_command(
-                command, event.text, state
-            )
-            command = self.contextual_command_policy._contextual_cart_pagination_command(
-                command, event, state
-            )
-            command = self.contextual_command_policy._contextual_final_review_pagination_command(
-                command, event, state
-            )
-            command = self.contextual_command_policy._contextual_order_status_command(
-                command, event, state
-            )
-            command = self.contextual_command_policy._contextual_voice_command(
-                command, event, state
+            command = self.contextual_command_policy.reinterpret_contextual_command(
+                command,
+                input_kind=event.input_type,
+                raw_text=event.text or "",
+                state=state,
+                available_cart_pages=available_cart_pages(state.visible_actions),
+                available_final_review_pages=available_final_review_pages(state.visible_actions),
             )
 
         duplicate_decision = self.state_compatibility_policy.evaluate(
@@ -444,7 +439,7 @@ class ConversationEngine:
             Intent.SHOW_FINAL_REVIEW,
             Intent.CHECK_MIN_SUM,
         }:
-            self._refresh_cart_order_values(state, catalog)
+            self.catalog_resolution.refresh_cart_order_values(state, catalog)
         if (
             current
             and current.status in {ItemStatus.NOT_FOUND, ItemStatus.AMBIGUOUS}
@@ -559,7 +554,7 @@ class ConversationEngine:
         if command.intent == Intent.SHOW_CART:
             if (
                 state.stage == SessionStage.AWAIT_SUBMIT_CONFIRM
-                and self.contextual_command_policy._is_generic_show_products_command(command.text)
+                and self.contextual_command_policy.is_generic_show_products_command(command.text)
             ):
                 return EngineResult(state=state, reply=supplier_warning_details_reply(state))
             state.cart_page = self._cart_page(command, state)
@@ -645,7 +640,7 @@ class ConversationEngine:
             item.catalog_unit = ""
             item.candidates = []
             item.status = ItemStatus.NEW
-            self._match_item(item, catalog, state.search_scope)
+            self.catalog_resolution.match_item(item, catalog, state.search_scope)
             return self._advance(state)
         if command.intent == Intent.SWITCH_SUPPLIER:
             index = self._callback_item_index(command, state)
@@ -837,7 +832,7 @@ class ConversationEngine:
                     current.candidates = []
                     current.rename_attempted = True
                     state.stage = SessionStage.COLLECTING
-                    self._match_item(current, catalog)
+                    self.catalog_resolution.match_item(current, catalog)
                     return self._advance(state)
             selected_supplier = state.supplier_hint_context
             newly_unresolved_ids: list[str] = []
@@ -848,7 +843,7 @@ class ConversationEngine:
                     extracted = self._validate_supplier_hint(extracted, catalog)
                 item = self._build_item(extracted, command.global_comment)
                 item.supplier_search_locked = bool(selected_supplier)
-                self._match_item(item, catalog)
+                self.catalog_resolution.match_item(item, catalog)
                 same_missing = next(
                     (
                         existing
@@ -1124,68 +1119,6 @@ class ConversationEngine:
         """Возвращает номер позиции по её идентификатору."""
         return state_item_index(state, item)
 
-    @staticmethod
-    def _catalog_packaging_measurement(
-        item: CartItem,
-        candidates: list[Candidate],
-    ) -> tuple[float, str] | None:
-        """Совместимо вызывает владельца разрешения каталога."""
-        return CatalogResolutionService._catalog_packaging_measurement(item, candidates)
-
-    def _match_item(
-        self,
-        item: CartItem,
-        catalog: list[CatalogProduct],
-        search_scope: SearchScope | None = None,
-    ) -> None:
-        """Совместимо вызывает сопоставление позиции в новом владельце."""
-        self.catalog_resolution.match_item(item, catalog, search_scope)
-
-    @staticmethod
-    def _looks_like_supplier_comment_fragment(words: list[str]) -> bool:
-        """Отличает инструкцию поставщику от неизвестной части названия товара."""
-        return ConversationEngine._supplier_comment_start(words) is not None
-
-    @staticmethod
-    def _remove_unanchored_supplier_hint(item: CartItem) -> None:
-        """Совместимо вызывает очистку подсказки поставщика."""
-        CatalogResolutionService._remove_unanchored_supplier_hint(item)
-
-    def _sanitize_catalog_facts_before_resolution(
-        self,
-        item: CartItem,
-        candidate: Candidate | None,
-    ) -> None:
-        """Совместимо вызывает очистку фактов каталога перед решением."""
-        self.catalog_resolution._sanitize_catalog_facts_before_resolution(item, candidate)
-
-    @staticmethod
-    def _supplier_comment_start(words: list[str]) -> int | None:
-        """Находит начало явного комментария внутри неизвестного фрагмента."""
-        return supplier_comment_start(words)
-
-    def _apply_catalog(
-        self,
-        item: CartItem,
-        candidate: Candidate,
-        catalog: list[CatalogProduct],
-    ) -> None:
-        """Совместимо вызывает применение результата каталога к позиции."""
-        self.catalog_resolution.apply_catalog(item, candidate, catalog)
-
-    def _refresh_cart_order_values(
-        self,
-        state: ConversationState,
-        catalog: list[CatalogProduct],
-    ) -> None:
-        """Совместимо вызывает обновление каталожных значений черновика."""
-        self.catalog_resolution.refresh_cart_order_values(state, catalog)
-
-    @staticmethod
-    def _reconcile_quantity_with_catalog_name(item: CartItem, product_name: str) -> None:
-        """Совместимо вызывает отделение заказа от фасовки каталога."""
-        CatalogResolutionService._reconcile_quantity_with_catalog_name(item, product_name)
-
     def _first_unresolved(self, state: ConversationState) -> CartItem | None:
         """Возвращает приоритетную нерешённую позицию."""
         return first_unresolved_item(state)
@@ -1262,7 +1195,7 @@ class ConversationEngine:
             return outcome.result
         assert outcome.item is not None and outcome.candidate is not None
         item = outcome.item
-        self._apply_catalog(item, outcome.candidate, catalog)
+        self.catalog_resolution.apply_catalog(item, outcome.candidate, catalog)
         duplicate = find_duplicate(
             ConversationState(cart=[current for current in state.cart if current.id != item.id]),
             item,

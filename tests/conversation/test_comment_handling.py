@@ -430,7 +430,7 @@ def test_legacy_merged_catalog_comment_is_split_before_submission(settings) -> N
         ],
     )
 
-    engine._refresh_cart_order_values(state, [product])
+    engine.catalog_resolution.refresh_cart_order_values(state, [product])
 
     assert state.cart[0].catalog_comment == "старое примечание каталога"
     assert state.cart[0].comment == "привезти холодным"
@@ -654,7 +654,7 @@ def test_catalog_evidence_separates_many_product_typos_from_free_comments(
 
     for raw_query, catalog, expected_query, expected_comment, product_id in cases:
         item = engine._build_item(ExtractedItem(product_query=raw_query))
-        engine._match_item(item, catalog)
+        engine.catalog_resolution.match_item(item, catalog)
 
         assert item.source_query == expected_query
         assert item.comment == expected_comment
@@ -701,7 +701,7 @@ def test_catalog_facts_are_not_saved_as_user_comment_on_single_candidate(setting
         )
     ]
 
-    engine._match_item(item, catalog)
+    engine.catalog_resolution.match_item(item, catalog)
 
     assert item.catalog_product_id == "ribs"
     assert item.comment == ""

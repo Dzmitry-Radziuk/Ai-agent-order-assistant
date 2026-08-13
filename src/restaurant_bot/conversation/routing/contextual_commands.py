@@ -17,7 +17,6 @@ from restaurant_bot.domain.models import (
     ItemStatus,
     ParsedCommand,
     SessionStage,
-    TelegramEvent,
 )
 from restaurant_bot.domain.units import UNIT_ALIASES, normalize_unit
 from restaurant_bot.orders.supplier_minimums import supplier_minimum_warnings
@@ -45,6 +44,52 @@ class ContextualCommandPolicy:
         """Извлекает явно произнесённое количество через существующий parser."""
         return self._spoken_quantity_parser(text)
 
+    def normalize_pre_modal_voice(
+        self,
+        command: ParsedCommand,
+        *,
+        input_kind: InputKind,
+        raw_text: str,
+        state: ConversationState,
+    ) -> ParsedCommand:
+        """Нормализует голосовую команду до проверки modal-состояния."""
+        return self._contextual_voice_command(command, input_kind, raw_text, state)
+
+    def reinterpret_contextual_command(
+        self,
+        command: ParsedCommand,
+        *,
+        input_kind: InputKind,
+        raw_text: str,
+        state: ConversationState,
+        available_cart_pages: set[int] | None = None,
+        available_final_review_pages: set[int] | None = None,
+    ) -> ParsedCommand:
+        """Применяет contextual transforms в утверждённом порядке."""
+        command = self._contextual_negative_command(command, input_kind, raw_text, state)
+        command = self._contextual_quantity_command(command, input_kind, raw_text, state)
+        command = self._contextual_cart_pagination_command(
+            command,
+            input_kind,
+            raw_text,
+            state,
+            available_cart_pages or set(),
+        )
+        command = self._contextual_final_review_pagination_command(
+            command,
+            input_kind,
+            raw_text,
+            state,
+            available_final_review_pages or set(),
+        )
+        command = self._contextual_order_status_command(command, input_kind, raw_text, state)
+        return self._contextual_voice_command(command, input_kind, raw_text, state)
+
+    @staticmethod
+    def is_generic_show_products_command(text: str) -> bool:
+        """Проверяет, является ли фраза общим запросом списка товаров."""
+        return ContextualCommandPolicy._is_generic_show_products_command(text)
+
     @staticmethod
     def _mentions_expected_unit(text: str, expected_unit: str) -> bool:
         """Проверяет, упомянул ли пользователь единицу открытой позиции."""
@@ -69,17 +114,18 @@ class ContextualCommandPolicy:
     def _contextual_quantity_command(
         self,
         command: ParsedCommand,
-        text: str,
+        input_kind: InputKind,
+        raw_text: str,
         state: ConversationState,
     ) -> ParsedCommand:
         """Обрабатывает команду количества с учётом текущего экрана."""
-        if command.text.startswith("v2:"):
+        if input_kind is InputKind.CALLBACK:
             return command
         current = state.current_item()
         if current is None:
             return command
 
-        phrase = normalize_text(text or command.text)
+        phrase = normalize_text(raw_text or command.text)
         if not phrase:
             return command
         words = set(phrase.split())
@@ -225,27 +271,23 @@ class ContextualCommandPolicy:
     def _contextual_cart_pagination_command(
         self,
         command: ParsedCommand,
-        event: TelegramEvent,
+        input_kind: InputKind,
+        raw_text: str,
         state: ConversationState,
+        available_pages: set[int],
     ) -> ParsedCommand:
         """Оставляет голосовую навигацию в черновике, если он разбит на страницы."""
-        page_callbacks: set[int] = set()
-        for action in state.visible_actions:
-            callback_data = action.get("action_id", "")
-            match = re.fullmatch(r"v2:cartpage:(\d+)(?::r\d+)?", callback_data)
-            if match:
-                page_callbacks.add(int(match.group(1)))
-        if not page_callbacks:
+        if not available_pages:
             return command
 
-        raw = event.text or command.text
+        raw = raw_text or command.text
         phrase = normalize_command_text(raw)
         navigation_target = self._status_navigation_target(phrase)
         if navigation_target not in {"next", "previous"}:
             return command
 
         target_page = state.cart_page + (1 if navigation_target == "next" else -1)
-        if target_page not in page_callbacks:
+        if target_page not in available_pages:
             target_page = state.cart_page
         return ParsedCommand(
             intent=Intent.SHOW_CART,
@@ -256,13 +298,14 @@ class ContextualCommandPolicy:
     def _contextual_order_status_command(
         self,
         command: ParsedCommand,
-        event: TelegramEvent,
+        input_kind: InputKind,
+        raw_text: str,
         state: ConversationState,
     ) -> ParsedCommand:
         """Связывает короткую фразу с последним показанным списком заявок."""
         if not state.order_status_view_active:
             return command
-        raw = event.text or command.text
+        raw = raw_text or command.text
         phrase = normalize_command_text(raw)
         if not phrase:
             return command
@@ -325,27 +368,23 @@ class ContextualCommandPolicy:
     def _contextual_final_review_pagination_command(
         self,
         command: ParsedCommand,
-        event: TelegramEvent,
+        input_kind: InputKind,
+        raw_text: str,
         state: ConversationState,
+        available_pages: set[int],
     ) -> ParsedCommand:
         """Оставляет голосовую навигацию в постраничной финальной проверке."""
-        page_callbacks: set[int] = set()
-        for action in state.visible_actions:
-            callback_data = action.get("action_id", "")
-            match = re.fullmatch(r"v2:finalpage:(\d+)(?::r\d+)?", callback_data)
-            if match:
-                page_callbacks.add(int(match.group(1)))
-        if not page_callbacks:
+        if not available_pages:
             return command
 
-        raw = event.text or command.text
+        raw = raw_text or command.text
         phrase = normalize_command_text(raw)
         navigation_target = self._status_navigation_target(phrase)
         if navigation_target not in {"next", "previous"}:
             return command
 
         target_page = state.final_review_page + (1 if navigation_target == "next" else -1)
-        if target_page not in page_callbacks:
+        if target_page not in available_pages:
             target_page = state.final_review_page
         return ParsedCommand(
             intent=Intent.SHOW_FINAL_REVIEW,
@@ -382,16 +421,17 @@ class ContextualCommandPolicy:
     def _contextual_voice_command(
         self,
         command: ParsedCommand,
-        event: TelegramEvent,
+        input_kind: InputKind,
+        raw_text: str,
         state: ConversationState,
     ) -> ParsedCommand:
         """Обрабатывает голосовую команду с учётом текущего экрана."""
-        if event.input_type != InputKind.VOICE:
+        if input_kind is not InputKind.VOICE:
             return command
         if command.intent == Intent.EDIT_QUANTITY and command.edit_quantity is not None:
             return command
 
-        raw = event.text or command.text
+        raw = raw_text or command.text
         phrase = normalize_text(raw)
         if not phrase:
             return command
@@ -634,13 +674,14 @@ class ContextualCommandPolicy:
     def _contextual_negative_command(
         self,
         command: ParsedCommand,
-        event: TelegramEvent,
+        input_kind: InputKind,
+        raw_text: str,
         state: ConversationState,
     ) -> ParsedCommand:
         """Применяет отрицание до любых подтверждающих и изменяющих маршрутов."""
-        if event.input_type == InputKind.CALLBACK:
+        if input_kind is InputKind.CALLBACK:
             return command
-        raw = event.text or command.text
+        raw = raw_text or command.text
         phrase = normalize_text(raw)
         if not phrase:
             return command

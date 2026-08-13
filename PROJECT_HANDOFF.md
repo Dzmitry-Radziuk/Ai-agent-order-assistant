@@ -1,6 +1,41 @@
 # Передача проекта
 
-## CURRENT ARCHITECTURE — Block 5W
+## CURRENT ARCHITECTURE — Block 5X
+
+Block 5X завершён локально поверх `5cabc5bd56ffc1f1884860a877493dc81d590e3c`;
+после изменений полный regression suite: `1370 collected / 1370 passed`.
+`ContextualCommandPolicy` теперь предоставляет публичные методы
+`normalize_pre_modal_voice()`, `reinterpret_contextual_command()` и
+`is_generic_show_products_command()`. Engine вызывает их в прежнем порядке:
+отрицание → количество → страницы черновика → страницы финальной проверки →
+статус заявки → voice. Telegram callback page parsing находится в
+`input/telegram_visible_actions.py`; `contextual_commands.py` не импортирует
+TelegramEvent, input/presentation/integrations/services и не содержит `v2:*`-парсинг.
+
+`CatalogResolutionService` — единственный production owner `match_item`,
+`apply_catalog` и `refresh_cart_order_values`; engine-фасады и тестовые обращения
+переведены на canonical service. `CandidateSelectionHandler` оставлен `KEEP_TEMP`
+как presentation adapter с callback/revision/reply контрактами. Quantity actions
+не выделялись: подтверждено **NO SAFE QUANTITY ACTION SEAM** без риска изменить
+Block C semantics. Алгоритмы catalog matching, provenance, callbacks, state
+serialization и submission lifecycle не менялись.
+После удаления obsolete catalog facades engine содержит `1613` строк, `76431` байт
+и `33` метода; это уменьшение относится только к переходным wrappers, не к алгоритму.
+
+### Block 5X — проверка границ и callers
+
+Новый architectural regression test проверяет отсутствие Telegram transport/protocol
+зависимостей в contextual policy. Полный suite и focused catalog/routing проверки
+зелёные; targeted mypy и ruff проходят. Историческая глобальная проверка
+`ruff format --check .` по-прежнему может показывать только ранее известный
+`docs/RAPID_INPUT_CONCURRENCY_ANALYSIS.md`; изменённые файлы форматированы.
+
+Рекомендуемая следующая кампания (только после отдельного одобрения):
+analysis-only аудит оставшихся state-action seams engine с отдельным решением
+по безопасному владельцу; реализацию и дальнейшую декомпозицию в Block 5X не
+начинать.
+
+### Block 5W — завершённые seams
 
 Block 5W выполняется поверх `af78e13f3e8bac9eacc474e016ca3f7f083432fd` на ветке
 `decompose_bot`. Базовая проверка до изменений: `1369 collected / 1369 passed`.
@@ -41,8 +76,8 @@ production analytics path в `services/orchestrator.py`; wrappers без product
 удалены после caller-аудита. Дополнительный seam, кроме contextual policy и item intake,
 признан небезопасным: **NO SAFE EXTRA SEAM**.
 
-Текущие изменения engine и два новых conversation-модуля ещё не закоммичены в этом
-срезе. Следующий шаг этой задачи — quality gates, docs audit и один итоговый commit.
+Block 5W опубликован коммитами `adf475128ad973dc6b97a3e37d741f6f50b078bf` и
+`5cabc5bd56ffc1f1884860a877493dc81d590e3c`; его seams являются базой для Block 5X.
 
 ## ARCHIVED ARCHITECTURE SNAPSHOT — Block 5V
 

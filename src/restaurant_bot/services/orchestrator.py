@@ -1715,7 +1715,7 @@ class UpdateOrchestrator:
             )
             if selected is None:
                 continue
-            self.engine._apply_catalog(item, selected, catalog)
+            self.engine.catalog_resolution.apply_catalog(item, selected, catalog)
             safely_resolved = True
             logger.info(
                 "catalog_candidate_safe_equivalence_selected",
@@ -1848,7 +1848,7 @@ class UpdateOrchestrator:
                 packaging_text=item.packaging_text,
             )
             if can_select and selected is not None:
-                self.engine._apply_catalog(item, selected, catalog)
+                self.engine.catalog_resolution.apply_catalog(item, selected, catalog)
             elif (
                 decision.action == "not_found"
                 and decision.confidence >= _AI_MATCH_NOT_FOUND_MIN_CONFIDENCE

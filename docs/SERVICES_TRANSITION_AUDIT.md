@@ -1,6 +1,23 @@
 # Аудит переходного слоя services/ и результат Block 5V
 
-## CURRENT ARCHITECTURE — Block 5W
+## CURRENT ARCHITECTURE — Block 5X
+
+После Block 5X текущий baseline: `1370 collected / 1370 passed`. Контекстный
+маршрутизатор имеет channel-neutral public API, а Telegram page extraction
+перенесён в `input/telegram_visible_actions.py`; `services/engine.py` передаёт
+только `InputKind`, raw text, state и вычисленные страницы.
+
+Каталоговые mutation/read operations принадлежат
+`orders/catalog_resolution.py`: production callers engine и orchestrator, а
+catalog tests используют тот же owner. Удалены engine compatibility facades
+для matching/apply/refresh и неиспользуемые supplier/comment wrappers.
+`_validate_supplier_hint` оставлен orchestration operation. Candidate selection
+handler — `KEEP_TEMP` presentation adapter; quantity actions — **NO SAFE
+QUANTITY ACTION SEAM** до отдельного доказательства безопасной границы.
+После удаления catalog facades engine содержит `1613` строк, `76431` байт и
+`33` метода; его orchestration ordering не менялся.
+
+## CURRENT ARCHITECTURE — Block 5W (архив)
 
 Текущий срез после Block 5W-A и незакоммиченных mechanical seams: полный baseline
 `1369 collected / 1369 passed`. Venue contract/codes принадлежат `venues/`, а

@@ -1,6 +1,22 @@
 # Карта проекта
 
-## Current architecture after Block 5W
+## Current architecture after Block 5X
+
+Block 5X завершил contextual/catalog boundary cleanup без изменения поведения;
+свежий полный suite: `1370 collected / 1370 passed`. Публичные методы
+`ContextualCommandPolicy` сохраняют порядок pre-modal voice и contextual
+fallback. `input/telegram_visible_actions.py` — Telegram-only owner извлечения
+страниц из `visible_actions`; routing policy не импортирует transport,
+presentation, integrations или services и не знает `v2:*`.
+
+`orders/catalog_resolution.py` — единственный owner `match_item`,
+`apply_catalog`, `refresh_cart_order_values`; engine/orchestrator вызывают его
+напрямую. `CandidateSelectionHandler` остаётся `KEEP_TEMP` presentation
+adapter, а quantity action seam пока помечен **NO SAFE QUANTITY ACTION SEAM**.
+После удаления catalog facades engine содержит `1613` строк, `76431` байт и
+`33` метода; порядок stateful orchestration сохранён.
+
+## Current architecture after Block 5W (архив)
 
 На актуальном срезе `decompose_bot` базовый полный suite даёт `1369 passed`.
 Нейтральный контракт заведений находится в `venues/`; fallback-модели OpenAI принадлежат
