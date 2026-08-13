@@ -108,8 +108,49 @@ def clear_item_comment(item: CartItem) -> None:
 
 def append_item_comment(item: CartItem, comment: str) -> None:
     """Добавляет семантический комментарий позиции без повторов."""
-    item.comment = merge_comments(item.comment, comment)
+    item.comment = merge_comments(_apply_local_correction(item.comment, comment))
     item.comment_source = CommentSource.SEMANTIC
+
+
+def _apply_local_correction(existing: str, addition: str) -> str:
+    """Заменяет исправленный фрагмент, сохраняя остальные пожелания."""
+    correction = re.fullmatch(
+        r"\s*не\s+(?P<old>.+?)\s*,?\s+(?:а|но|только)\s+(?P<new>.+?)\s*",
+        clean_text(addition),
+        flags=re.IGNORECASE,
+    )
+    if correction is None or not existing:
+        return merge_comments(existing, addition)
+
+    old = correction.group("old").strip(" .,;:-—–")
+    new = correction.group("new").strip(" .,;:-—–")
+    if not old or not new:
+        return merge_comments(existing, addition)
+
+    normalized_old = normalize_text(old)
+    replaced = False
+    fragments: list[str] = []
+    for fragment in existing.split(";"):
+        current = fragment.strip(" .,;:-—–")
+        normalized_current = normalize_text(current)
+        if normalized_old == normalized_current:
+            fragments.append(new)
+            replaced = True
+            continue
+        marker = re.search(
+            rf"(?<![\wа-яё]){re.escape(old)}(?![\wа-яё])",
+            current,
+            flags=re.IGNORECASE,
+        )
+        if marker is None:
+            fragments.append(current)
+            continue
+        fragments.append(f"{current[: marker.start()]}{new}{current[marker.end() :]}")
+        replaced = True
+
+    if not replaced:
+        return merge_comments(existing, addition)
+    return "; ".join(part.strip(" .,;:-—–") for part in fragments if part.strip(" .,;:-—–"))
 
 
 def remove_cart_comment_shadows(state: ConversationState) -> None:
