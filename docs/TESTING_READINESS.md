@@ -10,7 +10,7 @@
 |---|---|
 | Дата | 2026-08-13 |
 | Ветка | `decompose_bot` |
-| Проверенный HEAD | `5c1242e` |
+| Проверенный HEAD | `6299a84` |
 | Полный baseline | `1378 collected / 1378 passed` за `17.13 s` |
 | Финальная проверка после acceptance/architecture tests | `1382 collected / 1382 passed` за `17.33 s` |
 | Архитектурный статус | `SERVICES_FINAL_FREEZE`; Block 6C/6C.1 завершены |

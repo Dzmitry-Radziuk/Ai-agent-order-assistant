@@ -2,7 +2,7 @@
 
 ## CURRENT STATUS — ARCHITECTURE FINALIZATION
 
-Проверенный текущий HEAD: `5c1242e`, ветка
+Проверенный текущий HEAD: `6299a84`, ветка
 `decompose_bot`, origin — GitHub. Свежий baseline до acceptance-тестов:
 `1378 collected / 1378 passed`; финальный suite после двух новых характеристик:
 `1382 collected / 1382 passed`. Baseline `1378/1378` снят на исходном Block 6D
