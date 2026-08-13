@@ -21,7 +21,7 @@ def test_text_order_uses_neutral_input_without_telegram_event(settings) -> None:
         interaction,
         infer_intent(interaction.text),
         ConversationState(),
-        [CatalogProduct(product_id="chicken", name="Курица", unit="кг")],
+        [CatalogProduct(product_id="cucumber", name="Огурцы", unit="кг")],
     )
 
     assert result.state.cart
