@@ -2,6 +2,9 @@
 
 ## Current architecture after Block 5Y
 
+Detailed current `UpdateOrchestrator` forensic inventory is maintained in
+[`docs/UPDATE_ORCHESTRATOR_AUDIT.md`](../docs/UPDATE_ORCHESTRATOR_AUDIT.md).
+
 Block 5Y завершил controlled cleanup draft/comment/progression seams без изменения
 поведения; свежий полный suite: `1377 collected / 1377 passed`. Публичные методы
 `ContextualCommandPolicy` сохраняют порядок pre-modal voice и contextual

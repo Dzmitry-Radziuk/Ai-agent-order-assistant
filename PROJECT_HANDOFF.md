@@ -2,6 +2,15 @@
 
 ## CURRENT ARCHITECTURE — Block 5Y
 
+### Block 5Z — forensic audit of UpdateOrchestrator
+
+Detailed analysis-only inventory, pipeline, safety protocol and seam decision is
+documented in [`docs/UPDATE_ORCHESTRATOR_AUDIT.md`](docs/UPDATE_ORCHESTRATOR_AUDIT.md).
+The current baseline is `1377 collected / 1377 passed`; claim/lease/checkpoint
+remain one durable coordinator boundary. The only next candidate campaign is
+input interpretation extraction; checkpoint, lease, review, registration and
+catalog AI remain protected.
+
 Block 5Y завершён поверх опубликованного `fc39d6a13c6557f24816f9787ce3d14ee5b0985a`;
 текущий полный regression suite: `1377 collected / 1377 passed`.
 `ContextualCommandPolicy` теперь предоставляет публичные методы
