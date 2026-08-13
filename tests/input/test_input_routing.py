@@ -1,4 +1,7 @@
+from unittest.mock import MagicMock
+
 from restaurant_bot.application.order_review.contracts import ReviewSnapshot
+from restaurant_bot.conversation.routing.state_compatibility import StateCompatibilityPolicy
 from restaurant_bot.domain.models import (
     ConversationState,
     ExtractedItem,
@@ -10,8 +13,17 @@ from restaurant_bot.domain.models import (
 )
 from restaurant_bot.input.telegram import normalize_telegram_update
 from restaurant_bot.input.telegram_callbacks import parse_callback
+from restaurant_bot.input.telegram_interpretation import TelegramInputInterpreter
 from restaurant_bot.parsing.commands.api import enrich_command, infer_intent
 from restaurant_bot.services.orchestrator import UpdateOrchestrator
+
+
+def _interpreter(orchestrator: UpdateOrchestrator) -> TelegramInputInterpreter:
+    """Создаёт интерпретатор для прямых тестов текстового маршрута."""
+    provider = getattr(orchestrator, "openai", MagicMock())
+    engine = getattr(orchestrator, "engine", None)
+    policy = getattr(engine, "state_compatibility_policy", StateCompatibilityPolicy())
+    return TelegramInputInterpreter(provider, lambda: MagicMock(), policy)
 
 
 def test_bot_suffix_is_removed_from_slash_command_before_routing() -> None:
@@ -78,7 +90,7 @@ def test_callback_input_preserves_callback_data_for_engine() -> None:
 def test_review_deep_link_is_a_dedicated_command() -> None:
     """Проверяет, что deep-link просмотра не превращается в товар или регистрацию."""
     orchestrator = UpdateOrchestrator.__new__(UpdateOrchestrator)
-    command = orchestrator._parse_text_in_context(
+    command = _interpreter(orchestrator).interpret_text(
         "/start review_6461W6",
         ConversationState(),
     )
@@ -174,7 +186,7 @@ def test_sheet_review_does_not_map_arbitrary_text_to_visible_action() -> None:
         ],
     )
 
-    command = orchestrator._parse_text_in_context(
+    command = _interpreter(orchestrator).interpret_text(
         "ну всё готово, можно передавать снабженцу",
         state,
     )
@@ -208,7 +220,7 @@ def test_review_voice_maps_negative_and_refresh_phrases_without_product_addition
     ):
         orchestrator = UpdateOrchestrator.__new__(UpdateOrchestrator)
         orchestrator.openai = ReviewVoiceAI(parsed_intent)
-        command = orchestrator._parse_text_in_context(phrase, state)
+        command = _interpreter(orchestrator).interpret_text(phrase, state)
         assert command.intent is expected
 
 
@@ -224,7 +236,7 @@ def test_regular_cart_review_does_not_use_sheet_review_voice_router() -> None:
 
     orchestrator = UpdateOrchestrator.__new__(UpdateOrchestrator)
     orchestrator.openai = RegularReviewAI()
-    command = orchestrator._parse_text_in_context(
+    command = _interpreter(orchestrator).interpret_text(
         "Отправляй",
         ConversationState(stage=SessionStage.REVIEW, review_mode="cart"),
     )
@@ -253,7 +265,7 @@ def test_short_sheet_review_voice_transcription_never_selects_a_button() -> None
 
     orchestrator = UpdateOrchestrator.__new__(UpdateOrchestrator)
     orchestrator.openai = ShortVoiceAI()
-    command = orchestrator._parse_text_in_context(
+    command = _interpreter(orchestrator).interpret_text(
         "А.",
         ConversationState(
             stage=SessionStage.REVIEW,
@@ -298,7 +310,7 @@ def test_concrete_product_command_wins_over_visible_action_fallback() -> None:
         visible_actions=[{"label": "Добавить ещё товары", "action_id": "v2:add"}],
     )
 
-    command = orchestrator._parse_text_in_context("пармезан 3 кг", state)
+    command = _interpreter(orchestrator).interpret_text("пармезан 3 кг", state)
 
     assert command.intent is Intent.ADD_ITEMS
     assert command.items[0].product_query == "пармезан"

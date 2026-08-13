@@ -5,6 +5,7 @@ from unittest.mock import ANY, MagicMock
 import httpx
 import pytest
 
+from restaurant_bot.conversation.routing.state_compatibility import StateCompatibilityPolicy
 from restaurant_bot.domain.models import (
     BotReply,
     Button,
@@ -13,15 +14,23 @@ from restaurant_bot.domain.models import (
     ConversationState,
     EngineResult,
     ExtractedItem,
+    InputKind,
     Intent,
     ItemStatus,
     ParsedCommand,
     SessionStage,
+    TelegramEvent,
 )
+from restaurant_bot.input.telegram_interpretation import TelegramInputInterpreter
 from restaurant_bot.integrations.openai_client import CommentScopeDecision
 from restaurant_bot.services import orchestrator as orchestrator_module
 from restaurant_bot.services.orchestrator import ClaimedUpdate, UpdateOrchestrator
 from restaurant_bot.services.venue_registration import RegistrationResult, VenueContext
+
+
+def _interpreter(service: UpdateOrchestrator) -> TelegramInputInterpreter:
+    """Создаёт интерпретатор для прямых проверок входного маршрута."""
+    return TelegramInputInterpreter(service.openai, lambda: MagicMock(), StateCompatibilityPolicy())
 
 
 def _authorized_orchestrator(mocker) -> UpdateOrchestrator:  # type: ignore[no-untyped-def]
@@ -33,6 +42,7 @@ def _authorized_orchestrator(mocker) -> UpdateOrchestrator:  # type: ignore[no-u
     service.sheets = MagicMock()
     service.catalog = MagicMock()
     service.engine = MagicMock()
+    service.input_interpreter = MagicMock()
     service.tracer = MagicMock()
     trace = MagicMock()
     service.tracer.observation.return_value = nullcontext(trace)
@@ -263,11 +273,12 @@ def test_pending_comment_answer_uses_dedicated_scope_resolver() -> None:
     """Не отправляет ответ об области комментария в обычный поиск товаров."""
     service = object.__new__(UpdateOrchestrator)
     service.openai = SimpleNamespace(
+        parse_text=lambda text: ParsedCommand(intent=Intent.UNKNOWN, text=text),
         resolve_comment_scope=lambda _text, _items: CommentScopeDecision(
             action="items",
             target_item_indexes=[0, 1],
             confidence=0.99,
-        )
+        ),
     )
     state = ConversationState(
         pending_comment_items=[
@@ -277,7 +288,7 @@ def test_pending_comment_answer_uses_dedicated_scope_resolver() -> None:
         pending_comment_text="положить отдельно",
     )
 
-    command = service._parse_pending_comment_scope("Для всех товаров", state)
+    command = _interpreter(service).interpret_text("Для всех товаров", state)
 
     assert command.intent is Intent.ADD_ITEMS
     assert command.comment_scope_action == "items"
@@ -297,7 +308,15 @@ def test_pending_comment_callback_selects_last_item_without_ai() -> None:
         pending_comment_text="положить отдельно",
     )
 
-    command = service._parse_pending_comment_scope("v2:comment:last:r7", state)
+    command = _interpreter(service).interpret(
+        TelegramEvent(
+            update_id=1,
+            chat_id="chat",
+            input_type=InputKind.CALLBACK,
+            callback_data="v2:comment:last:r7",
+        ),
+        state,
+    )
 
     assert command.comment_scope_action == "items"
     assert command.comment_target_indexes == [1]
@@ -412,7 +431,7 @@ def test_product_text_pipeline_shows_progress_and_edits_it_with_result(mocker) -
         intent=Intent.ADD_ITEMS,
         items=[ExtractedItem(product_query="сироп роза", quantity=10, unit="шт")],
     )
-    service._parse = MagicMock(return_value=command)  # type: ignore[method-assign]
+    service.input_interpreter.interpret = MagicMock(return_value=command)
     catalog = [CatalogProduct(product_id="rose", name="Сироп Роза", unit="шт")]
     service.catalog.get.return_value = catalog
     result = EngineResult(
@@ -444,12 +463,12 @@ def test_unauthorized_update_stops_before_parser(mocker) -> None:  # type: ignor
     service._claim = MagicMock(return_value=_claim("сироп роза"))  # type: ignore[method-assign]
     service.registration.context_for.return_value = None
     service._complete_unauthorized = MagicMock()  # type: ignore[method-assign]
-    service._parse = MagicMock()  # type: ignore[method-assign]
+    service.input_interpreter.interpret = MagicMock()
 
     service.process(1)
 
     service._complete_unauthorized.assert_called_once()
-    service._parse.assert_not_called()
+    service.input_interpreter.interpret.assert_not_called()
     service._finish.assert_called_once_with(1, "done")
 
 
@@ -458,7 +477,7 @@ def test_voice_pipeline_shows_progress_before_transcription(mocker) -> None:  # 
     service = _authorized_orchestrator(mocker)
     service._claim = MagicMock(return_value=_voice_claim())  # type: ignore[method-assign]
     command = ParsedCommand(intent=Intent.SHOW_CART, text="покажи черновик")
-    service._parse = MagicMock(return_value=command)  # type: ignore[method-assign]
+    service.input_interpreter.interpret = MagicMock(return_value=command)
     result = EngineResult(state=ConversationState(), reply=BotReply(text="Черновик заявки"))
     service.engine.handle.return_value = result
     service._resolve_ai_pending = MagicMock(return_value=result)  # type: ignore[method-assign]
@@ -479,7 +498,7 @@ def test_voice_pipeline_continues_when_progress_card_times_out(mocker) -> None: 
     service = _authorized_orchestrator(mocker)
     service._claim = MagicMock(return_value=_voice_claim())  # type: ignore[method-assign]
     command = ParsedCommand(intent=Intent.FIX_MULTIPLE, text="выбрать количество")
-    service._parse = MagicMock(return_value=command)  # type: ignore[method-assign]
+    service.input_interpreter.interpret = MagicMock(return_value=command)
     result = EngineResult(
         state=ConversationState(),
         reply=BotReply(
@@ -493,7 +512,7 @@ def test_voice_pipeline_continues_when_progress_card_times_out(mocker) -> None: 
 
     service.process(2)
 
-    service._parse.assert_called_once()
+    service.input_interpreter.interpret.assert_called_once()
     final = service.telegram.send_reply.call_args_list[1].args[1]
     assert final.text == "Выберите количество"
     assert final.edit_message_id is None
@@ -508,6 +527,11 @@ def test_photo_pipeline_reports_download_recognition_and_catalog_stages(mocker, 
     """Показывает каждый длительный этап обработки фотографии."""
     service = _authorized_orchestrator(mocker)
     service._claim = MagicMock(return_value=_photo_claim())  # type: ignore[method-assign]
+    service.input_interpreter = TelegramInputInterpreter(
+        service.openai,
+        service._recognizer,
+        StateCompatibilityPolicy(),
+    )
     photo = tmp_path / "large-order.jpg"
     photo.write_bytes(b"image")
     service.telegram.download_file.return_value = SimpleNamespace(
@@ -546,6 +570,11 @@ def test_photo_timeout_replaces_progress_with_specific_recovery(mocker, tmp_path
     """Заменяет зависшую карточку фото понятной подсказкой после таймаута."""
     service = _authorized_orchestrator(mocker)
     service._claim = MagicMock(return_value=_photo_claim())  # type: ignore[method-assign]
+    service.input_interpreter = TelegramInputInterpreter(
+        service.openai,
+        service._recognizer,
+        StateCompatibilityPolicy(),
+    )
     photo = tmp_path / "large-order.jpg"
     photo.write_bytes(b"image")
     service.telegram.download_file.return_value = SimpleNamespace(
@@ -571,7 +600,7 @@ def test_search_all_suppliers_deletes_old_card_and_edits_progress_with_result(
     service = _authorized_orchestrator(mocker)
     service._claim = MagicMock(return_value=_search_all_claim())  # type: ignore[method-assign]
     command = ParsedCommand(intent=Intent.SEARCH_ALL_SUPPLIERS, callback_target="0")
-    service._parse = MagicMock(return_value=command)  # type: ignore[method-assign]
+    service.input_interpreter.interpret = MagicMock(return_value=command)
     service.catalog.get.return_value = []
     result = EngineResult(state=ConversationState(), reply=BotReply(text="Выберите товар"))
     service.engine.handle.return_value = result
@@ -639,7 +668,7 @@ def test_pipeline_failure_is_checkpointed_and_user_gets_safe_reply(mocker) -> No
     service = _authorized_orchestrator(mocker)
     claim = _claim("/draft")
     service._claim = MagicMock(return_value=claim)  # type: ignore[method-assign]
-    service._parse = MagicMock(side_effect=RuntimeError("parser failed"))  # type: ignore[method-assign]
+    service.input_interpreter.interpret = MagicMock(side_effect=RuntimeError("parser failed"))
     service.telegram.send_reply.return_value = 77
 
     with pytest.raises(RuntimeError, match="parser failed"):
@@ -662,7 +691,7 @@ def test_checkpointed_result_retries_only_telegram_delivery(mocker) -> None:  # 
     claim.result = result.model_dump(mode="json")
     claim.state_applied = True
     service._claim = MagicMock(return_value=claim)  # type: ignore[method-assign]
-    service._parse = MagicMock()  # type: ignore[method-assign]
+    service.input_interpreter.interpret = MagicMock()
     request = httpx.Request("POST", "https://telegram.invalid/editMessageText")
     service.telegram.send_reply.side_effect = [
         httpx.ConnectTimeout("TLS timeout", request=request),
@@ -672,7 +701,7 @@ def test_checkpointed_result_retries_only_telegram_delivery(mocker) -> None:  # 
     with pytest.raises(httpx.ConnectTimeout, match="TLS timeout"):
         service.process(2)
 
-    service._parse.assert_not_called()
+    service.input_interpreter.interpret.assert_not_called()
     service.engine.handle.assert_not_called()
     service._checkpoint_state.assert_not_called()
     assert service.telegram.send_reply.call_count == 1
@@ -680,7 +709,7 @@ def test_checkpointed_result_retries_only_telegram_delivery(mocker) -> None:  # 
 
     service.process(2)
 
-    service._parse.assert_not_called()
+    service.input_interpreter.interpret.assert_not_called()
     service.engine.handle.assert_not_called()
     service._checkpoint_state.assert_not_called()
     service._checkpoint_reply.assert_called_once_with(2, "7", 91)

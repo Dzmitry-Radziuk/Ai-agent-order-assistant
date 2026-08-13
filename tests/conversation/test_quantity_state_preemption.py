@@ -16,6 +16,7 @@ from restaurant_bot.domain.models import (
     SessionStage,
     TelegramEvent,
 )
+from restaurant_bot.input.telegram_interpretation import TelegramInputInterpreter
 from restaurant_bot.parsing.commands.api import infer_intent
 from restaurant_bot.services.engine import ConversationEngine
 from restaurant_bot.services.orchestrator import UpdateOrchestrator
@@ -86,7 +87,11 @@ def test_quantity_preemption_uses_global_text_parser_boundary(settings) -> None:
     parser.openai = SimpleNamespace(parse_text=infer_intent)
     state = _missing_quantity_state()
 
-    command = parser._parse_text_in_context("пармезан 3 кг", state)
+    command = TelegramInputInterpreter(
+        parser.openai,
+        lambda: None,
+        StateCompatibilityPolicy(),
+    ).interpret_text("пармезан 3 кг", state)
 
     assert command.intent is Intent.ADD_ITEMS
     assert command.items[0].product_query == "пармезан"

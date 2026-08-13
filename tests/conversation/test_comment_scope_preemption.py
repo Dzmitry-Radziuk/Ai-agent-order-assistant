@@ -24,9 +24,19 @@ from restaurant_bot.domain.models import (
     SessionStage,
     TelegramEvent,
 )
+from restaurant_bot.input.telegram_interpretation import TelegramInputInterpreter
 from restaurant_bot.integrations.openai_client import CommentScopeDecision
 from restaurant_bot.services.engine import ConversationEngine
 from restaurant_bot.services.orchestrator import UpdateOrchestrator
+
+
+def _interpreter(service: UpdateOrchestrator) -> TelegramInputInterpreter:
+    """Создаёт интерпретатор для проверки contextual comment routing."""
+    return TelegramInputInterpreter(
+        service.openai,
+        lambda: Mock(),
+        service.engine.state_compatibility_policy,
+    )
 
 
 def _event(text: str, input_type: InputKind = InputKind.TEXT) -> TelegramEvent:
@@ -288,7 +298,7 @@ def test_global_parse_precedes_comment_scope_fallback() -> None:
     service.openai.resolve_comment_scope = Mock(side_effect=AssertionError("must not be called"))
     service.engine = SimpleNamespace(state_compatibility_policy=StateCompatibilityPolicy())
 
-    command = service._parse_text_in_context("пармезан 3 кг", _pending_state())
+    command = _interpreter(service).interpret_text("пармезан 3 кг", _pending_state())
 
     assert command.intent is Intent.ADD_ITEMS
     assert command.items[0].product_query == "пармезан"
@@ -307,7 +317,7 @@ def test_independent_global_intents_skip_comment_scope_fallback(intent: Intent) 
     service.openai.resolve_comment_scope = Mock(side_effect=AssertionError("must not be called"))
     service.engine = SimpleNamespace(state_compatibility_policy=StateCompatibilityPolicy())
 
-    command = service._parse_text_in_context(intent.value, _pending_state())
+    command = _interpreter(service).interpret_text(intent.value, _pending_state())
 
     assert command.intent is intent
     service.openai.resolve_comment_scope.assert_not_called()
@@ -328,7 +338,7 @@ def test_unknown_global_parse_uses_comment_scope_fallback() -> None:
     )
     service.engine = SimpleNamespace(state_compatibility_policy=StateCompatibilityPolicy())
 
-    command = service._parse_text_in_context("для первого и третьего", _pending_state())
+    command = _interpreter(service).interpret_text("для первого и третьего", _pending_state())
 
     assert command.comment_scope_action == "items"
     assert command.comment_target_indexes == [0, 2]

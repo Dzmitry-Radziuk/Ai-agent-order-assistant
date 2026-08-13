@@ -9,7 +9,6 @@ from typing import Any
 from uuid import uuid4
 
 import structlog
-from openai import APIConnectionError, APITimeoutError, RateLimitError
 from redis import Redis
 from structlog.contextvars import bound_contextvars
 
@@ -29,13 +28,9 @@ from restaurant_bot.catalog.safety import (
     is_safe_catalog_name_equivalent,
 )
 from restaurant_bot.config import Settings
-from restaurant_bot.conversation.comments import comment_scope_items
 from restaurant_bot.conversation.routing.contracts import (
     CompatibilityAction,
     CompatibilityContext,
-)
-from restaurant_bot.conversation.routing.state_compatibility import (
-    StateCompatibilityPolicy,
 )
 from restaurant_bot.db import SessionLocal
 from restaurant_bot.domain.models import (
@@ -53,7 +48,7 @@ from restaurant_bot.domain.models import (
     TelegramEvent,
 )
 from restaurant_bot.input.telegram import normalize_telegram_update
-from restaurant_bot.input.telegram_callbacks import parse_callback
+from restaurant_bot.input.telegram_interpretation import TelegramInputInterpreter
 from restaurant_bot.integrations.cache import (
     CatalogCache,
     ChatLease,
@@ -65,7 +60,7 @@ from restaurant_bot.integrations.openai_client import OpenAIService
 from restaurant_bot.integrations.openai_transcription_policy import has_distinct_models
 from restaurant_bot.integrations.telegram import TELEGRAM_TRANSIENT_ERRORS, TelegramClient
 from restaurant_bot.logging import sanitize_log_value
-from restaurant_bot.parsing.commands.api import enrich_command, infer_intent
+from restaurant_bot.parsing.commands.api import infer_intent
 from restaurant_bot.presentation.telegram.order_review import preview_reply
 from restaurant_bot.presentation.telegram.venue_registration import not_bound_reply
 from restaurant_bot.repositories.order_events import OrderEventRepository
@@ -99,7 +94,6 @@ def _lease_kwargs(lease: ChatLease | None) -> dict[str, Any]:
     return {"lease": lease} if lease is not None else {}
 
 
-_OPENAI_TRANSIENT_ERRORS = (APIConnectionError, APITimeoutError, RateLimitError)
 _AI_MATCH_SELECT_MIN_CONFIDENCE = 0.90
 _AI_MATCH_NOT_FOUND_MIN_CONFIDENCE = 0.80
 _AI_MATCH_MIN_SCORE = 40.0
@@ -152,6 +146,11 @@ class UpdateOrchestrator:
         self.sheets = sheets
         self.catalog = CatalogCache(settings, redis, sheets)
         self.engine = ConversationEngine(settings)
+        self.input_interpreter = TelegramInputInterpreter(
+            self.openai,
+            self._recognizer,
+            self.engine.state_compatibility_policy,
+        )
         self.tracer = openai_service.tracer
         self.registration = VenueRegistrationService(settings, redis, sheets)
         self.order_review = OrderReviewService(settings, redis, telegram, sheets)
@@ -344,7 +343,11 @@ class UpdateOrchestrator:
                         )
 
                     stage_started = perf_counter()
-                    command = self._parse(event, state, processing_message_id)
+                    command = self.input_interpreter.interpret(
+                        event,
+                        state,
+                        processing_message_id,
+                    )
                     timings["parse_ms"] = round((perf_counter() - stage_started) * 1000)
                     log.info("command_parsed", **self._command_log(command))
                     if event.input_type is InputKind.PHOTO and command.intent in _REVIEW_INTENTS:
@@ -1303,275 +1306,13 @@ class UpdateOrchestrator:
                 _ensure_lease(lease)
             sessions.save(event.chat_id, state, row)
 
-    def _parse(
-        self,
-        event: TelegramEvent,
-        state: ConversationState,
-        processing_message_id: int | None = None,
-    ) -> ParsedCommand:
-        """Разбирает нормализованное событие пользователя."""
-        if event.input_type == InputKind.CALLBACK and event.callback_data.startswith("v2:review"):
-            return enrich_command("", parse_callback(event.callback_data))
-        if event.input_type == InputKind.CALLBACK and state.pending_comment_items:
-            return self._parse_pending_comment_scope(event.callback_data, state)
-        if event.input_type == InputKind.CALLBACK:
-            return enrich_command("", parse_callback(event.callback_data))
-        if event.input_type == InputKind.TEXT:
-            return self._parse_text_in_context(event.text, state)
-        if event.input_type in {InputKind.VOICE, InputKind.PHOTO}:
-            return self._recognizer().recognize_media(
-                event,
-                state,
-                self._parse_text_in_context,
-                processing_message_id,
-            )
-        return ParsedCommand(intent=Intent.UNKNOWN, text=event.text)
-
     def _recognizer(self) -> InputRecognitionService:
-        """Возвращает сервис распознавания, включая облегчённые тестовые экземпляры."""
+        """Возвращает сервис распознавания с сохранением lazy test-контракта."""
         service = getattr(self, "input_recognition", None)
         if service is None:
             service = InputRecognitionService(self.telegram, self.openai)
             self.input_recognition = service
         return service
-
-    def _parse_text_in_context(
-        self,
-        text: str,
-        state: ConversationState,
-    ) -> ParsedCommand:
-        """Разбирает текст с учётом кнопок, видимых пользователю."""
-        review_match = re.fullmatch(
-            r"/start(?:@[A-Za-z0-9_]+)?\s+review_([A-Za-zА-ЯЁ0-9]{4,32})",
-            clean_text(text),
-            flags=re.IGNORECASE,
-        )
-        if review_match:
-            return ParsedCommand(
-                intent=Intent.REVIEW_ORDER,
-                text=text,
-                callback_target=review_match.group(1),
-            )
-        # A clear reference to a button belongs to the current screen. Keep
-        # it out of the generic product parser, except while a comment-scope
-        # answer is being resolved by its dedicated contextual flow.
-        if not state.pending_comment_items:
-            callback_data = self._match_visible_action(text, state)
-            if callback_data:
-                return enrich_command("", parse_callback(callback_data)).model_copy(
-                    update={"text": text}
-                )
-        parsed = self.openai.parse_text(text)
-        review_command = self._parse_sheet_review_command(text, parsed, state)
-        if review_command is not None:
-            return review_command
-        if (
-            state.pending_comment_items
-            and self.engine.state_compatibility_policy.should_try_contextual_fallback(
-                state,
-                parsed,
-                CompatibilityContext.COMMENT_SCOPE,
-            )
-        ):
-            return self._parse_pending_comment_scope(text, state)
-        # Visible buttons are a contextual fallback after global parsing. A
-        # concrete product command must remain an ADD_ITEMS intent.
-        if parsed.intent is Intent.UNKNOWN or (
-            parsed.intent is Intent.ADD_ITEMS and not parsed.items
-        ):
-            callback_data = self._match_visible_action(text, state)
-            if callback_data:
-                return enrich_command("", parse_callback(callback_data)).model_copy(
-                    update={"text": text}
-                )
-        if not self._needs_visible_action_ai(text, parsed, state):
-            return parsed
-        try:
-            selected = self.openai.choose_visible_action(
-                text,
-                state.ui_message_text,
-                state.visible_actions,
-            )
-        except _OPENAI_TRANSIENT_ERRORS as error:
-            logger.warning(
-                "visible_action_transport_failed",
-                error_type=type(error).__name__,
-            )
-            return ParsedCommand(intent=Intent.UNKNOWN, text=text)
-        if not selected:
-            if parsed.intent is Intent.ADD_ITEMS and parsed.items:
-                return ParsedCommand(intent=Intent.UNKNOWN, text=text)
-            return parsed
-        return enrich_command("", parse_callback(selected)).model_copy(update={"text": text})
-
-    def _parse_sheet_review_command(
-        self,
-        text: str,
-        parsed: ParsedCommand,
-        state: ConversationState,
-    ) -> ParsedCommand | None:
-        """Нормализует только подтверждённую структурированную команду sheet-review."""
-        if state.stage != SessionStage.REVIEW or state.review_mode != _SHEET_REVIEW_MODE:
-            return None
-
-        policy = getattr(
-            getattr(self, "engine", None),
-            "state_compatibility_policy",
-            StateCompatibilityPolicy(),
-        )
-        decision = policy.evaluate(
-            parsed,
-            state,
-            CompatibilityContext.SHEET_REVIEW,
-        )
-        if decision.action is CompatibilityAction.INTERRUPT:
-            return parsed
-        if decision.action is CompatibilityAction.AMBIGUOUS:
-            return ParsedCommand(intent=Intent.UNKNOWN, text=text)
-        if decision.action is not CompatibilityAction.CONTINUE:
-            return parsed.model_copy(update={"text": text})
-
-        if parsed.intent in {Intent.REVIEW_SUBMIT, Intent.REVIEW_CANCEL}:
-            return parsed.model_copy(update={"callback_target": state.review_token, "text": text})
-        if parsed.intent in {Intent.SUBMIT_REQUEST, Intent.SUBMIT_AS_IS, Intent.CONFIRM} or (
-            parsed.dialogue_response.value == "affirm"
-        ):
-            return parsed.model_copy(
-                update={
-                    "intent": Intent.REVIEW_SUBMIT,
-                    "callback_target": state.review_token,
-                    "text": text,
-                }
-            )
-        if parsed.intent in {Intent.CANCEL, Intent.BACK} or (
-            parsed.dialogue_response.value == "decline"
-        ):
-            return parsed.model_copy(
-                update={
-                    "intent": Intent.REVIEW_CANCEL,
-                    "callback_target": state.review_token,
-                    "text": text,
-                }
-            )
-        return parsed.model_copy(update={"text": text})
-
-    def _parse_pending_comment_scope(
-        self,
-        text: str,
-        state: ConversationState,
-    ) -> ParsedCommand:
-        """Разбирает ответ на вопрос об области ожидающего комментария."""
-        callback = clean_text(text).casefold()
-        scope_items = comment_scope_items(state)
-        item_count = len(scope_items)
-        action = ""
-        target_indexes: list[int] = []
-        confidence = 0.0
-
-        if callback.startswith("v2:comment:"):
-            target = callback.removeprefix("v2:comment:").split(":r", maxsplit=1)[0]
-            confidence = 1.0
-            if target == "all":
-                action = "items"
-                target_indexes = list(range(item_count))
-            elif target == "last" and item_count:
-                action = "items"
-                target_indexes = [item_count - 1]
-            elif target == "order":
-                action = "order"
-            elif target == "cancel":
-                action = "cancel"
-        else:
-            try:
-                decision = self.openai.resolve_comment_scope(
-                    text,
-                    [item.product_query for item in scope_items],
-                )
-            except _OPENAI_TRANSIENT_ERRORS as error:
-                logger.warning(
-                    "comment_scope_transport_failed",
-                    error_type=type(error).__name__,
-                )
-                action = "ambiguous"
-            else:
-                action = decision.action
-                target_indexes = decision.target_item_indexes
-                confidence = decision.confidence
-
-        carries_items = action in {"items", "order"}
-        intent = (
-            Intent.ADD_ITEMS
-            if carries_items
-            else Intent.CANCEL
-            if action == "cancel"
-            else Intent.CLARIFY_CURRENT
-        )
-        return ParsedCommand(
-            intent=intent,
-            text=text,
-            items=(
-                [item.model_copy(deep=True) for item in state.pending_comment_items]
-                if carries_items
-                else []
-            ),
-            comment_scope_action=action or "ambiguous",
-            comment_target_indexes=target_indexes,
-            confidence=confidence,
-        )
-
-    @staticmethod
-    def _match_visible_action(text: str, state: ConversationState) -> str:
-        """Находит явно названную кнопку текущего экрана."""
-        return InputRecognitionService.match_visible_action(text, state)
-
-    @staticmethod
-    def _needs_visible_action_ai(
-        text: str,
-        parsed: ParsedCommand,
-        state: ConversationState,
-    ) -> bool:
-        """Определяет необходимость смыслового выбора видимой кнопки."""
-        if state.stage == SessionStage.REVIEW and state.review_mode == _SHEET_REVIEW_MODE:
-            return False
-        if not state.visible_actions or parsed.intent not in {Intent.UNKNOWN, Intent.ADD_ITEMS}:
-            return False
-        if (
-            parsed.intent == Intent.ADD_ITEMS
-            and parsed.items
-            and (
-                parsed.explicit_add_items
-                or any(item.quantity is not None or item.unit for item in parsed.items)
-            )
-        ):
-            return False
-        words = normalize_text(text).split()
-        action_stems = (
-            "выбр",
-            "остав",
-            "введ",
-            "укаж",
-            "исправ",
-            "измен",
-            "поменя",
-            "покаж",
-            "посмотр",
-            "откр",
-            "перей",
-            "верн",
-            "отправ",
-            "добав",
-            "убер",
-            "удал",
-            "очист",
-            "начн",
-            "повтор",
-            "пропуст",
-            "пров",
-            "прав",
-        )
-        return state.stage not in {SessionStage.COLLECTING, SessionStage.REVIEW} or any(
-            word.startswith(action_stems) for word in words
-        )
 
     @staticmethod
     def _voice_transcription_prompt(state: ConversationState) -> str:

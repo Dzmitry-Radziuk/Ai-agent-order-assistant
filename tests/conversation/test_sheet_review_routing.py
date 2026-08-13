@@ -17,6 +17,7 @@ from restaurant_bot.domain.models import (
     ParsedCommand,
     SessionStage,
 )
+from restaurant_bot.input.telegram_interpretation import TelegramInputInterpreter
 from restaurant_bot.services.orchestrator import UpdateOrchestrator
 
 
@@ -140,7 +141,11 @@ def _parse(command: ParsedCommand, text: str) -> ParsedCommand:
     """Прогоняет текст через global parse и sheet-review compatibility boundary."""
     orchestrator = UpdateOrchestrator.__new__(UpdateOrchestrator)
     orchestrator.openai = _GlobalParser(command)
-    return orchestrator._parse_text_in_context(text, _state())
+    return TelegramInputInterpreter(
+        orchestrator.openai,
+        lambda: None,
+        StateCompatibilityPolicy(),
+    ).interpret_text(text, _state())
 
 
 @pytest.mark.parametrize(
@@ -223,7 +228,11 @@ def test_uncertain_sheet_text_preserves_context_and_controls() -> None:
     orchestrator = UpdateOrchestrator.__new__(UpdateOrchestrator)
     orchestrator.openai = _GlobalParser(_command(Intent.UNKNOWN))
 
-    parsed = orchestrator._parse_text_in_context("ну посмотрим", state)
+    parsed = TelegramInputInterpreter(
+        orchestrator.openai,
+        lambda: None,
+        StateCompatibilityPolicy(),
+    ).interpret_text("ну посмотрим", state)
     reply = orchestrator._sheet_review_ambiguous_reply(state)
 
     assert parsed.intent is Intent.UNKNOWN

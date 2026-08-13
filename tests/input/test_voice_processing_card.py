@@ -4,6 +4,7 @@ from unittest.mock import MagicMock
 import httpx
 from openai import APITimeoutError
 
+from restaurant_bot.conversation.routing.state_compatibility import StateCompatibilityPolicy
 from restaurant_bot.domain.models import (
     CartItem,
     ConversationState,
@@ -15,11 +16,21 @@ from restaurant_bot.domain.models import (
     SessionStage,
     TelegramEvent,
 )
+from restaurant_bot.input.telegram_interpretation import TelegramInputInterpreter
 from restaurant_bot.input.voice_transcript_policy import (
     has_supported_voice_letters,
     select_transcription_result,
 )
 from restaurant_bot.services.orchestrator import UpdateOrchestrator
+
+
+def _interpreter(orchestrator: UpdateOrchestrator) -> TelegramInputInterpreter:
+    """Создаёт интерпретатор с тем же lazy media recognizer, что и orchestrator."""
+    return TelegramInputInterpreter(
+        orchestrator.openai,
+        orchestrator._recognizer,
+        StateCompatibilityPolicy(),
+    )
 
 
 def test_voice_processing_card_matches_the_transient_n8n_reply() -> None:
@@ -206,7 +217,7 @@ def test_high_accuracy_retry_corrects_gram_kilogram_confusion(tmp_path) -> None:
         "Один грамм.",
         "Один килограмм.",
     ]
-    orchestrator._parse_text_in_context = MagicMock(
+    orchestrator.openai.parse_text = MagicMock(
         return_value=ParsedCommand(intent=Intent.EDIT_QUANTITY, edit_quantity=1, edit_unit="кг")
     )
     state = _awaiting_kilograms_state()
@@ -218,10 +229,10 @@ def test_high_accuracy_retry_corrects_gram_kilogram_confusion(tmp_path) -> None:
         mime_type="audio/ogg",
     )
 
-    command = orchestrator._parse(event, state)
+    command = _interpreter(orchestrator).interpret(event, state)
 
     assert command.text == "Один килограмм."
-    orchestrator._parse_text_in_context.assert_called_once_with("Один килограмм.", state)
+    orchestrator.openai.parse_text.assert_called_once_with("Один килограмм.")
     assert orchestrator.openai.transcribe.call_count == 2
     assert orchestrator.openai.transcribe.call_args_list[1].kwargs["high_accuracy"] is True
 
@@ -258,7 +269,7 @@ def test_voice_phrase_without_button_verb_matches_visible_action() -> None:
     )
 
     assert (
-        UpdateOrchestrator._match_visible_action("У всех поставщиков.", state)
+        TelegramInputInterpreter._match_visible_action("У всех поставщиков.", state)
         == "v2:searchall:1:r3"
     )
 
@@ -285,7 +296,7 @@ def test_voice_transcription_timeout_returns_recovery_command(tmp_path) -> None:
         mime_type="audio/ogg",
     )
 
-    command = orchestrator._parse(event, ConversationState())
+    command = _interpreter(orchestrator).interpret(event, ConversationState())
 
     assert command.intent is Intent.UNKNOWN
     assert command.text == ""
@@ -308,7 +319,7 @@ def test_high_accuracy_timeout_keeps_primary_transcript(tmp_path) -> None:  # ty
             request=httpx.Request("POST", "https://api.openai.test/audio/transcriptions")
         ),
     ]
-    orchestrator._parse_text_in_context = MagicMock(
+    orchestrator.openai.parse_text = MagicMock(
         return_value=ParsedCommand(intent=Intent.ENTER_OTHER_QUANTITY)
     )
     state = ConversationState(
@@ -324,10 +335,10 @@ def test_high_accuracy_timeout_keeps_primary_transcript(tmp_path) -> None:  # ty
         mime_type="audio/ogg",
     )
 
-    command = orchestrator._parse(event, state)
+    command = _interpreter(orchestrator).interpret(event, state)
 
     assert command.intent is Intent.ENTER_OTHER_QUANTITY
-    orchestrator._parse_text_in_context.assert_called_once_with("Убрать количество", state)
+    orchestrator.openai.parse_text.assert_called_once_with("Убрать количество")
 
 
 def test_visible_action_timeout_returns_unknown_instead_of_product() -> None:
@@ -349,7 +360,7 @@ def test_visible_action_timeout_returns_unknown_instead_of_product() -> None:
         ],
     )
 
-    command = orchestrator._parse_text_in_context("Править поставщику.", state)
+    command = _interpreter(orchestrator).interpret_text("Править поставщику.", state)
 
     assert command.intent is Intent.UNKNOWN
     assert command.items == []
@@ -365,7 +376,7 @@ def test_free_form_visible_button_phrase_uses_exact_screen_action() -> None:
         ]
     )
 
-    command = orchestrator._parse_text_in_context(
+    command = _interpreter(orchestrator).interpret_text(
         "Я хочу выбрать количество",
         state,
     )
@@ -393,7 +404,7 @@ def test_semantic_voice_action_can_only_choose_a_visible_button() -> None:
         ],
     )
 
-    command = orchestrator._parse_text_in_context(
+    command = _interpreter(orchestrator).interpret_text(
         "Нет, оставим всё как было",
         state,
     )
@@ -425,7 +436,7 @@ def test_real_product_with_quantity_is_not_replaced_by_visible_add_action() -> N
         ],
     )
 
-    command = orchestrator._parse_text_in_context(
+    command = _interpreter(orchestrator).interpret_text(
         "Сироп роза, одна штука, желательно холодный.",
         state,
     )
@@ -448,7 +459,7 @@ def test_semantic_action_does_not_accept_an_unavailable_callback() -> None:
         ],
     )
 
-    assert orchestrator._parse_text_in_context("удали всё", state) is parsed
+    assert _interpreter(orchestrator).interpret_text("удали всё", state) is parsed
 
 
 def test_callback_ack_failure_does_not_abort_business_action() -> None:
