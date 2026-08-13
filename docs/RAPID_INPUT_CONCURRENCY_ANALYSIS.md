@@ -46,7 +46,7 @@ DB-транзакции. После завершения этой транзак
 ```python
 redis.lock(
     f"restaurant-bot:chat-lock:{chat_id}",
-    timeout=120,             # default
+    timeout=120,  # default
     blocking_timeout=15,
 )
 ```

@@ -1,232 +1,189 @@
 # Текущая архитектура
 
-Финальный structural implementation pass завершён на branch `decompose_bot`.
-Текущая проверка: `1391 collected / 1391 passed`; итоговый verdict
-`STRUCTURE_FINAL_WITH_HARD_PROTECTED_DEBT`. Root оставляет `config.py`, `cli.py`
-и package init; observability, persistence, text normalization и media
-recognition имеют тематических владельцев. Следующий шаг — только
-`TEST SUITE CONSOLIDATION / DEDUPLICATION`.
+Документ описывает фактическую структуру ветки `decompose_bot` после независимого
+аудита 2026-08-13. Исполняемый код и тесты имеют приоритет. Историю декомпозиции
+сохраняет [`ARCHITECTURE_DECOMPOSITION.md`](ARCHITECTURE_DECOMPOSITION.md), но её
+старые SHA, размеры файлов и verdict не являются текущим состоянием.
 
-## Финальная проверка структуры и масштаба
+## Состояние
 
-Проверка выполнена на checkout кампании, начатой с SHA
-`1232bc62ca776dae5cc7cacf3765322288e214e1`. Production-код не переносился
-между пакетами ради размера файла, не менялись БД, миграции, DevOps и
-пользовательские алгоритмы. Целью были явные владельцы, нейтральный вход и
-доказательство границ для будущих каналов.
+- исходный HEAD аудита: `4dc67430336bb90cfad731aca583f51a19948a48`;
+- свежий baseline до документных изменений: `1391 collected / 1391 passed`;
+- Python: 3.12+, строгий mypy, Ruff;
+- реализованный пользовательский канал: Telegram;
+- production-код в рамках аудита не менялся;
+- следующий шаг: закрыть условия контролируемого pilot, а не продолжать общую
+  архитектурную декомпозицию.
 
-### Контракты каналов
+Финальный SHA и повторные проверки этой документной кампании записаны в
+[`TESTING_READINESS.md`](TESTING_READINESS.md) и `PROJECT_HANDOFF.md` после commit.
 
-| Область | Владелец | Зафиксированное правило |
-|---|---|---|
-| Нейтральный вход | `application/conversation/contracts.py` | `ConversationInteraction` содержит только conversation/actor/channel/kind/text/action/media/metadata. |
-| Семантическая кнопка | `application/conversation/actions.py` | Кодек не знает Telegram и сохраняет namespace, target, value и revision. |
-| Telegram mapping | `presentation/telegram/conversation.py` | Только presentation переводит кнопку Telegram в `SemanticAction` и обратно в callback. |
-| Общий use case | `application/conversation/use_case.py` | Вызывает processor и возвращает нейтральный результат; mapper внедряется снаружи. |
-| Legacy bridge | `services/engine.py` | Принимает нейтральный протокол, но временно отдаёт `EngineResult`/`BotReply`. |
+## Владельцы ответственности
 
-Callback round-trip проверен для `skip`, `sel`, `qty`, `cartpage` и
-`review_submit`; fake-channel тесты покрывают простой товар, ожидание количества,
-редактирование комментария и выбор кандидата. Callback, state serialization и durable
-claim/lease/checkpoint не переписывались.
-
-### Инвентаризация крупных файлов
-
-| Файл | Строки | Классы | Функции | Ответственность и решение |
-|---|---:|---:|---:|---|
-| `integrations/openai_prompts.py` | 2378 | 0 | 0 | Единый текстовый контракт AI; оставлен целиком, дробление изменило бы prompt API. |
-| `services/submission.py` | 2051 | 1 | 53 | Безопасный протокол записи/повторной проверки/отправки; защищён до отдельного effect proof. |
-| `services/orchestrator.py` | 1932 | 2 | 50 | Claim, lease, state/reply checkpoints и запуск задач; это один durable coordinator. |
-| `services/engine.py` | 1515 | 1 | 31 | Авторитетный порядок state machine и legacy reply bridge; перенос требует отдельного proof. |
-| `presentation/telegram/replies.py` | 950 | 0 | 30 | Когезивные пользовательские ответы и кнопки Telegram. |
-| `integrations/openai_client.py` | 935 | 1 | 21 | Транспорт и retry/trace policy провайдера OpenAI. |
-| `conversation/routing/contextual_commands.py` | 930 | 1 | 25 | Policy contextual fallback и modal routing без transport. |
-| `integrations/google_sheets.py` | 881 | 6 | 33 | Внешний каталог, кеш и таблицы; materialized list оставлена до search projection. |
-| `presentation/telegram/submission.py` | 698 | 0 | 28 | Telegram-представление submission/review. |
-| `parsing/ai/comment_reconciliation.py` | 588 | 0 | 17 | AI/source comment reconciliation; выделен тематически, дальнейшее дробление не нужно. |
-| `domain/models.py` | 530 | 20 | 15 | Стабильные модели домена и совместимый TelegramEvent adapter. |
-| `parsing/products.py` | 506 | 0 | 13 | Orchestration deterministic product-line parsing. |
-
-Файлы крупнее 1000 строк имеют конкретного владельца, а не являются свалками:
-prompts — единый контракт, submission — safety protocol, orchestrator — durable
-pipeline, engine — stateful compatibility coordinator. Удаление этих границ
-без caller/effect proof опаснее, чем текущий размер.
-
-### Зависимости и масштабирование
-
-Направление модулей: `input/presentation/api/workers → application →
-conversation/orders/catalog/parsing/domain`; `repositories/integrations` —
-адаптеры внешних эффектов, `services` — защищённые координаторы. Точный AST-граф
-модулей текущего checkout не содержит циклов. Внутри `services` остаются
-переходные зависимости на legacy presentation, что отмечено выше и не
-распространяется на нейтральный application слой.
-
-Каталог сейчас передаётся как materialized `list[CatalogProduct]` через
-`CatalogResolver` и Google Sheets cache. Следующая безопасная граница масштаба —
-порт `CatalogSearch` с bounded venue-scoped shortlist; текущий
-`ListCatalogSearch` уже адаптирует Sheets/cache provider, deterministic evidence,
-ranking и safety gate должны остаться до AI auto-select. В этой кампании не
-добавлялись таблицы, индексы, миграции или vector search.
-
-Добавлен characterization proof на 100 000 строках: caller передаёт provider,
-который возвращает только bounded projection, а resolver по-прежнему возвращает
-не более пяти кандидатов. Тест не использует timing assertions и не меняет
-товарные правила.
-
-### Классификация полей состояния
-
-| Класс | Примеры | Владелец и правило |
-|---|---|---|
-| Канонический черновик | `ConversationState.cart`, status, quantity/unit, catalog binding | `conversation`/`orders`; изменяется только существующими draft-операциями. |
-| Modal-контекст | `pending_comment_*`, `pending_product_add_*`, supplier warning, candidate block | `conversation/routing` и handlers; policy решает continue/interrupt, старые данные не переходят в новый intent. |
-| Durable safety | `ui_revision`, `pending_submission`, request/lease/checkpoint identifiers | `services/orchestrator`, repositories и submission; защищает повторы и stale callbacks. |
-| Канальный metadata | Telegram update/callback/user/file поля | `input/telegram` и `TelegramEvent` adapter aliases; не входит в application contract. |
-| Производное представление | `visible_actions`, reply rows, rendered HTML | `presentation/telegram`; не является источником истины для state или intent. |
-
-Разделение не меняет сериализацию и не вводит `suspended_interaction`.
-Compatibility handlers сохраняют pending context при interrupt, а callback
-revision проверяется до state mutation.
-
-### Защищённый долг
-
-Оставлены `UpdateOrchestrator`, `SubmissionService`, `OrderReviewService`,
-`VenueRegistrationService` и Telegram presentation:
-они совмещают внешние эффекты с координацией и требуют отдельного отказоустойчивого
-proof. `InputRecognitionService` перенесён в `input/media_recognition.py` как
-канальный media adapter. Не создавать для оставшихся компонентов
-`engine_part*.py`, `helpers.py` или параллельные
-state rules. Следующий функциональный шаг проекта — строго
-`TEST SUITE CONSOLIDATION / DEDUPLICATION`, а не новая декомпозиция.
-
-Документ фиксирует фактическую структуру после финальной архитектурной кампании.
-Он описывает владельцев и намеренно оставленный технический долг; сам по себе не
-заменяет исполняемый код и тесты.
-
-## Multi-channel boundary — текущий срез
-
-Финальная кампания добавила общий прикладной контракт в
-`application/conversation/`: `ConversationInput`, `ConversationResult`,
-`ConversationView`, `SemanticAction` и `ConversationEffectPlan`. Канальный адаптер
-`input/telegram.to_conversation_input()` переводит `TelegramEvent` в этот вход,
-`ConversationApplication` вызывает существующий stateful processor, а
-`presentation/telegram/conversation.py` кодирует смысловые действия обратно в
-совместимые Telegram-кнопки. `UpdateOrchestrator` использует этот use case, не
-меняя durable claim/lease/checkpoint порядок.
-
-Проверяемый fake-channel proof находится в
-`tests/application/test_conversation_application.py`: текстовый заказ и ответ на
-ожидаемое количество проходят без создания `TelegramEvent`. Архитектурные guards
-проверяют отсутствие Telegram/presentation/infrastructure imports в нейтральном
-application contract.
-
-Оставшийся защищённый долг: `ConversationEngine` по-прежнему возвращает
-совместимый `EngineResult`/`BotReply` и содержит stateful Telegram UX adapters;
-`UpdateOrchestrator`, `SubmissionService`, `OrderReviewService`, регистрация и
-media recognition сохраняют effectful Telegram/DB/Sheets протоколы. Это не
-создаёт отдельные правила для MAX/Web, но полный перенос renderer/stateful
-coordinators потребует отдельного proof checkpoint и не выполнялся в этом run.
-
-## Слои и направление зависимостей
-
-```text
-api / input / workers / presentation
-              ↓
-application use cases и контракты
-              ↓
-conversation / orders / catalog / parsing / domain
-              ↓
-чистые модели и правила
-
-repositories / integrations реализуют внешние эффекты,
-а composition root связывает concrete adapters с координаторами.
-```
-
-Фактический граф верхнего уровня:
-
-| Пакет | Назначение | Основные зависимости | Внешние эффекты |
-|---|---|---|---|
-| `domain` | модели команд, состояния и каталога | нормализация текста | нет |
-| `parsing` | deterministic/AI parsing и reconciliation | `domain`, `conversation` для comment contract | нет |
-| `catalog` | evidence, retrieval, ranking и safety gates | `domain`, `parsing` | нет |
-| `conversation` | routing, state transitions и draft mutations | `domain`, `orders`, `parsing` | нет |
-| `orders` | catalog-to-draft resolution и supplier policies | `catalog`, `conversation`, `domain`, `parsing` | нет |
-| `application` | review/venue contracts и фоновые порты | `domain` | нет |
-| `presentation` | Telegram replies, buttons и formatting | `application`, `conversation`, `domain`, `orders` | формирование ответа |
-| `input` | Telegram input adapters и voice/photo interpretation | `conversation`, `domain`, `integrations`, `parsing`, `venues` | получение input через adapters |
-| `repositories` | DB persistence | `domain`, DB models | БД |
-| `integrations` | Telegram/OpenAI/Redis/Sheets/provider adapters | `domain`, `catalog`, `parsing`, `venues` | внешние API и cache |
-| `workers` | Celery delivery adapters | `services`, repositories, integrations | фоновые задачи |
-| `services` | защищённые effectful coordinators | все runtime-слои | orchestration, DB, lease, Sheets, Telegram |
-
-`domain`, `conversation`, `catalog`, `orders` и `parsing` не импортируют
-`services`, `workers`, `api`, `repositories`, `integrations` или
-`presentation`. Это закреплено архитектурным тестом.
-
-## Runtime-потоки
-
-### Telegram update
-
-```text
-Telegram webhook → UpdateOrchestrator
-  → TelegramInputInterpreter
-  → global parsing/reconciliation
-  → StateCompatibilityPolicy
-  → ConversationEngine
-  → catalog resolution / state checkpoint
-  → Telegram presentation reply
-  → reply checkpoint → background task, если нужен
-```
-
-### Отправка заявки
-
-```text
-review callback → OrderReviewService
-  → lease + DB lock
-  → свежий venue access и snapshot каталога
-  → fingerprint/revision check
-  → prepare/readback/recalc protocol
-  → внешний dispatch или disabled/uncertain recovery
-  → idempotent completion notification
-```
-
-### Order review
-
-Чистые `ReviewItem`, `ReviewSnapshot`, fingerprint и token принадлежат
-`application/order_review`. `services/order_review.py` остаётся effect coordinator:
-он объединяет lease, DB session, venue access, Sheets и Telegram notification.
-Разделение на application use case и concrete adapters сейчас не выполняется,
-поскольку требует перепроверки durable checkpoint protocol и не даёт безопасного
-механического переноса.
-
-### Venue registration
-
-`application/venue_registration/contracts.py` владеет
-`VenueContext` и `RegistrationResult`. `services/venue_registration.py` остаётся
-координатором транзакции привязки, доступа, directory, Sheets и rollback; старый
-импорт контрактов сохранён как совместимый re-export через module namespace.
-
-## Разрешённые и запрещённые зависимости
-
-- `presentation` читает state и строит `BotReply`, но не мутирует cart или submission.
-- `repositories` и `integrations` владеют внешними эффектами.
-- `workers` не содержат бизнес-решений и не импортируются из core/application.
-- `services` не является core-слоем; оставшиеся файлы — явные coordinators.
-- Core не знает Telegram, DB, Redis, Sheets, Celery и concrete services.
-- `application` содержит только контракты/порты и не импортирует concrete
-  Telegram, Sheets, Redis или DB.
-
-## Оставшийся защищённый долг
-
-| Область | Почему оставлена |
+| Пакет | Текущая ответственность |
 |---|---|
-| `services/engine.py` | единый порядок stateful routing и modal safety |
-| `services/orchestrator.py` | durable claim/lease/checkpoint/reply/task protocol |
-| `services/submission.py` | критический protocol с uncertainty, fencing и replay |
-| `services/order_review.py` | lease/DB/Sheets/Telegram side effects в одной транзакционной границе |
-| `services/venue_registration.py` | access rollback и sync semantics требуют общего effect coordinator |
-| `services/input_recognition.py` | Telegram download, provider retry и media progress связаны runtime-контрактом |
-| `services/conversation_handlers/*` | handlers адаптируют pure decisions к `EngineResult` и Telegram UX без доказанного безопасного нового owner |
+| `api` | FastAPI webhook, аутентификация входа и health endpoints |
+| `application` | нейтральные conversation-контракты, порты и use case |
+| `catalog` | evidence, retrieval, ranking, auto-select safety и resolver |
+| `conversation` | state policy, routing decisions, черновик и progression |
+| `domain` | модели состояния, команды, товара и ответа |
+| `input` | перевод Telegram update в нейтральное взаимодействие |
+| `integrations` | Telegram, OpenAI, Google Sheets, Redis, Apps Script и tracing adapters |
+| `observability` | события и безопасные для логирования метаданные |
+| `orders` | quantity multiple, supplier minimum и catalog-to-draft resolution |
+| `parsing` | deterministic extraction, AI schemas и reconciliation |
+| `persistence` | общие транзакционные и lifecycle-контракты |
+| `presentation` | Telegram copy, кнопки, карточки и legacy reply mapping |
+| `repositories` | транзакционный доступ к PostgreSQL |
+| `services` | защищённые runtime/effect coordinators |
+| `venues` | коды, контракты и правила доступа заведений |
+| `workers` | Celery entrypoints, redrive и фоновые операции |
 
-Эти границы классифицированы как `PROTECTED_BY_SAFETY`, а не как забытые
-transitional facades. Новые каналы, history use case, DB migrations и search
-redesign в кампанию не входят.
+`services` не является универсальным слоем бизнес-логики. Оставшиеся там крупные
+модули координируют lease, транзакции, provider calls, checkpoints и доставку;
+чистые правила находятся в тематических пакетах.
+
+## Фактический путь Telegram update
+
+```text
+Telegram webhook
+  → api/app.py: проверка secret + durable inbox
+  → workers/tasks.py: Celery entrypoint
+  → services/orchestrator.py: claim + chat lease + access + checkpoints
+  → input/telegram.py и input/media_recognition.py
+  → parsing: deterministic extraction + AI reconciliation
+  → application/conversation/use_case.py
+  → services/engine.py: авторитетный порядок state machine
+  → conversation + catalog + orders
+  → repository transaction: state/result/checkpoint
+  → presentation/telegram
+  → Telegram reply и разрешённые фоновые effects
+```
+
+`StateCompatibilityPolicy` остаётся единой точкой решения о продолжении или
+прерывании modal context. Text и расшифрованный voice сходятся до state-specific
+fallback. Callback остаётся явным UI-путём с проверкой revision.
+
+## Транзакции и надёжность
+
+- `TelegramUpdate.update_id` идемпотентно принимает повторную доставку webhook.
+- Update одного чата сериализуются renewable Redis lease и проверкой более ранних
+  незавершённых update.
+- Старый владелец fencing-проверками останавливается перед сохранением и постановкой
+  side-effect task.
+- State и обработанный результат сохраняются вместе; доставка ответа и постановка
+  задач имеют отдельные checkpoints.
+- Submission повторно читает state и доступ, использует per-sheet lock, durable
+  record, read-back и явные состояния `uncertain`.
+- Начатый внешний POST не повторяется автоматически при неизвестном результате.
+- Итоговое уведомление использует at-most-once lifecycle: возможна потеря сообщения,
+  но не автоматический дубль.
+
+Оставшиеся точные окна: crash после фактической отправки Telegram reply, но до его
+checkpoint, может дать повтор ответа; crash после Celery publish, но до task
+checkpoint, может повторно поставить задачу. Опасные submission/product-add effects
+имеют собственные durable gates, но общий transactional outbox пока отсутствует.
+
+## Граница AI
+
+Принцип проекта:
+
+```text
+AI предлагает структуру
+  → исходный текст подтверждает факты
+  → каталог уточняет identity
+  → deterministic code разрешает действие
+```
+
+Структурированные schemas ограничивают AI payload. Quantity reconciliation не
+должен подменять доказанное количество заказа числами фасовки, диапазона или title.
+AI выбирает только из deterministic shortlist, после чего numeric, qualifier,
+packaging, contradiction и confidence gates могут заблокировать auto-select.
+Visible action и contextual fallback не подменяют уже распознанный независимый intent.
+
+## Многоканальность
+
+### Нейтрально сегодня
+
+- `ConversationInteraction` и `SemanticAction`;
+- parsing и source reconciliation;
+- state compatibility, conversation decisions и order/catalog rules;
+- application use case;
+- сериализуемый conversation state.
+
+### Telegram-specific сегодня
+
+- webhook и event mapping;
+- media download/progress;
+- callback payload/revision;
+- тексты, клавиатуры, edit/send semantics;
+- legacy `EngineResult`/`BotReply` на выходе engine.
+
+`ConversationApplication` временно преобразует legacy reply rows через внедрённый
+mapper. Это не блокирует текущий Telegram runtime. Для MAX/Web нужен отдельный
+input/action/renderer/delivery adapter; bridge следует убирать после первого
+утверждённого вертикального сценария второго канала, когда станет виден реальный
+нейтральный output contract.
+
+## Каталог и 100 000+ позиций
+
+`CatalogSearch` задаёт bounded search contract, а `ListCatalogSearch` адаптирует
+нынешний список. Архитектурный тест на 100 000 строк доказывает, что resolver может
+принять ограниченного provider без передачи полного каталога в core.
+
+Production runtime пока делает следующее:
+
+1. Google adapter читает полный диапазон каталога.
+2. Redis cache хранит полный JSON.
+3. Orchestrator получает полный `list[CatalogProduct]`.
+4. `ListCatalogSearch` материализует и копирует список.
+5. Ranking и token-frequency проходят по кандидатам линейно.
+
+Следовательно, граница готова архитектурно, но производительность 100 000 позиций не
+доказана. До такого масштаба нужен venue/supplier-scoped indexed provider
+(PostgreSQL/API), подключённый в runtime composition, и benchmark p95, памяти и
+recall на реальных запросах.
+
+## Крупные файлы
+
+| Файл | Проблема сегодня | Безопасный seam |
+|---|---|---|
+| `integrations/openai_prompts.py` (>2300 строк) | Да: несколько независимо меняющихся prompt-контрактов находятся в одном модуле | модули по типу запроса с byte-for-byte contract tests |
+| `services/submission.py` (>2000 строк) | Да: order submission, status/history и product-add протоколы имеют разные причины изменения | сначала вынести status/history, затем product-add coordinator, не дробя основной protocol |
+| `services/orchestrator.py` (>1900 строк) | Да: durable update protocol соседствует с AI candidate resolution, analytics и presentation progress | вынос чистого catalog-AI decision и analytics serialization при сохранении одного checkpoint coordinator |
+| `services/engine.py` (>1500 строк) | Да: `handle()` содержит порядок многих state flows и presentation decisions | извлекать state-specific decision/result builders только после characterization tests |
+| `tests/ai/test_ai_media.py` (>1400 строк) | Умеренно: тематически связан, но дорог в навигации | группировать по parsing contract при следующем изменении соответствующих тестов |
+
+Размер сам по себе не является дефектом. Эти seams отмечены для изменения по
+триггеру; новый общий refactor до pilot не нужен.
+
+## Направление зависимостей
+
+Core-пакеты `domain`, `conversation`, `catalog`, `orders` и `parsing` не импортируют
+`api`, `workers`, concrete repositories/integrations/presentation или `services`.
+`application` задаёт порты. `services` и `workers` собирают concrete adapters и
+внешние эффекты. Архитектурные тесты проверяют границы и циклы.
+
+## Защищённый долг
+
+| Долг | Почему сохраняется | Триггер оплаты |
+|---|---|---|
+| Legacy reply bridge | сейчас стабилизирует весь Telegram UX | первый вертикальный сценарий второго канала |
+| Крупный engine/orchestrator | порядок state/checkpoint доказан большим regression suite | изменение затронутого flow или явная стоимость сопровождения |
+| Submission monolith | protocol locality снижает риск unsafe retry | отдельная работа с failure-injection proof |
+| List-backed catalog | достаточен для текущего малого каталога | утверждённый рост до десятков/сотен тысяч позиций |
+| Нет общего transactional outbox | опасные effects имеют локальные gates | дубли status/reply становятся наблюдаемой production-проблемой или растёт нагрузка |
+
+## Куда вносить изменения
+
+- новый intent/state rule: `conversation/routing` и соответствующий decision owner;
+- новый формат входа: adapter в `input`, затем общий application use case;
+- новый канал: собственные input/action/presentation/delivery adapters;
+- новый catalog backend: реализация `CatalogSearch` и runtime composition;
+- новый внешний provider: `integrations` плюс порт application/core;
+- persistence: repository и Alembic migration;
+- UX Telegram: `presentation/telegram`;
+- durable порядок effects: защищённые `services` и `workers`.
+
+Перед изменением соблюдайте `AGENTS.md`, `.agents/DEVELOPMENT_PROCESS.md` и
+актуальный `PROJECT_HANDOFF.md`.

@@ -1,8 +1,8 @@
 # Карта проекта
 
-## Итоговая карта владельцев после кампании структуры
+## Текущий статус после независимого аудита 2026-08-13
 
-Канально-нейтральный вход и результат принадлежат
+Канально-нейтральный вход и application result принадлежат
 `src/restaurant_bot/application/conversation/`. `ConversationInteraction` не
 содержит Telegram-полей; `ConversationApplication` получает processor и
 внедрённый `ActionMapper`. `input/telegram.py` переводит Telegram update во
@@ -16,19 +16,29 @@
 (side-effect protocol), `order_review.py`, `venue_registration.py`,
 `input/media_recognition.py` и внешние OpenAI/Sheets adapters.
 
-Крупные файлы разделены по реальной ответственности: prompt-контракт,
-submission protocol, durable coordinator, state machine, provider transport,
-catalog adapter и presentation. Дробление только по количеству строк не
-проводилось. AST-проверка текущих модулей не выявила циклических импортов.
-Каталог получил `CatalogSearch` и `ListCatalogSearch` с bounded provider;
-БД и миграции в этой кампании не менялись.
+Core-владельцы: `conversation` — state decisions, `catalog` — evidence/search/
+safety, `orders` — правила заявки, `parsing` — deterministic и AI reconciliation,
+`repositories` — PostgreSQL, `integrations` — providers, `services` — защищённые
+runtime/effect coordinators. Крупные `engine`, `orchestrator`, `submission` и
+prompt-модуль остаются trigger-based долгом, а не поводом для новой общей
+декомпозиции.
 
 Проверенные границы: callback round-trip для пяти форматов, fake-channel proof
 для товара/quantity/comment/candidate, отсутствие Telegram в application
-contracts и полный suite `1391 collected / 1391 passed`. Следующий шаг: **TEST SUITE
-CONSOLIDATION / DEDUPLICATION**.
+contracts и свежий полный suite `1391 collected / 1391 passed`. `CatalogSearch`
+допускает bounded provider, но production runtime пока materializes полный
+list/cache каталог и не имеет доказанного 100k benchmark.
 
-## Актуальный статус после финальной архитектурной кампании
+Следующий шаг: **CONTROLLED HUMAN TELEGRAM PILOT PREPARATION** после token rotation,
+изолированного environment и live preflight при выключенной внешней отправке.
+Подробности: [`docs/CURRENT_ARCHITECTURE.md`](../docs/CURRENT_ARCHITECTURE.md),
+[`docs/TESTING_READINESS.md`](../docs/TESTING_READINESS.md) и
+[`docs/INDEPENDENT_ENGINEERING_AUDIT.md`](../docs/INDEPENDENT_ENGINEERING_AUDIT.md).
+
+## Исторический статус финальной архитектурной кампании
+
+Разделы до заголовка «Назначение» ниже сохранены как хронология переходов. Их
+baseline, verdict и «следующий шаг» не являются текущими; текущий статус задан выше.
 
 Channel-neutral conversation boundary добавлена в
 `src/restaurant_bot/application/conversation/`: `ConversationInput` и
@@ -54,7 +64,7 @@ effectful services намеренно сохранены. Подробный т�
 этот статус. Block 6D и финальная архитектурная кампания завершены; защищённый
 долг перечислен в [`docs/CURRENT_ARCHITECTURE.md`](../docs/CURRENT_ARCHITECTURE.md).
 
-## IMPLEMENTED AFTER 5Z / BLOCK 6A
+## История: implemented after 5Z / Block 6A
 
 Telegram-specific semantic input boundary теперь находится в
 `input/telegram_interpretation.py` (`TelegramInputInterpreter`). Он получает
@@ -74,7 +84,7 @@ Block 6C переключил текущий фокус с decomposition на te
 [`docs/TESTING_READINESS.md`](../docs/TESTING_READINESS.md): full suite `1382/1382`,
 verdict `READY_FOR_MANUAL_TESTING_WITH_KNOWN_NONBLOCKERS`.
 
-## Current architecture after Block 5Y
+## История: architecture after Block 5Y
 
 Detailed current `UpdateOrchestrator` forensic inventory is maintained in
 [`docs/UPDATE_ORCHESTRATOR_AUDIT.md`](../docs/UPDATE_ORCHESTRATOR_AUDIT.md).
@@ -155,7 +165,7 @@ DB/Sheets/cache/rollback и re-export-ит переходные `VenueContext` �
 `RegistrationResult`; каталог, access registry, Telegram input и replies имеют
 отдельных владельцев выше.
 
-## Block 5S — актуальные владельцы бывших `services.text` символов
+## История Block 5S — владельцы бывших `services.text` символов
 
 После Block 5S `services/text.py` содержит только transitional `to_float`.
 Канонические owners: `domain/units.py` (`UNIT_ALIASES`, `normalize_unit`),
@@ -168,14 +178,14 @@ DB/Sheets/cache/rollback и re-export-ит переходные `VenueContext` �
 старых путей для этих символов нет. `to_float` оставлен в `services/text.py`,
 потому что его контракт одновременно покрывает Google Sheets и AI-reconciliation.
 
-## Block 5R: Telegram presentation formatting
+## История Block 5R: Telegram presentation formatting
 
 `presentation/telegram/formatting.py` — канонический owner `escape` и
 `format_number`. Он зависит только от `text_normalization`; `services/text.py`
 сохраняет measurement, overlap и parsing primitives. `presentation/telegram/submission.py`
 использует новый owner и больше не импортирует `services`.
 
-## Block 5P: владельцы политики транскрипции
+## История Block 5P: владельцы политики транскрипции
 
 `src/restaurant_bot/input/voice_transcript_policy.py` содержит две чистые функции
 выбора и проверки транскрипции. `src/restaurant_bot/services/input_recognition.py`
@@ -379,7 +389,7 @@ CommentScopeHandler их сохраняет.
 | `tests/docs/`, `tests/ci/` | Сценарии, docstring, ссылки и документационные контракты |
 
 Канонический каталог пользовательских сценариев: `docs/user-scenarios/scenarios.json`. Markdown и HTML генерируются из него, поэтому вручную редактировать производные файлы нельзя.
-## Block 6C — current services cleanup
+## История Block 6C — services cleanup
 
 `services/text.py` удалён после переноса единственного символа `to_float` в
 `parsing/numeric.py`. Четыре lower/core AI-reconciliation модуля и два integration
