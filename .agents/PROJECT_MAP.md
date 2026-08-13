@@ -14,18 +14,18 @@
 долг: его нельзя обходить копированием правил в MAX/Web. Аналогично защищены
 `services/orchestrator.py` (claim/lease/checkpoint), `submission.py`
 (side-effect protocol), `order_review.py`, `venue_registration.py`,
-`input_recognition.py` и внешние OpenAI/Sheets adapters.
+`input/media_recognition.py` и внешние OpenAI/Sheets adapters.
 
 Крупные файлы разделены по реальной ответственности: prompt-контракт,
 submission protocol, durable coordinator, state machine, provider transport,
 catalog adapter и presentation. Дробление только по количеству строк не
 проводилось. AST-проверка текущих модулей не выявила циклических импортов.
-Каталог остаётся list-based до отдельного `CatalogSearch`/searchable projection
-proof; БД и миграции в этой кампании не менялись.
+Каталог получил `CatalogSearch` и `ListCatalogSearch` с bounded provider;
+БД и миграции в этой кампании не менялись.
 
 Проверенные границы: callback round-trip для пяти форматов, fake-channel proof
 для товара/quantity/comment/candidate, отсутствие Telegram в application
-contracts и полный suite `1390 collected / 1390 passed`. Следующий шаг: **TEST SUITE
+contracts и полный suite `1391 collected / 1391 passed`. Следующий шаг: **TEST SUITE
 CONSOLIDATION / DEDUPLICATION**.
 
 ## Актуальный статус после финальной архитектурной кампании

@@ -17,6 +17,13 @@
 совместимый `EngineResult`/`BotReply` и импортирует presentation; это явно
 зафиксированный защищённый переходный долг, а не второй источник правил.
 
+В этом pass root `logging.py`/`observability.py` объединены в пакет
+`observability/`, `text_normalization.py` перенесён в `domain/text.py`,
+`db.py`/`db_models.py` — в `persistence/`, а media recognition — в
+`input/media_recognition.py`. Добавлены `CatalogSearch` и list-backed
+`ListCatalogSearch` с bounded provider и characterization proof на 100 000
+строках. Callback, state, БД, submission и prompt contracts сохранены.
+
 Полный suite после изменений: `1390 collected / 1390 passed` (один предупреждающий сигнал pytest
 связан с кэшем Windows). Mypy, Ruff, форматирование, markdown-ссылки,
 compileall и `git diff --check` должны быть зелёными перед публикацией.
@@ -26,7 +33,7 @@ compileall и `git diff --check` должны быть зелёными пере
 `google_sheets.py` (провайдеры), `openai_prompts.py` (единый prompt-контракт).
 Механическое дробление без отдельного proof checkpoint не выполнялось.
 
-Итоговый verdict кампании: `CODEBASE_STRUCTURE_FINALIZED_WITH_PROTECTED_DEBT`.
+Итоговый verdict кампании: `STRUCTURE_FINAL_WITH_HARD_PROTECTED_DEBT`.
 
 ## NEXT STEP
 

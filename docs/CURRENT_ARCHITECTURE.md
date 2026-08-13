@@ -1,5 +1,12 @@
 # Текущая архитектура
 
+Финальный structural implementation pass завершён на branch `decompose_bot`.
+Текущая проверка: `1391 collected / 1391 passed`; итоговый verdict
+`STRUCTURE_FINAL_WITH_HARD_PROTECTED_DEBT`. Root оставляет `config.py`, `cli.py`
+и package init; observability, persistence, text normalization и media
+recognition имеют тематических владельцев. Следующий шаг — только
+`TEST SUITE CONSOLIDATION / DEDUPLICATION`.
+
 ## Финальная проверка структуры и масштаба
 
 Проверка выполнена на checkout кампании, начатой с SHA
@@ -56,9 +63,15 @@ conversation/orders/catalog/parsing/domain`; `repositories/integrations` —
 
 Каталог сейчас передаётся как materialized `list[CatalogProduct]` через
 `CatalogResolver` и Google Sheets cache. Следующая безопасная граница масштаба —
-порт `CatalogSearch` с bounded venue-scoped shortlist; deterministic evidence,
+порт `CatalogSearch` с bounded venue-scoped shortlist; текущий
+`ListCatalogSearch` уже адаптирует Sheets/cache provider, deterministic evidence,
 ranking и safety gate должны остаться до AI auto-select. В этой кампании не
 добавлялись таблицы, индексы, миграции или vector search.
+
+Добавлен characterization proof на 100 000 строках: caller передаёт provider,
+который возвращает только bounded projection, а resolver по-прежнему возвращает
+не более пяти кандидатов. Тест не использует timing assertions и не меняет
+товарные правила.
 
 ### Классификация полей состояния
 
@@ -77,9 +90,11 @@ revision проверяется до state mutation.
 ### Защищённый долг
 
 Оставлены `UpdateOrchestrator`, `SubmissionService`, `OrderReviewService`,
-`VenueRegistrationService`, `InputRecognitionService` и Telegram presentation:
+`VenueRegistrationService` и Telegram presentation:
 они совмещают внешние эффекты с координацией и требуют отдельного отказоустойчивого
-proof. Не создавать для них `engine_part*.py`, `helpers.py` или параллельные
+proof. `InputRecognitionService` перенесён в `input/media_recognition.py` как
+канальный media adapter. Не создавать для оставшихся компонентов
+`engine_part*.py`, `helpers.py` или параллельные
 state rules. Следующий функциональный шаг проекта — строго
 `TEST SUITE CONSOLIDATION / DEDUPLICATION`, а не новая декомпозиция.
 

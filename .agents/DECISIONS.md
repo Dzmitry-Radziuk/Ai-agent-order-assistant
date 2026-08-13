@@ -200,6 +200,23 @@
   `presentation/telegram/conversation.py`, `services/engine.py` и
   `tests/application/test_conversation_application.py`.
 
+### ADR-018 — Инфраструктурные root-модули и bounded catalog search
+
+- Дата: 2026-08-13.
+- Статус: действует.
+- Контекст: root содержал разрозненные logging, tracing, text normalization и
+  persistence modules, а каталог требовал полного list аргумента на пути поиска.
+- Решение: logging/tracing принадлежат `observability/`, ORM и session factory —
+  `persistence/`, низкоуровневая нормализация — `domain/text.py`, media
+  recognition — `input/media_recognition.py`. `CatalogSearch` и
+  `ListCatalogSearch` дают provider boundary; ranking и safety остаются в
+  `CatalogResolver`.
+- Последствия: root оставляет только `config.py`, `cli.py` и package init.
+  Текущий Sheets/cache adapter может отдавать bounded projection; PostgreSQL или
+  внешний API подключаются позже без изменения conversation/order rules.
+- Реализация: `catalog/search.py`, `tests/catalog/test_catalog_search_boundary.py`
+  и механически обновлённые callers.
+
 ## Шаблон новой записи
 
 ```markdown
