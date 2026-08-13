@@ -490,7 +490,7 @@ _STATUS_DETAIL_BLOCKS_PER_PAGE = 3
 def _tracked_status_groups(
     rows: list[dict[str, Any]], state: Any
 ) -> tuple[list[str], list[tuple[str, list[dict[str, Any]]]]]:
-    """Return tracked order numbers and rows belonging to them."""
+    """Возвращает отслеживаемые номера заявок и относящиеся к ним строки."""
     tracked = list(
         dict.fromkeys(
             [str(getattr(state, "last_order_no", "") or "").strip()]
@@ -512,7 +512,7 @@ def _aggregated_detail_blocks(
     *,
     display_index: int = 1,
 ) -> list[list[str]]:
-    """Split supplier rows and long product lists into safe Telegram-sized blocks."""
+    """Делит строки поставщика и длинные списки на безопасные блоки Telegram."""
     blocks: list[list[str]] = [[f"{display_index}. <b>Заявка {escape(order_no)}</b>"]]
     for row in order_rows:
         supplier = _status_value(
@@ -559,7 +559,7 @@ def _legacy_detail_blocks(
     *,
     display_index: int = 1,
 ) -> list[list[str]]:
-    """Split legacy one-product-per-row history into blocks."""
+    """Делит старую историю с одной позицией в строке на блоки."""
     details = [
         (
             _status_value(
@@ -614,7 +614,7 @@ def _build_order_status_detail_pages(
     *,
     display_index: int = 1,
 ) -> list[str]:
-    """Build paginated details while keeping supplier/product boundaries readable."""
+    """Строит страницы, сохраняя границы поставщиков и товаров читаемыми."""
     _, shown = _tracked_status_groups(rows, state)
     if len(shown) != 1:
         return []
@@ -653,7 +653,7 @@ def order_status_detail_page_count(
     *,
     display_index: int = 1,
 ) -> int:
-    """Return the number of pages needed for a status detail card."""
+    """Возвращает число страниц карточки состояния заявки."""
     return max(
         1,
         len(

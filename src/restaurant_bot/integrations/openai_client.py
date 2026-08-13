@@ -123,7 +123,7 @@ class OpenAIService:
         return normalized
 
     def parse_text(self, text: str) -> ParsedCommand:
-        """Parse a normal message or a long explicit list in bounded AI calls."""
+        """Разбирает обычное сообщение или длинный список ограниченными вызовами AI."""
         chunks = self._large_order_list_chunks(text)
         if chunks:
             return self._parse_large_order_list(text, chunks)
@@ -131,7 +131,7 @@ class OpenAIService:
 
     @staticmethod
     def _large_order_list_chunks(text: str) -> list[str]:
-        """Split only unambiguous line-based lists; never infer a quantity from a name."""
+        """Выделяет только однозначный построчный список без догадки о количестве."""
         lines = [
             clean_text(line) for line in re.split(r"[\r\n;]+", str(text or "")) if clean_text(line)
         ]
@@ -165,7 +165,7 @@ class OpenAIService:
         return chunks
 
     def _parse_large_order_list(self, source_text: str, chunks: list[str]) -> ParsedCommand:
-        """Parse every list chunk with AI and reject partial/guessed results."""
+        """Разбирает части списка и отклоняет неполные или догаданные результаты."""
         commands: list[ParsedCommand] = []
         for index, chunk in enumerate(chunks, start=1):
             command = self._parse_text_once(chunk, force_ai=True)

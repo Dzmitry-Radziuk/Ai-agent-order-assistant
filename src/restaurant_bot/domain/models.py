@@ -157,6 +157,56 @@ class TelegramEvent(BaseModel):
     mime_type: str = ""
     raw_update: dict[str, Any] = Field(default_factory=dict)
 
+    @property
+    def interaction_id(self) -> int:
+        """Возвращает идентификатор события через нейтральное имя."""
+        return self.update_id
+
+    @property
+    def conversation_id(self) -> str:
+        """Возвращает идентификатор разговора через нейтральное имя."""
+        return self.chat_id
+
+    @property
+    def actor_id(self) -> str:
+        """Возвращает идентификатор отправителя через нейтральное имя."""
+        return self.telegram_user_id or self.chat_id
+
+    @property
+    def channel(self) -> str:
+        """Возвращает имя транспортного канала события."""
+        return "telegram"
+
+    @property
+    def kind(self) -> InputKind:
+        """Возвращает тип входного взаимодействия."""
+        return self.input_type
+
+    @property
+    def action(self) -> str:
+        """Возвращает действие входного взаимодействия."""
+        return self.callback_data
+
+    @property
+    def media_reference(self) -> str:
+        """Возвращает ссылку на медиафайл входного взаимодействия."""
+        return self.file_id
+
+    @property
+    def metadata(self) -> dict[str, Any]:
+        """Возвращает нейтральные метаданные для совместимого обработчика."""
+        return {
+            "username": self.telegram_username,
+            "first_name": self.telegram_first_name,
+            "last_name": self.telegram_last_name,
+            "chat_type": self.chat_type,
+            "callback_query_id": self.callback_query_id,
+            "callback_message_id": self.callback_message_id,
+            "file_id": self.file_id,
+            "mime_type": self.mime_type,
+            "raw_update": self.raw_update,
+        }
+
 
 class DepartmentQuantities(BaseModel):
     """Хранит количества товара по отделам заведения."""

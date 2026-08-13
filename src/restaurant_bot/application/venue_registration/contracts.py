@@ -27,6 +27,21 @@ class VenueContext:
     telegram_user_id: str
     telegram_chat_id: str
 
+    @property
+    def actor_id(self) -> str:
+        """Возвращает нейтральный идентификатор участника."""
+        return self.telegram_user_id
+
+    @property
+    def conversation_id(self) -> str:
+        """Возвращает нейтральный идентификатор разговора."""
+        return self.telegram_chat_id
+
+    @property
+    def channel(self) -> str:
+        """Возвращает канал, для которого сохранён контекст."""
+        return "telegram"
+
 
 @dataclass(slots=True)
 class RegistrationResult:

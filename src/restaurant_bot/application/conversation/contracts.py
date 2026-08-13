@@ -9,19 +9,17 @@ from restaurant_bot.domain.models import ConversationState, InputKind
 
 
 class ConversationInteraction(Protocol):
-    """Описывает минимальный вход, необходимый stateful processor."""
+    """Описывает минимальный вход, необходимый обработчику состояния."""
 
-    update_id: int
-    chat_id: str
-    input_type: InputKind
+    interaction_id: int
+    conversation_id: str
+    actor_id: str
+    channel: str
+    kind: InputKind
     text: str
-    callback_data: str
-    callback_query_id: str
-    callback_message_id: int | None
-    telegram_user_id: str
-    telegram_username: str
-    telegram_first_name: str
-    telegram_last_name: str
+    action: str
+    media_reference: str
+    metadata: dict[str, Any]
 
     def model_copy(self, *, update: dict[str, Any] | None = None) -> Any:
         """Создаёт копию входа с изменениями."""
@@ -70,65 +68,17 @@ class ConversationInput:
         values.update(update or {})
         return ConversationInput(**values)
 
-    @property
-    def update_id(self) -> int:
-        """Возвращает идентификатор взаимодействия для старого runtime-контракта."""
-        return self.interaction_id
-
-    @property
-    def chat_id(self) -> str:
-        """Возвращает идентификатор разговора для старого runtime-контракта."""
-        return self.conversation_id
-
-    @property
-    def input_type(self) -> InputKind:
-        """Возвращает нейтральный тип входа."""
-        return self.kind
-
-    @property
-    def callback_data(self) -> str:
-        """Возвращает семантическое действие входа."""
-        return self.action
-
-    @property
-    def callback_query_id(self) -> str:
-        """Возвращает идентификатор подтверждения действия, если он есть."""
-        return str(self.metadata.get("callback_query_id", ""))
-
-    @property
-    def callback_message_id(self) -> int | None:
-        """Возвращает идентификатор сообщения действия, если он есть."""
-        value = self.metadata.get("callback_message_id")
-        return value if isinstance(value, int) else None
-
-    @property
-    def telegram_user_id(self) -> str:
-        """Возвращает legacy identity из metadata без требования Telegram в core."""
-        return self.actor_id
-
-    @property
-    def telegram_username(self) -> str:
-        """Возвращает имя пользователя из metadata."""
-        return str(self.metadata.get("username", ""))
-
-    @property
-    def telegram_first_name(self) -> str:
-        """Возвращает имя пользователя из metadata."""
-        return str(self.metadata.get("first_name", ""))
-
-    @property
-    def telegram_last_name(self) -> str:
-        """Возвращает фамилию пользователя из metadata."""
-        return str(self.metadata.get("last_name", ""))
-
 
 @dataclass(frozen=True, slots=True)
 class SemanticAction:
-    """Описывает действие интерфейса без callback-протокола канала."""
+    """Описывает действие интерфейса без протокола конкретного канала."""
 
-    action_id: str
+    kind: str
     label: str
+    namespace: str = ""
     target: str = ""
+    value: str = ""
+    revision: int | None = None
     group: int = 0
 
 
@@ -154,7 +104,7 @@ class ConversationEffectPlan:
 
 @dataclass(frozen=True, slots=True)
 class ConversationResult:
-    """Описывает результат диалога до channel-specific rendering."""
+    """Описывает результат диалога до отрисовки в конкретном канале."""
 
     state: ConversationState
     view: ConversationView

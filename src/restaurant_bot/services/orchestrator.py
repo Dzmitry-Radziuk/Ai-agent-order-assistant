@@ -64,7 +64,10 @@ from restaurant_bot.integrations.openai_transcription_policy import has_distinct
 from restaurant_bot.integrations.telegram import TELEGRAM_TRANSIENT_ERRORS, TelegramClient
 from restaurant_bot.logging import sanitize_log_value
 from restaurant_bot.parsing.commands.api import infer_intent
-from restaurant_bot.presentation.telegram.conversation import render_conversation_view
+from restaurant_bot.presentation.telegram.conversation import (
+    render_conversation_view,
+    telegram_action_mapper,
+)
 from restaurant_bot.presentation.telegram.order_review import preview_reply
 from restaurant_bot.presentation.telegram.venue_registration import not_bound_reply
 from restaurant_bot.repositories.order_events import OrderEventRepository
@@ -151,7 +154,8 @@ class UpdateOrchestrator:
         self.catalog = CatalogCache(settings, redis, sheets)
         self.engine = ConversationEngine(settings)
         self.conversation_application = ConversationApplication(
-            cast(ConversationProcessor, self.engine)
+            cast(ConversationProcessor, self.engine),
+            action_mapper=telegram_action_mapper,
         )
         self.input_interpreter = TelegramInputInterpreter(
             self.openai,
@@ -1334,7 +1338,10 @@ class UpdateOrchestrator:
         interaction: ConversationInput = to_conversation_input(event)
         application = getattr(self, "conversation_application", None)
         if application is None:
-            application = ConversationApplication(cast(ConversationProcessor, self.engine))
+            application = ConversationApplication(
+                cast(ConversationProcessor, self.engine),
+                action_mapper=telegram_action_mapper,
+            )
             self.conversation_application = application
         result = application.process(interaction, command, state, catalog)
         return EngineResult(

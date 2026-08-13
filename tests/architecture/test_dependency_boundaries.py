@@ -80,3 +80,10 @@ def test_conversation_application_source_has_no_telegram_protocol_types() -> Non
         assert "TelegramEvent" not in source
         assert "presentation.telegram" not in source
         assert "services.orchestrator" not in source
+
+
+def test_conversation_engine_uses_neutral_input_contract() -> None:
+    """Проверяет, что центральный processor не требует TelegramEvent."""
+    source = (ROOT / "services" / "engine.py").read_text(encoding="utf-8")
+    assert "TelegramEvent" not in source
+    assert "ConversationInteraction" in source

@@ -51,12 +51,24 @@ class ConversationProcessor(Protocol):
         """Обрабатывает нейтральное взаимодействие."""
 
 
+class ActionMapper(Protocol):
+    """Преобразует действие legacy-процессора в семантическое действие."""
+
+    def __call__(self, button: Any, group: int) -> SemanticAction:
+        """Преобразует одну кнопку внешнего процессора."""
+
+
 class ConversationApplication:
     """Координирует общий диалоговый use case для разных каналов."""
 
-    def __init__(self, processor: ConversationProcessor) -> None:
-        """Сохраняет внедрённый stateful processor."""
+    def __init__(
+        self,
+        processor: ConversationProcessor,
+        action_mapper: ActionMapper | None = None,
+    ) -> None:
+        """Сохраняет внедрённый обработчик состояния."""
         self._processor = processor
+        self._action_mapper = action_mapper
 
     def process(
         self,
@@ -67,14 +79,14 @@ class ConversationApplication:
     ) -> ConversationResult:
         """Обрабатывает вход и возвращает нейтральный результат."""
         result = self._processor.handle(interaction, command, state, catalog)
-        actions = tuple(
-            SemanticAction(
-                action_id=str(getattr(button, "callback_data", "")),
-                label=str(getattr(button, "text", "")),
-                group=row_index,
+        actions = (
+            tuple(
+                self._action_mapper(button, row_index)
+                for row_index, row in enumerate(result.reply.rows)
+                for button in row
             )
-            for row_index, row in enumerate(result.reply.rows)
-            for button in row
+            if self._action_mapper is not None
+            else ()
         )
         return ConversationResult(
             state=result.state,

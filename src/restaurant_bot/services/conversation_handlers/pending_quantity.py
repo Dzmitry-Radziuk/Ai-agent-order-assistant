@@ -80,7 +80,7 @@ class PendingQuantityHandler:
         item = state.current_item()
         text = event.text or command.text
         if (
-            event.input_type == InputKind.CALLBACK
+            event.kind == InputKind.CALLBACK
             or item is None
             or item.status
             not in {

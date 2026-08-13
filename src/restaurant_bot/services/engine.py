@@ -5,6 +5,7 @@ from collections import defaultdict
 from copy import deepcopy
 from datetime import UTC, datetime
 
+from restaurant_bot.application.conversation.contracts import ConversationInteraction
 from restaurant_bot.catalog.evidence import (
     query_evidence_tokens,
 )
@@ -78,7 +79,6 @@ from restaurant_bot.domain.models import (
     PendingSubmission,
     SearchScope,
     SessionStage,
-    TelegramEvent,
 )
 from restaurant_bot.domain.unit_conversion import convert_quantity
 from restaurant_bot.domain.units import normalize_unit
@@ -190,14 +190,14 @@ class ConversationEngine:
 
     def handle(
         self,
-        event: TelegramEvent,
+        event: ConversationInteraction,
         command: ParsedCommand,
         state: ConversationState,
         catalog: list[CatalogProduct],
     ) -> EngineResult:
         """Обрабатывает входные данные текущего компонента."""
         if (
-            event.input_type in {InputKind.TEXT, InputKind.VOICE}
+            event.kind in {InputKind.TEXT, InputKind.VOICE}
             and command.dialogue_response is DialogueResponse.NONE
         ):
             command = command.model_copy(
@@ -211,13 +211,13 @@ class ConversationEngine:
             )
         # Keep the existing voice normalizer as a pre-policy normalization
         # step for legacy/LLM commands that mislabel a submit phrase as add-more.
-        if event.input_type is InputKind.VOICE and (
+        if event.kind is InputKind.VOICE and (
             command.intent in {Intent.ADD_MORE, Intent.CONFIRM}
             or state.stage is SessionStage.AWAIT_SUBMIT_CONFIRM
         ):
             command = self.contextual_command_policy.normalize_pre_modal_voice(
                 command,
-                input_kind=event.input_type,
+                input_kind=event.kind,
                 raw_text=event.text or "",
                 state=state,
             )
@@ -229,7 +229,7 @@ class ConversationEngine:
         # A stale callback must be rejected before any modal transition or
         # cleanup can mutate the current draft.
         if (
-            event.input_type == InputKind.CALLBACK
+            event.kind == InputKind.CALLBACK
             and command.callback_revision is not None
             and command.callback_revision != state.ui_revision
         ):
@@ -373,20 +373,7 @@ class ConversationEngine:
         self._remove_navigation_command_items(state)
         remove_cart_comment_shadows(state)
         remove_exact_cart_duplicates(state)
-
-        # The source n8n workflow accepts voice phrases such as "отправь
-        # запрос снабженцу" in any word order while a not-found/candidate card
-        # is open.  Do this before generic intent handling: the parser can
-        # otherwise interpret the phrase as a product line, and bare
-        # "отправить" remains the normal submit command in every other state.
         current = state.current_item()
-
-        # Voice transcription and an LLM intent are advisory only.  The
-        # n8n workflow resolves short spoken corrections against the card that
-        # is currently open: a phrase such as "исправить" must never become a
-        # new product search, and "поставь 40" must affect only that item.
-        # Keep that state-aware rule local and deterministic for text and
-        # voice alike.
         if (
             not modal_decision.quantity_interrupted
             and not modal_decision.candidate_interrupted
@@ -399,7 +386,7 @@ class ConversationEngine:
         ):
             command = self.contextual_command_policy.reinterpret_contextual_command(
                 command,
-                input_kind=event.input_type,
+                input_kind=event.kind,
                 raw_text=event.text or "",
                 state=state,
                 available_cart_pages=available_cart_pages(state.visible_actions),
@@ -509,7 +496,7 @@ class ConversationEngine:
                         selection_query=event.text or command.text,
                         callback_target=str(state_item_index(state, current)),
                     )
-                elif event.input_type == InputKind.VOICE and not command.items:
+                elif event.kind == InputKind.VOICE and not command.items:
                     # On an open candidate card every vague voice utterance
                     # is a possible choice, never a new product.  Keeping the
                     # same card is safer than polluting the draft with a bad
@@ -529,7 +516,7 @@ class ConversationEngine:
         # stable request. The orchestration inbox also deduplicates updates,
         # but this preserves the n8n contract at the state-machine boundary.
         if any(
-            str(request.get("description_event_key") or "") == str(event.update_id)
+            str(request.get("description_event_key") or "") == str(event.interaction_id)
             for request in state.product_add_requests
         ):
             return EngineResult(state=state, reply=cart_reply(state))
@@ -659,8 +646,6 @@ class ConversationEngine:
                 state.cart[index].status = ItemStatus.SKIPPED
             state.supplier_hint_context = ""
             state.supplier_search_locked = False
-            # n8n skips the locked item, then returns to the supplier-warning
-            # chooser; it does not accept a free-form supplier name here.
             return EngineResult(state=state, reply=supplier_warning_choose_reply(state))
         if command.intent == Intent.CHECK_MIN_SUM:
             return EngineResult(state=state, reply=supplier_warning_details_reply(state))
@@ -697,12 +682,8 @@ class ConversationEngine:
                     state.pending_comment_text,
                 ),
             )
-
-        # `v2:back` is n8n's return-to-draft button. It must render the
-        # existing draft (including unresolved positions), not clear context
-        # and ask for another product.
         if command.intent == Intent.BACK:
-            if event.input_type == InputKind.CALLBACK or command.text.startswith("v2:back"):
+            if event.kind == InputKind.CALLBACK or command.text.startswith("v2:back"):
                 return EngineResult(state=state, reply=cart_reply(state))
             clear_transient_dialog_state(state)
             state.stage = SessionStage.COLLECTING
@@ -803,7 +784,7 @@ class ConversationEngine:
         if (
             state.stage == SessionStage.AWAIT_PRODUCT_ADD_DETAILS
             and modal_decision.product_add_details.action is CompatibilityAction.AMBIGUOUS
-            and not (event.input_type is InputKind.PHOTO and command.intent is Intent.ADD_ITEMS)
+            and not (event.kind is InputKind.PHOTO and command.intent is Intent.ADD_ITEMS)
         ):
             index = state.pending_product_add_item_index
             item = state.cart[index] if index is not None and index < len(state.cart) else None
@@ -825,9 +806,9 @@ class ConversationEngine:
                         )
                     ),
                 )
-            if event.input_type == InputKind.VOICE and not command.items:
+            if event.kind == InputKind.VOICE and not command.items:
                 return EngineResult(state=state, reply=unrecognized_voice_reply(state))
-            if event.input_type == InputKind.PHOTO and not command.items:
+            if event.kind == InputKind.PHOTO and not command.items:
                 return EngineResult(state=state, reply=photo_without_quantities_reply(state))
             if (
                 modal_decision.manual_details.action is CompatibilityAction.CONTINUE
@@ -898,9 +879,6 @@ class ConversationEngine:
                     ItemStatus.AI_PENDING,
                 }:
                     newly_unresolved_ids.append(item.id)
-            # `v2:minsumadd` scopes exactly the next incoming product message
-            # in n8n. Retaining this context would incorrectly lock every
-            # later product to the same supplier.
             if selected_supplier:
                 state.supplier_hint_context = ""
             preferred_issue_item_id = next(iter(newly_unresolved_ids), "")
@@ -910,13 +888,13 @@ class ConversationEngine:
                 preferred_issue_item_id=preferred_issue_item_id,
             )
 
-        if event.input_type == InputKind.VOICE:
+        if event.kind == InputKind.VOICE:
             return EngineResult(state=state, reply=unrecognized_voice_reply(state))
         return EngineResult(state=state, reply=unknown_intent_reply(state))
 
     def _resolve_pending_comment_scope(
         self,
-        event: TelegramEvent,
+        event: ConversationInteraction,
         command: ParsedCommand,
         state: ConversationState,
         catalog: list[CatalogProduct],
@@ -1005,7 +983,7 @@ class ConversationEngine:
 
     @staticmethod
     def _cart_page(command: ParsedCommand, state: ConversationState) -> int:
-        """Resolve the requested page of the current draft."""
+        """Определяет запрошенную страницу текущего черновика."""
         target = command.callback_target
         if target.startswith("page:"):
             try:
@@ -1041,7 +1019,7 @@ class ConversationEngine:
 
     def _submit_product_add_description(
         self,
-        event: TelegramEvent,
+        event: ConversationInteraction,
         state: ConversationState,
         description: str,
     ) -> EngineResult:
@@ -1061,11 +1039,11 @@ class ConversationEngine:
                     "source_item_id": item.id if item else "",
                     "original_query": item.source_query if item else "",
                     "description": description[:1000],
-                    "description_event_key": str(event.update_id),
-                    "telegram_user_id": event.telegram_user_id or event.chat_id,
-                    "telegram_username": event.telegram_username,
-                    "telegram_first_name": event.telegram_first_name,
-                    "telegram_last_name": event.telegram_last_name,
+                    "description_event_key": str(event.interaction_id),
+                    "telegram_user_id": event.actor_id or event.conversation_id,
+                    "telegram_username": str(event.metadata.get("username", "")),
+                    "telegram_first_name": str(event.metadata.get("first_name", "")),
+                    "telegram_last_name": str(event.metadata.get("last_name", "")),
                     "status": "pending_write",
                     "created_at": now,
                     "updated_at": now,
@@ -1378,7 +1356,9 @@ class ConversationEngine:
             return self._advance_multiple_quantity_choice(state)
         return self._advance(state)
 
-    def _prepare_submission(self, event: TelegramEvent, state: ConversationState) -> EngineResult:
+    def _prepare_submission(
+        self, event: ConversationInteraction, state: ConversationState
+    ) -> EngineResult:
         """Фиксирует черновик для надёжной отправки."""
         if (
             state.pending_submission
@@ -1409,7 +1389,7 @@ class ConversationEngine:
         if not matched:
             return EngineResult(state=state, reply=cart_reply(state))
         now = datetime.now(UTC)
-        order_no = f"{now:%Y%m%d-%H%M%S}-{event.chat_id[-4:]}"
+        order_no = f"{now:%Y%m%d-%H%M%S}-{event.conversation_id[-4:]}"
         supplier_totals: dict[str, float] = defaultdict(float)
         for item in matched:
             supplier_totals[item.supplier] += item.amount
@@ -1445,8 +1425,8 @@ class ConversationEngine:
         state.pending_submission = PendingSubmission(
             order_no=order_no,
             trace_id=state.order_trace_id,
-            telegram_user_id=event.telegram_user_id or event.chat_id,
-            telegram_chat_id=event.chat_id,
+            telegram_user_id=event.actor_id or event.conversation_id,
+            telegram_chat_id=event.conversation_id,
             rows=rows,
             spreadsheet_id=state.spreadsheet_id,
             venue_code=state.venue_code,
@@ -1465,7 +1445,7 @@ class ConversationEngine:
 
     def _handle_submission_failed_recovery(
         self,
-        event: TelegramEvent,
+        event: ConversationInteraction,
         command: ParsedCommand,
         state: ConversationState,
         decision: CompatibilityDecision,

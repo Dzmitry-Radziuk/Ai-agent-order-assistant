@@ -98,7 +98,7 @@ class OrderStatusHandler:
             reply=BotReply(
                 text=(
                     "Обновляю статус заявки..."
-                    if event.input_type == InputKind.CALLBACK
+                    if event.kind == InputKind.CALLBACK
                     else "Проверяю статусы ваших заявок..."
                 )
             ),
