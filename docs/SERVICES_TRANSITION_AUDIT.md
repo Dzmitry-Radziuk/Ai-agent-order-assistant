@@ -509,3 +509,110 @@ facades не найдено. Остальные большие application/use-c
 Полный baseline до и после — `1366 collected / 1366 passed`.
 Старые списки зависимостей и таблица ниже сохранены как история предыдущих
 аудитов; для текущего дерева применяются owners и edges из этой секции.
+## BLOCK 6C.1 — PROTECTED SERVICES ADAPTERS SECOND PASS
+
+### Рамки и свежая проверка
+
+Аудит выполнен на HEAD `0383b0dd1479908e6d30f950633db142693a53f4`, ветка `decompose_bot`.
+Изменения в production-код, тесты, скрипты, миграции и настройки не вносились.
+Свежий полный прогон: `1378 collected / 1378 passed` за `17.82 s`.
+Quality gates: `mypy src` — без ошибок (129 файлов), `ruff check` — без ошибок,
+`ruff format --check` — 238 файлов отформатированы, Markdown links — 33 файла,
+`compileall` и `git diff --check` — без ошибок.
+
+Текущая файловая граница `services/` содержит `engine.py`, `orchestrator.py`,
+`submission.py`, `venue_registration.py`, `input_recognition.py`, `order_review.py`
+и пять обработчиков в `conversation_handlers/`:
+`candidate_selection.py`, `comment_scope.py`, `final_review.py`, `navigation.py`,
+`pending_quantity.py` (плюс маркер пакета). `services/text.py` отсутствует:
+`to_float` уже принадлежит `parsing/numeric.py`.
+
+### Второй проход по владельцам
+
+| Область | Фактическая ответственность и callers | Решение |
+|---|---|---|
+| `candidate_selection.py` | Адаптирует чистый `conversation.selection.resolve_candidate_selection` к `EngineResult`, пагинации и Telegram-ответу; вызывается `ConversationEngine` и прямыми handler-тестами. | `KEEP_TEMP`: перенос смешал бы чистое решение, state и presentation; нового зрелого владельца нет. |
+| `comment_scope.py` | Проверяет scope/confidence, меняет pending-comment state, применяет `conversation.comments`, строит clarification/cart reply и возвращает reprocess-команду; вызывается только engine и прямыми тестами. | `KEEP_TEMP`: это цельный modal adapter, а не безопасный leaf. |
+| `final_review.py` | Guards unresolved/matched items, final-review pagination, stage transition и сигнал подготовки submission; вызывается engine и тестами. | `PROTECTED`: граница с критическим submission/checkpoint-контрактом. |
+| `navigation.py:PassiveIntentHandler` | Reply mapping для passive intents и onboarding mutation; engine и handler-тесты. | `KEEP_TEMP`: перенос в presentation потерял бы допустимую state mutation. |
+| `navigation.py:OrderStatusHandler` | State пагинации/деталей истории и `enqueue_order_status`; engine и handler-тесты. | `KEEP_TEMP_UNTIL_HISTORY_USE_CASE`: будущий history use-case ещё не оформлен. |
+| `pending_quantity.py` | Единственный modal owner MISSING_QTY/UNIT_MISMATCH/DUPLICATE_PENDING: guard, spoken quantity/unit recovery, mutation, duplicate/status transitions; engine и tests. | `PROTECTED`: поведение зависит от state, catalog-unit special case и compatibility policy. |
+
+`PendingQuantityHandler.spoken_quantity` владеет modal recovery; его примитивы
+`parse_quantity_unit`, number-word parsing и `parse_product_lines` принадлежат
+нижним parsing-владельцам. Целый метод нельзя механически перенести в
+`parsing/quantities.py`, потому что он содержит state-specific fallback и
+catalog-unit semantics. Возможен только отдельный будущий контракт после
+разделения примитива и modal policy, но не в этом аудите.
+
+### Проверка engine-обёрток
+
+`_build_item` делегирует `conversation.item_intake.build_cart_item`; production
+caller — engine, а прямые тестовые callers закрепляют внутренний контракт.
+`_spoken_quantity` делегирует `PendingQuantityHandler.spoken_quantity`; production
+caller — `UpdateOrchestrator` (аналитический/contextual seam), отдельная
+`ContextualCommandPolicy._spoken_quantity` является другим injected parser.
+`_cart_page` вызывается двумя участками engine и не имеет готового общего owner;
+`_callback_item_index` вызывается пятью callback-ветками engine и тестом
+state-aware resolution. Ни одна обёртка не является dead code, re-export или
+безопасным кандидатом на удаление.
+
+### Корневые services и контракты
+
+`input_recognition.py` одновременно выполняет Telegram download/cleanup,
+OpenAI voice/photo, retry/fallback и progress/visible-action effects; перенос
+в `input/` был бы косметическим и опасным. `order_review.py` координирует lease,
+DB/Redis, Sheets и Telegram read/submit effects. `submission.py` содержит
+критический порядок checkpoint, read-back, recalc и dispatch. `orchestrator.py`
+сохраняет durable claim/checkpoint и порядок input → engine → side effects;
+предыдущая декомпозиция признана достаточной. Все четыре файла — `PROTECTED`.
+
+`VenueContext` содержит venue плюс user/chat binding и инфраструктурные поля;
+`venues/contracts.py::Venue` описывает только нейтральный каталог venue. Это
+разные контракты, поэтому перенос `VenueContext` в `venues/contracts.py`
+создал бы смешение identity и session access. `RegistrationResult` — boundary
+результат registration handler (`handled`, reply, context, reset), а не domain
+модель. Оба типа остаются в `services/venue_registration.py`.
+
+### Зависимости и безопасные границы
+
+Проверка AST для текущего source tree дала `LOWER_TO_SERVICES = []` для
+`domain`, `conversation`, `catalog`, `orders`, `parsing`; `SERVICE_CYCLES = []`.
+Разрешённые внешние направления остаются `workers/tasks.py → services/orchestrator.py`,
+`cli.py → services/venue_registration.py` и application adapters → services.
+Поиск callers не обнаружил dynamic/importlib, monkeypatch или re-export контрактов,
+кроме явных прямых imports в перечисленных тестах.
+
+### Рейтинг кандидатов
+
+Оценка: architecture benefit / behavior risk / dependency improvement /
+owner maturity / testability / diff size / future usefulness (1–5; для diff
+5 означает большой перенос).
+
+| Кандидат | Оценка | Классификация |
+|---|---|---|
+| Candidate selection adapter | 2 / 3 / 2 / 5 / 3 / 2 / 2 | `KEEP_TEMP`, `NOT_WORTH_IT` |
+| Comment scope handler | 3 / 4 / 3 / 4 / 3 / 3 / 3 | `CONDITIONAL` |
+| Final review handler | 3 / 5 / 3 / 3 / 3 / 4 / 3 | `PROTECTED` |
+| Passive intent handler | 2 / 2 / 2 / 3 / 3 / 2 / 2 | `KEEP_TEMP`, `NOT_WORTH_IT` |
+| Order status handler | 3 / 3 / 3 / 2 / 3 / 3 / 5 | `KEEP_TEMP_UNTIL_HISTORY_USE_CASE` |
+| Spoken quantity extraction | 4 / 4 / 3 / 3 / 4 / 3 / 5 | `CONDITIONAL`, не сейчас |
+| `_build_item` | 2 / 2 / 4 / 5 / 4 / 1 / 2 | `CONDITIONAL`, не сейчас |
+| `_spoken_quantity` | 3 / 3 / 3 / 3 / 4 / 1 / 4 | `CONDITIONAL`, не сейчас |
+| `_cart_page` | 1 / 2 / 2 / 2 / 3 / 1 / 2 | `NOT_WORTH_IT` |
+| `_callback_item_index` | 2 / 3 / 2 / 2 / 3 / 1 / 2 | `KEEP_TEMP`, `NOT_WORTH_IT` |
+| `input_recognition.py` | 1 / 4 / 1 / 2 / 2 / 4 / 3 | `PROTECTED` |
+| Venue contract relocation | 3 / 4 / 3 / 2 / 3 / 3 / 3 | `CONDITIONAL`, не сейчас |
+| `order_review.py` | 1 / 5 / 1 / 5 / 2 / 5 / 5 | `PROTECTED` |
+| `submission.py` | 1 / 5 / 1 / 5 / 2 / 5 / 5 | `PROTECTED` |
+| `orchestrator.py` | 1 / 5 / 3 / 5 / 2 / 5 / 5 | `PROTECTED` |
+
+### Итоговое решение
+
+`SERVICES_FINAL_FREEZE`.
+
+Второй проход не выявил ни одного `SAFE_NOW` механического переноса или
+удаляемого файла. До стабилизации нельзя начинать новый services cleanup,
+переносить handlers, объединять Venue-контракты или дробить submission/
+orchestrator. Следующий шаг ровно один: `BLOCK 6D — STABILIZATION / REALISTIC
+SMOKE / ACCEPTANCE PREP`.
