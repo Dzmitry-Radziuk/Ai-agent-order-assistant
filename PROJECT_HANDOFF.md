@@ -1,5 +1,29 @@
 # Передача проекта
 
+## CURRENT STATUS — TEST SUITE CONSOLIDATION
+
+Кампания выполнена только в `tests/`; production, Alembic, Docker и DevOps не
+изменялись. Baseline: `1391 collected / 1391 passed`, 98 test-файлов,
+23 765 строк тестового кода, 91 parametrized-функция, полный запуск около
+21,74 с. После консолидации: `1391 collected / 1391 passed`, 98 файлов,
+23 752 строки, 90 parametrized-функций, около 22,21 с.
+
+Удалён один доказанный duplicate: два набора проверяли один и тот же
+`infer_intent → intent + items == []` global voice routing path; 12 входов
+перенесены в оставшийся parametrized test с теми же semantic cases. Остальные
+похожие тесты сохранены как intentional redundancy, потому что покрывают
+разные уровни (parser, engine, Telegram), разные state transitions или
+submission/concurrency failure modes. Fixture consolidation не потребовалась:
+есть один общий `settings` fixture, остальные setup локальны и читаемы.
+
+Проверка user-scenario catalog: 34 сценария актуальны, dangling mappings не
+обнаружены. Сохранены отдельные proofs modal preemption, quantity/comment
+leakage, stale callbacks, idempotency, lease fencing, submission uncertainty,
+multi-channel contracts, architecture guards и bounded 100k catalog provider.
+
+Итоговый verdict: `TEST_SUITE_CONSOLIDATED_WITH_INTENTIONAL_REDUNDANCY`.
+Следующий шаг не запускается автоматически.
+
 ## CURRENT STATUS — ФИНАЛЬНАЯ КАМПАНИЯ СТРУКТУРЫ КОДОВОЙ БАЗЫ
 
 Кампания начата на SHA `1232bc62ca776dae5cc7cacf3765322288e214e1`, ветка
