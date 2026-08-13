@@ -1,45 +1,63 @@
-# Testing Readiness — Block 6C
+# Testing Readiness — Block 6D
 
 Текущий документ готовности для ручного тестирования. Он не заменяет
 исполняемый код и не переписывает исторический
 [`FULL_REGRESSION_AUDIT.md`](FULL_REGRESSION_AUDIT.md).
 
-## 1. Снимок проверки
+## 1. Текущий снимок проверки
 
 | Поле | Значение |
 |---|---|
 | Дата | 2026-08-13 |
 | Ветка | `decompose_bot` |
-| Проверенный HEAD | `669b5cff05ef959cc2ded5a21f14054f9aa737ab` |
-| Полный baseline | `1377 collected / 1377 passed` за `17.09 s` |
-| Рабочее дерево до docs | чистое |
+| Проверенный HEAD | `2fb1e6e03e5f889ba5034da013facd555fea138f4` |
+| Полный baseline | `1378 collected / 1378 passed` за `17.13 s` |
+| Финальная проверка после acceptance tests | `1380 collected / 1380 passed` за `17.87 s` |
+| Архитектурный статус | `SERVICES_FINAL_FREEZE`; Block 6C/6C.1 завершены |
 | Реальные Telegram/Google/OpenAI/supplier effects | не выполнялись |
 | `.env` | не tracked; значения не читались |
 
-Архитектурная декомпозиция завершена решениями `ENGINE_PHASE_ACCEPTABLE` и
-`ORCHESTRATOR_DECOMPOSITION_SUFFICIENT`. Block 6C проверяет поведение и
-readiness, но не начинает новый refactor.
+Архитектурная декомпозиция завершена решениями `ENGINE_PHASE_ACCEPTABLE`,
+`ORCHESTRATOR_DECOMPOSITION_SUFFICIENT` и `SERVICES_FINAL_FREEZE`. Block 6D
+закрыл два acceptance coverage gap и не начинал новый refactor.
+
+Исторический snapshot на `669b5cff05ef959cc2ded5a21f14054f9aa737ab` сохранён
+ниже как архивное сравнение и не является текущим baseline.
+
+### Архивный snapshot Block 6C
+
+| Поле | Историческое значение |
+|---|---|
+| HEAD | `669b5cff05ef959cc2ded5a21f14054f9aa737ab` |
+| Full pytest | `1377 collected / 1377 passed` |
+| Verdict | `READY_FOR_MANUAL_TESTING_WITH_KNOWN_NONBLOCKERS` |
+
+Эти цифры относятся к завершённому Block 6C и не заменяют свежую проверку
+текущего HEAD.
 
 ## 2. Автоматические проверки
 
 | Проверка | Результат |
 |---|---:|
-| Full pytest | `1377 passed` |
-| Orchestrator/input/photo/submission smoke | `238 passed` |
-| Text/voice/catalog/routing/callback focused set | `386 passed` |
-| Registration/concurrency/replay/submission safety | `171 passed` |
+| Full pytest | `1380 passed` |
+| Acceptance stabilization tests | `2 passed` |
+| Conversation/input/catalog/venue/callback focused set | `455 passed` |
+| AI/voice/quantity/submission/concurrency safety set | `254 passed` |
 | Representative historical HIGH recheck | `36 passed` |
 | Explicit acceptance subset | `16 passed` |
 | Ruff check | pass |
-| Ruff format check (`src tests scripts alembic`) | `237 files already formatted` |
+| Ruff format check (`src tests`) | `130 files already formatted` |
 | Mypy | `129 source files, no issues` |
 | Compileall (`src tests scripts alembic`) | pass |
-| Markdown links | `32 files, pass` |
+| Markdown links | `33 files, pass` |
 | Scenario catalog check | `34 scenarios, актуален` |
 | `git diff --check` | pass |
 
 Все smoke-наборы используют fake/mock/test settings. Никаких реальных заявок,
 записей в production Sheets или сообщений пользователям не отправлялось.
+Полная проверка `ruff format --check .` повторно показывает один исторический
+P2-файл `docs/RAPID_INPUT_CONCURRENCY_ANALYSIS.md`; изменённые в Block 6D файлы
+форматированы, исторический документ намеренно не переписывался.
 
 ## 3. Критические пользовательские сценарии
 
@@ -114,8 +132,8 @@ review callbacks покрыты tests; stale callback не мутирует те
 | Сценарий | Current result |
 |---|---|
 | Новый товар во время quantity modal | **PASS**: `test_quantity_answer_completes_current_missing_item_without_new_cart_line`, `test_voice_product_list_is_not_consumed_by_open_quantity_card`; сильная новая команда прерывает modal и не наследует старый quantity |
-| «Удали все комментарии» | Отдельного realistic characterization test не найдено; **NO_REALISTIC_COVERAGE / MANUAL_LIVE_REQUIRED**. По коду и существующим comment-scope tests доказательства удаления cart отсутствуют |
-| «Не X, а Y» в комментарии | Отдельного acceptance test не найдено; **NO_REALISTIC_COVERAGE / MANUAL_LIVE_REQUIRED**. Баг не считается подтверждённым |
+| «Удали все комментарии» | **PASS**: `test_remove_all_comments_keeps_cart_and_catalog_bindings`; комментарии очищены по scope, cart, identities, quantity, units и catalog bindings не изменились |
+| «Не X, а Y» в комментарии | **PASS**: `test_comment_correction_replaces_only_corrected_fact`; заменён только совпавший фрагмент, независимые пожелания сохранены |
 | Quantity provenance | **PASS**: explicit order quantity не переписывается packaging/title/catalog number; catalog tests и AI media tests green |
 | NOT_FOUND | **PASS**: safe clarification/alternatives, похожий товар не auto-select |
 | Supplier-comment provenance | **PASS**: representative catalog/AI provenance tests green |
@@ -128,9 +146,9 @@ baseline. Representative groups на текущем HEAD дали `36 passed`, �
 comment provenance, spoken quantity, title/packaging numbers, voice shadow and
 comment recovery, visible-action fallback и photo quantity isolation.
 
-Текущий full suite также зелёный (`1377/1377`), поэтому подтверждённых P0/P1
-регрессий по историческому списку нет. Отсутствие отдельного теста для
-comment-removal/correction остаётся coverage gap, а не зафиксированным failure.
+Текущий full suite также зелёный (`1380/1380`), поэтому подтверждённых P0/P1
+регрессий по историческому списку нет. Два ранее открытых acceptance gap закрыты
+автоматическими характеристиками на уровне ConversationEngine.
 
 ## 7. Search readiness
 
@@ -198,7 +216,7 @@ Redis/Celery URLs. Значения секретов здесь не приво�
 
 Основание: full suite и critical fake smoke зелёные, P0/P1 blocker на текущем
 HEAD не воспроизведён, search safety и replay/lease protections подтверждены.
-Known nonblockers — отсутствие live ASR/vision/Telegram smoke и отсутствие
-отдельных realistic characterization tests для «удали все комментарии» и
-«не X, а Y». Следующая единственная кампания: controlled human pilot по этому
-checklist; новую архитектурную декомпозицию и history implementation не начинать.
+Known nonblockers — отсутствие live ASR/vision/Telegram smoke и внешних
+провайдерских эффектов в тестовом окружении. Следующая единственная кампания:
+`CONTROLLED HUMAN PILOT` по этому checklist; новую архитектурную декомпозицию и
+history implementation не начинать.

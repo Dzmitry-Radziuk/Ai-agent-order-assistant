@@ -1,5 +1,26 @@
 # Передача проекта
 
+## CURRENT STATUS — BLOCK 6D
+
+Проверенный текущий HEAD: `2fb1e6e03e5f889ba5034da013facd555fea138f4`, ветка
+`decompose_bot`, origin — GitHub. Свежий baseline до acceptance-тестов:
+`1378 collected / 1378 passed`; финальный suite после двух новых характеристик:
+`1380 collected / 1380 passed`. Ruff, format, mypy, markdown links, compileall и
+`git diff --check` проходят. `.env` не tracked и не читался; GitLab не
+использовался.
+
+Block 6D закрыл acceptance gaps «удали все комментарии» и локальной коррекции
+«не X, а Y». Тесты подтверждают сохранность cart, identities, quantity/unit,
+catalog bindings и независимых пожеланий. Production change ограничен
+канонической операцией comment mutation; новая декомпозиция engine/orchestrator
+не выполнялась. Архитектурный статус: `SERVICES_FINAL_FREEZE`.
+
+## NEXT STEP
+
+`CONTROLLED HUMAN PILOT` в изолированном окружении с отключённой внешней
+отправкой. Live Telegram, ASR, vision и Google остаются `MANUAL_LIVE_REQUIRED`.
+Новые архитектурные слои, history implementation и search redesign не начинать.
+
 ## IMPLEMENTED AFTER 5Z / BLOCK 6A
 
 Выполнено поведенчески нейтральное выделение Telegram input interpretation.
@@ -13,21 +34,22 @@ orchestrator. Порядок callback/text/media, StateCompatibilityPolicy,
 транзиентные ошибки провайдера и видимые действия не изменены.
 
 Метрики после переноса: `orchestrator.py` — 1888 строк, 49 функций/методов;
-новый интерпретатор — 330 строк, 3 класса, 11 функций/методов. Полный suite:
-`1377 collected / 1377 passed`; focused input/routing: `444 passed`.
+новый интерпретатор — 330 строк, 3 класса, 11 функций/методов. Исторический
+suite после переноса: `1377 collected / 1377 passed`; текущий Block 6D baseline и
+финальный suite указаны в разделе `CURRENT STATUS — BLOCK 6D`.
 Коммит extraction: `c6feeb7`.
 
-### Текущий фокус — Block 6D
+### Block 6D — завершённая acceptance closure
 
 Архитектурная декомпозиция и Block 6C cleanup завершены. `services/text.py` удалён
 после механического переноса `to_float` в `parsing/numeric.py`; lower/core → services
 edge из AI reconciliation устранён. Stateful/effectful services и handlers оставлены
-защищёнными. Baseline до добавления guard-теста: `1377 collected / 1377 passed`;
-финальный suite: `1378 passed`.
+защищёнными. Block 6D добавил только два acceptance-теста и минимальную
+коррекцию comment mutation; финальный suite: `1380 collected / 1380 passed`.
 Подробный аудит: [`docs/SERVICES_TRANSITION_AUDIT.md`](docs/SERVICES_TRANSITION_AUDIT.md).
 Решение: `SERVICES_CLEANUP_PARTIAL_WITH_PROTECTED_ADAPTERS`.
-Следующая задача: `BLOCK 6D — STABILIZATION / REALISTIC SMOKE / ACCEPTANCE PREP`.
-Не начинать новую декомпозицию и не исправлять acceptance bugs в Block 6C.
+Следующий шаг: `CONTROLLED HUMAN PILOT`. Не начинать новую декомпозицию,
+history implementation или search redesign.
 
 ## POST-6A REASSESSMENT / BLOCK 6B
 
