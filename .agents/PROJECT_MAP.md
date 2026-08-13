@@ -1,5 +1,16 @@
 # Карта проекта
 
+## IMPLEMENTED AFTER 5Z / BLOCK 6A
+
+Telegram-specific semantic input boundary теперь находится в
+`input/telegram_interpretation.py` (`TelegramInputInterpreter`). Он получает
+`TelegramEvent`, `ConversationState` и injected provider/recognizer/policy и
+возвращает `ParsedCommand`. В модуле нет DB, Redis, Telegram transport,
+Sheets, catalog cache, engine, review, registration, checkpoint или task
+зависимостей. `UpdateOrchestrator` только создаёт owner и вызывает
+`interpret(...)`; `_recognizer()` сохранён lazy seam. Полный baseline после
+переноса: `1377/1377`.
+
 ## Current architecture after Block 5Y
 
 Detailed current `UpdateOrchestrator` forensic inventory is maintained in

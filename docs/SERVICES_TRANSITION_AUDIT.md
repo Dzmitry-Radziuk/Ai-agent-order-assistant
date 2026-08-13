@@ -1,5 +1,18 @@
 # Аудит переходного слоя services/ и результат Block 5V
 
+## IMPLEMENTED AFTER 5Z / BLOCK 6A
+
+Input interpretation больше не является ответственностью
+`services/orchestrator.py`. Telegram-only owner
+`input/telegram_interpretation.py` получает только нормализованное событие,
+state и injected parsing/media зависимости. Он не импортирует service-layer,
+DB, Redis, TelegramClient, Sheets, catalog или engine. Orchestrator сохраняет
+durable coordination и вызывает owner одной точкой.
+
+Механический перенос подтверждён baseline `1377 collected / 1377 passed` и
+focused input/routing `444 passed`; изменения протокола, state serialization и
+внешних эффектов отсутствуют.
+
 ## CURRENT ARCHITECTURE — Block 5Y
 
 Block 5Y завершил controlled cleanup основных conversation seams. Свежий baseline:

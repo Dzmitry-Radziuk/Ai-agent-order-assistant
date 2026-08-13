@@ -1,5 +1,51 @@
 # Передача проекта
 
+## IMPLEMENTED AFTER 5Z / BLOCK 6A
+
+Выполнено поведенчески нейтральное выделение Telegram input interpretation.
+Класс `TelegramInputInterpreter` в
+`src/restaurant_bot/input/telegram_interpretation.py` теперь владеет выбором
+пути для callback, text, voice и photo. Из `UpdateOrchestrator` вынесены
+`_parse`, `_parse_text_in_context`, `_parse_sheet_review_command`,
+`_parse_pending_comment_scope`, `_match_visible_action` и
+`_needs_visible_action_ai`; lazy-фабрика `_recognizer()` оставлена в
+orchestrator. Порядок callback/text/media, StateCompatibilityPolicy,
+транзиентные ошибки провайдера и видимые действия не изменены.
+
+Метрики после переноса: `orchestrator.py` — 1888 строк, 49 функций/методов;
+новый интерпретатор — 330 строк, 3 класса, 11 функций/методов. Полный suite:
+`1377 collected / 1377 passed`; focused input/routing: `444 passed`.
+Коммит extraction: `c6feeb7`.
+
+### Следующая кампания (не начинать)
+
+Единственная следующая кампания — analysis-only аудит оставшихся границ
+`UpdateOrchestrator` после Block 6A. Не переносить checkpoint, lease, claim,
+delivery, review, registration или catalog AI без отдельного одобрения.
+
+## IMPLEMENTED AFTER 5Z / BLOCK 6A
+
+Выполнено поведенчески нейтральное выделение Telegram input interpretation.
+Класс `TelegramInputInterpreter` в
+`src/restaurant_bot/input/telegram_interpretation.py` теперь владеет выбором
+пути для callback, text, voice и photo. Из `UpdateOrchestrator` вынесены
+`_parse`, `_parse_text_in_context`, `_parse_sheet_review_command`,
+`_parse_pending_comment_scope`, `_match_visible_action` и
+`_needs_visible_action_ai`; lazy-фабрика `_recognizer()` оставлена в
+orchestrator. Порядок callback/text/media, StateCompatibilityPolicy,
+транзиентные ошибки провайдера и видимые действия не изменены.
+
+Метрики после переноса: `orchestrator.py` — 1888 строк, 49 функций/методов;
+новый интерпретатор — 330 строк, 3 класса, 11 функций/методов. Полный suite:
+`1377 collected / 1377 passed`; focused input/routing: `444 passed`.
+Коммит extraction: `c6feeb7`.
+
+### Следующая кампания (не начинать)
+
+Единственная следующая кампания — analysis-only аудит оставшихся границ
+`UpdateOrchestrator` после Block 6A. Не переносить checkpoint, lease, claim,
+delivery, review, registration или catalog AI без отдельного одобрения.
+
 ## CURRENT ARCHITECTURE — Block 5Y
 
 ### Block 5Z — forensic audit of UpdateOrchestrator

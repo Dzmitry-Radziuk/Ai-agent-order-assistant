@@ -1,5 +1,44 @@
 # BLOCK 5Z — forensic-аудит `UpdateOrchestrator`
 
+## IMPLEMENTED AFTER 5Z / BLOCK 6A
+
+### Результат extraction
+
+После analysis-only аудита Block 5Z выполнен один поведенчески нейтральный
+перенос. `TelegramInputInterpreter` в
+`src/restaurant_bot/input/telegram_interpretation.py` стал владельцем
+Telegram-specific interpretation pipeline. Перенесены методы:
+
+- `_parse` → `interpret`;
+- `_parse_text_in_context` → `interpret_text`;
+- `_parse_sheet_review_command`;
+- `_parse_pending_comment_scope`;
+- `_match_visible_action`;
+- `_needs_visible_action_ai`.
+
+`UpdateOrchestrator._recognizer()` оставлен lazy factory и передаётся в новый
+owner через injection. Новый модуль зависит только от domain state/event,
+Telegram callback decoder, pure visible-action policy, parsing API,
+comment-scope helper и injected provider/recognizer. DB, Redis, TelegramClient,
+Google Sheets, CatalogCache, ConversationEngine, review, registration,
+checkpoint и background tasks в него не импортируются.
+
+Сохранены без изменения: callback `v2:review*` и pending-comment callbacks;
+deep-link review; text order (review deep-link → visible action без pending
+comment → global parse → sheet review → comment compatibility → visible-action
+fallback → visible-action AI); voice/photo через `InputRecognitionService` с
+общим `interpret_text`; сильный ADD_ITEMS не заменяется кнопкой; transient
+provider errors дают прежние безопасные результаты.
+
+Механические caller updates выполнены в input/conversation tests: прямых
+вызовов старых orchestrator parsing helpers больше нет. Защищённые методы
+claim/lease/checkpoint/delivery/review/catalog не менялись.
+
+Фактические метрики после переноса: `orchestrator.py` — 1888 строк, 49
+функций/методов, 2 класса; `telegram_interpretation.py` — 330 строк, 11
+функций/методов, 3 класса. Коммит: `c6feeb7`. Focused suite: `444 passed`;
+full suite: `1377 collected / 1377 passed`.
+
 Дата аудита: 2026-08-13
 Ветка: `decompose_bot`
 Исходный commit: `d1c5a2150e6a9c1749c10088847b1ce7c491a738`

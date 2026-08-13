@@ -1,5 +1,19 @@
 # План декомпозиции архитектуры
 
+## IMPLEMENTED AFTER 5Z / BLOCK 6A
+
+Выполнено механическое выделение Telegram input interpretation из
+`services/orchestrator.py`. Новый owner —
+`input/telegram_interpretation.py:TelegramInputInterpreter`. В него перенесены
+верхнеуровневый `_parse`, text contextual routing, sheet-review normalization,
+pending-comment scope, visible-action matching и visible-action AI fallback.
+`_recognizer()` и media provider остаются совместимым injected seam.
+
+Семантика не менялась: сохранены точный порядок callback → text → voice/photo,
+global parse до contextual fallback, StateCompatibilityPolicy и обработка
+транзиентных OpenAI ошибок. Проверка: focused `444 passed`, полный suite
+`1377 passed`.
+
 ## CURRENT ARCHITECTURE — Block 5Y
 
 The current `UpdateOrchestrator` audit and the single candidate input-boundary
