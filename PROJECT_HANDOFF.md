@@ -1,5 +1,40 @@
 # Передача проекта
 
+## CURRENT STATUS — ФИНАЛЬНАЯ КАМПАНИЯ СТРУКТУРЫ КОДОВОЙ БАЗЫ
+
+Кампания начата на SHA `1232bc62ca776dae5cc7cacf3765322288e214e1`, ветка
+`decompose_bot`, origin — GitHub. Выполнена проверка владельцев пакетов,
+границы многоканального ввода, callback-паритета, сервисов и крупных файлов.
+Поведение state machine, БД, миграции, DevOps и внешние контракты не менялись.
+
+Нейтральный вход `ConversationInteraction` и `SemanticAction` находятся в
+`application/conversation/contracts.py`. `ConversationApplication` принимает
+нейтральный processor; Telegram-кодирование кнопок принадлежит
+`presentation/telegram/conversation.py` и передаётся через `ActionMapper`.
+Проверены пять callback-форматов с точным round-trip, а также fake-channel
+сценарии добавления товара, ожидания количества, комментария и выбора кандидата.
+`ConversationEngine` принимает нейтральный протокол, но пока возвращает
+совместимый `EngineResult`/`BotReply` и импортирует presentation; это явно
+зафиксированный защищённый переходный долг, а не второй источник правил.
+
+Полный suite после изменений: `1390 passed` (один предупреждающий сигнал pytest
+связан с кэшем Windows). Mypy, Ruff, форматирование, markdown-ссылки,
+compileall и `git diff --check` должны быть зелёными перед публикацией.
+Крупные защищённые координаторы: `services/submission.py` (протокол внешней
+отправки), `services/orchestrator.py` (claim/lease/checkpoint),
+`services/engine.py` (единая state-machine), `openai_client.py` и
+`google_sheets.py` (провайдеры), `openai_prompts.py` (единый prompt-контракт).
+Механическое дробление без отдельного proof checkpoint не выполнялось.
+
+Итоговый verdict кампании: `CODEBASE_STRUCTURE_FINALIZED_WITH_PROTECTED_DEBT`.
+
+## NEXT STEP
+
+`TEST SUITE CONSOLIDATION / DEDUPLICATION`
+
+Следующий шаг ограничен поиском дубликатов и консолидацией тестов. Его нельзя
+начинать в рамках текущей кампании.
+
 ## CURRENT STATUS — MULTI-CHANNEL ARCHITECTURE CAMPAIGN
 
 Стартовый проверенный SHA: `1cabab401a1c8aa67c2ccddd7ded95b6c7689288`, ветка

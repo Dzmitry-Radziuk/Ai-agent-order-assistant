@@ -1,5 +1,33 @@
 # Карта проекта
 
+## Итоговая карта владельцев после кампании структуры
+
+Канально-нейтральный вход и результат принадлежат
+`src/restaurant_bot/application/conversation/`. `ConversationInteraction` не
+содержит Telegram-полей; `ConversationApplication` получает processor и
+внедрённый `ActionMapper`. `input/telegram.py` переводит Telegram update во
+вход, а `presentation/telegram/conversation.py` — единственный владелец
+кодирования semantic actions в callback.
+
+`services/engine.py` принимает нейтральный протокол, но остаётся переходным
+координатором state machine и legacy `EngineResult`/`BotReply`. Это защищённый
+долг: его нельзя обходить копированием правил в MAX/Web. Аналогично защищены
+`services/orchestrator.py` (claim/lease/checkpoint), `submission.py`
+(side-effect protocol), `order_review.py`, `venue_registration.py`,
+`input_recognition.py` и внешние OpenAI/Sheets adapters.
+
+Крупные файлы разделены по реальной ответственности: prompt-контракт,
+submission protocol, durable coordinator, state machine, provider transport,
+catalog adapter и presentation. Дробление только по количеству строк не
+проводилось. AST-проверка текущих модулей не выявила циклических импортов.
+Каталог остаётся list-based до отдельного `CatalogSearch`/searchable projection
+proof; БД и миграции в этой кампании не менялись.
+
+Проверенные границы: callback round-trip для пяти форматов, fake-channel proof
+для товара/quantity/comment/candidate, отсутствие Telegram в application
+contracts и полный suite `1390 passed`. Следующий шаг: **TEST SUITE
+CONSOLIDATION / DEDUPLICATION**.
+
 ## Актуальный статус после финальной архитектурной кампании
 
 Channel-neutral conversation boundary добавлена в

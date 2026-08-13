@@ -179,6 +179,27 @@
   `presentation/telegram/conversation.py`,
   `tests/application/test_conversation_application.py`.
 
+### ADR-017 — Нейтральное действие и защищённый engine bridge
+
+- Дата: 2026-08-13.
+- Статус: действует.
+- Контекст: общий диалог должен принимать text/voice/web input без чтения
+  Telegram callback-полей, но существующий engine всё ещё владеет безопасным
+  порядком state transitions и legacy reply contract.
+- Решение: `SemanticAction` и его codec находятся в
+  `application/conversation/actions.py`; Telegram mapper внедряется в
+  `ConversationApplication` снаружи. `ConversationEngine` принимает
+  `ConversationInteraction`, а `TelegramEvent` сохраняет явные adapter aliases
+  для старых callers. Полный перенос engine и renderer не выполнять без
+  отдельного proof checkpoint.
+- Последствия: новые каналы не должны создавать `callback_data`, `BotReply` или
+  Telegram identity; presentation отвечает за mapping. Переходный долг виден и
+  тестируется, но не размножает business rules.
+- Реализация: `application/conversation/contracts.py`,
+  `application/conversation/actions.py`, `application/conversation/use_case.py`,
+  `presentation/telegram/conversation.py`, `services/engine.py` и
+  `tests/application/test_conversation_application.py`.
+
 ## Шаблон новой записи
 
 ```markdown

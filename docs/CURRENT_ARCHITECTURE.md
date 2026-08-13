@@ -1,5 +1,74 @@
 # Текущая архитектура
 
+## Финальная проверка структуры и масштаба
+
+Проверка выполнена на checkout кампании, начатой с SHA
+`1232bc62ca776dae5cc7cacf3765322288e214e1`. Production-код не переносился
+между пакетами ради размера файла, не менялись БД, миграции, DevOps и
+пользовательские алгоритмы. Целью были явные владельцы, нейтральный вход и
+доказательство границ для будущих каналов.
+
+### Контракты каналов
+
+| Область | Владелец | Зафиксированное правило |
+|---|---|---|
+| Нейтральный вход | `application/conversation/contracts.py` | `ConversationInteraction` содержит только conversation/actor/channel/kind/text/action/media/metadata. |
+| Семантическая кнопка | `application/conversation/actions.py` | Кодек не знает Telegram и сохраняет namespace, target, value и revision. |
+| Telegram mapping | `presentation/telegram/conversation.py` | Только presentation переводит кнопку Telegram в `SemanticAction` и обратно в callback. |
+| Общий use case | `application/conversation/use_case.py` | Вызывает processor и возвращает нейтральный результат; mapper внедряется снаружи. |
+| Legacy bridge | `services/engine.py` | Принимает нейтральный протокол, но временно отдаёт `EngineResult`/`BotReply`. |
+
+Callback round-trip проверен для `skip`, `sel`, `qty`, `cartpage` и
+`review_submit`; fake-channel тесты покрывают простой товар, missing quantity,
+comment edit и candidate selection. Callback, state serialization и durable
+claim/lease/checkpoint не переписывались.
+
+### Инвентаризация крупных файлов
+
+| Файл | Строки | Классы | Функции | Ответственность и решение |
+|---|---:|---:|---:|---|
+| `integrations/openai_prompts.py` | 2378 | 0 | 0 | Единый текстовый контракт AI; оставлен целиком, дробление изменило бы prompt API. |
+| `services/submission.py` | 2051 | 1 | 53 | Безопасный протокол записи/повторной проверки/отправки; защищён до отдельного effect proof. |
+| `services/orchestrator.py` | 1932 | 2 | 50 | Claim, lease, state/reply checkpoints и запуск задач; это один durable coordinator. |
+| `services/engine.py` | 1515 | 1 | 31 | Авторитетный порядок state machine и legacy reply bridge; перенос требует отдельного proof. |
+| `presentation/telegram/replies.py` | 950 | 0 | 30 | Когезивные пользовательские ответы и кнопки Telegram. |
+| `integrations/openai_client.py` | 935 | 1 | 21 | Транспорт и retry/trace policy провайдера OpenAI. |
+| `conversation/routing/contextual_commands.py` | 930 | 1 | 25 | Policy contextual fallback и modal routing без transport. |
+| `integrations/google_sheets.py` | 881 | 6 | 33 | Внешний каталог, кеш и таблицы; materialized list оставлена до search projection. |
+| `presentation/telegram/submission.py` | 698 | 0 | 28 | Telegram-представление submission/review. |
+| `parsing/ai/comment_reconciliation.py` | 588 | 0 | 17 | AI/source comment reconciliation; выделен тематически, дальнейшее дробление не нужно. |
+| `domain/models.py` | 530 | 20 | 15 | Стабильные модели домена и совместимый TelegramEvent adapter. |
+| `parsing/products.py` | 506 | 0 | 13 | Orchestration deterministic product-line parsing. |
+
+Файлы крупнее 1000 строк имеют конкретного владельца, а не являются свалками:
+prompts — единый контракт, submission — safety protocol, orchestrator — durable
+pipeline, engine — stateful compatibility coordinator. Удаление этих границ
+без caller/effect proof опаснее, чем текущий размер.
+
+### Зависимости и масштабирование
+
+Направление модулей: `input/presentation/api/workers → application →
+conversation/orders/catalog/parsing/domain`; `repositories/integrations` —
+адаптеры внешних эффектов, `services` — защищённые координаторы. Точный AST-граф
+модулей текущего checkout не содержит циклов. Внутри `services` остаются
+переходные зависимости на legacy presentation, что отмечено выше и не
+распространяется на нейтральный application слой.
+
+Каталог сейчас передаётся как materialized `list[CatalogProduct]` через
+`CatalogResolver` и Google Sheets cache. Следующая безопасная граница масштаба —
+порт `CatalogSearch` с bounded venue-scoped shortlist; deterministic evidence,
+ranking и safety gate должны остаться до AI auto-select. В этой кампании не
+добавлялись таблицы, индексы, миграции или vector search.
+
+### Защищённый долг
+
+Оставлены `UpdateOrchestrator`, `SubmissionService`, `OrderReviewService`,
+`VenueRegistrationService`, `InputRecognitionService` и Telegram presentation:
+они совмещают внешние эффекты с координацией и требуют отдельного отказоустойчивого
+proof. Не создавать для них `engine_part*.py`, `helpers.py` или параллельные
+state rules. Следующий функциональный шаг проекта — строго
+`TEST SUITE CONSOLIDATION / DEDUPLICATION`, а не новая декомпозиция.
+
 Документ фиксирует фактическую структуру после финальной архитектурной кампании.
 Он описывает владельцев и намеренно оставленный технический долг; сам по себе не
 заменяет исполняемый код и тесты.
