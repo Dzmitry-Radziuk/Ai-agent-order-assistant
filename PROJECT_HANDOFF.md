@@ -1,5 +1,37 @@
 # Передача проекта
 
+## CURRENT STATUS — MULTI-CHANNEL ARCHITECTURE CAMPAIGN
+
+Стартовый проверенный SHA: `1cabab401a1c8aa67c2ccddd7ded95b6c7689288`, ветка
+`decompose_bot`, origin — GitHub. Свежий baseline до кампании:
+`1382 collected / 1382 passed`; после добавления neutral-contract proof:
+`1386 passed`. `.env` не tracked и не читался, GitLab не использовался.
+
+Канально-нейтральная граница теперь представлена контрактами
+`application/conversation/contracts.py` и use case
+`application/conversation/use_case.py`. Telegram adapter находится в
+`input/telegram.py`, а Telegram renderer — в
+`presentation/telegram/conversation.py`. `UpdateOrchestrator` переводит Telegram
+в `ConversationInput`, вызывает общий use case и сохраняет прежний durable
+порядок claim → lease → state checkpoint → reply checkpoint → tasks.
+
+Proof-тесты `tests/application/test_conversation_application.py` показывают
+текстовый заказ и modal follow-up через fake-channel input без создания
+`TelegramEvent`. Architecture guards дополнительно проверяют, что application
+contracts не знают Telegram, presentation или infrastructure.
+
+Текущий итоговый verdict: `MULTI_CHANNEL_ARCHITECTURE_READY_WITH_PROTECTED_DEBT`.
+Защищены `ConversationEngine` (stateful routing и legacy `EngineResult`/`BotReply`),
+`UpdateOrchestrator` (Telegram delivery protocol), submission/review/venue
+координаторы и media recognition. Они не размножают business rules для будущих
+каналов; их полный перенос требует отдельного proof checkpoint и не выполнялся.
+Подробная инструкция расширения: [`docs/CHANNEL_EXTENSION_GUIDE.md`](docs/CHANNEL_EXTENSION_GUIDE.md).
+
+Оценка готовности: Telegram isolation 3/5, MAX 3/5, Web 3/5, REST API 3/5,
+third-party integrations 4/5, onboarding 4/5, testability 4/5, dependency clarity
+4/5. Это readiness общей границы, а не утверждение, что новые каналы уже
+реализованы.
+
 ## CURRENT STATUS — ARCHITECTURE FINALIZATION
 
 Проверенный текущий HEAD: `6299a84`, ветка

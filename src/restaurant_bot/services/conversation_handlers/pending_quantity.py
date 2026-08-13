@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 from enum import StrEnum
 
+from restaurant_bot.application.conversation.contracts import ConversationInteraction
 from restaurant_bot.conversation.routing.item_resolution import has_named_product_items
 from restaurant_bot.domain.models import (
     ConversationState,
@@ -12,7 +13,6 @@ from restaurant_bot.domain.models import (
     ItemStatus,
     ParsedCommand,
     SessionStage,
-    TelegramEvent,
 )
 from restaurant_bot.domain.units import UNIT_ALIASES, normalize_unit
 from restaurant_bot.parsing.number_words import parse_number_words
@@ -72,7 +72,7 @@ class PendingQuantityHandler:
 
     def handle(
         self,
-        event: TelegramEvent,
+        event: ConversationInteraction,
         command: ParsedCommand,
         state: ConversationState,
     ) -> PendingQuantityAction:

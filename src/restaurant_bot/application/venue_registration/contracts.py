@@ -3,8 +3,17 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Any, Protocol
 
-from restaurant_bot.domain.models import BotReply
+
+class RegistrationReply(Protocol):
+    """Описывает минимальный ответ, который рендерит внешний канал."""
+
+    text: str
+    rows: list[list[Any]]
+    edit_message_id: int | None
+    disable_previous_keyboard: bool
+    parse_mode: str
 
 
 @dataclass(slots=True, frozen=True)
@@ -24,6 +33,6 @@ class RegistrationResult:
     """Описывает результат привязки пользователя к заведению."""
 
     handled: bool
-    reply: BotReply | None = None
+    reply: RegistrationReply | None = None
     context: VenueContext | None = None
     reset_session: bool = False

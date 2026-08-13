@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from restaurant_bot.application.conversation.contracts import ConversationInput
 from restaurant_bot.domain.models import InputKind, TelegramEvent
 from restaurant_bot.text_normalization import clean_text
 
@@ -65,4 +66,29 @@ def normalize_telegram_update(update: dict[str, Any]) -> TelegramEvent:
         file_id=file_id,
         mime_type=mime_type,
         raw_update=update,
+    )
+
+
+def to_conversation_input(event: TelegramEvent) -> ConversationInput:
+    """Преобразует Telegram-событие в нейтральный прикладной вход."""
+    return ConversationInput(
+        interaction_id=event.update_id,
+        conversation_id=event.chat_id,
+        actor_id=event.telegram_user_id or event.chat_id,
+        channel="telegram",
+        kind=event.input_type,
+        text=event.text,
+        action=event.callback_data,
+        media_reference=event.file_id,
+        metadata={
+            "callback_query_id": event.callback_query_id,
+            "callback_message_id": event.callback_message_id,
+            "username": event.telegram_username,
+            "first_name": event.telegram_first_name,
+            "last_name": event.telegram_last_name,
+            "chat_type": event.chat_type,
+            "file_id": event.file_id,
+            "mime_type": event.mime_type,
+            "raw_update": event.raw_update,
+        },
     )

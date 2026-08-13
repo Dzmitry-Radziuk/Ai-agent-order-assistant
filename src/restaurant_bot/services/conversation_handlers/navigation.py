@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
+from restaurant_bot.application.conversation.contracts import ConversationInteraction
 from restaurant_bot.domain.models import (
     BotReply,
     ConversationState,
@@ -11,7 +12,6 @@ from restaurant_bot.domain.models import (
     InputKind,
     Intent,
     ParsedCommand,
-    TelegramEvent,
 )
 from restaurant_bot.presentation.telegram.replies import (
     help_reply,
@@ -58,7 +58,7 @@ class OrderStatusHandler:
 
     def handle(
         self,
-        event: TelegramEvent,
+        event: ConversationInteraction,
         command: ParsedCommand,
         state: ConversationState,
     ) -> EngineResult | None:

@@ -4,6 +4,30 @@
 Он описывает владельцев и намеренно оставленный технический долг; сам по себе не
 заменяет исполняемый код и тесты.
 
+## Multi-channel boundary — текущий срез
+
+Финальная кампания добавила общий прикладной контракт в
+`application/conversation/`: `ConversationInput`, `ConversationResult`,
+`ConversationView`, `SemanticAction` и `ConversationEffectPlan`. Канальный адаптер
+`input/telegram.to_conversation_input()` переводит `TelegramEvent` в этот вход,
+`ConversationApplication` вызывает существующий stateful processor, а
+`presentation/telegram/conversation.py` кодирует смысловые действия обратно в
+совместимые Telegram-кнопки. `UpdateOrchestrator` использует этот use case, не
+меняя durable claim/lease/checkpoint порядок.
+
+Проверяемый fake-channel proof находится в
+`tests/application/test_conversation_application.py`: текстовый заказ и ответ на
+ожидаемое количество проходят без создания `TelegramEvent`. Архитектурные guards
+проверяют отсутствие Telegram/presentation/infrastructure imports в нейтральном
+application contract.
+
+Оставшийся защищённый долг: `ConversationEngine` по-прежнему возвращает
+совместимый `EngineResult`/`BotReply` и содержит stateful Telegram UX adapters;
+`UpdateOrchestrator`, `SubmissionService`, `OrderReviewService`, регистрация и
+media recognition сохраняют effectful Telegram/DB/Sheets протоколы. Это не
+создаёт отдельные правила для MAX/Web, но полный перенос renderer/stateful
+coordinators потребует отдельного proof checkpoint и не выполнялся в этом run.
+
 ## Слои и направление зависимостей
 
 ```text

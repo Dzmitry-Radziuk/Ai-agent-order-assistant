@@ -5,7 +5,7 @@ from collections import Counter
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from time import perf_counter
-from typing import Any
+from typing import Any, cast
 from uuid import uuid4
 
 import structlog
@@ -13,6 +13,9 @@ from redis import Redis
 from structlog.contextvars import bound_contextvars
 
 from restaurant_bot.application.background_tasks import BackgroundTaskDispatcher
+from restaurant_bot.application.conversation import ConversationApplication
+from restaurant_bot.application.conversation.contracts import ConversationInput
+from restaurant_bot.application.conversation.use_case import ConversationProcessor
 from restaurant_bot.application.order_review.token import new_review_token
 from restaurant_bot.catalog.evidence import (
     canonical_search_query,
@@ -47,7 +50,7 @@ from restaurant_bot.domain.models import (
     SessionStage,
     TelegramEvent,
 )
-from restaurant_bot.input.telegram import normalize_telegram_update
+from restaurant_bot.input.telegram import normalize_telegram_update, to_conversation_input
 from restaurant_bot.input.telegram_interpretation import TelegramInputInterpreter
 from restaurant_bot.integrations.cache import (
     CatalogCache,
@@ -61,6 +64,7 @@ from restaurant_bot.integrations.openai_transcription_policy import has_distinct
 from restaurant_bot.integrations.telegram import TELEGRAM_TRANSIENT_ERRORS, TelegramClient
 from restaurant_bot.logging import sanitize_log_value
 from restaurant_bot.parsing.commands.api import infer_intent
+from restaurant_bot.presentation.telegram.conversation import render_conversation_view
 from restaurant_bot.presentation.telegram.order_review import preview_reply
 from restaurant_bot.presentation.telegram.venue_registration import not_bound_reply
 from restaurant_bot.repositories.order_events import OrderEventRepository
@@ -146,6 +150,9 @@ class UpdateOrchestrator:
         self.sheets = sheets
         self.catalog = CatalogCache(settings, redis, sheets)
         self.engine = ConversationEngine(settings)
+        self.conversation_application = ConversationApplication(
+            cast(ConversationProcessor, self.engine)
+        )
         self.input_interpreter = TelegramInputInterpreter(
             self.openai,
             self._recognizer,
@@ -417,7 +424,7 @@ class UpdateOrchestrator:
                         else (
                             self._handle_review_command(event, state, command)
                             if review_command
-                            else self.engine.handle(event, command, state, catalog)
+                            else self._process_conversation(event, command, state, catalog)
                         )
                     )
                     _ensure_lease(lease)
@@ -1221,6 +1228,8 @@ class UpdateOrchestrator:
         if registration.context:
             self._apply_venue_context(state, registration.context)
         reply = registration.reply or not_bound_reply()
+        if not isinstance(reply, BotReply):
+            raise TypeError("Регистрация вернула неподдерживаемый ответ канала")
         if event.input_type == InputKind.CALLBACK and event.callback_message_id:
             reply.edit_message_id = event.callback_message_id
         state.ui_revision += 1
@@ -1313,6 +1322,34 @@ class UpdateOrchestrator:
             service = InputRecognitionService(self.telegram, self.openai)
             self.input_recognition = service
         return service
+
+    def _process_conversation(
+        self,
+        event: TelegramEvent,
+        command: ParsedCommand,
+        state: ConversationState,
+        catalog: list[CatalogProduct],
+    ) -> EngineResult:
+        """Передаёт Telegram-вход в общий conversation use case и рендерит ответ."""
+        interaction: ConversationInput = to_conversation_input(event)
+        application = getattr(self, "conversation_application", None)
+        if application is None:
+            application = ConversationApplication(cast(ConversationProcessor, self.engine))
+            self.conversation_application = application
+        result = application.process(interaction, command, state, catalog)
+        return EngineResult(
+            state=result.state,
+            reply=render_conversation_view(result.view),
+            enqueue_submission=result.effects.enqueue_submission,
+            enqueue_order_status=result.effects.enqueue_order_status,
+            order_status_page=result.order_status_page,
+            order_status_detail_page=result.order_status_detail_page,
+            order_status_selected_index=result.order_status_selected_index,
+            order_status_order_number=result.order_status_order_number,
+            enqueue_product_add=result.effects.enqueue_product_add,
+            enqueue_review_submission=result.effects.enqueue_review_submission,
+            invalidate_catalog=result.effects.invalidate_catalog,
+        )
 
     @staticmethod
     def _voice_transcription_prompt(state: ConversationState) -> str:
@@ -1474,7 +1511,7 @@ class UpdateOrchestrator:
         if not pending:
             if safely_resolved:
                 result.state.current_issue_item_id = ""
-                return self.engine.handle(
+                return self._process_conversation(
                     event,
                     ParsedCommand(intent=Intent.CONTINUE_CURRENT),
                     result.state,
@@ -1629,7 +1666,7 @@ class UpdateOrchestrator:
                     )
 
         result.state.current_issue_item_id = ""
-        return self.engine.handle(
+        return self._process_conversation(
             event,
             ParsedCommand(intent=Intent.CONTINUE_CURRENT),
             result.state,

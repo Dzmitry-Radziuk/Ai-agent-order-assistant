@@ -2,6 +2,22 @@
 
 ## Актуальный статус после финальной архитектурной кампании
 
+Channel-neutral conversation boundary добавлена в
+`src/restaurant_bot/application/conversation/`: `ConversationInput` и
+`ConversationResult` не требуют Telegram payload, а `ConversationApplication`
+координирует общий processor. `input/telegram.py` — единственный переводчик
+Telegram update в нейтральный вход; `presentation/telegram/conversation.py`
+кодирует `SemanticAction` обратно в Telegram rows. `UpdateOrchestrator` вызывает
+этот use case между interpretation и checkpoint, сохраняя durable protocol.
+Fake-channel proof и guards находятся в
+`tests/application/test_conversation_application.py` и
+`tests/architecture/test_dependency_boundaries.py`.
+
+Protected residue: `services/engine.py` сохраняет stateful legacy
+`EngineResult`/`BotReply` adapters; orchestrator, submission, review, venue и
+media services сохраняют внешние delivery/checkpoint contracts. Не считать этот
+остаток основанием для копирования business rules в MAX/Web.
+
 `services/text.py` удалён после доказанного механического переноса `to_float` в
 `parsing/numeric.py`; свежий baseline — `1378 collected / 1378 passed`, финальный
 suite после acceptance и architecture coverage — `1382 collected / 1382 passed`. Stateful и

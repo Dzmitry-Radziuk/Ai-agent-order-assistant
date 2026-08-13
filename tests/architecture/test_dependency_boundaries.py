@@ -7,6 +7,10 @@ from pathlib import Path
 
 ROOT = Path(__file__).parents[2] / "src" / "restaurant_bot"
 CORE_PACKAGES = ("domain", "conversation", "catalog", "orders", "parsing")
+CHANNEL_NEUTRAL_APPLICATION_FILES = (
+    ROOT / "application" / "conversation" / "contracts.py",
+    ROOT / "application" / "conversation" / "use_case.py",
+)
 FORBIDDEN_CORE_IMPORTS = {
     "services",
     "workers",
@@ -49,3 +53,30 @@ def test_venue_application_contract_has_no_infrastructure_imports() -> None:
     """Проверяет нейтральность контракта регистрации заведения."""
     contract = ROOT / "application" / "venue_registration" / "contracts.py"
     assert _imports(contract) <= {"domain"}
+
+
+def test_conversation_application_contract_has_no_channel_adapters() -> None:
+    """Не допускает Telegram и инфраструктуру в общем conversation use case."""
+    forbidden = {
+        "presentation",
+        "integrations",
+        "repositories",
+        "workers",
+        "api",
+        "services",
+    }
+    violations = [
+        f"{path}: {name}"
+        for path in CHANNEL_NEUTRAL_APPLICATION_FILES
+        for name in sorted(_imports(path) & forbidden)
+    ]
+    assert violations == []
+
+
+def test_conversation_application_source_has_no_telegram_protocol_types() -> None:
+    """Проверяет, что общий use case не требует TelegramEvent или callback-протокола."""
+    for path in CHANNEL_NEUTRAL_APPLICATION_FILES:
+        source = path.read_text(encoding="utf-8")
+        assert "TelegramEvent" not in source
+        assert "presentation.telegram" not in source
+        assert "services.orchestrator" not in source
