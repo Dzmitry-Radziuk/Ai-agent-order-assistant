@@ -1,6 +1,50 @@
 # Передача проекта
 
-## CURRENT ARCHITECTURE — Block 5V
+## CURRENT ARCHITECTURE — Block 5W
+
+Block 5W выполняется поверх `af78e13f3e8bac9eacc474e016ca3f7f083432fd` на ветке
+`decompose_bot`. Базовая проверка до изменений: `1369 collected / 1369 passed`.
+Историческое значение `1366 passed` относится к завершённому Block 5U и не является
+текущим baseline.
+
+### Block 5W-A — исправление владельцев Block 5V
+
+Завершено и опубликовано коммитом `adf475128ad973dc6b97a3e37d741f6f50b078bf`.
+Нейтральный контракт заведения находится в `venues/contracts.py`, нормализация кодов —
+в `venues/codes.py`; Telegram input/presentation импортируют только эти примитивы,
+а интеграционные directory/access registry остаются владельцами внешних источников.
+Знание о fallback-моделях OpenAI перенесено в
+`integrations/openai_transcription_policy.py`; input-policy больше не определяет
+провайдерскую эвристику.
+
+### Block 5W-C/E — первые безопасные seams ConversationEngine
+
+Контекстные команды принадлежат `conversation/routing/contextual_commands.py`.
+`ConversationEngine` только вызывает эту policy в прежнем порядке и не передаёт ей
+Telegram presentation, provider или infrastructure зависимости. Построение
+`CartItem` принадлежит чистому seam `conversation/item_intake.py`; engine сохраняет
+тонкий `_build_item`-адаптер для существующего внутреннего контракта.
+
+Размер engine уменьшен с `117719` до `79555` байт и с `2563` до `1680` строк, число методов
+`ConversationEngine` — с `63` до `42`. Сохранён порядок `handle()`: enrichment,
+voice normalization, modal/stale-callback guards, recovery и confirmation flows,
+contextual reinterpretation, global routing, mutation и progression. `_prepare_submission`
+и внешние submission-эффекты не переносились.
+
+### Block 5W-D/F/G — границы и нерешённые seams
+
+New-order lifecycle (`_fresh_order_state`, `_start_new_order`,
+`_resume_after_new_order_confirmation`) оставлен в engine как единый stateful seam:
+отдельный перенос не доказал бы безопасного нового владельца сериализованного state.
+`_spoken_quantity` сохранён как compatibility facade, потому что его вызывает
+production analytics path в `services/orchestrator.py`; wrappers без production callers
+удалены после caller-аудита. Дополнительный seam, кроме contextual policy и item intake,
+признан небезопасным: **NO SAFE EXTRA SEAM**.
+
+Текущие изменения engine и два новых conversation-модуля ещё не закоммичены в этом
+срезе. Следующий шаг этой задачи — quality gates, docs audit и один итоговый commit.
+
+## ARCHIVED ARCHITECTURE SNAPSHOT — Block 5V
 
 Последний завершённый блок — Block 5U. Актуальные владельцы:
 

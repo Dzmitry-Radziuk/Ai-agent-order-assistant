@@ -1,8 +1,55 @@
 # План декомпозиции архитектуры
 
-## CURRENT ARCHITECTURE — Block 5V
+## CURRENT ARCHITECTURE — Block 5W
 
-После Block 5U актуальная карта owners выглядит так:
+Актуальный baseline после Block 5V-A и до итогового commit Block 5W: `1369 collected /
+1369 passed`. Block 5W-A закрепил нейтральные `venues/contracts.py` и `venues/codes.py`,
+а провайдерский fallback моделей — в `integrations/openai_transcription_policy.py`.
+В Block 5W-C контекстные команды вынесены в `conversation/routing/contextual_commands.py`,
+в Block 5W-E сборка `CartItem` — в `conversation/item_intake.py`. Это механический перенос
+границ: алгоритмы, public contracts, callback values, state serialization и порядок
+`ConversationEngine.handle()` не менялись. Engine уменьшен с 2563 до 1680 строк и с 63
+до 42 методов (`117719` → `79555` байт). New-order lifecycle и submission preparation оставлены в engine, потому
+что безопасный отдельный owner не доказан; дополнительный seam: **NO SAFE EXTRA SEAM**.
+
+## Block 5W-B — инвентарь ConversationEngine
+
+Ниже зафиксирован фактический inventory после механического переноса. Диапазоны строк
+относятся к текущему `services/engine.py`; почти все private-методы вызываются из
+`handle()` или из соседнего state-action метода. `state` означает чтение или изменение
+`ConversationState`, `reply` — выбор существующего Telegram presenter, а не новый
+внешний эффект.
+
+| Методы и диапазоны | Ответственность | State / mutation | Основные вызовы | Решение и риск |
+|---|---|---|---|---|
+| `__init__` (149–176) | Сборка зависимостей и handlers | Инициализирует engine | handlers, policies | KEEP: coordinator boundary |
+| `handle` (178–909) | Полная лестница маршрутизации и переходов | Да / да | modal policy, handlers, catalog, progression, presenters | KEEP: authoritative coordinator; высокий риск изменения порядка |
+| `_resolve_pending_comment_scope` (911–924), `_remove_navigation_command_items` (927–973) | Защита comment/navigation context | Да / да | comment policy, state queries | KEEP: state guard |
+| `_build_item` (975–981), `_validate_supplier_hint` (983–993) | Intake adapter и проверка поставщика | Да / через результат | `conversation.item_intake`, parsing policy | SPLIT уже выполнен; supplier validation остаётся рядом с catalog boundary |
+| `_spoken_quantity` (996–998), `_cart_page` (1001–1009), `_callback_item_index` (1084–1096), `_item_index` (1123–1125) | Compatibility, page/index queries | Читают state | quantity handler, state queries | KEEP тонкими; `_spoken_quantity` нужен production caller |
+| `_fresh_order_state` (1012–1028), `_start_new_order` (1030–1034), `_resume_after_new_order_confirmation` (1223–1251) | Жизненный цикл нового заказа | Да / да | `deepcopy`, transient reset, existing replies | KEEP как единый lifecycle seam: безопасный отдельный owner не доказан |
+| `_submit_product_add_description` (1036–1081), `_clear_transient_dialog_state` (1099–1111), `_repeat_add_more_prompt` (1114–1120) | Product-add и transient recovery | Да / да | product-add state, presenters | KEEP: stateful handlers требуют общего ordering |
+| `_catalog_packaging_measurement` (1128–1133), `_match_item` (1135–1142), `_looks_like_supplier_comment_fragment` (1145–1147), `_remove_unanchored_supplier_hint` (1150–1152) | Catalog evidence и supplier/comment boundary | Да / да | catalog resolver, evidence, comment policy | KEEP: catalog mutation seam защищён Block D/E |
+| `_sanitize_catalog_facts_before_resolution` (1154–1160), `_supplier_comment_start` (1163–1165), `_apply_catalog` (1167–1174), `_refresh_cart_order_values` (1176–1182), `_reconcile_quantity_with_catalog_name` (1185–1187) | Применение catalog facts и quantity reconciliation | Да / да | resolver, unit conversion | KEEP: source/catalog provenance; высокий риск |
+| `_advance` (1193–1221), `_first_unresolved` (1189–1191) | Progression и поиск следующей проблемы | Да / да | progression policy, state queries | KEEP: один переходный coordinator |
+| `_select_candidate` (1253–1279) | Выбор уже допущенного кандидата | Да / да | selection, catalog state | KEEP: candidate safety и callback revision |
+| `_use_catalog_unit` (1281–1292), `_accept_suggested_quantity` (1294–1302), `_keep_current_quantity` (1304–1311), `_enter_other_quantity` (1313–1346), `_show_multiple_quantity_choice` (1348–1356), `_advance_multiple_quantity_choice` (1358–1368) | Quantity/unit modal actions | Да / да | quantity handlers, unit conversion, presenters | KEEP: Block C semantics и ordering |
+| `_skip_current` (1370–1378), `_confirm_current` (1380–1396), `_remove_item` (1398–1433) | Item actions | Да / да | draft queries, comment cleanup | KEEP: shadow/duplicate cleanup invariants |
+| `_edit_existing_comment` (1435–1489), `_edit_quantity` (1491–1524) | Изменение draft fields | Да / да | comment policy, unit conversion | KEEP: source ownership and comment provenance |
+| `_prepare_submission` (1526–1609), `_handle_submission_failed_recovery` (1611–1665), `_submission_department_quantities` (1668–1680) | Submission preparation и recovery | Да / да | pending submission, Sheets-facing service contracts | PROTECTED: в Block 5W не переносить и не менять |
+
+### Порядок `handle()` и dependency audit
+
+Относительный порядок сохранён: dialogue enrichment → voice normalization → modal routing
+→ stale callback rejection до mutation → `last_input_text` → failed-submission recovery
+→ new-order confirmation → submit-confirm → add-more → comment scope → manual/not-found
+ambiguity → navigation/shadow cleanup → contextual policy → duplicate/unit mismatch →
+global routing → item mutation → progression. Новые conversation owners не импортируют
+`presentation`, `input`, `integrations` или `services`; проверенный поиск таких импортов
+для `conversation/` и `input/` дал 0 edges. Сам engine по-прежнему имеет существующие
+presentation edges для `BotReply` и Telegram UX, что допустимо для Phase 1.
+
+Архивная карта owners после Block 5U (для исторического сравнения) выглядит так:
 
 | Область | Owner | Граница |
 |---|---|---|

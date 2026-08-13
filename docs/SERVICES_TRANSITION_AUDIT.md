@@ -1,6 +1,15 @@
 # Аудит переходного слоя services/ и результат Block 5V
 
-## CURRENT ARCHITECTURE — Block 5V
+## CURRENT ARCHITECTURE — Block 5W
+
+Текущий срез после Block 5W-A и незакоммиченных mechanical seams: полный baseline
+`1369 collected / 1369 passed`. Venue contract/codes принадлежат `venues/`, а
+`integrations/openai_transcription_policy.py` владеет fallback-моделями. Conversation
+policy больше не живёт в `services/engine.py`: её owner —
+`conversation/routing/contextual_commands.py`; item intake —
+`conversation/item_intake.py`. Engine остаётся координатором stateful Telegram flow
+и уменьшен до 1680 строк/42 методов. Исторические Block 5V/5U таблицы ниже сохранены
+для аудита и не заменяют этот current snapshot.
 
 Текущая карта владельцев после Block 5U:
 

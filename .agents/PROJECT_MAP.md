@@ -1,6 +1,15 @@
 # Карта проекта
 
-## Current architecture after Block 5V
+## Current architecture after Block 5W
+
+На актуальном срезе `decompose_bot` базовый полный suite даёт `1369 passed`.
+Нейтральный контракт заведений находится в `venues/`; fallback-модели OpenAI принадлежат
+`integrations/openai_transcription_policy.py`. Контекстная routing policy находится в
+`conversation/routing/contextual_commands.py`, построение `CartItem` — в
+`conversation/item_intake.py`. `services/engine.py` остаётся координатором TelegramEvent
+и EngineResult: после Block 5W это 1680 строк и 42 метода вместо 2563 строк и 63 методов.
+Ниже перечислены текущие владельцы; исторические таблицы после этого раздела не являются
+источником текущей архитектуры.
 
 Актуальные владельцы имеют приоритет при чтении этой карты:
 
@@ -17,12 +26,16 @@
 | Cart page transition | `conversation/state/transitions.py` | Clamp persisted page before rendering |
 | Telegram page-size constants | `presentation/telegram/pagination.py` | Telegram presentation owns page size |
 | Voice policy | `input/voice_policy.py` | Pure visible-action/prompt/model policy |
+| OpenAI transcription fallback | `integrations/openai_transcription_policy.py` | Provider-specific model capability |
+| Contextual conversation commands | `conversation/routing/contextual_commands.py` | Channel-neutral contextual fallback |
+| Cart item intake | `conversation/item_intake.py` | Pure `ExtractedItem` → `CartItem` construction |
+| Neutral venue contract | `venues/contracts.py`, `venues/codes.py` | Frozen value object and pure code rules |
 | Venue directory | `integrations/venue_directory.py` | GViz fetch, parse, cache and code primitives |
 | Venue access registry | `integrations/venue_access_registry.py` | Access rows, decision and cache |
 | Venue registration input | `input/telegram_venue_registration.py` | Telegram commands and callbacks |
 | Venue registration presentation | `presentation/telegram/venue_registration.py` | Registration replies/buttons only |
 
-После Block 5U `services/parser.py`, `services/replies.py` и
+Историческое описание после Block 5U: `services/parser.py`, `services/replies.py` и
 `services/product_add_flow.py` отсутствуют. Таблицы ниже описывают текущие
 модули; исторические аудиты помечены явно и не являются owner-map.
 

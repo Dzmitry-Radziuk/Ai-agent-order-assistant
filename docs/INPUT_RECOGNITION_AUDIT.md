@@ -1,5 +1,12 @@
 # Block 5O/5V — аудит `InputRecognitionService`
 
+## Актуальный owner после Block 5W-A
+
+Fallback между моделями OpenAI не является input-policy: его чистое правило находится
+в `integrations/openai_transcription_policy.py`, а `InputRecognitionService` только
+координирует media/provider/state-aware flow. Это исправление владельца не меняет
+prompt, transcription contract или voice recovery semantics.
+
 ## Block 5P — выполненный перенос pure transcript policy
 
 Выбранный в Block 5O seam завершён без изменения алгоритма. Канонический модуль
