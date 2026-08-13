@@ -2,10 +2,10 @@
 
 ## CURRENT STATUS — ARCHITECTURE FINALIZATION
 
-Проверенный текущий HEAD: `54c45ac677b385efcfc44a22d707e710242e8b7e`, ветка
+Проверенный текущий HEAD: `5c1242e`, ветка
 `decompose_bot`, origin — GitHub. Свежий baseline до acceptance-тестов:
 `1378 collected / 1378 passed`; финальный suite после двух новых характеристик:
-`1380 collected / 1380 passed`. Baseline `1378/1378` снят на исходном Block 6D
+`1382 collected / 1382 passed`. Baseline `1378/1378` снят на исходном Block 6D
 HEAD `2fb1e6e03e5f889ba5034da013facd555fea138f4`. Ruff, format, mypy, markdown links, compileall и
 `git diff --check` проходят. `.env` не tracked и не читался; GitLab не
 использовался.
@@ -47,7 +47,8 @@ suite после переноса: `1377 collected / 1377 passed`; текущи�
 после механического переноса `to_float` в `parsing/numeric.py`; lower/core → services
 edge из AI reconciliation устранён. Stateful/effectful services и handlers оставлены
 защищёнными. Block 6D добавил только два acceptance-теста и минимальную
-коррекцию comment mutation; финальный suite: `1380 collected / 1380 passed`.
+коррекцию comment mutation и два architecture guard-теста; финальный suite:
+`1382 collected / 1382 passed`.
 Подробный аудит: [`docs/SERVICES_TRANSITION_AUDIT.md`](docs/SERVICES_TRANSITION_AUDIT.md).
 Решение: `SERVICES_CLEANUP_PARTIAL_WITH_PROTECTED_ADAPTERS`.
 Следующий шаг: `CONTROLLED HUMAN PILOT`. Не начинать новую декомпозицию,

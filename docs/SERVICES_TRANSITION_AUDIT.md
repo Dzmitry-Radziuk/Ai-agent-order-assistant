@@ -618,7 +618,7 @@ orchestrator. Следующий шаг ровно один: `BLOCK 6D — STABI
 SMOKE / ACCEPTANCE PREP`.
 # Финальный reassessment после архитектурной кампании
 
-На текущем HEAD `54c45ac` сервисы разделены по фактической ответственности.
+На текущем HEAD `5c1242e` сервисы разделены по фактической ответственности.
 `VenueContext` и `RegistrationResult` вынесены в
 `application/venue_registration/contracts.py`; `services/venue_registration.py`
 остаётся effect coordinator и предоставляет прежний импорт. Остальные сервисы

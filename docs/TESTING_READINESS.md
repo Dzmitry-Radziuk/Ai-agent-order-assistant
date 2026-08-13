@@ -10,9 +10,9 @@
 |---|---|
 | Дата | 2026-08-13 |
 | Ветка | `decompose_bot` |
-| Проверенный HEAD | `c1cc92e697704d49e221eaed4ea3a07a0e3782a9` |
+| Проверенный HEAD | `5c1242e` |
 | Полный baseline | `1378 collected / 1378 passed` за `17.13 s` |
-| Финальная проверка после acceptance tests | `1380 collected / 1380 passed` за `17.87 s` |
+| Финальная проверка после acceptance/architecture tests | `1382 collected / 1382 passed` за `17.33 s` |
 | Архитектурный статус | `SERVICES_FINAL_FREEZE`; Block 6C/6C.1 завершены |
 | Реальные Telegram/Google/OpenAI/supplier effects | не выполнялись |
 | `.env` | не tracked; значения не читались |
@@ -42,7 +42,7 @@ Baseline `1378/1378` снят на исходном Block 6D HEAD `2fb1e6e03e5f8
 
 | Проверка | Результат |
 |---|---:|
-| Full pytest | `1380 passed` |
+| Full pytest | `1382 passed` |
 | Acceptance stabilization tests | `2 passed` |
 | Conversation/input/catalog/venue/callback focused set | `455 passed` |
 | AI/voice/quantity/submission/concurrency safety set | `254 passed` |
@@ -149,7 +149,7 @@ baseline. Representative groups на текущем HEAD дали `36 passed`, �
 comment provenance, spoken quantity, title/packaging numbers, voice shadow and
 comment recovery, visible-action fallback и photo quantity isolation.
 
-Текущий full suite также зелёный (`1380/1380`), поэтому подтверждённых P0/P1
+Текущий full suite также зелёный (`1382/1382`), поэтому подтверждённых P0/P1
 регрессий по историческому списку нет. Два ранее открытых acceptance gap закрыты
 автоматическими характеристиками на уровне ConversationEngine.
 

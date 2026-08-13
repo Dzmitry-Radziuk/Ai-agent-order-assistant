@@ -4,7 +4,7 @@
 
 `services/text.py` удалён после доказанного механического переноса `to_float` в
 `parsing/numeric.py`; свежий baseline — `1378 collected / 1378 passed`, финальный
-suite после acceptance coverage — `1380 collected / 1380 passed`. Stateful и
+suite после acceptance и architecture coverage — `1382 collected / 1382 passed`. Stateful и
 effectful services намеренно сохранены. Подробный текущий аудит находится в
 `docs/SERVICES_TRANSITION_AUDIT.md`; исторические разделы ниже не переопределяют
 этот статус. Block 6D и финальная архитектурная кампания завершены; защищённый
@@ -20,14 +20,14 @@ Sheets, catalog cache, engine, review, registration, checkpoint или task
 зависимостей. `UpdateOrchestrator` только создаёт owner и вызывает
 `interpret(...)`; `_recognizer()` сохранён lazy seam. Полный baseline после
 переноса: `1377/1377` (исторический); текущий Block 6D baseline — `1378/1378`,
-финальный — `1380/1380`. Пост-6A reassessment в
+финальный — `1382/1382`. Пост-6A reassessment в
 [`docs/UPDATE_ORCHESTRATOR_AUDIT.md`](../docs/UPDATE_ORCHESTRATOR_AUDIT.md)
 выбрал `ORCHESTRATOR_DECOMPOSITION_SUFFICIENT`; следующая кампания —
 `BLOCK 6D — FINAL STABILIZATION / ACCEPTANCE CLOSURE`.
 
 Block 6C переключил текущий фокус с decomposition на testing readiness. Block 6D
 закрыл два acceptance gaps; текущий отчёт находится в
-[`docs/TESTING_READINESS.md`](../docs/TESTING_READINESS.md): full suite `1380/1380`,
+[`docs/TESTING_READINESS.md`](../docs/TESTING_READINESS.md): full suite `1382/1382`,
 verdict `READY_FOR_MANUAL_TESTING_WITH_KNOWN_NONBLOCKERS`.
 
 ## Current architecture after Block 5Y
