@@ -49,6 +49,119 @@ full suite: `1377 collected / 1377 passed`.
 thresholds, callback protocol, serialized state, submission protocol, Redis
 lease implementation и `UpdateRepository`.
 
+## POST-6A REASSESSMENT / BLOCK 6B
+
+Дата: 2026-08-13. Проверен commit `c3bde2ff1229d9850dcb8dd21543331956f20794`,
+ветка `decompose_bot`, origin — GitHub. Свежий полный запуск на текущем HEAD:
+`1377 collected / 1377 passed` за `16.19 s`. Изменений в `src/`, tests, scripts,
+Alembic, DB, Docker и CI в этом блоке нет.
+
+### Sanity-проверка границы Block 6A
+
+`TelegramInputInterpreter` действительно является владельцем semantic input
+interpretation: callback, text, voice и photo доходят до единого
+`interpret(...)`; глобальный parsing выполняется до contextual fallback и
+`StateCompatibilityPolicy`. В `UpdateOrchestrator` остались только injected
+`_recognizer()` и координация жизненного цикла. AST-проверка import graph не
+нашла циклов (`cycles=[]`). Новый owner не импортирует DB, Redis, Telegram
+transport, Sheets, catalog cache, engine, review, registration, checkpoints или
+background tasks. Это sanity-проверка уже принятого 6A, а не повторный аудит
+input pipeline.
+
+### Текущие метрики и инвентарь `UpdateOrchestrator`
+
+Текущий файл: `1888` строк, `81567` байт, `2` класса, `49` функций/методов,
+`38` import declarations. Метод `process()` занимает строки `159–628` и
+остаётся единственным lifecycle coordinator. Полный inventory сгруппирован по
+реальным контрактам; в скобках указаны callers/callees, effects и решение.
+
+| Группа и методы | Callers/callees и связанный контракт | Риск | Решение |
+|---|---|---|---|
+| `__init__`, `process` | worker/API вызывают `process`; внутри claim → lease → venue → state → input owner → catalog → engine → AI → checkpoints → delivery → tasks → finish | критический: DB, Redis lease, Telegram, Sheets, Celery | **PROTECTED / KEEP_COORDINATOR** |
+| `_ensure_lease`, `_lease_kwargs` | вызываются вокруг каждой guarded mutation и внешнего эффекта | критический lease fencing | **PROTECTED** |
+| `_leave_sheet_review_on_regular_command`, `_handle_review_command`, `_is_review_event`, `_review_stale_reply`, `_sheet_review_ambiguous_reply` | `process` → `OrderReviewService`, repositories, Telegram; token/fingerprint/venue/revision/submission state | высокий: state + DB + Sheets + reply | **PROTECTED** |
+| `_scenario_for_intent`, `_effective_analytics_command`, `_request_analytics`, `_analytics_request_text` | только `process` и analytics tests; строят projection outcome/scenario/counts, читают settings и вызывают `PendingQuantityHandler.spoken_quantity` через приватный engine adapter | средний: semantic compatibility, но без mutation | **KEEP_TEMP**; не выделять отдельно |
+| `_record_request_outcome` | `process`; `structlog`, `Tracer.observation.update`, anonymized identifiers | средний: внешний telemetry effect | **KEEP_COORDINATOR** |
+| `_command_log`, `_state_log`, `_reply_log` | только `process`; формируют privacy-safe log payload | низкий, но schema coupling | **KEEP_COORDINATOR** |
+| `_answer_callback_best_effort`, `_send_processing_best_effort`, `_disable_keyboard_best_effort` | только `process`; прямой Telegram transport, broad best-effort exceptions | высокий: ACK timing и stale keyboard safety | **PROTECTED** |
+| `_complete_registration`, `_complete_unauthorized`, `_apply_venue_context`, `_ensure_venue_session` | `process`; `VenueRegistrationService`, `SessionRepository`, DB/Redis, reply/checkpoint | высокий: access/venue/session transaction | **PROTECTED** |
+| `_recognizer`, `_voice_transcription_prompt`, `_requires_high_accuracy_transcription`, `_has_distinct_transcription_fallback`, `_update_processing` | `process`/`InputRecognitionService`; tests вызывают wrappers; media progress уже принадлежит input service | низкий как seam, высокий риск дублирования | **COMPATIBILITY_FACADE / KEEP_TEMP** |
+| `_attach_ui_revision`, `_store_visible_actions` | `process`, registration completion; мутируют `ConversationState` перед checkpoint и поддерживают stale callback guard | высокий: revision + edit-message contract | **PROTECTED** |
+| `_voice_processing_reply`, `_photo_received_reply`, `_all_suppliers_processing_reply`, `_text_processing_reply`, `_should_show_text_processing` | `process` и UI tests; shape-only replies, но timing определяется coordinator | средний/высокий из-за UX order | **KEEP_COORDINATOR** |
+| `_needs_catalog`, `_requires_fresh_catalog` | `process` и focused tests; чистые статические predicates | низкий, benefit мал | **KEEP_COORDINATOR** |
+| `_catalog_match_evidence`, `_resolve_ai_pending` | `process`; `CatalogCache`, catalog evidence/safety, OpenAI shortlist, `ConversationEngine.catalog_resolution` | критический: catalog safety и AI gate | **PROTECTED** |
+| `_claim`, `_defer_if_current_attempt` | `process`; `UpdateRepository`, DB transaction, sequence and stale-owner fencing | критический durable protocol | **PROTECTED** |
+| `_checkpoint_state`, `_append_order_transition_events`, `_checkpoint_reply`, `_checkpoint_tasks` | `process`; session/update/order-event repositories, lease checks, idempotency | критический transaction/checkpoint coupling | **PROTECTED** |
+| `_enqueue_side_effects`, `_finish`, `_error_reply` | `process`; background dispatcher, catalog invalidation, Telegram error reply, DB status | критический effect and retry boundary | **PROTECTED** |
+
+Analytics field contract is currently assembled by `_request_analytics`:
+`status`, `scenario`, `intent`, `outcome`, `failure_reason`, `input_type`,
+`stage_from`, `stage_to`, `item_count`, `cart_count`, `issue_count`,
+`issue_types`, `confidence` and optional privacy-controlled `user_text` /
+`request_fingerprint`. `_record_request_outcome` additionally writes structured
+logs and Langfuse metadata (`chat_hash`, `venue_hash`). `observability.Tracer`
+is an existing telemetry adapter, but it does not own this product outcome
+schema. `_effective_analytics_command` depends on the canonical quantity parser
+`PendingQuantityHandler.spoken_quantity`; `ConversationEngine._spoken_quantity`
+is only a compatibility adapter. Moving analytics now would either split this
+schema or introduce a new owner without a stable injected logging-policy
+contract. Therefore no analytics implementation is selected in 6B.
+
+Processing UI is also not a safe independent seam. The coordinator sends the
+callback ACK before the chat lock, creates voice/photo/text processing cards
+after state load, disables the previous keyboard, reuses `processing_message_id`
+for the final edit, and preserves best-effort exception handling. Photo progress
+updates are already owned by `InputRecognitionService._recognize_photo` through
+`update_processing`. Extracting only reply constructors would not remove the
+ordering and transport responsibilities; extracting the whole cluster would
+duplicate or split that owner. Candidate B is therefore rejected for now.
+
+### Candidate matrix
+
+Scores are 1–5. For benefit, owner maturity, testability and future multi-channel
+value, 5 is better. For behavioral risk, transaction/lease/external coupling and
+diff size, 5 is worse.
+
+| Candidate | Benefit | Risk | Tx coupling | Lease coupling | External effects | Owner maturity | Testability | Diff size | Multi-channel | Decision |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|
+| A Analytics/observability | 3 | 2 | 1 | 1 | 2 | 3 | 4 | 2 | 3 | KEEP_TEMP |
+| B Telegram processing/UI lifecycle | 2 | 4 | 2 | 3 | 5 | 2 | 3 | 3 | 1 | KEEP_COORDINATOR |
+| C UI revision/visible-action checkpoint | 2 | 4 | 3 | 4 | 4 | 2 | 3 | 2 | 1 | PROTECTED |
+| D Catalog load policy | 1 | 1 | 1 | 1 | 1 | 3 | 4 | 1 | 1 | KEEP_COORDINATOR |
+| E Voice compatibility wrappers | 1 | 1 | 1 | 1 | 2 | 4 | 4 | 1 | 2 | COMPATIBILITY_FACADE |
+| F Venue/session | 3 | 5 | 5 | 5 | 5 | 3 | 2 | 4 | 1 | PROTECTED |
+| G Sheet review | 3 | 5 | 5 | 4 | 5 | 3 | 2 | 5 | 1 | PROTECTED |
+| H AI catalog reconciliation | 4 | 5 | 4 | 4 | 5 | 4 | 2 | 5 | 2 | PROTECTED |
+| I Durable update protocol | 1 | 5 | 5 | 5 | 5 | 5 | 1 | 5 | 1 | PROTECTED |
+
+### Safety and final decision
+
+`process()` должен остаться coordinator skeleton:
+
+```text
+claim → normalize → callback ACK → chat lease/fence → venue/access → state load
+→ processing UX → TelegramInputInterpreter → catalog dependencies
+→ review или ConversationEngine → AI reconciliation
+→ UI revision/visible actions → state checkpoint → Telegram delivery
+→ reply checkpoint → background effects → tasks checkpoint → finish/outcome
+```
+
+Старые lease/claim/checkpoint/delivery/review/registration/catalog AI contracts
+сохраняются. Нижние owners не импортируют `UpdateOrchestrator`; новый input owner
+не создаёт обратной зависимости. `observability.Tracer` и
+`PendingQuantityHandler.spoken_quantity` остаются текущими владельцами своих
+низкоуровневых контрактов.
+
+Итог: **ORCHESTRATOR_DECOMPOSITION_SUFFICIENT**. После Block 6A не найден
+достаточно зрелый, низкорисковый следующий implementation seam: analytics и
+voice wrappers слишком малы/связаны с compatibility, processing UI и revision
+завязаны на timing/checkpoint, catalog/review/venue/durable блоки защищены.
+
+Следующая единственная кампания: **BLOCK 6C — STABILIZATION / REALISTIC SMOKE /
+ACCEPTANCE PREP** (сначала plan-only). Block 6C должен проверить реальный
+runtime smoke и acceptance readiness; новый production decomposition в этом
+блоке не начинать. Block 6B завершён analysis-only.
+
 ## 1. Краткий вывод
 
 `UpdateOrchestrator` — не обычный service-handler, а координатор одного
@@ -67,16 +180,18 @@ lease implementation и `UpdateRepository`.
 application-port seams. Нельзя механически выносить checkpoint, lease,
 claim и delivery по отдельности: их порядок является частью safety protocol.
 
-Текущее состояние не требует немедленного production-рефакторинга. Единственная
-следующая implementation campaign, которую следует планировать после отдельного
-одобрения, — **выделить чистый `UpdateInputPipeline` для выбора и запуска
-text/voice/photo/callback parsing, сохранив в `UpdateOrchestrator.process()`
-claim, lease, checkpoint, delivery и error protocol**. Детали и ограничения
-этой единственной кампании приведены в разделе 29.
+Текущее состояние не требует немедленного production-рефакторинга. Пост-6A
+reassessment в разделе `POST-6A REASSESSMENT / BLOCK 6B` завершён решением
+`ORCHESTRATOR_DECOMPOSITION_SUFFICIENT`; единственная следующая кампания —
+`BLOCK 6C — STABILIZATION / REALISTIC SMOKE / ACCEPTANCE PREP`.
 
 ## 2. Проверенный scope и методы
 
-### 2.1. Метрики текущего файла
+### 2.1. Historical metrics и inventory на Block 5Z
+
+Следующая таблица сохранена как исторический снимок Block 5Z. Актуальные
+метрики и inventory после Block 6A находятся в разделе `POST-6A REASSESSMENT /
+BLOCK 6B` выше.
 
 | Метрика | Значение | Источник |
 |---|---:|---|
@@ -543,7 +658,10 @@ Telegram
 `orchestrator` или Telegram transport. `orchestrator` — верхняя composition
 boundary; `workers` и `api` знают его, нижние owners — нет.
 
-## 18. Candidate seams и риск
+## 18. Historical candidate seams и риск (Block 5Z)
+
+Эта таблица описывает состояние до Block 6A и сохранена для трассировки решения;
+она заменена актуальной score matrix в разделе `POST-6A REASSESSMENT / BLOCK 6B`.
 
 | Candidate seam | Что переносится | Риск | Вердикт |
 |---|---|---|---|
@@ -564,7 +682,7 @@ boundary; `workers` и `api` знают его, нижние owners — нет.
 4. catalog AI reconciliation — после доказательного safety audit;
 5. checkpoint/lease/registration/review — не переносить без новой campaign.
 
-## 19. Единственная следующая implementation campaign
+## 19. Historical implementation campaign (выполнена в Block 6A)
 
 ### `UpdateInputPipeline` — механическое выделение semantic input boundary
 

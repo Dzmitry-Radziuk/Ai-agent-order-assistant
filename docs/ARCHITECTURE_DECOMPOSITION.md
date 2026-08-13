@@ -12,7 +12,11 @@ pending-comment scope, visible-action matching и visible-action AI fallback.
 Семантика не менялась: сохранены точный порядок callback → text → voice/photo,
 global parse до contextual fallback, StateCompatibilityPolicy и обработка
 транзиентных OpenAI ошибок. Проверка: focused `444 passed`, полный suite
-`1377 passed`.
+`1377 passed`. Block 6B reassessment выбрал
+`ORCHESTRATOR_DECOMPOSITION_SUFFICIENT`; следующий шаг — `BLOCK 6C —
+STABILIZATION / REALISTIC SMOKE / ACCEPTANCE PREP`, без нового production
+переноса до отдельного одобрения. Детальная matrix находится в
+[`UPDATE_ORCHESTRATOR_AUDIT.md`](UPDATE_ORCHESTRATOR_AUDIT.md).
 
 ## CURRENT ARCHITECTURE — Block 5Y
 
@@ -30,8 +34,8 @@ transient reset. Engine уменьшен с `1613` до `1535` строк, с `7
 Порядок `handle()` и stale callback guard сохранены. `_build_item`,
 `_spoken_quantity`, `_cart_page`, `_callback_item_index` оставлены как тонкие
 adapters; quantity/new-order/product-add/submission seams защищены. Readiness:
-`ENGINE_PHASE_ACCEPTABLE`; следующая единственная кампания — analysis-only audit
-UpdateOrchestrator, не начат.
+`ENGINE_PHASE_ACCEPTABLE`; Block 6B завершил analysis-only reassessment
+UpdateOrchestrator без нового implementation seam.
 
 ## CURRENT ARCHITECTURE — Block 5X (архив)
 

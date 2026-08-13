@@ -11,7 +11,9 @@ durable coordination и вызывает owner одной точкой.
 
 Механический перенос подтверждён baseline `1377 collected / 1377 passed` и
 focused input/routing `444 passed`; изменения протокола, state serialization и
-внешних эффектов отсутствуют.
+внешних эффектов отсутствуют. Block 6B завершил reassessment оставшихся
+orchestrator seams: выбран `ORCHESTRATOR_DECOMPOSITION_SUFFICIENT`, следующая
+кампания — `BLOCK 6C — STABILIZATION / REALISTIC SMOKE / ACCEPTANCE PREP`.
 
 ## CURRENT ARCHITECTURE — Block 5Y
 
@@ -25,8 +27,7 @@ reset — в `conversation/state/transitions.py`. Engine уменьшен до `
 comparison: `MISMATCHES = 0`. Presenter не мутирует state, handle ordering и stale
 callback guard сохранены. Candidate selection, quantity, new-order, product-add и
 submission остаются `KEEP_TEMP`/protected seams. Readiness:
-`ENGINE_PHASE_ACCEPTABLE`; следующая единственная кампания — analysis-only audit
-UpdateOrchestrator, без переноса кода.
+`ENGINE_PHASE_ACCEPTABLE`; новый production seam после Block 6B не назначен.
 
 ## CURRENT ARCHITECTURE — Block 5X (архив)
 

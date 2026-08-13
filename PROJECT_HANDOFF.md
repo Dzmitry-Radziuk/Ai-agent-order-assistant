@@ -19,32 +19,25 @@ orchestrator. Порядок callback/text/media, StateCompatibilityPolicy,
 
 ### Следующая кампания (не начинать)
 
-Единственная следующая кампания — analysis-only аудит оставшихся границ
-`UpdateOrchestrator` после Block 6A. Не переносить checkpoint, lease, claim,
-delivery, review, registration или catalog AI без отдельного одобрения.
+Единственная следующая кампания — **BLOCK 6C — STABILIZATION / REALISTIC SMOKE /
+ACCEPTANCE PREP** (сначала plan-only). Block 6B подтвердил, что после 6A нет
+достаточно зрелого низкорискового implementation seam: analytics и voice wrappers
+остаются compatibility-границами, processing UI и UI revision связаны с timing и
+checkpoint, review/venue/catalog/durable protocol защищены. Production decomposition
+до отдельного одобрения не начинать.
 
-## IMPLEMENTED AFTER 5Z / BLOCK 6A
+## POST-6A REASSESSMENT / BLOCK 6B
 
-Выполнено поведенчески нейтральное выделение Telegram input interpretation.
-Класс `TelegramInputInterpreter` в
-`src/restaurant_bot/input/telegram_interpretation.py` теперь владеет выбором
-пути для callback, text, voice и photo. Из `UpdateOrchestrator` вынесены
-`_parse`, `_parse_text_in_context`, `_parse_sheet_review_command`,
-`_parse_pending_comment_scope`, `_match_visible_action` и
-`_needs_visible_action_ai`; lazy-фабрика `_recognizer()` оставлена в
-orchestrator. Порядок callback/text/media, StateCompatibilityPolicy,
-транзиентные ошибки провайдера и видимые действия не изменены.
+Анализ выполнен на HEAD `c3bde2ff1229d9850dcb8dd21543331956f20794`, ветка
+`decompose_bot`, свежий полный suite: `1377 collected / 1377 passed` за `16.19 s`.
+`UpdateOrchestrator` — `1888` строк, `49` функций/методов; input boundary
+`TelegramInputInterpreter` подтверждён как отдельный owner без циклических
+импортов и без DB/Redis/Telegram/Sheets/engine/checkpoint зависимостей.
 
-Метрики после переноса: `orchestrator.py` — 1888 строк, 49 функций/методов;
-новый интерпретатор — 330 строк, 3 класса, 11 функций/методов. Полный suite:
-`1377 collected / 1377 passed`; focused input/routing: `444 passed`.
-Коммит extraction: `c6feeb7`.
-
-### Следующая кампания (не начинать)
-
-Единственная следующая кампания — analysis-only аудит оставшихся границ
-`UpdateOrchestrator` после Block 6A. Не переносить checkpoint, lease, claim,
-delivery, review, registration или catalog AI без отдельного одобрения.
+Решение Block 6B: **ORCHESTRATOR_DECOMPOSITION_SUFFICIENT**. Полная inventory,
+caller/effect/risk матрица, score matrix кандидатов A–I и сохранённый coordinator
+pipeline находятся в [`docs/UPDATE_ORCHESTRATOR_AUDIT.md`](docs/UPDATE_ORCHESTRATOR_AUDIT.md).
+Application code и tests в Block 6B не изменялись.
 
 ## CURRENT ARCHITECTURE — Block 5Y
 

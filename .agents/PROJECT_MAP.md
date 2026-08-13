@@ -9,7 +9,10 @@ Telegram-specific semantic input boundary теперь находится в
 Sheets, catalog cache, engine, review, registration, checkpoint или task
 зависимостей. `UpdateOrchestrator` только создаёт owner и вызывает
 `interpret(...)`; `_recognizer()` сохранён lazy seam. Полный baseline после
-переноса: `1377/1377`.
+переноса: `1377/1377`. Пост-6A reassessment в
+[`docs/UPDATE_ORCHESTRATOR_AUDIT.md`](../docs/UPDATE_ORCHESTRATOR_AUDIT.md)
+выбрал `ORCHESTRATOR_DECOMPOSITION_SUFFICIENT`; следующая кампания —
+`BLOCK 6C — STABILIZATION / REALISTIC SMOKE / ACCEPTANCE PREP`.
 
 ## Current architecture after Block 5Y
 
@@ -36,7 +39,8 @@ operations — `conversation/comments.py`, progression state —
 `_spoken_quantity` имеет production caller в orchestrator. Quantity, new-order,
 product-add и submission остаются protected, candidate selection — `KEEP_TEMP`.
 Readiness: `ENGINE_PHASE_ACCEPTABLE`; следующая единственная кампания —
-analysis-only audit UpdateOrchestrator перед любым переносом кода.
+`BLOCK 6C — STABILIZATION / REALISTIC SMOKE / ACCEPTANCE PREP`; Block 6B не
+выбрал новый production implementation seam.
 
 ## Current architecture after Block 5X (архив)
 
