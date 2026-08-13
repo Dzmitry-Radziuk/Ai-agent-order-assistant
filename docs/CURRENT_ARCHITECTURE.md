@@ -60,6 +60,20 @@ conversation/orders/catalog/parsing/domain`; `repositories/integrations` —
 ranking и safety gate должны остаться до AI auto-select. В этой кампании не
 добавлялись таблицы, индексы, миграции или vector search.
 
+### Классификация полей состояния
+
+| Класс | Примеры | Владелец и правило |
+|---|---|---|
+| Канонический черновик | `ConversationState.cart`, status, quantity/unit, catalog binding | `conversation`/`orders`; изменяется только существующими draft-операциями. |
+| Modal-контекст | `pending_comment_*`, `pending_product_add_*`, supplier warning, candidate block | `conversation/routing` и handlers; policy решает continue/interrupt, старые данные не переходят в новый intent. |
+| Durable safety | `ui_revision`, `pending_submission`, request/lease/checkpoint identifiers | `services/orchestrator`, repositories и submission; защищает повторы и stale callbacks. |
+| Канальный metadata | Telegram update/callback/user/file поля | `input/telegram` и `TelegramEvent` adapter aliases; не входит в application contract. |
+| Производное представление | `visible_actions`, reply rows, rendered HTML | `presentation/telegram`; не является источником истины для state или intent. |
+
+Разделение не меняет сериализацию и не вводит `suspended_interaction`.
+Compatibility handlers сохраняют pending context при interrupt, а callback
+revision проверяется до state mutation.
+
 ### Защищённый долг
 
 Оставлены `UpdateOrchestrator`, `SubmissionService`, `OrderReviewService`,
