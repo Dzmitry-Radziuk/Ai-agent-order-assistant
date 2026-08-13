@@ -19,8 +19,8 @@
 | Legacy bridge | `services/engine.py` | Принимает нейтральный протокол, но временно отдаёт `EngineResult`/`BotReply`. |
 
 Callback round-trip проверен для `skip`, `sel`, `qty`, `cartpage` и
-`review_submit`; fake-channel тесты покрывают простой товар, missing quantity,
-comment edit и candidate selection. Callback, state serialization и durable
+`review_submit`; fake-channel тесты покрывают простой товар, ожидание количества,
+редактирование комментария и выбор кандидата. Callback, state serialization и durable
 claim/lease/checkpoint не переписывались.
 
 ### Инвентаризация крупных файлов

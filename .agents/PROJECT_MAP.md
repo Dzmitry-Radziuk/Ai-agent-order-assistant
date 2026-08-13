@@ -25,7 +25,7 @@ proof; БД и миграции в этой кампании не менялис
 
 Проверенные границы: callback round-trip для пяти форматов, fake-channel proof
 для товара/quantity/comment/candidate, отсутствие Telegram в application
-contracts и полный suite `1390 passed`. Следующий шаг: **TEST SUITE
+contracts и полный suite `1390 collected / 1390 passed`. Следующий шаг: **TEST SUITE
 CONSOLIDATION / DEDUPLICATION**.
 
 ## Актуальный статус после финальной архитектурной кампании
