@@ -31,6 +31,7 @@ class ProgressionResult:
     item: CartItem | None = None
     prompt_count: int = 0
     added_count: int = 0
+    resumed: bool = False
 
 
 _ISSUE_KINDS = {
@@ -46,29 +47,67 @@ def advance(
     state: ConversationState,
     added_count: int = 0,
     preferred_issue_item_id: str = "",
+    issue_context_item_ids: list[str] | None = None,
 ) -> ProgressionResult:
-    """Переходит к следующей нерешённой позиции с прежней семантикой."""
+    """Переходит внутри текущего контекста и возобновляет прерванный вопрос."""
     if added_count:
         state.pending_added_items_count = added_count
 
-    unresolved = first_unresolved(state)
-    if preferred_issue_item_id:
-        preferred = next(
-            (
+    if issue_context_item_ids is not None:
+        if not state.issue_context_stack and state.current_issue_item_id:
+            current = state.current_item()
+            if current is not None and is_unresolved_status(current.status):
+                state.issue_context_stack.append([current.id])
+        state.issue_context_stack.append(list(issue_context_item_ids))
+
+    if not state.issue_context_stack and state.current_issue_item_id:
+        current = state.current_item()
+        if current is not None and is_unresolved_status(current.status):
+            state.issue_context_stack.append([current.id])
+
+    resumed = False
+    unresolved = None
+    while state.issue_context_stack:
+        context = state.issue_context_stack[-1]
+        context[:] = [
+            item_id
+            for item_id in context
+            if any(item.id == item_id and is_unresolved_status(item.status) for item in state.cart)
+        ]
+        if preferred_issue_item_id:
+            preferred = next(
+                (item for item in state.cart if item.id == preferred_issue_item_id),
+                None,
+            )
+            if preferred is not None and is_unresolved_status(preferred.status):
+                unresolved = preferred
+                break
+        if context:
+            unresolved = next(
                 item
                 for item in state.cart
-                if item.id == preferred_issue_item_id and is_unresolved_status(item.status)
-            ),
-            None,
-        )
-        if preferred is not None:
-            unresolved = preferred
+                if item.id == context[0] and is_unresolved_status(item.status)
+            )
+            break
+        state.issue_context_stack.pop()
+        if state.issue_context_stack:
+            resumed = True
+
+    if unresolved is None:
+        unresolved = first_unresolved(state)
+        if unresolved is not None:
+            state.issue_context_stack = [[unresolved.id]]
 
     if unresolved:
         state.current_issue_item_id = unresolved.id
         state.current_issue_kind = _ISSUE_KINDS.get(unresolved.status)
-        return ProgressionResult(kind=ProgressionKind.ISSUE, item=unresolved)
+        return ProgressionResult(
+            kind=ProgressionKind.ISSUE,
+            item=unresolved,
+            resumed=resumed,
+        )
 
+    state.issue_context_stack = []
     state.current_issue_item_id = ""
     state.current_issue_kind = None
     if state.pending_added_items_count:

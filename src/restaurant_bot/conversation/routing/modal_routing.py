@@ -80,6 +80,22 @@ class ModalRoutingDecision:
         """Показывает, прервано ли ожидание решения по unit mismatch."""
         return self.unit_mismatch.action is CompatibilityAction.INTERRUPT
 
+    @property
+    def item_issue_interrupted(self) -> bool:
+        """Показывает, прерван ли текущий вопрос по позиции новым товаром."""
+        return any(
+            decision.action is CompatibilityAction.INTERRUPT
+            for decision in (
+                self.quantity,
+                self.manual_details,
+                self.product_add_details,
+                self.candidate_selection,
+                self.not_found,
+                self.duplicate,
+                self.unit_mismatch,
+            )
+        )
+
 
 def evaluate_modal_routing(
     policy: StateCompatibilityPolicy,

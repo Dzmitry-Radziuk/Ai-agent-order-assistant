@@ -27,7 +27,7 @@ def preview_reply(
                 f"🛒 {heading('Текущая заявка пуста')}\n\n"
                 "В таблице пока нет товаров с указанным количеством."
             ),
-            rows=[[Button(text="↩️ Закрыть", callback_data=f"v2:review_cancel:{token}")]],
+            rows=[[Button(text="Закрыть", callback_data=f"v2:review_cancel:{token}")]],
             edit_message_id=edit_message_id,
         )
     lines = [
@@ -37,7 +37,7 @@ def preview_reply(
         f"Поставщиков: {snapshot.supplier_count}",
     ]
     if changed:
-        lines += ["", "⚠️ Таблица изменилась. Проверьте обновлённый состав заявки."]
+        lines += ["", "🔸 Таблица изменилась. Проверьте обновлённый состав заявки."]
     lines += ["", "<b>Товары по поставщикам:</b>"]
     grouped: dict[str, list[ReviewItem]] = {}
     for item in snapshot.items:
@@ -75,8 +75,8 @@ def preview_reply(
             "Все товары повторно проверяются перед отправкой."
         )
     rows = [
-        [Button(text="✅ Отправить заявку", callback_data=f"v2:review_submit:{token}")],
-        [Button(text="↩️ Отмена", callback_data=f"v2:review_cancel:{token}")],
+        [Button(text="Отправить заявку", callback_data=f"v2:review_submit:{token}")],
+        [Button(text="Отмена", callback_data=f"v2:review_cancel:{token}")],
     ]
     return BotReply(text="\n".join(lines), rows=rows, edit_message_id=edit_message_id)
 
@@ -92,7 +92,7 @@ def submission_disabled_reply(venue_code: str, edit_message_id: int | None = Non
         rows=[
             [
                 Button(
-                    text="🔄 Обновить заявку",
+                    text="Обновить заявку",
                     callback_data=f"v2:review:{venue_code}",
                 )
             ]
@@ -105,12 +105,12 @@ def submission_failure_reply(token: str, edit_message_id: int | None = None) -> 
     """Формирует ответ о временной ошибке отправки заявки."""
     return BotReply(
         text=(
-            f"⚠️ {heading('Не удалось отправить заявку')}\n\nТаблица не изменена. Попробуйте ещё раз позже."
+            f"🔸 {heading('Не удалось отправить заявку')}\n\nТаблица не изменена. Попробуйте ещё раз позже."
         ),
         rows=[
             [
                 Button(
-                    text="🔄 Повторить",
+                    text="Повторить",
                     callback_data=f"v2:review_submit:{token}",
                 )
             ]

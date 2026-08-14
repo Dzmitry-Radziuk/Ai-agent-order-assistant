@@ -720,7 +720,7 @@ class SubmissionService:
                 state,
                 BotReply(
                     text=(
-                        f"⚠️ {heading('Заявка не найдена')}\n\n"
+                        f"🔸 {heading('Заявка не найдена')}\n\n"
                         f"Заявки {escape(target)} нет в «Истории» этого заведения."
                     ),
                     rows=[

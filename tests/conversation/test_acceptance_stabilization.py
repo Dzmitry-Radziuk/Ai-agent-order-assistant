@@ -2,6 +2,7 @@
 
 import pytest
 
+from restaurant_bot.conversation.comments import reconcile_comment_target
 from restaurant_bot.domain.models import (
     CartItem,
     CatalogProduct,
@@ -221,3 +222,71 @@ def test_comment_correction_replaces_only_corrected_fact(settings) -> None:  # t
     assert "в красной упаковке" not in comment
     assert result.state.cart[0].quantity == 4
     assert result.state.cart[0].catalog_product_id == "tomatoes"
+
+
+@pytest.mark.parametrize(
+    ("target", "comment"),
+    [
+        ("бородинскому", "хлебу в кирпичиках"),
+        ("хлебу", "бородинскому без нарезки"),
+        ("бородинскому", "хлебу: в кирпичиках"),
+        ("свежим", "огурцам только мелкие"),
+    ],
+)
+@pytest.mark.parametrize("input_kind", [InputKind.TEXT, InputKind.VOICE])
+def test_comment_target_reconciliation_keeps_product_words_out_of_comment(
+    settings,
+    target: str,
+    comment: str,
+    input_kind: InputKind,
+) -> None:  # type: ignore[no-untyped-def]
+    """Разделяет цель комментария по фактическому товару одинаково для текста и голоса."""
+    product = "Хлеб Бородинский" if "хлеб" in f"{target} {comment}" else "Огурцы свежие"
+    state = ConversationState(
+        cart=[
+            CartItem(
+                id="comment-target",
+                source_query=product,
+                catalog_name=product,
+                status=ItemStatus.MATCHED,
+            )
+        ]
+    )
+    command = ParsedCommand(
+        intent=Intent.EDIT_COMMENT,
+        comment_target_query=target,
+        comment_text=comment,
+        comment_action="add",
+        comment_scope="item",
+    )
+
+    result = ConversationEngine(settings).handle(
+        _event(f"{target} {comment}").model_copy(update={"input_type": input_kind}),
+        command,
+        state,
+        [],
+    )
+
+    assert result.state.cart[0].comment in {"в кирпичиках", "без нарезки", "только мелкие"}
+    assert "хлебу" not in result.state.cart[0].comment
+    assert "бородинскому" not in result.state.cart[0].comment
+    assert "огурцам" not in result.state.cart[0].comment
+
+
+def test_comment_target_reconciliation_rejects_ambiguous_cart_boundary() -> None:
+    """Не выбирает товар, если граница цели совпадает с несколькими позициями."""
+    state = ConversationState(
+        cart=[
+            CartItem(id="one", source_query="Огурцы свежие", status=ItemStatus.MATCHED),
+            CartItem(id="two", source_query="Огурцы тепличные", status=ItemStatus.MATCHED),
+        ]
+    )
+
+    resolution = reconcile_comment_target(state, "огурцам", "только мелкие")
+
+    assert resolution.ambiguous is True
+    assert resolution.item is None
+
+    removal = reconcile_comment_target(state, "огурцам", "")
+    assert removal.ambiguous is True
+    assert removal.item is None

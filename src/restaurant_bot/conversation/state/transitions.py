@@ -29,6 +29,7 @@ def clear_transient_dialog_state(state: ConversationState) -> None:
     """Очищает временный контекст диалога без изменения постоянного черновика."""
     state.current_issue_item_id = ""
     state.current_issue_kind = None
+    state.issue_context_stack = []
     state.search_scope = SearchScope.SUPPLIER_ONLY
     state.supplier_search_locked = False
     state.supplier_hint_context = ""

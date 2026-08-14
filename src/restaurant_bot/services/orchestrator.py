@@ -733,7 +733,7 @@ class UpdateOrchestrator:
                 state=state,
                 reply=BotReply(
                     text="Отправка заявки отменена.",
-                    rows=[[Button(text="📦 Показать черновик", callback_data="v2:back")]],
+                    rows=[[Button(text="Показать черновик", callback_data="v2:back")]],
                 ),
             )
         if command.intent == Intent.REVIEW_SUBMIT:
@@ -779,11 +779,11 @@ class UpdateOrchestrator:
                         rows=[
                             [
                                 Button(
-                                    text="🔄 Обновить заявку",
+                                    text="Обновить заявку",
                                     callback_data=f"v2:review:{state.review_venue_code}",
                                 )
                             ],
-                            [Button(text="↩️ Закрыть", callback_data=f"v2:review_cancel:{token}")],
+                            [Button(text="Закрыть", callback_data=f"v2:review_cancel:{token}")],
                         ],
                     ),
                 )
@@ -812,11 +812,9 @@ class UpdateOrchestrator:
     def _review_stale_reply(state: ConversationState) -> BotReply:
         """Сообщает, что старая кнопка проверки больше не действует."""
         code = state.review_venue_code or state.venue_code
-        rows = (
-            [[Button(text="🔄 Обновить заявку", callback_data=f"v2:review:{code}")]] if code else []
-        )
+        rows = [[Button(text="Обновить заявку", callback_data=f"v2:review:{code}")]] if code else []
         return BotReply(
-            text="⚠️ Эта карточка заявки устарела. Обновите заявку и проверьте её ещё раз.",
+            text="🔸 Эта карточка заявки устарела. Обновите заявку и проверьте её ещё раз.",
             rows=rows,
         )
 
@@ -1999,7 +1997,7 @@ class UpdateOrchestrator:
         if event.input_type == InputKind.PHOTO:
             return BotReply(
                 text=(
-                    f"⚠️ {heading('Не удалось распознать фото')}\n\n"
+                    f"🔸 {heading('Не удалось распознать фото')}\n\n"
                     "Если список большой, отправьте его двумя или тремя фотографиями покрупнее. "
                     "Уже добавленные товары останутся в черновике."
                 ),

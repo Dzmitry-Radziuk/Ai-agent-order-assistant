@@ -84,7 +84,7 @@ def test_submission_retry_reuses_checkpoint_without_clearing_draft(settings) -> 
     assert retry.state.pending_submission.order_no == "20260722-0001"
     assert retry.state.cart[0].status is ItemStatus.MATCHED
     assert retry.reply.text == (
-        "⚠️ <b><u>Отправка не завершена</u></b>\n\n"
+        "🔸 <b><u>Отправка не завершена</u></b>\n\n"
         "Заявка: 20260722-0001\n\n"
         "Нажмите «Повторить отправку». Уже выполненные этапы будут пропущены."
     )

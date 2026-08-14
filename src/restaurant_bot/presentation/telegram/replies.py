@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from restaurant_bot.conversation.quantity_resolution import multiple_warnings
+from restaurant_bot.conversation.state.queries import unresolved_items
 from restaurant_bot.domain.models import (
     BotReply,
     Button,
@@ -19,6 +20,7 @@ from restaurant_bot.presentation.telegram.formatting import (
     format_number,
     heading,
     product_name,
+    russian_plural,
 )
 from restaurant_bot.presentation.telegram.pagination import (
     CART_PAGE_SIZE,
@@ -122,17 +124,10 @@ def welcome_reply(
 def new_order_confirmation_reply(state: ConversationState) -> BotReply:
     """Просит подтвердить удаление непустого черновика перед новой заявкой."""
     count = len(_active_items(state))
-    last_two = count % 100
-    last = count % 10
-    if last == 1 and last_two != 11:
-        item_word = "позиция"
-    elif 2 <= last <= 4 and not 12 <= last_two <= 14:
-        item_word = "позиции"
-    else:
-        item_word = "позиций"
+    item_word = russian_plural(count, "позиция", "позиции", "позиций")
     return BotReply(
         text=(
-            f"⚠️ {heading('Начать новую заявку?')}\n\n"
+            f"🔸 {heading('Начать новую заявку?')}\n\n"
             f"В текущем черновике: {count} {item_word}.\n"
             "Если начать новую заявку, текущий черновик будет очищен."
         ),
@@ -189,7 +184,8 @@ def thanks_reply(state: ConversationState) -> BotReply:
     """Формирует ответ на благодарность."""
     issues = sum(item.status in ISSUE_STATUSES for item in _active_items(state))
     text = (
-        f"<i>Черновик сохранён</i>\n\nНужно уточнить ещё {issues} товар(а)."
+        f"<i>Черновик сохранён</i>\n\nНужно уточнить ещё {issues} "
+        f"{russian_plural(issues, 'товар', 'товара', 'товаров')}."
         if issues
         else (
             "<i>Черновик сохранён</i>"
@@ -239,7 +235,7 @@ def unknown_intent_reply(state: ConversationState) -> BotReply:
         else []
     )
     return BotReply(
-        text=f"""⚠️ {heading("К сожалению, мне не удалось распознать сообщение")}
+        text=f"""🔸 {heading("К сожалению, мне не удалось распознать сообщение")}
 
 Попробуйте написать или сказать:
 • <code>добавь курицу 5 кг</code>;
@@ -255,7 +251,7 @@ def unrecognized_voice_reply(state: ConversationState) -> BotReply:
     has_draft = _has_draft_content(state)
     return BotReply(
         text=(
-            f"⚠️ {heading('К сожалению, мне не удалось распознать голосовое сообщение')}\n\n"
+            f"🔸 {heading('К сожалению, мне не удалось распознать голосовое сообщение')}\n\n"
             "Повторите короче или отправьте текстом.\n\n"
             "Пример: <code>сироп роза 3 штуки</code>"
         ),
@@ -316,7 +312,7 @@ def comment_scope_clarification_reply(
     """Просит безопасно выбрать товары для неоднозначного комментария."""
     visible_items = items[:10]
     lines = [
-        f"⚠️ {heading('Уточните комментарий')}",
+        f"🔸 {heading('Уточните комментарий')}",
         "",
         f"К каким товарам относится: <i>{escape(comment)}</i>",
         "",
@@ -362,7 +358,7 @@ def submission_retry_reply(order_no: str) -> BotReply:
     """Формирует карточку повторной отправки."""
     return BotReply(
         text=(
-            f"⚠️ {heading('Отправка не завершена')}\n\n"
+            f"🔸 {heading('Отправка не завершена')}\n\n"
             f"Заявка: {escape(order_no)}\n\n"
             "Нажмите «Повторить отправку». Уже выполненные этапы будут пропущены."
         ),
@@ -457,7 +453,7 @@ def cart_reply(
     if issues:
         if lines[-1] != "":
             lines.append("")
-        lines.append(f"⚠️ {heading('Нужно уточнить')}")
+        lines.append(f"🔸 {heading('Нужно уточнить')}")
         for item in page_issues if paginated else issues[:25]:
             if item.status == ItemStatus.UNIT_MISMATCH:
                 lines.append(
@@ -520,7 +516,37 @@ def product_add_sending_reply() -> BotReply:
     return BotReply(text="<b>Отправляю запрос менеджеру…</b>")
 
 
-def issue_reply(item: CartItem, item_index: int | None = None) -> BotReply:
+def issue_reply(
+    item: CartItem,
+    item_index: int | None = None,
+    *,
+    state: ConversationState | None = None,
+    resumed: bool = False,
+) -> BotReply:
+    """Формирует карточку проблемы с контекстом возобновления при необходимости."""
+    reply = _issue_reply_body(item, item_index)
+    if not resumed or state is None:
+        return reply
+    unresolved_count = len(unresolved_items(state))
+    name = product_name(_item_name(item))
+    if unresolved_count == 1:
+        resume_line = f"Осталось уточнить один товар — {name}."
+    else:
+        word = russian_plural(unresolved_count, "товар", "товара", "товаров")
+        resume_line = f"Осталось уточнить {unresolved_count} {word}.\nСейчас — {name}."
+    if item.status == ItemStatus.MISSING_QTY:
+        reply.text = (
+            f"✏️ {heading('Укажите количество')}\n\n"
+            f"{resume_line} Сколько нужно?\n\n"
+            "Отправьте число текстом или голосом.\n\n"
+            "Пример: <code>5</code>"
+        )
+    else:
+        reply.text = f"{resume_line}\n\n{reply.text}"
+    return reply
+
+
+def _issue_reply_body(item: CartItem, item_index: int | None = None) -> BotReply:
     """Формирует карточку проблемы товарной позиции."""
     index = 0 if item_index is None else item_index
     name = product_name(_item_name(item))
@@ -535,7 +561,7 @@ def issue_reply(item: CartItem, item_index: int | None = None) -> BotReply:
             incoming_unit = item.unit or item.catalog_unit or existing_unit
             return BotReply(
                 text=(
-                    f"⚠️ {heading('Товар уже есть в черновике')}\n\n{name}\n\n"
+                    f"🔸 {heading('Товар уже есть в черновике')}\n\n{name}\n\n"
                     f"В черновике: <b>{format_number(item.duplicate_existing_quantity)} "
                     f"{escape(existing_unit)}</b>\n"
                     f"Вы указали: <b>{format_number(item.quantity)} "
@@ -581,7 +607,7 @@ def issue_reply(item: CartItem, item_index: int | None = None) -> BotReply:
         )
         return BotReply(
             text=(
-                f"⚠️ {heading('Уточните количество')}\n\n{name}\n\n"
+                f"🔸 {heading('Уточните количество')}\n\n{name}\n\n"
                 f"Вы указали: <b>{format_number(item.quantity)} {escape(item.unit)}</b>.\n"
                 f"Этот товар заказывается <b>в {escape(item.catalog_unit)}</b>.\n\n"
                 f"Выберите вариант или напишите, сколько {escape(item.catalog_unit)} нужно."
@@ -599,7 +625,7 @@ def issue_reply(item: CartItem, item_index: int | None = None) -> BotReply:
             existing_unit = item.duplicate_existing_unit or item.catalog_unit
             return BotReply(
                 text=(
-                    f"⚠️ {heading('Товар уже есть в черновике')}\n\n{name}\n\n"
+                    f"🔸 {heading('Товар уже есть в черновике')}\n\n{name}\n\n"
                     f"В черновике: <b>{format_number(existing_quantity)} "
                     f"{escape(existing_unit)}</b>\n"
                     f"Вы указали: <b>{format_number(item.quantity)} "
@@ -620,7 +646,7 @@ def issue_reply(item: CartItem, item_index: int | None = None) -> BotReply:
         if not item.quantity:
             return BotReply(
                 text=(
-                    f"⚠️ {heading('Товар уже есть в черновике')}\n\n{name}\n"
+                    f"🔸 {heading('Товар уже есть в черновике')}\n\n{name}\n"
                     f"В черновике: {format_number(existing_quantity)} {escape(unit)}\n\n"
                     "Напишите или скажите голосом, сколько добавить. Если повторно добавлять товар не нужно — нажмите на кнопку ниже."
                 ),
@@ -629,7 +655,7 @@ def issue_reply(item: CartItem, item_index: int | None = None) -> BotReply:
         total = existing_quantity + item.quantity
         return BotReply(
             text=(
-                f"⚠️ {heading('Товар уже есть в черновике')}\n\n{name}\n\n"
+                f"🔸 {heading('Товар уже есть в черновике')}\n\n{name}\n\n"
                 f"В черновике: {format_number(existing_quantity)} {escape(unit)}\n"
                 f"Вы добавляете: {format_number(item.quantity)} {escape(unit)}\n"
                 f"После добавления будет: {format_number(total)} {escape(unit)}"
@@ -686,7 +712,7 @@ def issue_reply(item: CartItem, item_index: int | None = None) -> BotReply:
         return BotReply(text="\n".join(lines).strip(), rows=rows)
     if item.status == ItemStatus.NOT_FOUND and item.supplier_search_locked and item.supplier_hint:
         lines = [
-            f"⚠️ {heading('Товар не найден у выбранного поставщика')}",
+            f"🔸 {heading('Товар не найден у выбранного поставщика')}",
             "",
             f"Поставщик: <b>{escape(item.supplier_hint)}</b>",
             f"По запросу: {escape(item.source_query)}",
@@ -721,7 +747,7 @@ def issue_reply(item: CartItem, item_index: int | None = None) -> BotReply:
     if item.status == ItemStatus.NOT_FOUND and item.rename_attempted:
         return BotReply(
             text=(
-                f"⚠️ {heading('Товар не обнаружен в вашем списке товаров')}\n\n"
+                f"🔸 {heading('Товар не обнаружен в вашем списке товаров')}\n\n"
                 f"• Название товара: {product_name(item.source_query)}\n\n"
                 "Отправить заявку менеджеру по снабжению АвтоСнаб на добавление этого товара "
                 "в ваш список товаров (таблицу)?"
@@ -733,7 +759,7 @@ def issue_reply(item: CartItem, item_index: int | None = None) -> BotReply:
         )
     return BotReply(
         text=(
-            f"⚠️ {heading('Товар не найден')}\n\n"
+            f"🔸 {heading('Товар не найден')}\n\n"
             f"По вашему запросу «{product_name(item.source_query)}» ничего не найдено.\n\n"
             "Вы можете изменить название, отправить запрос менеджеру по снабжению "
             "или не добавлять товар."
@@ -784,7 +810,7 @@ def final_review_reply(state: ConversationState) -> BotReply:
         suggested = format_number(item.suggested_quantity)
         lines += [
             "",
-            f"⚠️ {heading('Проверьте количество')}",
+            f"🔸 {heading('Проверьте количество')}",
             product_name(_item_name(item)),
             (
                 f"Этот товар заказывают партиями по <b>{batch} {unit}</b>."
@@ -801,7 +827,7 @@ def final_review_reply(state: ConversationState) -> BotReply:
     elif len(multiple) > 1:
         lines += [
             "",
-            f"⚠️ {heading(f'Проверьте количество у {len(multiple)} товаров')}",
+            f"🔸 {heading(f'Проверьте количество у {len(multiple)} товаров')}",
             "Эти товары заказывают партиями определённого размера.",
             "Выберите количество для каждого товара.",
         ]
@@ -810,7 +836,7 @@ def final_review_reply(state: ConversationState) -> BotReply:
         ]
     else:
         if warnings:
-            lines += ["", f"⚠️ {heading('Минимальная сумма поставщика')}"]
+            lines += ["", f"🔸 {heading('Минимальная сумма поставщика')}"]
             lines += [
                 f"{escape(warning.supplier)}: {format_number(warning.current_amount + warning.added_amount)} ₽ из {format_number(warning.minimum_amount)} ₽"
                 for warning in warnings
@@ -879,7 +905,7 @@ def supplier_warning_details_reply(state: ConversationState) -> BotReply:
             text="<i>Минимальная сумма набрана</i>",
             rows=[[Button(text="К финальной проверке", callback_data="v2:cart")]],
         )
-    lines = [f"⚠️ {heading('Минимальная сумма не набрана')}"]
+    lines = [f"🔸 {heading('Минимальная сумма не набрана')}"]
     for warning in warnings[:8]:
         lines += [
             "",

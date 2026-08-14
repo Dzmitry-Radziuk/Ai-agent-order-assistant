@@ -82,8 +82,8 @@ def test_preview_lists_each_product_and_has_confirmation_buttons(settings) -> No
     assert "• <b>Сироп роза, 1 л</b> — 5 шт" in reply.text
     assert "• <b>Сливки 33%</b> — 3 л" in reply.text
     assert [button.text for row in reply.rows for button in row] == [
-        "✅ Отправить заявку",
-        "↩️ Отмена",
+        "Отправить заявку",
+        "Отмена",
     ]
     assert reply.rows[0][0].callback_data == "v2:review_submit:token"
 

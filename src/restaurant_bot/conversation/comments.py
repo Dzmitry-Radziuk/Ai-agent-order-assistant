@@ -1,9 +1,11 @@
-"""Содержит channel-neutral операции над комментариями черновика."""
+"""Содержит операции над комментариями черновика без привязки к каналу."""
 
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass
 
+from restaurant_bot.conversation.selection import contains_score
 from restaurant_bot.domain.models import (
     CartItem,
     CommentSource,
@@ -15,6 +17,94 @@ from restaurant_bot.domain.text import clean_text, normalize_text
 from restaurant_bot.domain.units import UNIT_ALIASES, normalize_unit
 from restaurant_bot.parsing.comment_policy import comment_semantic_key
 from restaurant_bot.parsing.number_words import NUMBER_WORDS
+
+
+@dataclass(frozen=True, slots=True)
+class CommentTargetResolution:
+    """Хранит безопасно разделённую цель и текст комментария."""
+
+    item: CartItem | None
+    target_query: str
+    comment_text: str
+    ambiguous: bool = False
+
+
+def reconcile_comment_target(
+    state: ConversationState,
+    target_query: str,
+    comment_text: str,
+) -> CommentTargetResolution:
+    """Уточняет границу товара по уникальному совпадению с активным черновиком."""
+    target = clean_text(target_query).strip(" .,;:-—–")
+    comment = clean_text(comment_text).strip(" .,;:-—–")
+    active_items = [item for item in state.cart if item.status is not ItemStatus.SKIPPED]
+    if not comment:
+        item = _unique_comment_item(active_items, target)
+        return CommentTargetResolution(item, target, comment, item is None and bool(target))
+
+    token_matches = re.findall(r"[a-zа-яё0-9%]+", f"{target} {comment}", flags=re.I)
+    words = [normalize_text(token) for token in token_matches]
+    if len(words) < 2:
+        item = _unique_comment_item(active_items, target)
+        return CommentTargetResolution(item, target, comment, item is None and bool(target))
+
+    matches: list[tuple[int, int, CartItem]] = []
+    for split in range(1, len(words)):
+        prefix = " ".join(words[:split])
+        scored = [
+            (
+                max(
+                    contains_score(prefix, normalize_text(item.source_query)),
+                    contains_score(prefix, normalize_text(item.catalog_name)),
+                ),
+                item,
+            )
+            for item in active_items
+        ]
+        scored.sort(key=lambda pair: pair[0])
+        if not scored or scored[-1][0] <= 0:
+            continue
+        best_score = scored[-1][0]
+        best_items = [item for score, item in scored if score == best_score]
+        if len(best_items) == 1:
+            matches.append((best_score, split, best_items[0]))
+
+    if not matches:
+        item = _unique_comment_item(active_items, target)
+        return CommentTargetResolution(item, target, comment, item is None and bool(target))
+
+    best_score = max(score for score, _, _ in matches)
+    best_matches = [(split, item) for score, split, item in matches if score == best_score]
+    if len({item.id for _, item in best_matches}) > 1:
+        return CommentTargetResolution(None, target, comment, ambiguous=True)
+    split, item = min(best_matches, key=lambda pair: pair[0])
+    return CommentTargetResolution(
+        item,
+        " ".join(token_matches[:split]),
+        " ".join(token_matches[split:]),
+    )
+
+
+def _unique_comment_item(active_items: list[CartItem], target: str) -> CartItem | None:
+    """Возвращает единственную позицию, совпавшую с целью комментария."""
+    if not target:
+        return None
+    scored = [
+        (
+            max(
+                contains_score(normalize_text(target), normalize_text(item.source_query)),
+                contains_score(normalize_text(target), normalize_text(item.catalog_name)),
+            ),
+            item,
+        )
+        for item in active_items
+    ]
+    scored.sort(key=lambda pair: pair[0])
+    if not scored or scored[-1][0] <= 0:
+        return None
+    if len(scored) > 1 and scored[-1][0] == scored[-2][0]:
+        return None
+    return scored[-1][1]
 
 
 def merge_comments(*values: str) -> str:

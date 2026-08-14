@@ -19,6 +19,7 @@ from restaurant_bot.conversation.comments import (
     clear_all_active_comments,
     clear_item_comment,
     comment_scope_items,
+    reconcile_comment_target,
     remove_cart_comment_shadows,
 )
 from restaurant_bot.conversation.draft import (
@@ -697,7 +698,7 @@ class ConversationEngine:
                 state=state,
                 reply=BotReply(
                     text="Отправьте товары текстом, голосом или фото — я добавлю их в текущий черновик заказа.",
-                    rows=[[Button(text="📦 Показать черновик", callback_data="v2:back")]],
+                    rows=[[Button(text="Показать черновик", callback_data="v2:back")]],
                 ),
             )
         if command.intent == Intent.REMOVE_ITEM:
@@ -884,10 +885,16 @@ class ConversationEngine:
             if selected_supplier:
                 state.supplier_hint_context = ""
             preferred_issue_item_id = next(iter(newly_unresolved_ids), "")
+            issue_context_ids = (
+                newly_unresolved_ids
+                if newly_unresolved_ids or modal_decision.item_issue_interrupted
+                else None
+            )
             return self._advance(
                 state,
                 added_count=len(command.items),
                 preferred_issue_item_id=preferred_issue_item_id,
+                issue_context_item_ids=issue_context_ids,
             )
 
         if event.kind == InputKind.VOICE:
@@ -1095,12 +1102,14 @@ class ConversationEngine:
         state: ConversationState,
         added_count: int = 0,
         preferred_issue_item_id: str = "",
+        issue_context_item_ids: list[str] | None = None,
     ) -> EngineResult:
         """Переходит к следующей нерешённой позиции."""
         progression = advance_progression(
             state,
             added_count=added_count,
             preferred_issue_item_id=preferred_issue_item_id,
+            issue_context_item_ids=issue_context_item_ids,
         )
         if progression.kind is ProgressionKind.DRAFT:
             normalize_cart_page(state, page_size=CART_PAGE_SIZE)
@@ -1308,10 +1317,23 @@ class ConversationEngine:
             return EngineResult(
                 state=state,
                 reply=BotReply(
-                    text="⚠️ Укажите товар и комментарий, например: «к батону — желательно крупный»."
+                    text="🔸 Укажите товар и комментарий, например: «к батону — желательно крупный»."
                 ),
             )
-        item = find_cart_item(state, target)
+        resolution = reconcile_comment_target(state, target, comment)
+        if resolution.ambiguous:
+            return EngineResult(
+                state=state,
+                reply=BotReply(
+                    text=(
+                        "🔸 Не удалось однозначно определить товар для комментария. "
+                        "Уточните название товара."
+                    )
+                ),
+            )
+        target = resolution.target_query
+        comment = resolution.comment_text
+        item = resolution.item
         if item is None:
             return EngineResult(
                 state=state,

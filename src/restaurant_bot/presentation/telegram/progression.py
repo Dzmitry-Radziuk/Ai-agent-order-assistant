@@ -16,7 +16,12 @@ def render_progression(state: ConversationState, result: ProgressionResult) -> B
     """Преобразует channel-neutral результат перехода в Telegram-ответ."""
     if result.kind is ProgressionKind.ISSUE:
         assert result.item is not None
-        return issue_reply(result.item, item_index(state, result.item))
+        return issue_reply(
+            result.item,
+            item_index(state, result.item),
+            state=state,
+            resumed=result.resumed,
+        )
     if result.kind is ProgressionKind.ADD_MORE_CONFIRM:
         return added_items_question_reply(state, result.prompt_count)
     title = f"Добавлено позиций: {result.added_count}" if result.added_count else "Черновик заявки"

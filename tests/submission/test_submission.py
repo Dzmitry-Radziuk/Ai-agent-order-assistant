@@ -99,7 +99,7 @@ def test_submission_failure_card_matches_n8n() -> None:
     reply = submission_failure_reply(type("State", (), {"ui_revision": 4})(), "20260722-001")
 
     assert reply.text == (
-        "⚠️ <b><u>Отправка не завершена</u></b>\n\n"
+        "🔸 <b><u>Отправка не завершена</u></b>\n\n"
         "Заявка: 20260722-001\n\n"
         "Нажмите «Повторить отправку». Уже выполненные этапы будут пропущены."
     )

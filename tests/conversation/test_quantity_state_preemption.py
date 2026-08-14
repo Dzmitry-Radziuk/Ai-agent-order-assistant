@@ -2,6 +2,7 @@
 
 from types import SimpleNamespace
 
+from restaurant_bot.conversation.progression import ProgressionKind, advance
 from restaurant_bot.conversation.routing.contracts import CompatibilityAction
 from restaurant_bot.conversation.routing.state_compatibility import (
     StateCompatibilityPolicy,
@@ -222,3 +223,74 @@ def test_new_product_without_quantity_preempts_then_resumes_old_pending_item(set
     assert horseradish.status is ItemStatus.MATCHED
     assert horseradish.quantity == 4
     assert resumed.state.current_issue_item_id == mustard.id
+
+
+def test_nested_new_items_resume_in_reverse_interruption_order() -> None:
+    """Возвращает вопросы A после последовательного решения B и C."""
+    first = CartItem(id="a", source_query="Курица", status=ItemStatus.MISSING_QTY)
+    second = CartItem(id="b", source_query="Сыр", status=ItemStatus.MISSING_QTY)
+    third = CartItem(id="c", source_query="Укроп", status=ItemStatus.MISSING_QTY)
+    state = ConversationState(
+        cart=[first, second, third],
+        current_issue_item_id=first.id,
+        stage=SessionStage.AWAIT_UNIT_QUANTITY,
+    )
+
+    result = advance(
+        state,
+        added_count=2,
+        preferred_issue_item_id=second.id,
+        issue_context_item_ids=[second.id, third.id],
+    )
+    assert result.kind is ProgressionKind.ISSUE
+    assert result.item is second
+
+    second.status = ItemStatus.MATCHED
+    result = advance(state)
+    assert result.item is third
+    assert result.resumed is False
+
+    third.status = ItemStatus.MATCHED
+    result = advance(state)
+    assert result.item is first
+    assert result.resumed is True
+    assert state.current_issue_item_id == first.id
+
+
+def test_nested_interruptions_resume_latest_context_first() -> None:
+    """Возвращает контексты C, B и A в обратном порядке прерывания."""
+    first = CartItem(id="a", source_query="Курица", status=ItemStatus.MISSING_QTY)
+    second = CartItem(id="b", source_query="Сыр", status=ItemStatus.MISSING_QTY)
+    third = CartItem(id="c", source_query="Укроп", status=ItemStatus.MISSING_QTY)
+    state = ConversationState(
+        cart=[first, second, third],
+        current_issue_item_id=first.id,
+        stage=SessionStage.AWAIT_UNIT_QUANTITY,
+    )
+
+    assert (
+        advance(
+            state,
+            preferred_issue_item_id=second.id,
+            issue_context_item_ids=[second.id],
+        ).item
+        is second
+    )
+    assert (
+        advance(
+            state,
+            preferred_issue_item_id=third.id,
+            issue_context_item_ids=[third.id],
+        ).item
+        is third
+    )
+
+    third.status = ItemStatus.MATCHED
+    result = advance(state)
+    assert result.item is second
+    assert result.resumed is True
+
+    second.status = ItemStatus.MATCHED
+    result = advance(state)
+    assert result.item is first
+    assert result.resumed is True

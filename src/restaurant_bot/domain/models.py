@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Any, Literal
@@ -468,6 +469,7 @@ class ConversationState(BaseModel):
     unit_item_index: int | None = None
     edit_multiple_index: int | None = None
     pending_added_items_count: int = 0
+    issue_context_stack: list[list[str]] = Field(default_factory=list)
     pending_comment_items: list[ExtractedItem] = Field(default_factory=list)
     pending_comment_existing_item_ids: list[str] = Field(default_factory=list)
     pending_comment_text: str = ""
@@ -504,6 +506,12 @@ class Button(BaseModel):
 
     text: str
     callback_data: str
+
+    @field_validator("text", mode="before")
+    @classmethod
+    def remove_decorative_emoji(cls, value: str) -> str:
+        """Удаляет декоративные эмодзи только из подписи кнопки."""
+        return re.sub(r"^(?:✅|↩️|🔄|📦)\s*", "", str(value))
 
 
 class BotReply(BaseModel):

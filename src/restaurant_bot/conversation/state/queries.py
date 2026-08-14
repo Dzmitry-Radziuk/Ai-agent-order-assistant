@@ -15,9 +15,14 @@ _UNRESOLVED_PRIORITY = {
 
 def first_unresolved(state: ConversationState) -> CartItem | None:
     """Возвращает приоритетную нерешённую позицию без изменения состояния."""
-    unresolved = [item for item in state.cart if is_unresolved_status(item.status)]
+    unresolved = unresolved_items(state)
     unresolved.sort(key=lambda item: _UNRESOLVED_PRIORITY[item.status])
     return unresolved[0] if unresolved else None
+
+
+def unresolved_items(state: ConversationState) -> list[CartItem]:
+    """Возвращает активные позиции, которым ещё требуется решение пользователя."""
+    return [item for item in state.cart if is_unresolved_status(item.status)]
 
 
 def is_unresolved_status(status: ItemStatus) -> bool:
