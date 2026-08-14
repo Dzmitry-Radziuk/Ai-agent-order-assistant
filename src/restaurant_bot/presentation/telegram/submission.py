@@ -7,7 +7,13 @@ from datetime import datetime
 from typing import Any
 
 from restaurant_bot.domain.models import BotReply, Button
-from restaurant_bot.presentation.telegram.formatting import escape, heading, product_name
+from restaurant_bot.history.product_list import extract_history_product_name
+from restaurant_bot.presentation.telegram.formatting import (
+    escape,
+    format_status,
+    heading,
+    product_name,
+)
 
 # Канонический Telegram presenter.
 
@@ -199,23 +205,25 @@ def _format_delivery_date(value: Any) -> str:
     return raw
 
 
-def _format_history_timestamp(value: Any) -> str:
-    """Форматирует дату создания заявки для компактного списка."""
+def _format_order_date(value: Any) -> str:
+    """Форматирует дату создания заявки без времени для пользовательского заголовка."""
     raw = str(value or "").strip()
     if not raw:
-        return "Дата не указана"
+        return ""
     for pattern in (
         "%d.%m.%Y %H:%M:%S",
         "%d.%m.%Y %H:%M",
         "%Y-%m-%dT%H:%M:%S",
         "%Y-%m-%d %H:%M:%S",
+        "%d.%m.%Y",
+        "%Y-%m-%d",
     ):
         try:
             parsed = datetime.strptime(raw[:19], pattern)
-            return parsed.strftime("%d.%m.%Y, %H:%M")
+            return parsed.strftime("%d.%m.%Y")
         except ValueError:
             continue
-    return raw
+    return ""
 
 
 def _escape_multiline(value: Any) -> str:
@@ -223,9 +231,7 @@ def _escape_multiline(value: Any) -> str:
     return "\n".join(escape(line) for line in str(value or "").splitlines() if line.strip())
 
 
-_PRODUCT_LIST_LINE = re.compile(
-    r"^(?P<prefix>\s*(?:(?:•|\d+[.)])\s*)?)(?P<name>.+?)(?P<tail>\s+—\s+.*|\s+-\s+.*)$"
-)
+_PRODUCT_LIST_PREFIX = re.compile(r"^(?P<prefix>\s*(?:(?:•|\d+[.)])\s*)?)")
 
 
 def _escape_product_list(value: Any) -> str:
@@ -234,14 +240,14 @@ def _escape_product_list(value: Any) -> str:
     for line in str(value or "").splitlines():
         if not line.strip():
             continue
-        match = _PRODUCT_LIST_LINE.match(line)
-        if match:
-            tail = match.group("tail")
+        prefix_match = _PRODUCT_LIST_PREFIX.match(line)
+        prefix = prefix_match.group("prefix") if prefix_match else ""
+        body = line[len(prefix) :]
+        name = extract_history_product_name(body)
+        if name and body.startswith(name) and "<" not in name and ">" not in name:
+            tail = body[len(name) :]
             separator = " " if tail[:1].isspace() else ""
-            rendered.append(
-                f"{match.group('prefix')}{product_name(match.group('name'))}"
-                f"{separator}{escape(tail.lstrip())}"
-            )
+            rendered.append(f"{prefix}{product_name(name)}{separator}{escape(tail.lstrip())}")
         else:
             rendered.append(escape(line))
     return "\n".join(rendered)
@@ -296,6 +302,18 @@ def _supplier_word(count: int) -> str:
     return "поставщиков"
 
 
+def _order_title(order_rows: list[dict[str, Any]], display_index: int) -> str:
+    """Формирует короткий заголовок заявки по дате создания."""
+    created_at = _status_value(
+        order_rows[0],
+        "Время создания заявки",
+        "Дата создания",
+        "created_at",
+    )
+    date_text = _format_order_date(created_at)
+    return f"{display_index}. Заявка от {date_text}" if date_text else f"{display_index}. Заявка"
+
+
 def build_order_status_list_reply(
     rows: list[dict[str, Any]],
     *,
@@ -314,29 +332,32 @@ def build_order_status_list_reply(
 
     lines = [f"📋 {heading('Мои заявки')}", "", f"Страница {page + 1}:"]
     buttons: list[list[Button]] = []
-    for index, (order_number, order_rows) in enumerate(groups, start=1):
-        created_at = _status_value(
-            order_rows[0],
-            "Время создания заявки",
-            "Дата создания",
-            "created_at",
-        )
+    for index, (_order_number, order_rows) in enumerate(groups, start=1):
         supplier_count = _supplier_count(order_rows)
         stages = {
-            _status_value(row, "Стадия", "Статус", "status")
+            format_status(_status_value(row, "Стадия", "Статус", "status"))
             for row in order_rows
             if _status_value(row, "Стадия", "Статус", "status")
         }
+        order_title = _order_title(order_rows, index)
+        created_at_available = bool(
+            _format_order_date(
+                _status_value(
+                    order_rows[0],
+                    "Время создания заявки",
+                    "Дата создания",
+                    "created_at",
+                )
+            )
+        )
         lines.extend(
             [
                 "",
-                f"{index}. <b>{escape(order_number)}</b>",
+                f"<b>{escape(order_title)}</b>",
+                *([] if created_at_available else ["Дата создания не указана"]),
+                f"Поставщиков: <b>{supplier_count}</b>",
                 (
-                    f"{escape(_format_history_timestamp(created_at))} · "
-                    f"{supplier_count} {_supplier_word(supplier_count)}"
-                ),
-                (
-                    f"Статус: {escape(next(iter(stages)))}"
+                    f"Статус: <b>{escape(next(iter(stages)))}</b>"
                     if len(stages) == 1
                     else "Статусы различаются по поставщикам"
                 ),
@@ -345,7 +366,7 @@ def build_order_status_list_reply(
         buttons.append(
             [
                 Button(
-                    text=f"{index}. {order_number}"[:60],
+                    text=order_title[:60],
                     callback_data=f"v2:order:{index}",
                 )
             ]
@@ -431,12 +452,14 @@ def _append_aggregated_order_status(lines: list[str], order_rows: list[dict[str,
             "Основной поставщик (Условное наз-ие)",
             "supplier",
         )
-        stage = _status_value(
-            row,
-            "Стадия",
-            "Статус",
-            "status",
-            default="Ожидает обработки",
+        stage = format_status(
+            _status_value(
+                row,
+                "Стадия",
+                "Статус",
+                "status",
+                default="Ожидает обработки",
+            )
         )
         delivery = _format_delivery_date(
             _status_value(
@@ -481,7 +504,9 @@ def _append_legacy_order_status(lines: list[str], order_rows: list[dict[str, Any
                 "product_name",
                 default="Товар",
             ),
-            "stage": _status_value(row, "Стадия", "Статус", "status", default="Ожидает обработки"),
+            "stage": format_status(
+                _status_value(row, "Стадия", "Статус", "status", default="Ожидает обработки")
+            ),
             "delivery": _format_delivery_date(
                 _status_value(
                     row,
@@ -540,7 +565,13 @@ def _aggregated_detail_blocks(
     display_index: int = 1,
 ) -> list[list[str]]:
     """Делит строки поставщика и длинные списки на безопасные блоки Telegram."""
-    blocks: list[list[str]] = [[f"{display_index}. {heading(f'Заявка {order_no}')}"]]
+    del order_no
+    title_block = [f"<b>{escape(_order_title(order_rows, display_index))}</b>"]
+    if not _format_order_date(
+        _status_value(order_rows[0], "Время создания заявки", "Дата создания", "created_at")
+    ):
+        title_block.append("Дата создания не указана")
+    blocks: list[list[str]] = [title_block]
     for row in order_rows:
         supplier = _status_value(
             row,
@@ -548,7 +579,9 @@ def _aggregated_detail_blocks(
             "Основной поставщик (Условное наз-ие)",
             "supplier",
         )
-        stage = _status_value(row, "Стадия", "Статус", "status", default="Ожидает обработки")
+        stage = format_status(
+            _status_value(row, "Стадия", "Статус", "status", default="Ожидает обработки")
+        )
         delivery = _format_delivery_date(
             _status_value(
                 row, "Дата поставки", "Дата доставки", "Ожидаемая дата доставки", "delivery_date"
@@ -587,6 +620,7 @@ def _legacy_detail_blocks(
     display_index: int = 1,
 ) -> list[list[str]]:
     """Делит старую историю с одной позицией в строке на блоки."""
+    del order_no
     details = [
         (
             _status_value(
@@ -596,7 +630,9 @@ def _legacy_detail_blocks(
                 "product_name",
                 default="Товар",
             ),
-            _status_value(row, "Стадия", "Статус", "status", default="Ожидает обработки"),
+            format_status(
+                _status_value(row, "Стадия", "Статус", "status", default="Ожидает обработки")
+            ),
             _format_delivery_date(
                 _status_value(
                     row,
@@ -616,7 +652,16 @@ def _legacy_detail_blocks(
         chunk = details[offset : offset + _STATUS_DETAIL_PRODUCTS_PER_BLOCK]
         section: list[str] = []
         if offset == 0:
-            section.append(f"{display_index}. {heading(f'Заявка {order_no}')}")
+            section.append(f"<b>{escape(_order_title(order_rows, display_index))}</b>")
+            if not _format_order_date(
+                _status_value(
+                    order_rows[0],
+                    "Время создания заявки",
+                    "Дата создания",
+                    "created_at",
+                )
+            ):
+                section.append("Дата создания не указана")
             if len(stages) == 1:
                 section.append(f"Статус: <b>{escape(stages[0])}</b>")
             if len(deliveries) == 1:
@@ -705,7 +750,10 @@ def build_order_status_text(
     if not tracked:
         return f"{heading('Мои заявки')}\n\nУ вас пока нет заявок, отправленных через этого бота."
     if not shown:
-        return f"{heading('Мои заявки')}\n\nСтатус заявки {escape(tracked[0])} пока не появился в таблице. Попробуйте обновить позже."
+        return (
+            f"{heading('Мои заявки')}\n\n"
+            "Статус заявки пока не появился в таблице. Попробуйте обновить позже."
+        )
 
     pages = _build_order_status_detail_pages(rows, state, display_index=display_index)
     if len(pages) > 1:
@@ -713,9 +761,9 @@ def build_order_status_text(
         return f"{pages[page]}\n\nСтраница {page + 1} из {len(pages)}"
 
     lines = [heading("Мои заявки"), ""]
-    for index, (order_no, order_rows) in enumerate(shown):
+    for index, (_order_no, order_rows) in enumerate(shown):
         number = display_index if len(shown) == 1 else index + 1
-        lines.append(f"{number}. <b>Заявка {escape(order_no)}</b>")
+        lines.append(f"<b>{escape(_order_title(order_rows, number))}</b>")
         if any(_is_aggregated_status_row(row) for row in order_rows):
             _append_aggregated_order_status(lines, order_rows)
         else:

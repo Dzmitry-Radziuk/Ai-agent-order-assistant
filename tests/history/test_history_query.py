@@ -8,6 +8,7 @@ from unittest.mock import Mock
 from restaurant_bot.application.history.query_service import HistoryQueryService
 from restaurant_bot.domain.history import (
     HistoryAnswerKind,
+    HistoryDeliveryDateRelation,
     HistoryQuestionType,
     HistoryRow,
     HistoryStatusClass,
@@ -239,6 +240,141 @@ def test_product_list_keeps_same_row_evidence() -> None:
     assert [entry.product_name for entry in entries] == ["Хлеб Бородинский", "Сыр"]
     assert all(entry.supplier == "Поставщик" for entry in entries)
     assert all(entry.row.order_number == "A-1" for entry in entries)
+
+
+def test_product_list_strips_live_quantity_and_price_tail_only_when_structured() -> None:
+    """Отделяет подтверждённый live-хвост количества и цены от названия товара."""
+    row = _row(
+        "\n".join(
+            [
+                "Вино белое Д/Я КУХНИ - 5 шт - 1037 руб.",
+                "Коньяк Кухня - 2 шт - 702 руб.",
+                "Говядина Кости, суставы нарезанные (Сахарные) - 10 кг - 700 руб.",
+                "Соус - острый",
+            ]
+        )
+    )
+
+    entries = parse_history_product_list(row)
+
+    assert [entry.product_name for entry in entries] == [
+        "Вино белое Д/Я КУХНИ",
+        "Коньяк Кухня",
+        "Говядина Кости, суставы нарезанные (Сахарные)",
+        "Соус - острый",
+    ]
+
+
+def test_history_status_format_and_source_are_separate() -> None:
+    """Скрывает технический префикс статуса, сохраняя исходную строку истории."""
+    row = _row(
+        "Вино белое Д/Я КУХНИ",
+        stage="Вручную | Заявка подтверждена поставщиком.",
+        delivery_date=date(2026, 7, 30),
+    )
+    query = parse_history_query("Когда приедет вино?")
+    assert query is not None
+    answer = HistoryQueryService(_Reader([row]), today=date(2026, 8, 14)).execute(
+        query,
+        spreadsheet_id="sheet",
+        venue_name="Кафе",
+    )
+
+    assert answer.matches[0].entry.stage == "Вручную | Заявка подтверждена поставщиком."
+    assert answer.matches[0].delivery_date_relation is HistoryDeliveryDateRelation.PAST
+    rendered = history_reply(answer).text
+    assert "Статус: <b>Заявка подтверждена поставщиком</b>." in rendered
+    assert "Вручную |" not in rendered
+
+
+def test_stale_delivery_date_is_not_presented_as_delivery() -> None:
+    """Показывает прошедшую плановую дату без вывода о фактической доставке."""
+    row = _row(
+        "Вино белое Д/Я КУХНИ",
+        stage="Вручную | Заявка подтверждена поставщиком.",
+        delivery_date=date(2026, 7, 30),
+    )
+    query = parse_history_query("Когда приедет вино?")
+    assert query is not None
+    rendered = history_reply(
+        HistoryQueryService(_Reader([row]), today=date(2026, 8, 14)).execute(
+            query,
+            spreadsheet_id="sheet",
+            venue_name="Кафе",
+        )
+    ).text
+
+    assert "В истории указана дата поставки: <b>30 июля 2026</b> — она уже прошла." in rendered
+    assert "Новая дата поставки не указана." in rendered
+    assert "доставлено" not in rendered.lower()
+    assert "уже приехало" not in rendered.lower()
+
+
+def test_today_delivery_question_explains_stale_date() -> None:
+    """Не обещает поставку сегодня, если в истории осталась старая дата."""
+    row = _row(
+        "Вино белое Д/Я КУХНИ",
+        stage="Вручную | Заявка подтверждена поставщиком.",
+        delivery_date=date(2026, 7, 30),
+    )
+    query = parse_history_query("Сегодня приедет вино?")
+    assert query is not None
+    rendered = history_reply(
+        HistoryQueryService(_Reader([row]), today=date(2026, 8, 14)).execute(
+            query,
+            spreadsheet_id="sheet",
+            venue_name="Кафе",
+        )
+    ).text
+
+    assert "На эту дату поставка в истории не указана." in rendered
+    assert "Последняя указанная дата: <b>30 июля 2026</b> — она уже прошла." in rendered
+    assert "сегодня приедет" not in rendered.lower()
+
+
+def test_arrival_question_does_not_infer_delivery_from_stale_date() -> None:
+    """Не считает товар доставленным только по прошедшей плановой дате."""
+    row = _row(
+        "Вино белое Д/Я КУХНИ",
+        stage="Вручную | Заявка подтверждена поставщиком.",
+        delivery_date=date(2026, 7, 30),
+    )
+    query = parse_history_query("Вино уже приехало?")
+    assert query is not None
+    rendered = history_reply(
+        HistoryQueryService(_Reader([row]), today=date(2026, 8, 14)).execute(
+            query,
+            spreadsheet_id="sheet",
+            venue_name="Кафе",
+        )
+    ).text
+
+    assert "Статус: <b>Заявка подтверждена поставщиком</b>." in rendered
+    assert "доставлено" not in rendered.lower()
+    assert "приехало" not in rendered.lower()
+
+
+def test_history_answer_starts_with_product_without_generic_heading() -> None:
+    """Начинает обычный ответ с товара и не показывает технический заголовок."""
+    row = _row(
+        "Говядина Кости, суставы нарезанные (Сахарные)",
+        stage="Вручную | Заявка подтверждена поставщиком.",
+        supplier="Раджабов",
+        delivery_date=None,
+    )
+    query = parse_history_query("Что там по говядине?")
+    assert query is not None
+    rendered = history_reply(
+        HistoryQueryService(_Reader([row]), today=date(2026, 8, 14)).execute(
+            query,
+            spreadsheet_id="sheet",
+            venue_name="Кафе",
+        )
+    ).text
+
+    assert rendered.startswith("<b>Говядина Кости, суставы нарезанные (Сахарные)</b>")
+    assert "Проверка истории" not in rendered
+    assert "Поставщик: <b>Раджабов</b>" in rendered
 
 
 def test_google_history_repository_reads_only_history_and_isolates_venue() -> None:

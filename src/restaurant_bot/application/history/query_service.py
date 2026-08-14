@@ -9,7 +9,12 @@ from zoneinfo import ZoneInfo
 import structlog
 
 from restaurant_bot.application.history.contracts import HistoryReader
-from restaurant_bot.domain.history import HistoryAnswer, HistoryQuery
+from restaurant_bot.domain.history import (
+    HistoryAnswer,
+    HistoryDeliveryDateRelation,
+    HistoryMatch,
+    HistoryQuery,
+)
 from restaurant_bot.history.answers import build_history_answer
 from restaurant_bot.history.matching import match_product_query
 from restaurant_bot.history.product_list import parse_history_product_list
@@ -17,6 +22,30 @@ from restaurant_bot.history.status_policy import is_relevant_status
 from restaurant_bot.parsing.history.dates import resolve_date_reference
 
 logger = structlog.get_logger(__name__)
+
+
+def _date_relation(value: date | None, today: date) -> HistoryDeliveryDateRelation:
+    """Определяет положение даты поставки относительно бизнес-даты."""
+    if value is None:
+        return HistoryDeliveryDateRelation.MISSING
+    if value < today:
+        return HistoryDeliveryDateRelation.PAST
+    if value == today:
+        return HistoryDeliveryDateRelation.TODAY
+    return HistoryDeliveryDateRelation.FUTURE
+
+
+def _annotate_date_relations(
+    matches: list[HistoryMatch],
+    today: date,
+) -> list[HistoryMatch]:
+    """Добавляет к совпадениям нейтральные сведения о свежести даты."""
+    return [
+        match.model_copy(
+            update={"delivery_date_relation": _date_relation(match.entry.delivery_date, today)}
+        )
+        for match in matches
+    ]
 
 
 class HistoryQueryService:
@@ -45,9 +74,10 @@ class HistoryQueryService:
         started = perf_counter()
         rows = self.reader.read_history(spreadsheet_id, venue_name)
         entries = [entry for row in rows for entry in parse_history_product_list(row)]
+        business_today = self.today or datetime.now(ZoneInfo(self.timezone_name)).date()
         target_date = resolve_date_reference(
             query.date_reference,
-            today=self.today or datetime.now(ZoneInfo(self.timezone_name)).date(),
+            today=business_today,
             explicit_date=query.explicit_date,
         )
         relevant_entries = [
@@ -74,6 +104,7 @@ class HistoryQueryService:
                 ]
                 candidates = dated or candidates
             matches.extend(candidates)
+        matches = _annotate_date_relations(matches, business_today)
         answer = build_history_answer(
             query,
             matches,

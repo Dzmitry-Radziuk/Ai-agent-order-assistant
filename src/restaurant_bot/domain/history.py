@@ -47,6 +47,15 @@ class HistoryStatusClass(StrEnum):
     UNKNOWN = "unknown"
 
 
+class HistoryDeliveryDateRelation(StrEnum):
+    """Описывает отношение даты поставки к бизнес-дате ответа."""
+
+    MISSING = "missing"
+    TODAY = "today"
+    FUTURE = "future"
+    PAST = "past"
+
+
 class HistoryQuery(BaseModel):
     """Описывает структурированный вопрос пользователя о поставке."""
 
@@ -95,6 +104,7 @@ class HistoryMatch(BaseModel):
     query: str = ""
     score: float = Field(ge=0)
     matched_tokens: list[str] = Field(default_factory=list)
+    delivery_date_relation: HistoryDeliveryDateRelation = HistoryDeliveryDateRelation.MISSING
 
 
 class HistoryAnswerKind(StrEnum):

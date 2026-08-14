@@ -17,11 +17,11 @@ production refactor не начинать.
 
 - Ветка: `decompose_bot`.
 - Remote: только GitHub `origin` → `Dzmitry-Radziuk/test_bot`.
-- Полный suite после HISTORY-02: `1444 passed` (без падений; запуск с
+- Полный suite после LIVE-HISTORY-03A: `1453 passed` (без падений; запуск с
   локальным `--basetemp`, один предупреждающий `PytestCacheWarning` не связан с
   приложением).
-- Mypy: `155 source files, no issues`.
-- Ruff check: pass; Ruff format: `306 files already formatted`.
+- Mypy: `156 source files, no issues`.
+- Ruff check: pass; Ruff format: `308 files already formatted`.
 - Compileall и `git diff --check`: pass.
 - После refresh Markdown checker проверил 38 файлов.
 - Scenario catalog вырос до 41 содержательного сценария; все mappings
@@ -71,6 +71,12 @@ production refactor не начинать.
   часового пояса.
 - Запросы истории обслуживаются `HistoryQueryService` и отдельным Telegram
   presenter; существующая команда «Мои заявки» и её путь не заменены.
+- LIVE-HISTORY-03A: в обычном интерфейсе «Мои заявки» технический номер заявки
+  скрыт в списке, кнопке и заголовке деталей; вместо него показывается дата
+  создания. История и статусы заявок используют общий человекочитаемый formatter,
+  прямой ответ по истории начинается с товара, а прошедшая плановая дата явно
+  помечается как прошедшая без вывода о фактической доставке. Внутренний поиск по
+  номеру заявки, callback-протокол и исходные доказательства не изменены.
 
 Финальные post-doc проверки зелёные. Documentation impact checker после commit
 также прошёл; код истории сопровождается обновлённым каталогом сценариев.

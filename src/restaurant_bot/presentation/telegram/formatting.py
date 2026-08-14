@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import html
+import re
 from typing import Any
 
 from restaurant_bot.domain.text import clean_text
+
+_STATUS_TECHNICAL_PREFIX_RE = re.compile(r"^\s*Вручную\s*\|\s*", re.IGNORECASE)
 
 
 def escape(value: Any) -> str:
@@ -21,6 +24,15 @@ def product_name(value: Any) -> str:
 def heading(value: Any) -> str:
     """Форматирует заголовок карточки жирным подчёркнутым HTML."""
     return f"<b><u>{escape(value)}</u></b>"
+
+
+def format_status(value: Any) -> str:
+    """Убирает только известный технический префикс статуса для Telegram."""
+    status = clean_text(value).strip()
+    if not status:
+        return "Статус не указан"
+    status = _STATUS_TECHNICAL_PREFIX_RE.sub("", status).strip()
+    return status.rstrip(".").strip() or "Статус не указан"
 
 
 def format_number(value: float | None) -> str:

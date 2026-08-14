@@ -7,11 +7,17 @@ from datetime import date
 from restaurant_bot.domain.history import (
     HistoryAnswer,
     HistoryAnswerKind,
+    HistoryDeliveryDateRelation,
     HistoryMatch,
     HistoryQuestionType,
 )
 from restaurant_bot.domain.models import BotReply
-from restaurant_bot.presentation.telegram.formatting import escape, heading, product_name
+from restaurant_bot.presentation.telegram.formatting import (
+    escape,
+    format_status,
+    heading,
+    product_name,
+)
 
 _MONTHS = (
     "января",
@@ -43,6 +49,14 @@ def _match_lines(answer: HistoryAnswer, match: HistoryMatch) -> list[str]:
     if answer.query.question_type is HistoryQuestionType.DELIVERY_ON_DATE:
         if answer.target_date and entry.delivery_date == answer.target_date:
             lines.append("В истории указана поставка на эту дату.")
+        elif (
+            entry.delivery_date and match.delivery_date_relation is HistoryDeliveryDateRelation.PAST
+        ):
+            lines.append("На эту дату поставка в истории не указана.")
+            lines.append(
+                f"Последняя указанная дата: <b>{escape(_date_text(entry.delivery_date))}</b> — "
+                "она уже прошла."
+            )
         elif entry.delivery_date:
             lines.append(
                 f"На эту дату поставка не указана. Дата поставки: <b>{escape(_date_text(entry.delivery_date))}</b>."
@@ -50,12 +64,22 @@ def _match_lines(answer: HistoryAnswer, match: HistoryMatch) -> list[str]:
         else:
             lines.append("Дата поставки пока не указана.")
     elif entry.delivery_date:
-        lines.append(f"Дата поставки: <b>{escape(_date_text(entry.delivery_date))}</b>.")
+        date_text = escape(_date_text(entry.delivery_date))
+        if (
+            answer.query.question_type is HistoryQuestionType.DELIVERY_DATE
+            and match.delivery_date_relation is HistoryDeliveryDateRelation.PAST
+        ):
+            lines.append(f"В истории указана дата поставки: <b>{date_text}</b> — она уже прошла.")
+            lines.append("Новая дата поставки не указана.")
+        elif match.delivery_date_relation is HistoryDeliveryDateRelation.PAST:
+            lines.append(f"Дата поставки: <b>{date_text}</b> — она уже прошла.")
+        else:
+            lines.append(f"Дата поставки: <b>{date_text}</b>.")
     else:
         lines.append("Дата поставки пока не указана.")
-    lines.append(f"Статус: <b>{escape(entry.stage or 'не указан')}</b>.")
+    lines.append(f"Статус: <b>{escape(format_status(entry.stage))}</b>.")
     if entry.supplier:
-        lines.append(f"Поставщик: {escape(entry.supplier)}")
+        lines.append(f"Поставщик: <b>{escape(entry.supplier)}</b>")
     return lines
 
 
@@ -63,18 +87,18 @@ def history_reply(answer: HistoryAnswer) -> BotReply:
     """Переводит нейтральный history answer в Telegram HTML."""
     query_text = " и ".join(answer.query.product_queries)
     if answer.kind is HistoryAnswerKind.AMBIGUOUS:
-        lines = [heading("Нашёл несколько актуальных товаров"), ""]
+        ambiguous_lines = [heading("Нашёл несколько актуальных товаров"), ""]
         for match in answer.alternatives or answer.matches:
-            lines.append(f"• {product_name(match.entry.product_name)}")
-        lines.extend(["", "Уточните, какой именно товар проверить."])
-        return BotReply(text="\n".join(lines))
+            ambiguous_lines.append(f"• {product_name(match.entry.product_name)}")
+        ambiguous_lines.extend(["", "Уточните, какой именно товар проверить."])
+        return BotReply(text="\n".join(ambiguous_lines))
     if answer.kind is HistoryAnswerKind.NOT_FOUND:
         return BotReply(text=f"В истории этого заведения не нашёл товар «{escape(query_text)}».")
     if answer.kind is HistoryAnswerKind.NO_ACTIVE:
         return BotReply(text=f"{product_name(query_text)}\n\nАктивных поставок сейчас не найдено.")
     if answer.kind is HistoryAnswerKind.EMPTY:
         return BotReply(text="В истории этого заведения пока нет строк с товарами.")
-    lines = [heading("Проверка истории"), ""]
+    lines: list[str] = []
     for index, match in enumerate(answer.matches, start=1):
         if index > 1:
             lines.append("")

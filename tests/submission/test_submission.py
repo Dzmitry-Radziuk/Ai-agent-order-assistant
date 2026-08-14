@@ -19,8 +19,12 @@ from restaurant_bot.integrations.google_sheets import (
     OrderSubmissionResult,
     PreparedOrderSubmission,
 )
+from restaurant_bot.presentation.telegram.formatting import format_status
 from restaurant_bot.presentation.telegram.replies import cart_reply
-from restaurant_bot.presentation.telegram.submission import order_status_detail_page_count
+from restaurant_bot.presentation.telegram.submission import (
+    build_order_status_list_reply,
+    order_status_detail_page_count,
+)
 from restaurant_bot.services import submission as submission_module
 from restaurant_bot.services.submission import (
     SubmissionService,
@@ -133,7 +137,8 @@ def test_order_status_renderer_groups_rows_by_order_number() -> None:
         type("State", (), {"last_order_no": "", "submitted_order_numbers": ["A-1"]})(),
     )
 
-    assert "A-1" in text
+    assert "A-1" not in text
+    assert "<b>1. Заявка</b>" in text
     assert "Сироп Роза" in text
     assert "Говядина" in text
 
@@ -160,6 +165,26 @@ def test_order_status_renderer_uses_aggregated_history_fields() -> None:
     assert "Кухня:\n1. <b>Говядина</b> — 3 кг" in text
     assert "Дата поставки: <b>24 июля 2026</b>" in text
     assert "Контакт поставщика: Иван Петров, +375 29 000-00-00" in text
+
+
+def test_order_status_renderer_reuses_history_product_line_parser() -> None:
+    """Показывает live-хвост цены отдельно и сохраняет дефис в названии товара."""
+    text = build_order_status_text(
+        [
+            {
+                "Номер заявки": "A-1",
+                "Условное название поставщика": "Раджабов",
+                "Список товаров": (
+                    "Кухня:\n1. Вино белое Д/Я КУХНИ - 5 шт - 1037 руб.\n2. Соус - острый"
+                ),
+                "Стадия": "Заявка подтверждена",
+            }
+        ],
+        type("State", (), {"last_order_no": "A-1", "submitted_order_numbers": []})(),
+    )
+
+    assert "1. <b>Вино белое Д/Я КУХНИ</b> - 5 шт - 1037 руб." in text
+    assert "2. <b>Соус - острый</b>" in text
 
 
 def test_order_status_renderer_shows_each_supplier_separately() -> None:
@@ -286,9 +311,9 @@ def test_order_status_limits_to_ten_tracked_orders_and_formats_delivery_date() -
         type("State", (), {"last_order_no": "", "submitted_order_numbers": numbers})(),
     )
 
-    assert "A-0" in text
-    assert "A-9" in text
-    assert "A-10" not in text
+    assert "<b>1. Заявка A-0</b>" not in text
+    assert "<b>10. Заявка A-9</b>" not in text
+    assert "<b>11. Заявка A-10</b>" not in text
     assert "24 июля 2026" in text
 
 
@@ -1613,9 +1638,11 @@ def test_statuses_show_five_recent_orders_of_current_venue(
     )
     service.sheets.read_order_statuses.assert_not_called()
     reply = service.telegram.send_reply.call_args.args[1]
-    assert "ORDER-1" in reply.text
-    assert "ORDER-5" in reply.text
+    assert "ORDER-1" not in reply.text
+    assert "ORDER-5" not in reply.text
     assert "ORDER-6" not in reply.text
+    assert "<b>1. Заявка от 29.07.2026</b>" in reply.text
+    assert reply.rows[0][0].text == "1. Заявка от 29.07.2026"
     assert "Покажи вторую" in reply.text
     assert reply.rows[-1][0].text == "Старее →"
 
@@ -1648,10 +1675,40 @@ def test_statuses_open_selected_order_from_shown_list(
         "Тестовое кафе",
     )
     reply = service.telegram.send_reply.call_args.args[1]
-    assert "ORDER-2" in reply.text
-    assert "2. <b>Заявка ORDER-2</b>" in reply.text
+    assert "ORDER-2" not in reply.text
+    assert "<b>2. Заявка от 29.07.2026</b>" in reply.text
     assert "Раджабов" in reply.text
     assert reply.rows[-1][0].text == "← К списку заявок"
+
+
+def test_order_status_list_uses_human_date_and_shared_status_formatter() -> None:
+    """Показывает дату и очищенный статус, сохраняя callback выбранной заявки."""
+    reply = build_order_status_list_reply(
+        [
+            {
+                "Номер заявки": "01UKMJ35-000001",
+                "Время создания заявки": "31.07.2026 10:15:00",
+                "Условное название поставщика": "Раджабов",
+                "Стадия": "Вручную | Заявка подтверждена поставщиком.",
+                "Список товаров": "Вино белое Д/Я КУХНИ - 5 шт - 1037 руб.",
+            }
+        ],
+        page=0,
+        has_more=False,
+    )
+
+    assert "📋 <b><u>Мои заявки</u></b>" in reply.text
+    assert "<b>1. Заявка от 31.07.2026</b>" in reply.text
+    assert "Поставщиков: <b>1</b>" in reply.text
+    assert "Статус: <b>Заявка подтверждена поставщиком</b>" in reply.text
+    assert "01UKMJ35-000001" not in reply.text
+    assert reply.rows[0][0].text == "1. Заявка от 31.07.2026"
+    assert reply.rows[0][0].callback_data == "v2:order:1"
+    assert format_status("Вручную | Заявка подтверждена поставщиком.") == (
+        "Заявка подтверждена поставщиком"
+    )
+    assert format_status("Заявка подтверждена поставщиком") == ("Заявка подтверждена поставщиком")
+    assert format_status("Новая внутренняя стадия") == "Новая внутренняя стадия"
 
 
 def test_statuses_read_older_page_without_using_local_draft_number(
