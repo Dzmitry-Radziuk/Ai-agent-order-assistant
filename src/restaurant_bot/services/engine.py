@@ -101,7 +101,7 @@ from restaurant_bot.parsing.commands.item_commands import (
 from restaurant_bot.parsing.commands.normalization import (
     has_negated_action,
 )
-from restaurant_bot.presentation.telegram.formatting import escape
+from restaurant_bot.presentation.telegram.formatting import escape, heading
 from restaurant_bot.presentation.telegram.pagination import CART_PAGE_SIZE
 from restaurant_bot.presentation.telegram.product_add import product_add_prompt
 from restaurant_bot.presentation.telegram.progression import render_progression
@@ -739,7 +739,7 @@ class ConversationEngine:
                 state=state,
                 reply=BotReply(
                     text=(
-                        "✏️ <b>Измените название</b>\n\n"
+                        f"✏️ {heading('Измените название')}\n\n"
                         f"Текущий запрос: {current.source_query}\n\n"
                         "Отправьте новое название товара."
                     ),

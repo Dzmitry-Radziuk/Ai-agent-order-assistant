@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from restaurant_bot.domain.models import BotReply, Button
-from restaurant_bot.presentation.telegram.formatting import escape
+from restaurant_bot.presentation.telegram.formatting import escape, heading
 from restaurant_bot.venues.contracts import Venue
 
 
@@ -68,7 +68,7 @@ def access_disabled_reply() -> BotReply:
     """Сообщает пользователю об отключённом доступе."""
     return BotReply(
         text=(
-            "⛔ <b>Доступ к заведению отключён</b>\n\n"
+            f"⛔ {heading('Доступ к заведению отключён')}\n\n"
             "Обратитесь к ответственному сотруднику вашего заведения."
         )
     )

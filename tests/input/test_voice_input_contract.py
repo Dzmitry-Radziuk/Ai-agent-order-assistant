@@ -86,7 +86,7 @@ def test_empty_voice_add_items_uses_the_source_recovery_card(settings) -> None: 
     )
 
     assert result.reply.text == (
-        "⚠️ <b>К сожалению, мне не удалось распознать голосовое сообщение</b>\n\n"
+        "⚠️ <b><u>К сожалению, мне не удалось распознать голосовое сообщение</u></b>\n\n"
         "Повторите короче или отправьте текстом.\n\n"
         "Пример: <code>сироп роза 3 штуки</code>"
     )

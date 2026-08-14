@@ -54,6 +54,7 @@ from restaurant_bot.domain.models import (
 from restaurant_bot.domain.text import clean_text, normalize_text
 from restaurant_bot.input.media_recognition import InputRecognitionService
 from restaurant_bot.input.telegram import normalize_telegram_update, to_conversation_input
+from restaurant_bot.input.telegram_callbacks import parse_callback
 from restaurant_bot.input.telegram_interpretation import TelegramInputInterpreter
 from restaurant_bot.integrations.cache import (
     CatalogCache,
@@ -72,6 +73,7 @@ from restaurant_bot.presentation.telegram.conversation import (
     render_conversation_view,
     telegram_action_mapper,
 )
+from restaurant_bot.presentation.telegram.formatting import heading
 from restaurant_bot.presentation.telegram.order_review import preview_reply
 from restaurant_bot.presentation.telegram.venue_registration import not_bound_reply
 from restaurant_bot.repositories.order_events import OrderEventRepository
@@ -196,6 +198,8 @@ class UpdateOrchestrator:
         self._answer_callback_best_effort(event.callback_query_id, log)
         if event.callback_query_id:
             timings["callback_ack_ms"] = round((perf_counter() - callback_started) * 1000)
+        if event.input_type == InputKind.CALLBACK and event.callback_message_id:
+            self._disable_keyboard_best_effort(log, event.chat_id, event.callback_message_id)
 
         with (
             bound_contextvars(
@@ -230,14 +234,26 @@ class UpdateOrchestrator:
                     else None
                 )
 
+                if result is None and event.input_type == InputKind.CALLBACK:
+                    processing_reply = self._callback_processing_reply(event)
+                    processing_reply.edit_message_id = event.callback_message_id
+                    processing_message_id = self._send_processing_best_effort(
+                        log,
+                        event.chat_id,
+                        processing_reply,
+                    )
+
                 registration = self.registration.handle(event)
                 if registration.handled:
+                    registration_kwargs = _lease_kwargs(lease)
+                    if processing_message_id is not None:
+                        registration_kwargs["processing_message_id"] = processing_message_id
                     self._complete_registration(
                         update_id,
                         event,
                         claim,
                         registration,
-                        **_lease_kwargs(lease),
+                        **registration_kwargs,
                     )
                     _ensure_lease(lease)
                     self._finish(
@@ -278,6 +294,7 @@ class UpdateOrchestrator:
                         update_id,
                         event,
                         claim,
+                        processing_message_id=processing_message_id,
                         **_lease_kwargs(lease),
                     )
                     _ensure_lease(lease)
@@ -347,7 +364,7 @@ class UpdateOrchestrator:
                         processing_message_id = self._send_processing_best_effort(
                             log,
                             event.chat_id,
-                            self._text_processing_reply(),
+                            self._text_processing_reply_for_event(event),
                         )
                         self._disable_keyboard_best_effort(log, event.chat_id, state.ui_message_id)
                         timings["processing_card_ms"] = round(
@@ -377,16 +394,6 @@ class UpdateOrchestrator:
                         sheet_review_decision is not None
                         and sheet_review_decision.action is CompatibilityAction.AMBIGUOUS
                     )
-                    if command.intent == Intent.SEARCH_ALL_SUPPLIERS:
-                        if event.callback_message_id:
-                            self.telegram.delete_message(
-                                event.chat_id,
-                                event.callback_message_id,
-                            )
-                        processing_message_id = self.telegram.send_reply(
-                            event.chat_id,
-                            self._all_suppliers_processing_reply(),
-                        )
                     stage_started = perf_counter()
                     review_command = (
                         command.intent in _REVIEW_INTENTS and not sheet_review_ambiguous
@@ -673,7 +680,7 @@ class UpdateOrchestrator:
                     state=state,
                     reply=BotReply(
                         text=(
-                            "⛔ <b>Ссылка относится к другому заведению</b>\n\n"
+                            f"⛔ {heading('Ссылка относится к другому заведению')}\n\n"
                             "Откройте ссылку из таблицы своего заведения."
                         )
                     ),
@@ -765,7 +772,7 @@ class UpdateOrchestrator:
                     state=state,
                     reply=BotReply(
                         text=(
-                            "ℹ️ <b>Отправка пока отключена</b>\n\n"
+                            f"ℹ️ {heading('Отправка пока отключена')}\n\n"
                             "Заявка проверена, но поставщикам ничего не отправлено. "
                             "Данные таблицы не изменены."
                         ),
@@ -1224,6 +1231,7 @@ class UpdateOrchestrator:
         claim: ClaimedUpdate,
         registration: RegistrationResult,
         *,
+        processing_message_id: int | None = None,
         lease: ChatLease | None = None,
     ) -> None:
         """Сохраняет результат обработанной регистрации и отвечает."""
@@ -1235,7 +1243,9 @@ class UpdateOrchestrator:
         reply = registration.reply or not_bound_reply()
         if not isinstance(reply, BotReply):
             raise TypeError("Регистрация вернула неподдерживаемый ответ канала")
-        if event.input_type == InputKind.CALLBACK and event.callback_message_id:
+        if processing_message_id:
+            reply.edit_message_id = processing_message_id
+        elif event.input_type == InputKind.CALLBACK and event.callback_message_id:
             reply.edit_message_id = event.callback_message_id
         state.ui_revision += 1
         self._attach_ui_revision(reply, state.ui_revision)
@@ -1277,6 +1287,7 @@ class UpdateOrchestrator:
         event: Any,
         claim: ClaimedUpdate,
         *,
+        processing_message_id: int | None = None,
         lease: ChatLease | None = None,
     ) -> None:
         """Сохраняет отказ в доступе и отвечает пользователю."""
@@ -1288,6 +1299,7 @@ class UpdateOrchestrator:
                 handled=True,
                 reply=self.registration.denied_reply(event),
             ),
+            processing_message_id=processing_message_id,
             lease=lease,
         )
 
@@ -1411,6 +1423,81 @@ class UpdateOrchestrator:
         """Сообщает о поиске товара по полному каталогу поставщиков."""
         return BotReply(text="🔎 <b>Ищу товар у всех поставщиков…</b>")
 
+    @staticmethod
+    def _generic_processing_reply() -> BotReply:
+        """Формирует нейтральный статус обработки сообщения."""
+        return BotReply(text="⏳ Обрабатываю сообщение…")
+
+    @classmethod
+    def _processing_reply_for_intent(cls, intent: Intent) -> BotReply:
+        """Подбирает короткий статус для известного действия пользователя."""
+        if intent in {Intent.ADD_ITEMS, Intent.ADD_MORE}:
+            return cls._text_processing_reply()
+        if intent == Intent.SEARCH_ALL_SUPPLIERS:
+            return cls._all_suppliers_processing_reply()
+        if intent == Intent.SELECT_CANDIDATE:
+            return BotReply(text="⏳ Обрабатываю выбор…")
+        if intent == Intent.ORDER_STATUS:
+            return BotReply(text="⏳ Обновляю статусы заявок…")
+        if intent in {
+            Intent.SUBMIT_REQUEST,
+            Intent.SUBMIT_AS_IS,
+            Intent.SHOW_FINAL_REVIEW,
+            Intent.REVIEW_ORDER,
+            Intent.REVIEW_REFRESH,
+            Intent.REVIEW_SUBMIT,
+            Intent.REVIEW_CANCEL,
+            Intent.CHECK_MIN_SUM,
+        }:
+            return BotReply(text="⏳ Проверяю заявку…")
+        if intent in {
+            Intent.SHOW_CART,
+            Intent.BACK,
+            Intent.CONTINUE_CURRENT,
+            Intent.HELP,
+        }:
+            return BotReply(text="⏳ Открываю черновик…")
+        if intent in {
+            Intent.REMOVE_ITEM,
+            Intent.EDIT_QUANTITY,
+            Intent.EDIT_COMMENT,
+            Intent.CLEAR_CART,
+            Intent.START_NEW_ORDER,
+            Intent.SKIP_CURRENT,
+            Intent.MANUAL_CURRENT,
+            Intent.CONFIRM,
+            Intent.CANCEL,
+            Intent.ADD_SUPPLIER_ITEMS,
+            Intent.CHOOSE_SUPPLIER_WARNING,
+            Intent.ACCEPT_SUGGESTED_QUANTITY,
+            Intent.KEEP_CURRENT_QUANTITY,
+            Intent.ENTER_OTHER_QUANTITY,
+            Intent.USE_CATALOG_UNIT,
+            Intent.KEEP_MULTIPLE,
+            Intent.FIX_MULTIPLE,
+            Intent.EDIT_MULTIPLE,
+            Intent.UNIT_EDIT,
+            Intent.UNIT_OK,
+            Intent.MERGE_DUPLICATE,
+            Intent.PRODUCT_ADD,
+            Intent.PRODUCT_ADD_RETRY,
+            Intent.PRODUCT_ADD_SKIP,
+            Intent.PRODUCT_ADD_LIST,
+            Intent.SWITCH_SUPPLIER,
+        }:
+            return BotReply(text="⏳ Обновляю черновик…")
+        return cls._generic_processing_reply()
+
+    @classmethod
+    def _callback_processing_reply(cls, event: TelegramEvent) -> BotReply:
+        """Формирует статус обработки нажатой Telegram-кнопки."""
+        return cls._processing_reply_for_intent(parse_callback(event.callback_data).intent)
+
+    @classmethod
+    def _text_processing_reply_for_event(cls, event: TelegramEvent) -> BotReply:
+        """Формирует статус обработки текста до медленного разбора."""
+        return cls._processing_reply_for_intent(infer_intent(event.text).intent)
+
     def _update_processing(
         self,
         chat_id: str,
@@ -1427,18 +1514,9 @@ class UpdateOrchestrator:
 
     @staticmethod
     def _should_show_text_processing(event: TelegramEvent, state: ConversationState) -> bool:
-        """Проверяет, является ли текст вводом названий товаров."""
-        if event.input_type != InputKind.TEXT or not event.text.strip():
-            return False
-        if state.stage in {
-            SessionStage.AWAIT_UNIT_QUANTITY,
-            SessionStage.AWAIT_MULTIPLE_QUANTITY,
-            SessionStage.AWAIT_PRODUCT_ADD_DETAILS,
-            SessionStage.AWAIT_SUBMIT_CONFIRM,
-            SessionStage.SUBMITTING,
-        }:
-            return False
-        return infer_intent(event.text).intent == Intent.ADD_ITEMS
+        """Проверяет наличие текста, требующего немедленного подтверждения."""
+        del state
+        return event.input_type == InputKind.TEXT and bool(event.text.strip())
 
     @staticmethod
     def _needs_catalog(command: ParsedCommand) -> bool:
@@ -1921,7 +1999,7 @@ class UpdateOrchestrator:
         if event.input_type == InputKind.PHOTO:
             return BotReply(
                 text=(
-                    "⚠️ <b>Не удалось распознать фото</b>\n\n"
+                    f"⚠️ {heading('Не удалось распознать фото')}\n\n"
                     "Если список большой, отправьте его двумя или тремя фотографиями покрупнее. "
                     "Уже добавленные товары останутся в черновике."
                 ),

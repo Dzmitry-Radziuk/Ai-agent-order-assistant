@@ -57,8 +57,8 @@ def test_text_product_input_shows_catalog_search_card() -> None:
     assert UpdateOrchestrator._text_processing_reply().text == "🔎 Ищу товары в каталоге…"
 
 
-def test_text_processing_card_does_not_replace_quantity_or_navigation() -> None:
-    """Не показывает поиск для количества и навигационных команд."""
+def test_text_processing_card_covers_quantity_and_navigation_commands() -> None:
+    """Показывает короткий статус для количества и навигационных команд."""
     quantity_event = TelegramEvent(
         update_id=1,
         chat_id="77",
@@ -68,8 +68,16 @@ def test_text_processing_card_does_not_replace_quantity_or_navigation() -> None:
     quantity_state = ConversationState(stage=SessionStage.AWAIT_MULTIPLE_QUANTITY)
     cart_event = quantity_event.model_copy(update={"text": "покажи черновик"})
 
-    assert not UpdateOrchestrator._should_show_text_processing(quantity_event, quantity_state)
-    assert not UpdateOrchestrator._should_show_text_processing(cart_event, ConversationState())
+    assert UpdateOrchestrator._should_show_text_processing(quantity_event, quantity_state)
+    assert UpdateOrchestrator._should_show_text_processing(cart_event, ConversationState())
+    assert (
+        UpdateOrchestrator._text_processing_reply_for_event(quantity_event).text
+        == "⏳ Обрабатываю сообщение…"
+    )
+    assert (
+        UpdateOrchestrator._text_processing_reply_for_event(cart_event).text
+        == "⏳ Открываю черновик…"
+    )
 
 
 def test_voice_transcript_rejects_unrelated_script() -> None:

@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+import re
 from datetime import datetime
 from typing import Any
 
 from restaurant_bot.domain.models import BotReply, Button
-from restaurant_bot.presentation.telegram.formatting import escape
+from restaurant_bot.presentation.telegram.formatting import escape, heading, product_name
 
 # Канонический Telegram presenter.
 
@@ -62,7 +63,7 @@ def submission_failure_reply(state: Any, order_no: str) -> BotReply:
     """Формирует безопасную карточку незавершённой отправки."""
     return BotReply(
         text=(
-            "⚠️ <b>Отправка не завершена</b>\n\n"
+            f"⚠️ {heading('Отправка не завершена')}\n\n"
             f"Заявка: {escape(order_no)}\n\n"
             "Нажмите «Повторить отправку». Уже выполненные этапы будут пропущены."
         ),
@@ -83,7 +84,7 @@ def submission_dispatch_uncertain_reply(state: Any, order_no: str) -> BotReply:
     del state
     return BotReply(
         text=(
-            "⚠️ <b>Нужно проверить отправку</b>\n\n"
+            f"⚠️ {heading('Нужно проверить отправку')}\n\n"
             "Бот передал заявку, но не получил подтверждение от системы закупок.\n\n"
             "<b>Не отправляйте её повторно:</b> поставщики могли уже получить заказ.\n"
             "Сообщите менеджеру по снабжению этот код:\n"
@@ -97,7 +98,7 @@ def submission_catalog_uncertain_reply(state: Any, order_no: str) -> BotReply:
     del order_no
     return BotReply(
         text=(
-            "⚠️ <b>Отправка не завершена</b>\n\n"
+            f"⚠️ {heading('Отправка не завершена')}\n\n"
             "Заявка сохранена, но бот не смог безопасно подтвердить изменение данных.\n\n"
             "Чтобы случайно не изменить заявку повторно, отправка временно остановлена. "
             "Попробуйте позже или обратитесь к ответственному сотруднику."
@@ -113,7 +114,7 @@ def submission_recalculation_uncertain_reply(state: Any, order_no: str) -> BotRe
     del order_no
     return BotReply(
         text=(
-            "⚠️ <b>Заявка сохранена, но отправка остановлена</b>\n\n"
+            f"⚠️ {heading('Заявка сохранена, но отправка остановлена')}\n\n"
             "Бот не смог безопасно подтвердить обновление расчётов.\n\n"
             "Чтобы не повторить действие дважды, заявка не отправлена автоматически. "
             "Обратитесь к ответственному сотруднику для проверки."
@@ -129,7 +130,7 @@ def submission_catalog_conflict_reply(state: Any, order_no: str) -> BotReply:
     del order_no
     return BotReply(
         text=(
-            "⚠️ <b>Отправка не завершена</b>\n\n"
+            f"⚠️ {heading('Отправка не завершена')}\n\n"
             "Данные заявки изменились после начала отправки.\n\n"
             "Заявка сохранена. Бот не будет перезаписывать изменения автоматически. "
             "Обратитесь к ответственному сотруднику для проверки."
@@ -144,7 +145,7 @@ def submission_recovery_unavailable_reply() -> BotReply:
     """Сообщает о сбое, для которого в состоянии нет безопасного снимка."""
     return BotReply(
         text=(
-            "⚠️ <b>Отправку нельзя безопасно повторить</b>\n\n"
+            f"⚠️ {heading('Отправку нельзя безопасно повторить')}\n\n"
             "Снимок заявки не найден. Сохраните этот экран и обратитесь к менеджеру по снабжению."
         )
     )
@@ -222,6 +223,30 @@ def _escape_multiline(value: Any) -> str:
     return "\n".join(escape(line) for line in str(value or "").splitlines() if line.strip())
 
 
+_PRODUCT_LIST_LINE = re.compile(
+    r"^(?P<prefix>\s*(?:(?:•|\d+[.)])\s*)?)(?P<name>.+?)(?P<tail>\s+—\s+.*|\s+-\s+.*)$"
+)
+
+
+def _escape_product_list(value: Any) -> str:
+    """Экранирует список товаров и выделяет только названия позиций."""
+    rendered: list[str] = []
+    for line in str(value or "").splitlines():
+        if not line.strip():
+            continue
+        match = _PRODUCT_LIST_LINE.match(line)
+        if match:
+            tail = match.group("tail")
+            separator = " " if tail[:1].isspace() else ""
+            rendered.append(
+                f"{match.group('prefix')}{product_name(match.group('name'))}"
+                f"{separator}{escape(tail.lstrip())}"
+            )
+        else:
+            rendered.append(escape(line))
+    return "\n".join(rendered)
+
+
 def _is_aggregated_status_row(row: dict[str, Any]) -> bool:
     """Определяет строку нового сводного листа «История»."""
     return bool(
@@ -282,12 +307,12 @@ def build_order_status_list_reply(
     if not groups:
         return BotReply(
             text=(
-                "📋 <b>Мои заявки</b>\n\n"
+                f"📋 {heading('Мои заявки')}\n\n"
                 "У этого заведения пока нет отправленных заявок в листе «История»."
             )
         )
 
-    lines = ["📋 <b>Мои заявки</b>", "", f"Страница {page + 1}:"]
+    lines = [f"📋 {heading('Мои заявки')}", "", f"Страница {page + 1}:"]
     buttons: list[list[Button]] = []
     for index, (order_number, order_rows) in enumerate(groups, start=1):
         created_at = _status_value(
@@ -437,7 +462,7 @@ def _append_aggregated_order_status(lines: list[str], order_rows: list[dict[str,
         if delivery:
             lines.append(f"Дата поставки: <b>{escape(delivery)}</b>")
         if product_list:
-            lines.extend(["Товары:", _escape_multiline(product_list)])
+            lines.extend(["Товары:", _escape_product_list(product_list)])
         if manager or phone:
             contact = ", ".join(escape(value) for value in (manager, phone) if value)
             lines.append(f"Контакт поставщика: {contact}")
@@ -477,7 +502,7 @@ def _append_legacy_order_status(lines: list[str], order_rows: list[dict[str, Any
         lines.append(f"Дата поставки: <b>{escape(deliveries[0])}</b>")
     lines.append("Товары:")
     for item in details:
-        product_line = f"• <b>{escape(item['product'])}</b>"
+        product_line = f"• {product_name(item['product'])}"
         if len(stages) > 1:
             product_line += f" — {escape(item['stage'])}"
         if len(deliveries) > 1 and item["delivery"]:
@@ -515,7 +540,7 @@ def _aggregated_detail_blocks(
     display_index: int = 1,
 ) -> list[list[str]]:
     """Делит строки поставщика и длинные списки на безопасные блоки Telegram."""
-    blocks: list[list[str]] = [[f"{display_index}. <b>Заявка {escape(order_no)}</b>"]]
+    blocks: list[list[str]] = [[f"{display_index}. {heading(f'Заявка {order_no}')}"]]
     for row in order_rows:
         supplier = _status_value(
             row,
@@ -532,7 +557,7 @@ def _aggregated_detail_blocks(
         product_list = _status_value(row, "Список товаров", "Товары", "product_list")
         manager = _status_value(row, "ФИО менеджера Поставщика", "Менеджер", "manager")
         phone = _status_value(row, "Телефон", "Телефон поставщика", "phone")
-        product_lines = _escape_multiline(product_list).splitlines() or ["—"]
+        product_lines = _escape_product_list(product_list).splitlines() or ["—"]
         for chunk_index in range(0, len(product_lines), _STATUS_DETAIL_PRODUCTS_PER_BLOCK):
             chunk = product_lines[chunk_index : chunk_index + _STATUS_DETAIL_PRODUCTS_PER_BLOCK]
             section: list[str] = []
@@ -591,7 +616,7 @@ def _legacy_detail_blocks(
         chunk = details[offset : offset + _STATUS_DETAIL_PRODUCTS_PER_BLOCK]
         section: list[str] = []
         if offset == 0:
-            section.append(f"{display_index}. <b>Заявка {escape(order_no)}</b>")
+            section.append(f"{display_index}. {heading(f'Заявка {order_no}')}")
             if len(stages) == 1:
                 section.append(f"Статус: <b>{escape(stages[0])}</b>")
             if len(deliveries) == 1:
@@ -600,7 +625,7 @@ def _legacy_detail_blocks(
         else:
             section.append("Товары (продолжение):")
         for product, stage, delivery in chunk:
-            product_line = f"• <b>{escape(product)}</b>"
+            product_line = f"• {product_name(product)}"
             if len(stages) > 1:
                 product_line += f" — {escape(stage)}"
             if len(deliveries) > 1 and delivery:
@@ -644,7 +669,7 @@ def _build_order_status_detail_pages(
     for offset in range(0, len(blocks), _STATUS_DETAIL_BLOCKS_PER_PAGE):
         page_blocks = blocks[offset : offset + _STATUS_DETAIL_BLOCKS_PER_PAGE]
         pages.append(
-            "<b>Мои заявки</b>\n\n" + "\n\n".join("\n".join(block) for block in page_blocks)
+            f"{heading('Мои заявки')}\n\n" + "\n\n".join("\n".join(block) for block in page_blocks)
         )
     return pages
 
@@ -678,16 +703,16 @@ def build_order_status_text(
     """Формирует карточку статусов заявок."""
     tracked, shown = _tracked_status_groups(rows, state)
     if not tracked:
-        return "<b>Мои заявки</b>\n\nУ вас пока нет заявок, отправленных через этого бота."
+        return f"{heading('Мои заявки')}\n\nУ вас пока нет заявок, отправленных через этого бота."
     if not shown:
-        return f"<b>Мои заявки</b>\n\nСтатус заявки {escape(tracked[0])} пока не появился в таблице. Попробуйте обновить позже."
+        return f"{heading('Мои заявки')}\n\nСтатус заявки {escape(tracked[0])} пока не появился в таблице. Попробуйте обновить позже."
 
     pages = _build_order_status_detail_pages(rows, state, display_index=display_index)
     if len(pages) > 1:
         page = min(max(0, detail_page), len(pages) - 1)
         return f"{pages[page]}\n\nСтраница {page + 1} из {len(pages)}"
 
-    lines = ["<b>Мои заявки</b>", ""]
+    lines = [heading("Мои заявки"), ""]
     for index, (order_no, order_rows) in enumerate(shown):
         number = display_index if len(shown) == 1 else index + 1
         lines.append(f"{number}. <b>Заявка {escape(order_no)}</b>")

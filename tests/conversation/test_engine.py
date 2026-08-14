@@ -375,7 +375,7 @@ def test_empty_draft_uses_the_source_n8n_start_card(settings) -> None:  # type: 
 
     assert (
         result.reply.text
-        == "🧾 <b>Черновик пуст</b>\n\nОтправьте товары текстом, голосом или фото."
+        == "🧾 <b><u>Черновик пуст</u></b>\n\nОтправьте товары текстом, голосом или фото."
     )
     assert [[button.text, button.callback_data] for row in result.reply.rows for button in row] == [
         ["Начать", "v2:add"]
@@ -393,7 +393,7 @@ def test_manual_action_without_an_open_item_uses_source_recovery_card(settings) 
 
     assert (
         result.reply.text
-        == "ℹ️ <b>Нет товара для изменения</b>\n\nОткройте черновик или добавьте новый товар."
+        == "ℹ️ <b><u>Нет товара для изменения</u></b>\n\nОткройте черновик или добавьте новый товар."
     )
     assert [[button.text, button.callback_data] for row in result.reply.rows for button in row] == [
         ["Показать черновик", "v2:back"],

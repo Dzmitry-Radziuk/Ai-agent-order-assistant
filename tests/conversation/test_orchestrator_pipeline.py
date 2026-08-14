@@ -598,7 +598,7 @@ def test_photo_timeout_replaces_progress_with_specific_recovery(mocker, tmp_path
 def test_search_all_suppliers_deletes_old_card_and_edits_progress_with_result(
     mocker,
 ) -> None:  # type: ignore[no-untyped-def]
-    """Удаляет старую карточку перед полным поиском и выводит новый результат."""
+    """Отключает старую карточку перед полным поиском и выводит новый результат."""
     service = _authorized_orchestrator(mocker)
     service._claim = MagicMock(return_value=_search_all_claim())  # type: ignore[method-assign]
     command = ParsedCommand(intent=Intent.SEARCH_ALL_SUPPLIERS, callback_target="0")
@@ -611,7 +611,13 @@ def test_search_all_suppliers_deletes_old_card_and_edits_progress_with_result(
 
     service.process(4)
 
-    service.telegram.delete_message.assert_called_once_with("7", 44)
+    service.telegram.disable_keyboard.assert_called_once_with("7", 44)
+    telegram_methods = [
+        entry[0]
+        for entry in service.telegram.mock_calls
+        if entry[0] in {"answer_callback", "disable_keyboard", "send_reply"}
+    ]
+    assert telegram_methods[:3] == ["answer_callback", "disable_keyboard", "send_reply"]
     replies = [call.args[1] for call in service.telegram.send_reply.call_args_list]
     assert replies[0].text == "🔎 <b>Ищу товар у всех поставщиков…</b>"
     assert replies[1].text == "Выберите товар"

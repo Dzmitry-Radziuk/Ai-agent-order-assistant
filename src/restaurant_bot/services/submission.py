@@ -34,7 +34,7 @@ from restaurant_bot.integrations.google_sheets import (
 from restaurant_bot.integrations.telegram import TelegramAPIError, TelegramClient
 from restaurant_bot.persistence.database import SessionLocal
 from restaurant_bot.persistence.models import SubmissionRecord
-from restaurant_bot.presentation.telegram.formatting import escape
+from restaurant_bot.presentation.telegram.formatting import escape, heading
 from restaurant_bot.presentation.telegram.pagination import CART_PAGE_SIZE
 from restaurant_bot.presentation.telegram.replies import cart_reply
 from restaurant_bot.presentation.telegram.submission import (
@@ -720,7 +720,7 @@ class SubmissionService:
                 state,
                 BotReply(
                     text=(
-                        "⚠️ <b>Заявка не найдена</b>\n\n"
+                        f"⚠️ {heading('Заявка не найдена')}\n\n"
                         f"Заявки {escape(target)} нет в «Истории» этого заведения."
                     ),
                     rows=[
@@ -910,7 +910,7 @@ class SubmissionService:
                 return
             elif status == "write_failed":
                 reply = BotReply(
-                    text="<b>Запрос не отправлен</b>\n\nОн сохранён в черновике. Можно безопасно повторить отправку с тем же ID запроса.",
+                    text=f"{heading('Запрос не отправлен')}\n\nОн сохранён в черновике. Можно безопасно повторить отправку с тем же ID запроса.",
                     rows=[
                         [
                             Button(
@@ -924,7 +924,7 @@ class SubmissionService:
                 )
             else:
                 reply = BotReply(
-                    text="<b>Не удалось подтвердить отправку</b>\n\nЗапрос сохранён в черновике, но бот не уверен, что он попал в таблицу. Сообщите менеджеру по снабжению. Повторно отправлять запрос не нужно."
+                    text=f"{heading('Не удалось подтвердить отправку')}\n\nЗапрос сохранён в черновике, но бот не уверен, что он попал в таблицу. Сообщите менеджеру по снабжению. Повторно отправлять запрос не нужно."
                 )
             if lease is not None:
                 lease.ensure_owned()

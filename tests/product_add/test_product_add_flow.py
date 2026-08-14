@@ -25,7 +25,7 @@ def test_product_add_prompt_contains_query_and_user_guidance() -> None:
 
     assert "Опишите товар одним сообщением" in text
     assert "название, бренд, фасовку" in text
-    assert "Товар: Креветки королевские" in text
+    assert "Товар: <b>Креветки королевские</b>" in text
 
 
 def test_clear_product_add_pending_preserves_cart_and_completed_requests() -> None:

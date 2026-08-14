@@ -99,7 +99,7 @@ def test_submission_failure_card_matches_n8n() -> None:
     reply = submission_failure_reply(type("State", (), {"ui_revision": 4})(), "20260722-001")
 
     assert reply.text == (
-        "⚠️ <b>Отправка не завершена</b>\n\n"
+        "⚠️ <b><u>Отправка не завершена</u></b>\n\n"
         "Заявка: 20260722-001\n\n"
         "Нажмите «Повторить отправку». Уже выполненные этапы будут пропущены."
     )
@@ -157,7 +157,7 @@ def test_order_status_renderer_uses_aggregated_history_fields() -> None:
 
     assert "Поставщик: <b>Раджабов</b>" in text
     assert "Статус: <b>Заявка подтверждена</b>" in text
-    assert "Кухня:\n1. Говядина — 3 кг" in text
+    assert "Кухня:\n1. <b>Говядина</b> — 3 кг" in text
     assert "Дата поставки: <b>24 июля 2026</b>" in text
     assert "Контакт поставщика: Иван Петров, +375 29 000-00-00" in text
 
@@ -1713,5 +1713,5 @@ def test_statuses_explain_when_real_history_is_empty(
     )
     reply = service.telegram.send_reply.call_args.args[1]
     assert reply.text == (
-        "📋 <b>Мои заявки</b>\n\nУ этого заведения пока нет отправленных заявок в листе «История»."
+        "📋 <b><u>Мои заявки</u></b>\n\nУ этого заведения пока нет отправленных заявок в листе «История»."
     )

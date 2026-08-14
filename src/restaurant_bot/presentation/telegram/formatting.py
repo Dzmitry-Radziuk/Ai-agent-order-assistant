@@ -13,6 +13,16 @@ def escape(value: Any) -> str:
     return html.escape(clean_text(value), quote=False)
 
 
+def product_name(value: Any) -> str:
+    """Форматирует название товара жирным безопасным HTML."""
+    return f"<b>{escape(value)}</b>"
+
+
+def heading(value: Any) -> str:
+    """Форматирует заголовок карточки жирным подчёркнутым HTML."""
+    return f"<b><u>{escape(value)}</u></b>"
+
+
 def format_number(value: float | None) -> str:
     """Форматирует число для сообщения пользователю."""
     if value is None:

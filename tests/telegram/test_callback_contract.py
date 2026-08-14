@@ -71,3 +71,51 @@ def test_stale_callback_cannot_mutate_current_draft(settings) -> None:  # type: 
     assert result.state.stage.value == "collecting"
     assert len(result.state.cart) == 1
     assert "Сироп Роза" in result.reply.text
+
+
+def test_replayed_callback_with_new_update_id_cannot_repeat_mutation(settings) -> None:  # type: ignore[no-untyped-def]
+    """Защищает черновик от повторного callback после смены ревизии."""
+    engine = ConversationEngine(settings)
+    state = ConversationState(
+        ui_revision=3,
+        cart=[
+            CartItem(
+                id="old",
+                source_query="Сироп Роза",
+                catalog_name="Сироп Роза",
+                quantity=5,
+                unit="шт",
+                status=ItemStatus.MATCHED,
+            )
+        ],
+    )
+    callback = parse_callback("v2:remove:old:r3")
+
+    first = engine.handle(
+        TelegramEvent(update_id=10, chat_id="123456", input_type=InputKind.CALLBACK),
+        callback,
+        state,
+        [],
+    )
+    first.state.ui_revision = 4
+    first.state.cart.append(
+        CartItem(
+            id="new",
+            source_query="Сироп Роза",
+            catalog_name="Сироп Роза",
+            quantity=2,
+            unit="шт",
+            status=ItemStatus.MATCHED,
+        )
+    )
+
+    replay = engine.handle(
+        TelegramEvent(update_id=11, chat_id="123456", input_type=InputKind.CALLBACK),
+        callback,
+        first.state,
+        [],
+    )
+
+    assert [item.id for item in replay.state.cart if item.status is not ItemStatus.SKIPPED] == [
+        "new"
+    ]

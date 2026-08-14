@@ -361,4 +361,4 @@ def test_contextual_duplicate_quantity_merges_with_existing_row(
     assert result.state.cart[1].status is ItemStatus.SKIPPED
     assert result.state.current_issue_item_id == ""
     assert sum(item.status is ItemStatus.MATCHED for item in result.state.cart) == 1
-    assert "Сыр Швейцарский Сыробогатов 180гр — 5 шт" in result.reply.text
+    assert "<b>Сыр Швейцарский Сыробогатов 180гр</b> — 5 шт" in result.reply.text

@@ -1,12 +1,19 @@
 """Проверяет поведение, связанное с модулем «test ui replies»."""
 
 from restaurant_bot.domain.models import Candidate, CartItem, ConversationState, ItemStatus
+from restaurant_bot.presentation.telegram.formatting import heading, product_name
 from restaurant_bot.presentation.telegram.replies import (
     cart_reply,
     final_review_reply,
     help_reply,
     issue_reply,
 )
+
+
+def test_product_names_and_headings_escape_before_formatting() -> None:
+    """Экранирует пользовательский текст до добавления HTML-выделения."""
+    assert product_name("Сыр <премиум> & соус") == "<b>Сыр &lt;премиум&gt; &amp; соус</b>"
+    assert heading("Проверка <заявки>") == "<b><u>Проверка &lt;заявки&gt;</u></b>"
 
 
 def test_help_explains_how_to_include_product_and_order_comments() -> None:
@@ -27,7 +34,7 @@ def test_not_found_card_has_only_source_recovery_actions() -> None:
     reply = issue_reply(item, 0)
 
     assert reply.text == (
-        "⚠️ <b>Товар не найден</b>\n\n"
+        "⚠️ <b><u>Товар не найден</u></b>\n\n"
         "По вашему запросу «<b>Креветки королевские</b>» ничего не найдено.\n\n"
         "Вы можете изменить название, отправить запрос менеджеру по снабжению "
         "или не добавлять товар."
@@ -57,8 +64,8 @@ def test_ambiguous_card_shows_only_catalog_choices_and_safe_recovery() -> None:
     assert reply.text == (
         "По запросу «<b>сироп роза</b>» найдено несколько вариантов.\n\n"
         "Уточните, какой товар вы имели в виду:\n\n"
-        "1. Сироп Роза, 1л\n\n"
-        "2. Сироп Фейхоа, 1л\n\n"
+        "1. <b>Сироп Роза, 1л</b>\n\n"
+        "2. <b>Сироп Фейхоа, 1л</b>\n\n"
         "Не нашли нужный вариант? Отправьте запрос менеджеру по снабжению."
     )
     assert labels == [
@@ -88,10 +95,10 @@ def test_single_ambiguous_candidate_is_presented_only_as_a_similar_product() -> 
     reply = issue_reply(item, 0)
 
     assert reply.text == (
-        "🔎 <b>Точного совпадения не найдено</b>\n\n"
+        "🔎 <b><u>Точного совпадения не найдено</u></b>\n\n"
         "По запросу «<b>кукуруза спелая</b>» найден похожий товар.\n\n"
         "Возможно, вы имели в виду:\n\n"
-        "1. Крупа кукурузная Алина 700г 1/7, шт\n\n"
+        "1. <b>Крупа кукурузная Алина 700г 1/7, шт</b>\n\n"
         "Не нашли нужный вариант? Отправьте запрос менеджеру по снабжению."
     )
 

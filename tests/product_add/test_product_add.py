@@ -316,7 +316,7 @@ def test_product_add_success_is_shown_before_a_fresh_draft() -> None:
     assert confirmation.edit_message_id == 55
     assert confirmation.text == ("<i>Запрос менеджеру отправлен</i>\n\nКреветки королевские")
     assert draft.edit_message_id is None
-    assert "<b>Черновик заявки</b>" in draft.text
+    assert "<b><u>Черновик заявки</u></b>" in draft.text
     assert "Запросы снабженцу: 1" in draft.text
     assert all(
         button.callback_data.endswith(":r5")

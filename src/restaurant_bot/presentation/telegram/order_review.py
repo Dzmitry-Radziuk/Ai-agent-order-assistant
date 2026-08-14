@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from restaurant_bot.application.order_review.contracts import ReviewItem, ReviewSnapshot
 from restaurant_bot.domain.models import BotReply, Button
-from restaurant_bot.presentation.telegram.formatting import escape
+from restaurant_bot.presentation.telegram.formatting import escape, heading, product_name
 from restaurant_bot.presentation.telegram.replies import format_item_comment
 
 
@@ -24,14 +24,14 @@ def preview_reply(
     if not snapshot.items:
         return BotReply(
             text=(
-                "🛒 <b>Текущая заявка пуста</b>\n\n"
+                f"🛒 {heading('Текущая заявка пуста')}\n\n"
                 "В таблице пока нет товаров с указанным количеством."
             ),
             rows=[[Button(text="↩️ Закрыть", callback_data=f"v2:review_cancel:{token}")]],
             edit_message_id=edit_message_id,
         )
     lines = [
-        "🛒 <b>Проверьте текущую заявку</b>",
+        f"🛒 {heading('Проверьте текущую заявку')}",
         f"Заведение: {escape(snapshot.venue_name)}",
         f"Товаров: {len(snapshot.items)}",
         f"Поставщиков: {snapshot.supplier_count}",
@@ -50,7 +50,7 @@ def preview_reply(
         supplier_header = f"<b>{escape(supplier)}</b>"
         for item_index, item in enumerate(items):
             item_lines = [
-                f"• {escape(item.name)} — {format_quantity(item.quantity)} {escape(item.unit)}"
+                f"• {product_name(item.name)} — {format_quantity(item.quantity)} {escape(item.unit)}"
             ]
             if item.comment:
                 item_lines.append(format_item_comment(item.comment))
@@ -85,7 +85,7 @@ def submission_disabled_reply(venue_code: str, edit_message_id: int | None = Non
     """Формирует ответ при отключённой внешней отправке заявки."""
     return BotReply(
         text=(
-            "ℹ️ <b>Отправка пока отключена</b>\n\n"
+            f"ℹ️ {heading('Отправка пока отключена')}\n\n"
             "Заявка проверена, но поставщикам ничего не отправлено. "
             "Данные таблицы не изменены."
         ),
@@ -105,7 +105,7 @@ def submission_failure_reply(token: str, edit_message_id: int | None = None) -> 
     """Формирует ответ о временной ошибке отправки заявки."""
     return BotReply(
         text=(
-            "⚠️ <b>Не удалось отправить заявку</b>\n\nТаблица не изменена. Попробуйте ещё раз позже."
+            f"⚠️ {heading('Не удалось отправить заявку')}\n\nТаблица не изменена. Попробуйте ещё раз позже."
         ),
         rows=[
             [
