@@ -5,10 +5,13 @@ from __future__ import annotations
 from unittest.mock import MagicMock
 
 from restaurant_bot.conversation.routing.state_compatibility import StateCompatibilityPolicy
+from restaurant_bot.domain.history import HistoryQuery, HistoryQuestionType
 from restaurant_bot.domain.models import (
+    CartItem,
     ConversationState,
     InputKind,
     Intent,
+    ParsedCommand,
     SessionStage,
     TelegramEvent,
 )
@@ -59,3 +62,114 @@ def test_history_voice_transcript_uses_same_semantic_route() -> None:
 
     assert voice_command.intent is Intent.HISTORY_QUERY
     assert voice_command.history_query == text_command.history_query
+
+
+def test_natural_history_phrases_are_classified_before_generic_ai() -> None:
+    """Ключевые разговорные вопросы не попадают в добавление товаров."""
+    provider = MagicMock()
+    provider.parse_text.return_value = ParsedCommand(intent=Intent.ADD_ITEMS)
+    interpreter = TelegramInputInterpreter(
+        provider, lambda: MagicMock(), StateCompatibilityPolicy()
+    )
+
+    phrases = (
+        "Говядина приедет?",
+        "Мороженое вообще приедет?",
+        "Говядина уже приехала?",
+        "Хлеб ожидается?",
+        "Подскажи по говядине",
+        "Что там по говядине?",
+        "Мне говядину ждать?",
+        "Говядина будет или нет?",
+        "Поставка по говядине в силе?",
+        "Говядина задерживается?",
+        "Когда уже эта говядина будет?",
+    )
+
+    commands = [interpreter.interpret_text(phrase, ConversationState()) for phrase in phrases]
+
+    assert all(command.intent is Intent.HISTORY_QUERY for command in commands)
+    assert all(command.history_query is not None for command in commands)
+    provider.parse_text.assert_not_called()
+
+
+def test_pronoun_history_question_requires_one_safe_context_product() -> None:
+    """Не выдумывает товар для местоимения без однозначного контекста."""
+    provider = MagicMock()
+    provider.parse_text.return_value = ParsedCommand(intent=Intent.ADD_ITEMS)
+    interpreter = TelegramInputInterpreter(
+        provider, lambda: MagicMock(), StateCompatibilityPolicy()
+    )
+    one_item = ConversationState(cart=[CartItem(id="1", source_query="говядина")])
+    two_items = ConversationState(
+        cart=[CartItem(id="1", source_query="говядина"), CartItem(id="2", source_query="хлеб")]
+    )
+
+    safe = interpreter.interpret_text("Она уже приехала?", one_item)
+    unsafe = interpreter.interpret_text("Она уже приехала?", two_items)
+    empty = interpreter.interpret_text("Она уже приехала?", ConversationState())
+
+    assert safe.intent is Intent.HISTORY_QUERY
+    assert safe.history_query is not None
+    assert safe.history_query.product_queries == ["говядина"]
+    assert unsafe.intent is Intent.UNKNOWN
+    assert empty.intent is Intent.UNKNOWN
+    assert provider.parse_text.call_count == 0
+
+
+def test_unrecognized_history_formulation_uses_structured_ai_fallback() -> None:
+    """Передаёт свободную формулировку в существующий структурированный AI-путь."""
+    provider = MagicMock()
+    provider.parse_text.return_value = ParsedCommand(
+        intent=Intent.HISTORY_QUERY,
+        history_query=HistoryQuery(
+            product_queries=["говядину"],
+            question_type=HistoryQuestionType.CURRENT_STATUS,
+            original_text="Есть ли информация насчёт говядины",
+        ),
+    )
+    interpreter = TelegramInputInterpreter(
+        provider, lambda: MagicMock(), StateCompatibilityPolicy()
+    )
+
+    command = interpreter.interpret_text(
+        "Есть ли информация насчёт говядины",
+        ConversationState(),
+    )
+
+    assert command.intent is Intent.HISTORY_QUERY
+    assert command.history_query is not None
+    provider.parse_text.assert_called_once_with("Есть ли информация насчёт говядины")
+
+
+def test_history_text_and_voice_transcript_share_boundary_route() -> None:
+    """Текст и расшифрованный голос проходят один и тот же интерпретатор."""
+    provider = MagicMock()
+    provider.parse_text.return_value = ParsedCommand(intent=Intent.ADD_ITEMS)
+
+    class _TranscriptRecognizer:
+        """Передаёт транскрипт в общий text-путь."""
+
+        def recognize_media(self, event, state, parse_text, processing_message_id=None):
+            """Запускает общий разбор расшифрованного текста."""
+            del processing_message_id
+            return parse_text(event.text, state)
+
+    interpreter = TelegramInputInterpreter(
+        provider, lambda: _TranscriptRecognizer(), StateCompatibilityPolicy()
+    )
+    state = ConversationState()
+    transcript = "Мороженое вообще приедет?"
+    text_command = interpreter.interpret_text(transcript, state)
+    voice_command = interpreter.interpret(
+        TelegramEvent(
+            update_id=1,
+            chat_id="chat",
+            input_type=InputKind.VOICE,
+            text=transcript,
+        ),
+        state,
+    )
+
+    assert voice_command == text_command
+    assert voice_command.intent is Intent.HISTORY_QUERY

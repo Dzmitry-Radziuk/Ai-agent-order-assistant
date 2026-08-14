@@ -297,11 +297,23 @@ class OpenAIService:
             comment_bindings=[binding.model_dump() for binding in parsed.comment_bindings],
             items=[self._item_log(item) for item in parsed.items],
         )
-        payload = recover_omitted_explicit_items(parsed.model_dump(), text)
+        payload = parsed.model_dump()
+        if parsed.history_query is not None:
+            payload["intent"] = Intent.HISTORY_QUERY
+            payload["items"] = []
+        payload = recover_omitted_explicit_items(payload, text)
         for item in payload.get("items", []):
             if item.get("user_comment_to_supplier") and not item.get("comment"):
                 item["comment"] = item["user_comment_to_supplier"]
         command = ParsedCommand.model_validate(payload)
+        if command.history_query is not None:
+            command = command.model_copy(
+                update={
+                    "intent": Intent.HISTORY_QUERY,
+                    "items": [],
+                    "explicit_add_items": False,
+                }
+            )
         command = command.model_copy(
             update={
                 "explicit_add_items": has_explicit_add_items(text, payload.get("items", []))

@@ -178,6 +178,7 @@ class UpdateOrchestrator:
             self.openai,
             self._recognizer,
             self.engine.state_compatibility_policy,
+            timezone_name=settings.app_timezone,
         )
         self.tracer = openai_service.tracer
         self.registration = VenueRegistrationService(settings, redis, sheets)

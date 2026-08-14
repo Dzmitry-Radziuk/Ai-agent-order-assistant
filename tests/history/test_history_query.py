@@ -74,6 +74,17 @@ def test_add_command_is_not_reclassified_as_history() -> None:
     assert parse_history_query("добавь говядину сегодня") is None
 
 
+def test_yearless_explicit_date_uses_injected_business_clock() -> None:
+    """Разбирает дату без года относительно переданной даты приложения."""
+    query = parse_history_query(
+        "Говядина на 18.08?",
+        today=date(2026, 8, 14),
+    )
+
+    assert query is not None
+    assert query.explicit_date == date(2026, 8, 18)
+
+
 def test_morphology_and_reordered_terms_match_same_product() -> None:
     """Поддерживает падежи и перестановку слов в названии товара."""
     row = _row(
@@ -131,6 +142,54 @@ def test_completed_rows_do_not_pollute_active_question() -> None:
 
     assert answer.kind is HistoryAnswerKind.RESULTS
     assert [match.entry.stage for match in answer.matches] == ["В пути"]
+
+
+def test_arrival_question_keeps_delivered_evidence() -> None:
+    """Показывает фактическую доставленную строку для вопроса «уже привезли»."""
+    query = parse_history_query("Говядину уже привезли?")
+    assert query is not None
+    answer = HistoryQueryService(
+        _Reader([_row("Говядина Толстый край", stage="Доставлено")])
+    ).execute(query, spreadsheet_id="sheet", venue_name="Кафе")
+
+    assert answer.kind is HistoryAnswerKind.RESULTS
+    assert answer.matches[0].entry.stage == "Доставлено"
+
+
+def test_upcoming_question_excludes_old_delivered_row() -> None:
+    """Оставляет только актуальную поставку в вопросе о будущей доставке."""
+    rows = [
+        _row("Говядина Толстый край", stage="Доставлено", delivery_date=date(2026, 7, 1)),
+        _row("Говядина Толстый край", stage="В пути", delivery_date=date(2026, 8, 15)),
+    ]
+    query = parse_history_query("Когда приедет говядина?")
+    assert query is not None
+    answer = HistoryQueryService(_Reader(rows)).execute(
+        query,
+        spreadsheet_id="sheet",
+        venue_name="Кафе",
+    )
+
+    assert answer.kind is HistoryAnswerKind.RESULTS
+    assert [match.entry.stage for match in answer.matches] == ["В пути"]
+
+
+def test_delivered_stage_has_separate_semantic_class() -> None:
+    """Отличает подтверждённую доставку от общей завершённой стадии."""
+    assert classify_status("Доставлено") is HistoryStatusClass.DELIVERED
+    assert classify_status("Завершена") is HistoryStatusClass.COMPLETED
+
+
+def test_current_status_keeps_cancelled_evidence() -> None:
+    """Сохраняет отменённую поставку для ответа о текущем статусе."""
+    query = parse_history_query("Поставка по говядине в силе?")
+    assert query is not None
+    answer = HistoryQueryService(
+        _Reader([_row("Говядина Толстый край", stage="Отменена")])
+    ).execute(query, spreadsheet_id="sheet", venue_name="Кафе")
+
+    assert answer.kind is HistoryAnswerKind.RESULTS
+    assert answer.matches[0].entry.stage == "Отменена"
 
 
 def test_only_completed_rows_return_no_active_delivery() -> None:

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 from datetime import date, datetime, timedelta
+from zoneinfo import ZoneInfo
 
 from restaurant_bot.domain.history import HistoryDateReference
 from restaurant_bot.domain.text import normalize_text
@@ -13,7 +14,17 @@ _EXPLICIT_DATE_RE = re.compile(
 )
 
 
-def date_reference_for(text: str) -> tuple[HistoryDateReference, date | None]:
+def business_today(timezone_name: str = "Europe/Minsk") -> date:
+    """Возвращает текущую дату по часовому поясу приложения."""
+    return datetime.now(ZoneInfo(timezone_name)).date()
+
+
+def date_reference_for(
+    text: str,
+    *,
+    today: date | None = None,
+    timezone_name: str = "Europe/Minsk",
+) -> tuple[HistoryDateReference, date | None]:
     """Извлекает ссылку на сегодня, завтра или явную дату."""
     normalized = normalize_text(text)
     if re.search(r"\bсегодня\b", normalized):
@@ -26,7 +37,8 @@ def date_reference_for(text: str) -> tuple[HistoryDateReference, date | None]:
     day = int(match.group("day"))
     month = int(match.group("month"))
     raw_year = match.group("year")
-    year = int(raw_year) if raw_year else date.today().year
+    current_date = today or business_today(timezone_name)
+    year = int(raw_year) if raw_year else current_date.year
     if raw_year and len(raw_year) == 2:
         year += 2000
     try:

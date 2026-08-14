@@ -7,6 +7,7 @@ import httpx
 import pytest
 from openai import APITimeoutError
 
+from restaurant_bot.domain.history import HistoryQuery, HistoryQuestionType
 from restaurant_bot.domain.models import ExtractedItem, Intent, ParsedCommand
 from restaurant_bot.integrations import openai_client
 from restaurant_bot.integrations.openai_client import (
@@ -396,6 +397,25 @@ def test_ai_invented_supplier_comment_is_not_preserved(settings) -> None:  # typ
     assert command.global_comment == "на завтра"
     assert command.items[0].comment == ""
     assert command.items[0].user_comment_to_supplier == ""
+
+
+def test_ai_history_payload_is_normalized_to_read_only_command(settings) -> None:  # type: ignore[no-untyped-def]
+    """Оставляет history_query отдельной командой только для чтения при лишних items."""
+    parsed = ParsedInputSchema(
+        intent=Intent.ADD_ITEMS,
+        history_query=HistoryQuery(
+            product_queries=["говядину"],
+            question_type=HistoryQuestionType.CURRENT_STATUS,
+        ),
+        items=[ExtractedItem(product_query="говядина", quantity=5, unit="кг")],
+    )
+    service = _service(settings, SimpleNamespace(responses=_Responses(parsed)))
+
+    command = service._parse_text_once("Есть ли информация насчёт говядины")
+
+    assert command.intent is Intent.HISTORY_QUERY
+    assert command.history_query is not None
+    assert command.items == []
 
 
 def test_parse_text_runtime_reconciles_ai_comment_with_source(settings) -> None:  # type: ignore[no-untyped-def]

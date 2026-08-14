@@ -17,7 +17,9 @@ def classify_status(raw_status: str) -> HistoryStatusClass:
         return HistoryStatusClass.UNKNOWN
     if any(token in value for token in ("отмен", "аннулиров", "отказ")):
         return HistoryStatusClass.CANCELLED
-    if any(token in value for token in ("заверш", "доставлен", "выполнен", "получен", "закрыт")):
+    if "доставлен" in value:
+        return HistoryStatusClass.DELIVERED
+    if any(token in value for token in ("заверш", "выполнен", "получен", "закрыт")):
         return HistoryStatusClass.COMPLETED
     if any(
         token in value
@@ -47,7 +49,11 @@ def is_relevant_status(
     status = classify_status(raw_status)
     if scope is HistoryTemporalScope.PAST or question_type is HistoryQuestionType.PAST_DELIVERY:
         return status in {HistoryStatusClass.COMPLETED, HistoryStatusClass.DELIVERED}
-    return status is not HistoryStatusClass.COMPLETED
+    if question_type is HistoryQuestionType.ARRIVAL_STATUS:
+        # Для вопроса «уже приехал?» важна последняя зафиксированная стадия,
+        # включая доставленную или завершённую поставку.
+        return True
+    return status not in {HistoryStatusClass.COMPLETED, HistoryStatusClass.DELIVERED}
 
 
 def status_label(raw_status: str) -> str:

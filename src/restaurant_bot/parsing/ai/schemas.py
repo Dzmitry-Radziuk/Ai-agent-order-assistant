@@ -6,6 +6,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
+from restaurant_bot.domain.history import HistoryQuery
 from restaurant_bot.domain.models import ExtractedItem, Intent
 
 
@@ -37,6 +38,7 @@ class ParsedInputSchema(BaseModel):
     comment_scope: Literal["item", "order"] = "item"
     comment_bindings: list[CommentBindingSchema] = Field(default_factory=list)
     document_type: str = ""
+    history_query: HistoryQuery | None = None
 
 
 class ProductMatchDecision(BaseModel):

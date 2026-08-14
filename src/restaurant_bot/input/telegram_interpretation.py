@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Callable
+from datetime import date
 from typing import Protocol
 
 import structlog
@@ -30,7 +31,7 @@ from restaurant_bot.input.telegram_callbacks import parse_callback
 from restaurant_bot.input.voice_policy import match_visible_action
 from restaurant_bot.integrations.openai_client import CommentScopeDecision
 from restaurant_bot.parsing.commands.api import enrich_command
-from restaurant_bot.parsing.history import parse_history_query
+from restaurant_bot.parsing.history import parse_history_query, requires_history_context
 
 logger = structlog.get_logger(__name__)
 _OPENAI_TRANSIENT_ERRORS = (APIConnectionError, APITimeoutError, RateLimitError)
@@ -80,11 +81,16 @@ class TelegramInputInterpreter:
         provider: InputProvider,
         recognizer_factory: Callable[[], MediaRecognizer],
         state_compatibility_policy: StateCompatibilityPolicy,
+        *,
+        timezone_name: str = "Europe/Minsk",
+        today: date | None = None,
     ) -> None:
         """Сохраняет provider, media factory и каноническую state policy."""
         self.provider = provider
         self._recognizer_factory = recognizer_factory
         self.state_compatibility_policy = state_compatibility_policy
+        self.timezone_name = timezone_name
+        self.today = today
 
     def interpret(
         self,
@@ -129,7 +135,12 @@ class TelegramInputInterpreter:
                 return enrich_command("", parse_callback(callback_data)).model_copy(
                     update={"text": text}
                 )
-        history_query = parse_history_query(text)
+        history_query = parse_history_query(
+            text,
+            context_product_queries=self._history_context_products(state),
+            today=self.today,
+            timezone_name=self.timezone_name,
+        )
         if history_query is not None:
             logger.info(
                 "history_query_parsed",
@@ -142,6 +153,8 @@ class TelegramInputInterpreter:
                 text=text,
                 history_query=history_query,
             )
+        if requires_history_context(text):
+            return ParsedCommand(intent=Intent.UNKNOWN, text=text)
         parsed = self.provider.parse_text(text)
         review_command = self._parse_sheet_review_command(text, parsed, state)
         if review_command is not None:
@@ -182,6 +195,17 @@ class TelegramInputInterpreter:
                 return ParsedCommand(intent=Intent.UNKNOWN, text=text)
             return parsed
         return enrich_command("", parse_callback(selected)).model_copy(update={"text": text})
+
+    @staticmethod
+    def _history_context_products(state: ConversationState) -> list[str]:
+        """Возвращает единственный товар, безопасно доступный по контексту черновика."""
+        names = [
+            (item.catalog_name or item.source_query).strip()
+            for item in state.cart
+            if (item.catalog_name or item.source_query).strip()
+        ]
+        normalized = {normalize_text(name): name for name in names}
+        return list(normalized.values()) if len(normalized) == 1 else []
 
     def _parse_sheet_review_command(
         self,

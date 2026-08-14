@@ -39,7 +39,23 @@ select_candidate, add_more, greeting, help, thanks, small_talk, back,
 continue_current, check_min_sum, add_supplier_items, submit_as_is,
 accept_suggested_quantity, keep_current_quantity, enter_other_quantity,
 use_catalog_unit, show_final_review, order_status, product_add_list,
-start_new_order, unknown.
+start_new_order, history_query, unknown.
+Для вопросов о ранее отправленных поставках используй intent=history_query и
+заполняй только вложенное поле history_query. В history_query передавай названия
+товаров из сообщения, тип вопроса, временную область и явно названную дату.
+Не создавай items для такого вопроса. Не получай и не используй строки листа
+«История», каталог, статус, дату, номер заявки или поставщика: эти сведения
+добавит отдельный сервис только для чтения после разбора. Если товар нельзя надёжно
+определить из сообщения, не выдумывай его и верни intent=unknown.
+
+Примеры history_query:
+
+«Говядина приедет?» → history_query с question_type=delivery_date.
+«Говядина уже приехала?» → history_query с question_type=arrival_status.
+«Что там по говядине?» → history_query с question_type=current_status.
+
+Чёткая команда добавить товар остаётся add_items, даже если рядом есть слова
+«приедет», «будет» или дата: «добавь говядину», «закажи говядину 5 кг».
 
 ОТДЕЛЬНЫЙ СЦЕНАРИЙ ИЗМЕНЕНИЯ КОММЕНТАРИЯ
 Если пользователь просит добавить или изменить пожелание у товара, который уже
