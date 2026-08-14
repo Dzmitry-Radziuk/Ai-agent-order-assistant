@@ -18,6 +18,7 @@ from restaurant_bot.application.background_tasks import BackgroundTaskDispatcher
 from restaurant_bot.application.conversation import ConversationApplication
 from restaurant_bot.application.conversation.contracts import ConversationInput
 from restaurant_bot.application.conversation.use_case import ConversationProcessor
+from restaurant_bot.application.history.query_service import HistoryQueryService
 from restaurant_bot.application.order_review.token import new_review_token
 from restaurant_bot.catalog.evidence import (
     canonical_search_query,
@@ -36,6 +37,12 @@ from restaurant_bot.config import Settings
 from restaurant_bot.conversation.routing.contracts import (
     CompatibilityAction,
     CompatibilityContext,
+)
+from restaurant_bot.domain.history import (
+    HistoryAnswer,
+    HistoryAnswerKind,
+    HistoryQuery,
+    HistoryQuestionType,
 )
 from restaurant_bot.domain.models import (
     BotReply,
@@ -74,8 +81,10 @@ from restaurant_bot.presentation.telegram.conversation import (
     telegram_action_mapper,
 )
 from restaurant_bot.presentation.telegram.formatting import heading
+from restaurant_bot.presentation.telegram.history import history_reply
 from restaurant_bot.presentation.telegram.order_review import preview_reply
 from restaurant_bot.presentation.telegram.venue_registration import not_bound_reply
+from restaurant_bot.repositories.history import GoogleHistoryRepository
 from restaurant_bot.repositories.order_events import OrderEventRepository
 from restaurant_bot.repositories.sessions import SessionRepository
 from restaurant_bot.repositories.updates import (
@@ -156,6 +165,10 @@ class UpdateOrchestrator:
         self.input_recognition = InputRecognitionService(telegram, openai_service)
         self.sheets = sheets
         self.catalog = CatalogCache(settings, redis, sheets)
+        self.history_queries = HistoryQueryService(
+            GoogleHistoryRepository(sheets),
+            timezone_name=settings.app_timezone,
+        )
         self.engine = ConversationEngine(settings)
         self.conversation_application = ConversationApplication(
             cast(ConversationProcessor, self.engine),
@@ -381,13 +394,16 @@ class UpdateOrchestrator:
                     log.info("command_parsed", **self._command_log(command))
                     if event.input_type is InputKind.PHOTO and command.intent in _REVIEW_INTENTS:
                         command = ParsedCommand(intent=Intent.UNKNOWN, text=event.text)
+                    history_command = (
+                        command.intent is Intent.HISTORY_QUERY and command.history_query
+                    )
                     sheet_review_decision = (
                         self.engine.state_compatibility_policy.evaluate(
                             command,
                             state,
                             CompatibilityContext.SHEET_REVIEW,
                         )
-                        if event.input_type is not InputKind.CALLBACK
+                        if event.input_type is not InputKind.CALLBACK and not history_command
                         else None
                     )
                     sheet_review_ambiguous = (
@@ -433,6 +449,8 @@ class UpdateOrchestrator:
                             reply=self._sheet_review_ambiguous_reply(state),
                         )
                         if sheet_review_ambiguous
+                        else self._process_history_query(command, state)
+                        if history_command
                         else (
                             self._handle_review_command(event, state, command)
                             if review_command
@@ -442,7 +460,7 @@ class UpdateOrchestrator:
                     _ensure_lease(lease)
 
                     # AI работает за пределами DB-транзакции. Он может выбрать только ID из shortlist.
-                    if not review_command:
+                    if not review_command and not history_command:
                         if not sheet_review_ambiguous:
                             result = self._resolve_ai_pending(event, result, catalog)
                         self._leave_sheet_review_on_regular_command(command, result.state)
@@ -868,6 +886,8 @@ class UpdateOrchestrator:
             return "onboarding"
         if intent == Intent.ORDER_STATUS:
             return "order_status"
+        if intent is Intent.HISTORY_QUERY:
+            return "history_query"
         if intent in {
             Intent.REVIEW_ORDER,
             Intent.REVIEW_REFRESH,
@@ -1115,6 +1135,12 @@ class UpdateOrchestrator:
         return {
             "intent": command.intent.value,
             "text": command.text,
+            "history_question_type": (
+                command.history_query.question_type.value if command.history_query else ""
+            ),
+            "history_product_queries": (
+                command.history_query.product_queries if command.history_query else []
+            ),
             "target_query": command.target_query,
             "target_queries": command.target_queries,
             "selected_index": command.selected_index,
@@ -1369,6 +1395,33 @@ class UpdateOrchestrator:
             invalidate_catalog=result.effects.invalidate_catalog,
         )
 
+    def _process_history_query(
+        self,
+        command: ParsedCommand,
+        state: ConversationState,
+    ) -> EngineResult:
+        """Выполняет read-only history query, сохраняя текущий черновик."""
+        if command.history_query is None:
+            return EngineResult(
+                state=state, reply=history_reply(self._empty_history_answer(command))
+            )
+        answer = self.history_queries.execute(
+            command.history_query,
+            spreadsheet_id=state.spreadsheet_id,
+            venue_name=state.venue_name,
+        )
+        return EngineResult(state=state, reply=history_reply(answer))
+
+    @staticmethod
+    def _empty_history_answer(command: ParsedCommand) -> HistoryAnswer:
+        """Создаёт безопасный пустой ответ для повреждённой команды."""
+        query = command.history_query or HistoryQuery(
+            product_queries=["товар"],
+            question_type=HistoryQuestionType.CURRENT_STATUS,
+            original_text=command.text,
+        )
+        return HistoryAnswer(kind=HistoryAnswerKind.EMPTY, query=query)
+
     @staticmethod
     def _voice_transcription_prompt(state: ConversationState) -> str:
         """Формирует контекст для распознавания голоса."""
@@ -1437,6 +1490,8 @@ class UpdateOrchestrator:
             return BotReply(text="⏳ Обрабатываю выбор…")
         if intent == Intent.ORDER_STATUS:
             return BotReply(text="⏳ Обновляю статусы заявок…")
+        if intent is Intent.HISTORY_QUERY:
+            return BotReply(text="⏳ Проверяю историю заявок…")
         if intent in {
             Intent.SUBMIT_REQUEST,
             Intent.SUBMIT_AS_IS,

@@ -9,6 +9,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
+from restaurant_bot.domain.history import HistoryQuery
+
 
 class InputKind(StrEnum):
     """Перечисляет поддерживаемые типы входных сообщений Telegram."""
@@ -58,6 +60,7 @@ class Intent(StrEnum):
     REVIEW_SUBMIT = "review_submit"
     REVIEW_CANCEL = "review_cancel"
     ORDER_STATUS = "order_status"
+    HISTORY_QUERY = "history_query"
     PRODUCT_ADD = "product_add"
     PRODUCT_ADD_RETRY = "product_add_retry"
     PRODUCT_ADD_SKIP = "product_add_skip"
@@ -310,6 +313,7 @@ class ParsedCommand(BaseModel):
     callback_revision: int | None = None
     callback_target: str = ""
     order_status_detail_page: int = 0
+    history_query: HistoryQuery | None = None
 
 
 class CatalogProduct(BaseModel):

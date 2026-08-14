@@ -328,6 +328,7 @@
         "DRF-04",
         "SUB-01",
         "SUB-03",
+        "HIS-01",
         "SAF-04",
         "SAF-05"
       ],
@@ -1189,6 +1190,38 @@
       ],
       "automation_status": "AUTOMATED_PARTIAL",
       "manual_live_requirement": "Нужен live-прогон deep link из тестовой Google Sheets с изменением снимка перед подтверждением."
+    },
+    {
+      "id": "HIS-01",
+      "category": "submission",
+      "title": "Узнать статус поставки по товару",
+      "priority": "important",
+      "channels": [
+        "Текст",
+        "Голос"
+      ],
+      "precondition": "Пользователь привязан к заведению, а в листе «История» есть строки заявок.",
+      "user_action": "Спрашивает естественной фразой, когда привезут товар или что с его поставкой.",
+      "bot_response": "Читает только лист «История» текущего заведения, находит товар с учётом формулировки и показывает дату, статус, поставщика и номер заявки.",
+      "result": "Вопрос не добавляет товар и не меняет черновик; при неоднозначном совпадении бот просит уточнить название.",
+      "contract": {
+        "confirmation": "Не требуется: запрос только читает историю и не запускает запись заявки.",
+        "state_change": "Черновик и открытый modal-контекст сохраняются без изменений."
+      },
+      "examples": [
+        "Когда приедет говядина?",
+        "Что там с моей говядиной?",
+        "Говядину уже привезли?",
+        "Когда последний раз приезжала говядина?"
+      ],
+      "test_refs": [
+        "tests/history/test_history_query.py::test_delivery_phrases_have_one_structured_meaning",
+        "tests/history/test_history_query.py::test_arrival_cancellation_and_past_questions_have_distinct_types",
+        "tests/history/test_history_input_route.py::test_history_text_is_independent_of_pending_quantity",
+        "tests/history/test_history_input_route.py::test_history_voice_transcript_uses_same_semantic_route"
+      ],
+      "automation_status": "AUTOMATED_PARTIAL",
+      "manual_live_requirement": "Нужен live-прогон с тестовым заведением и актуальными строками листа «История»; внешняя таблица не изменяется."
     },
     {
       "id": "SAF-01",

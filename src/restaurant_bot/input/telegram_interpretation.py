@@ -30,6 +30,7 @@ from restaurant_bot.input.telegram_callbacks import parse_callback
 from restaurant_bot.input.voice_policy import match_visible_action
 from restaurant_bot.integrations.openai_client import CommentScopeDecision
 from restaurant_bot.parsing.commands.api import enrich_command
+from restaurant_bot.parsing.history import parse_history_query
 
 logger = structlog.get_logger(__name__)
 _OPENAI_TRANSIENT_ERRORS = (APIConnectionError, APITimeoutError, RateLimitError)
@@ -128,6 +129,19 @@ class TelegramInputInterpreter:
                 return enrich_command("", parse_callback(callback_data)).model_copy(
                     update={"text": text}
                 )
+        history_query = parse_history_query(text)
+        if history_query is not None:
+            logger.info(
+                "history_query_parsed",
+                question_type=history_query.question_type.value,
+                product_count=len(history_query.product_queries),
+                has_date_filter=history_query.date_reference.value != "none",
+            )
+            return ParsedCommand(
+                intent=Intent.HISTORY_QUERY,
+                text=text,
+                history_query=history_query,
+            )
         parsed = self.provider.parse_text(text)
         review_command = self._parse_sheet_review_command(text, parsed, state)
         if review_command is not None:

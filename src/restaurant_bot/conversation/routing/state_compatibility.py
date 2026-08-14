@@ -62,6 +62,7 @@ class StateCompatibilityPolicy:
             Intent.HELP,
             Intent.SMALL_TALK,
             Intent.ORDER_STATUS,
+            Intent.HISTORY_QUERY,
             Intent.PRODUCT_ADD_LIST,
             Intent.SUBMIT_REQUEST,
             Intent.SHOW_FINAL_REVIEW,

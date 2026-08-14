@@ -1,14 +1,14 @@
 # PROJECT HANDOFF
 
-Актуально для ветки `decompose_bot` после UX-полировки диалога
+Актуально для ветки `decompose_bot` после добавления запросов к истории заявок
 2026-08-14. Git SHA текущей версии документа нужно получать командой
 `git rev-parse HEAD`.
 
 ## Текущая задача
 
-Завершить проверенную UX-полировку диалога и перейти только к подготовке
-контролируемого Telegram pilot. Новую общую декомпозицию и production refactor не
-начинать.
+Завершить проверенный функциональный этап запросов к истории заявок и перейти
+только к подготовке контролируемого Telegram pilot. Новую общую декомпозицию и
+production refactor не начинать.
 
 Подробный verdict и scores:
 [`docs/INDEPENDENT_ENGINEERING_AUDIT.md`](docs/INDEPENDENT_ENGINEERING_AUDIT.md).
@@ -17,12 +17,14 @@
 
 - Ветка: `decompose_bot`.
 - Remote: только GitHub `origin` → `Dzmitry-Radziuk/test_bot`.
-- Полный suite после UX-полировки: `1420 collected / 1420 passed`.
-- Mypy: `139 source files, no issues`.
-- Ruff check: pass; Ruff format: `238 files already formatted`.
+- Полный suite после этапа истории заявок: `1434 passed` (без падений; запуск с
+  локальным `--basetemp`, один предупреждающий `PytestCacheWarning` не связан с
+  приложением).
+- Mypy: `155 source files, no issues`.
+- Ruff check: pass; Ruff format: `306 files already formatted`.
 - Compileall и `git diff --check`: pass.
-- После refresh Markdown checker проверил 36 файлов.
-- Scenario catalog вырос с 34 до 40 содержательных сценариев; все mappings
+- После refresh Markdown checker проверил 38 файлов.
+- Scenario catalog вырос до 41 содержательного сценария; все mappings
   проверяются официальным generator.
 - `.env` не tracked; значения не читались.
 - Repository scan не нашёл строк, похожих на Telegram/OpenAI keys.
@@ -51,6 +53,18 @@
   callback используют специализированные статусы. Callback сначала подтверждается
   и получает отключённую клавиатуру, после чего временная карточка заменяется
   результатом. Существующие revision/idempotency/lease-проверки сохранены.
+- Добавлены channel-neutral contracts для вопросов о поставках: детерминированный
+  parser распознаёт русские формулировки, text и voice используют один маршрут,
+  а запрос истории не превращается в ADD_ITEMS и не меняет modal-контекст.
+- Источник истории строго ограничен листом Google Sheets с точным именем
+  `История`. `GoogleHistoryRepository` выполняет один venue-scoped read за запрос;
+  каталог, черновик, база данных и лист `История товары(API)` не используются.
+- Историческая строка сохраняет evidence заявки, поставщика, стадии и даты для
+  каждого товара из поля `Список товаров`. Неизвестные стадии не угадываются,
+  активные вопросы не показывают завершённые строки, а неоднозначное совпадение
+  приводит к уточнению.
+- Запросы истории обслуживаются `HistoryQueryService` и отдельным Telegram
+  presenter; существующая команда «Мои заявки» и её путь не заменены.
 
 Финальные post-doc проверки зелёные. Documentation impact checker выполняется после
 commit, потому что принимает только Git-объекты; его результат нужно сверить перед

@@ -38,10 +38,10 @@
 
 | Показатель | Значение |
 |---|---:|
-| Всего сценариев | 40 |
-| Связаны с pytest | 40 |
+| Всего сценариев | 41 |
+| Связаны с pytest | 41 |
 | Критические | 26 |
-| Важные | 11 |
+| Важные | 12 |
 | Защитные | 3 |
 
 ## Основные маршруты
@@ -206,7 +206,7 @@ stateDiagram-v2
     Записано --> Пустая: новая заявка
 ```
 
-**Связанные сценарии:** `DRF-01`, `DRF-02`, `DRF-03`, `DRF-04`, `SUB-01`, `SUB-03`, `SAF-04`, `SAF-05`
+**Связанные сценарии:** `DRF-01`, `DRF-02`, `DRF-03`, `DRF-04`, `SUB-01`, `SUB-03`, `HIS-01`, `SAF-04`, `SAF-05`
 
 ## Каталог сценариев
 
@@ -1501,6 +1501,48 @@ stateDiagram-v2
 - [`tests/review/test_order_review.py`](../tests/review/test_order_review.py) → `test_snapshot_reads_every_department_quantity_and_ignores_empty_rows`
 - [`tests/review/test_order_review.py`](../tests/review/test_order_review.py) → `test_preview_lists_each_product_and_has_confirmation_buttons`
 - [`tests/review/test_order_review.py`](../tests/review/test_order_review.py) → `test_preview_groups_products_by_supplier`
+
+#### HIS-01 · Узнать статус поставки по товару
+
+**Приоритет:** Важный<br>
+**Статус:** Работает сейчас<br>
+**Канал:** Текст, Голос<br>
+**Предусловие:** Пользователь привязан к заведению, а в листе «История» есть строки заявок.
+
+**Действие пользователя:** Спрашивает естественной фразой, когда привезут товар или что с его поставкой.
+
+**Ответ бота:** Читает только лист «История» текущего заведения, находит товар с учётом формулировки и показывает дату, статус, поставщика и номер заявки.
+
+**Результат:** Вопрос не добавляет товар и не меняет черновик; при неоднозначном совпадении бот просит уточнить название.
+
+**Статус проверки:** `AUTOMATED_PARTIAL` — Основной контракт подтверждён, но реальный внешний контур не проверен
+
+**Ручная проверка:** Нужен live-прогон с тестовым заведением и актуальными строками листа «История»; внешняя таблица не изменяется.
+
+<details>
+<summary><strong>Что важно для системы</strong></summary>
+
+- **Доступ:** Пользователь подключён к заведению и видит только заявки своего заведения.
+- **Распознаваем:** заявка, поставщик, сумма, статус, дата поставки
+- **Подтверждение:** Не требуется: запрос только читает историю и не запускает запись заявки.
+- **Изменение состояния:** Черновик и открытый modal-контекст сохраняются без изменений.
+- **Восстановление:** До записи разрешить безопасный повтор; после неоднозначного результата не создавать возможный дубль.
+
+</details>
+
+**Примеры фраз:**
+
+- «Когда приедет говядина?»
+- «Что там с моей говядиной?»
+- «Говядину уже привезли?»
+- «Когда последний раз приезжала говядина?»
+
+**Автоматическая проверка:**
+
+- [`tests/history/test_history_query.py`](../tests/history/test_history_query.py) → `test_delivery_phrases_have_one_structured_meaning`
+- [`tests/history/test_history_query.py`](../tests/history/test_history_query.py) → `test_arrival_cancellation_and_past_questions_have_distinct_types`
+- [`tests/history/test_history_input_route.py`](../tests/history/test_history_input_route.py) → `test_history_text_is_independent_of_pending_quantity`
+- [`tests/history/test_history_input_route.py`](../tests/history/test_history_input_route.py) → `test_history_voice_transcript_uses_same_semantic_route`
 
 ### Защита от неверного действия
 

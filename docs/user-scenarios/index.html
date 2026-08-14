@@ -130,8 +130,8 @@
   </header>
   <main>
     <section class="summary" aria-label="Сводка">
-      <div class="metric"><b>40</b><span>сценариев</span></div>
-      <div class="metric"><b>40</b><span>связаны с pytest</span></div>
+      <div class="metric"><b>41</b><span>сценариев</span></div>
+      <div class="metric"><b>41</b><span>связаны с pytest</span></div>
       <div class="metric"><b>26</b><span>критических</span></div>
       <div class="metric"><b>7</b><span>разделов</span></div>
     </section>
@@ -152,7 +152,7 @@
       <h2>Как бот принимает решения</h2>
       <p>Откройте нужную схему — внутри только основные шаги.</p>
     </div>
-    <section class="system-flows"><details class="system-flow"><summary>Как бот понимает сообщение</summary><p>Канал ввода меняется, но решение всегда зависит от смысла фразы и текущего состояния диалога.</p><div class="journey-steps"><span><b>1</b>Получить сообщение</span><span><b>2</b>Распознать смысл</span><span><b>3</b>Проверить контекст</span><span><b>4</b>Проверить доступ</span><span><b>5</b>Выполнить или уточнить</span></div><div class="journey-tests"><b>Связанные сценарии:</b> <a href="#scenario-INP-01">INP-01</a> <a href="#scenario-INP-02">INP-02</a> <a href="#scenario-INP-03">INP-03</a> <a href="#scenario-DRF-01">DRF-01</a> <a href="#scenario-SUB-01">SUB-01</a> <a href="#scenario-SAF-01">SAF-01</a></div></details><details class="system-flow"><summary>Голосовое сообщение</summary><p>Бот сначала получает расшифровку, затем обрабатывает её так же, как обычный человеческий текст.</p><div class="journey-steps"><span><b>1</b>Скачать аудио</span><span><b>2</b>Получить расшифровку</span><span><b>3</b>Определить команду</span><span><b>4</b>Извлечь товары и числа</span><span><b>5</b>Уточнить сомнительное</span></div><div class="journey-tests"><b>Связанные сценарии:</b> <a href="#scenario-INP-02">INP-02</a> <a href="#scenario-REC-01">REC-01</a> <a href="#scenario-REC-02">REC-02</a> <a href="#scenario-REC-03">REC-03</a> <a href="#scenario-RCV-01">RCV-01</a></div></details><details class="system-flow"><summary>Когда требуется подтверждение</summary><p>Просмотр выполняется сразу, работа с черновиком обратима, а запись или очистка требуют явного согласия.</p><div class="journey-steps"><span><b>1</b>Определить действие</span><span><b>2</b>Оценить последствия</span><span><b>3</b>Показать результат</span><span><b>4</b>Запросить подтверждение</span><span><b>5</b>Изменить данные</span></div><div class="journey-tests"><b>Связанные сценарии:</b> <a href="#scenario-REG-02">REG-02</a> <a href="#scenario-REC-05">REC-05</a> <a href="#scenario-DRF-03">DRF-03</a> <a href="#scenario-DRF-04">DRF-04</a> <a href="#scenario-SUB-02">SUB-02</a> <a href="#scenario-SUB-03">SUB-03</a></div></details><details class="system-flow"><summary>Ошибка и восстановление</summary><p>Бот возвращает пользователя к безопасной точке и не повторяет действие, если результат предыдущей попытки неизвестен.</p><div class="journey-steps"><span><b>1</b>Зафиксировать этап</span><span><b>2</b>Определить результат</span><span><b>3</b>Сохранить черновик</span><span><b>4</b>Предложить безопасный шаг</span><span><b>5</b>Не создавать дубль</span></div><div class="journey-tests"><b>Связанные сценарии:</b> <a href="#scenario-SUB-05">SUB-05</a> <a href="#scenario-RCV-01">RCV-01</a> <a href="#scenario-RCV-02">RCV-02</a> <a href="#scenario-RCV-03">RCV-03</a> <a href="#scenario-RCV-04">RCV-04</a> <a href="#scenario-REC-09">REC-09</a> <a href="#scenario-SUB-06">SUB-06</a> <a href="#scenario-SAF-05">SAF-05</a></div></details><details class="system-flow"><summary>Состояния заявки</summary><p>Каждая команда обрабатывается с учётом текущего этапа, поэтому одинаковая фраза не должна запускать неверное действие.</p><div class="journey-steps"><span><b>1</b>Пустая заявка</span><span><b>2</b>Сбор товаров</span><span><b>3</b>Уточнение</span><span><b>4</b>Финальная проверка</span><span><b>5</b>Записано</span></div><div class="journey-tests"><b>Связанные сценарии:</b> <a href="#scenario-DRF-01">DRF-01</a> <a href="#scenario-DRF-02">DRF-02</a> <a href="#scenario-DRF-03">DRF-03</a> <a href="#scenario-DRF-04">DRF-04</a> <a href="#scenario-SUB-01">SUB-01</a> <a href="#scenario-SUB-03">SUB-03</a> <a href="#scenario-SAF-04">SAF-04</a> <a href="#scenario-SAF-05">SAF-05</a></div></details></section>
+    <section class="system-flows"><details class="system-flow"><summary>Как бот понимает сообщение</summary><p>Канал ввода меняется, но решение всегда зависит от смысла фразы и текущего состояния диалога.</p><div class="journey-steps"><span><b>1</b>Получить сообщение</span><span><b>2</b>Распознать смысл</span><span><b>3</b>Проверить контекст</span><span><b>4</b>Проверить доступ</span><span><b>5</b>Выполнить или уточнить</span></div><div class="journey-tests"><b>Связанные сценарии:</b> <a href="#scenario-INP-01">INP-01</a> <a href="#scenario-INP-02">INP-02</a> <a href="#scenario-INP-03">INP-03</a> <a href="#scenario-DRF-01">DRF-01</a> <a href="#scenario-SUB-01">SUB-01</a> <a href="#scenario-SAF-01">SAF-01</a></div></details><details class="system-flow"><summary>Голосовое сообщение</summary><p>Бот сначала получает расшифровку, затем обрабатывает её так же, как обычный человеческий текст.</p><div class="journey-steps"><span><b>1</b>Скачать аудио</span><span><b>2</b>Получить расшифровку</span><span><b>3</b>Определить команду</span><span><b>4</b>Извлечь товары и числа</span><span><b>5</b>Уточнить сомнительное</span></div><div class="journey-tests"><b>Связанные сценарии:</b> <a href="#scenario-INP-02">INP-02</a> <a href="#scenario-REC-01">REC-01</a> <a href="#scenario-REC-02">REC-02</a> <a href="#scenario-REC-03">REC-03</a> <a href="#scenario-RCV-01">RCV-01</a></div></details><details class="system-flow"><summary>Когда требуется подтверждение</summary><p>Просмотр выполняется сразу, работа с черновиком обратима, а запись или очистка требуют явного согласия.</p><div class="journey-steps"><span><b>1</b>Определить действие</span><span><b>2</b>Оценить последствия</span><span><b>3</b>Показать результат</span><span><b>4</b>Запросить подтверждение</span><span><b>5</b>Изменить данные</span></div><div class="journey-tests"><b>Связанные сценарии:</b> <a href="#scenario-REG-02">REG-02</a> <a href="#scenario-REC-05">REC-05</a> <a href="#scenario-DRF-03">DRF-03</a> <a href="#scenario-DRF-04">DRF-04</a> <a href="#scenario-SUB-02">SUB-02</a> <a href="#scenario-SUB-03">SUB-03</a></div></details><details class="system-flow"><summary>Ошибка и восстановление</summary><p>Бот возвращает пользователя к безопасной точке и не повторяет действие, если результат предыдущей попытки неизвестен.</p><div class="journey-steps"><span><b>1</b>Зафиксировать этап</span><span><b>2</b>Определить результат</span><span><b>3</b>Сохранить черновик</span><span><b>4</b>Предложить безопасный шаг</span><span><b>5</b>Не создавать дубль</span></div><div class="journey-tests"><b>Связанные сценарии:</b> <a href="#scenario-SUB-05">SUB-05</a> <a href="#scenario-RCV-01">RCV-01</a> <a href="#scenario-RCV-02">RCV-02</a> <a href="#scenario-RCV-03">RCV-03</a> <a href="#scenario-RCV-04">RCV-04</a> <a href="#scenario-REC-09">REC-09</a> <a href="#scenario-SUB-06">SUB-06</a> <a href="#scenario-SAF-05">SAF-05</a></div></details><details class="system-flow"><summary>Состояния заявки</summary><p>Каждая команда обрабатывается с учётом текущего этапа, поэтому одинаковая фраза не должна запускать неверное действие.</p><div class="journey-steps"><span><b>1</b>Пустая заявка</span><span><b>2</b>Сбор товаров</span><span><b>3</b>Уточнение</span><span><b>4</b>Финальная проверка</span><span><b>5</b>Записано</span></div><div class="journey-tests"><b>Связанные сценарии:</b> <a href="#scenario-DRF-01">DRF-01</a> <a href="#scenario-DRF-02">DRF-02</a> <a href="#scenario-DRF-03">DRF-03</a> <a href="#scenario-DRF-04">DRF-04</a> <a href="#scenario-SUB-01">SUB-01</a> <a href="#scenario-SUB-03">SUB-03</a> <a href="#scenario-HIS-01">HIS-01</a> <a href="#scenario-SAF-04">SAF-04</a> <a href="#scenario-SAF-05">SAF-05</a></div></details></section>
 
     <div class="section-heading">
       <h2>Все пользовательские сценарии</h2>
@@ -1446,6 +1446,47 @@
         </details>
       </article>
 
+      <article id="scenario-HIS-01" class="scenario-card"
+        data-category="submission"
+        data-priority="important" data-search="his-01 узнать статус поставки по товару проверка и запись заявки спрашивает естественной фразой, когда привезут товар или что с его поставкой. читает только лист «история» текущего заведения, находит товар с учётом формулировки и показывает дату, статус, поставщика и номер заявки. пользователь подключён к заведению и видит только заявки своего заведения. заявка поставщик сумма статус дата поставки когда приедет говядина? что там с моей говядиной? говядину уже привезли? когда последний раз приезжала говядина?">
+        <div class="card-top">
+          <span class="scenario-id">HIS-01</span>
+          <span class="badges">
+            <span class="status status-live">Работает сейчас</span>
+            <span class="priority priority-important">Важный</span>
+          </span>
+        </div>
+        <h3>Узнать статус поставки по товару</h3>
+        <p class="category-label">Проверка и запись заявки</p>
+        <div class="channels"><span>Текст</span><span>Голос</span></div>
+        <dl>
+          <div><dt>Перед началом</dt><dd>Пользователь привязан к заведению, а в листе «История» есть строки заявок.</dd></div>
+          <div><dt>Пользователь</dt><dd>Спрашивает естественной фразой, когда привезут товар или что с его поставкой.</dd></div>
+          <div><dt>Бот</dt><dd>Читает только лист «История» текущего заведения, находит товар с учётом формулировки и показывает дату, статус, поставщика и номер заявки.</dd></div>
+          <div class="result"><dt>Итог</dt><dd>Вопрос не добавляет товар и не меняет черновик; при неоднозначном совпадении бот просит уточнить название.</dd></div>
+          <div><dt>Статус проверки</dt><dd><code>AUTOMATED_PARTIAL</code> — Основной контракт подтверждён, но реальный внешний контур не проверен</dd></div>
+          <div><dt>Ручная проверка</dt><dd>Нужен live-прогон с тестовым заведением и актуальными строками листа «История»; внешняя таблица не изменяется.</dd></div>
+        </dl>
+        <details>
+          <summary>Что важно</summary>
+          <dl class="contract">
+            <div><dt>Доступ</dt><dd>Пользователь подключён к заведению и видит только заявки своего заведения.</dd></div>
+            <div><dt>Распознаём</dt><dd>заявка, поставщик, сумма, статус, дата поставки</dd></div>
+            <div><dt>Подтверждение</dt><dd>Не требуется: запрос только читает историю и не запускает запись заявки.</dd></div>
+            <div><dt>Что изменится</dt><dd>Черновик и открытый modal-контекст сохраняются без изменений.</dd></div>
+            <div><dt>Если произошла ошибка</dt><dd>До записи разрешить безопасный повтор; после неоднозначного результата не создавать возможный дубль.</dd></div>
+          </dl>
+        </details>
+        <details>
+          <summary>Примеры фраз</summary>
+          <ul><li>«Когда приедет говядина?»</li><li>«Что там с моей говядиной?»</li><li>«Говядину уже привезли?»</li><li>«Когда последний раз приезжала говядина?»</li></ul>
+        </details>
+        <details>
+          <summary>Связанные pytest-тесты · 4</summary>
+          <ul class="tests"><li><a href="../../tests/history/test_history_query.py">tests/history/test_history_query.py</a><span>test_delivery_phrases_have_one_structured_meaning</span></li><li><a href="../../tests/history/test_history_query.py">tests/history/test_history_query.py</a><span>test_arrival_cancellation_and_past_questions_have_distinct_types</span></li><li><a href="../../tests/history/test_history_input_route.py">tests/history/test_history_input_route.py</a><span>test_history_text_is_independent_of_pending_quantity</span></li><li><a href="../../tests/history/test_history_input_route.py">tests/history/test_history_input_route.py</a><span>test_history_voice_transcript_uses_same_semantic_route</span></li></ul>
+        </details>
+      </article>
+
       <article id="scenario-SAF-01" class="scenario-card"
         data-category="safety"
         data-priority="critical" data-search="saf-01 «не добавляй» не добавляет товар защита от неверного действия отказывается от текущей позиции естественной фразой. пропускает только текущую позицию и не воспринимает отрицание как подтверждение. те же права, что у текущего экрана; защитная проверка не расширяет доступ. отрицание текущее действие версия кнопки состояние диалога не добавляй эту позицию убери этот товар нет, это не нужно">
@@ -1817,7 +1858,7 @@
     </section>
   </main>
   <footer>Локальный каталог · версия 2.1 · работает без интернета</footer>
-  <script id="catalog-meta" type="application/json">{"version": "2.1", "total": 40, "linked": 40}</script>
+  <script id="catalog-meta" type="application/json">{"version": "2.1", "total": 41, "linked": 41}</script>
   <script>
     (() => {
       const cards = [...document.querySelectorAll(".scenario-card")];

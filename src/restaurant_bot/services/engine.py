@@ -430,6 +430,7 @@ class ConversationEngine:
                 )
         if command.intent not in {
             Intent.ORDER_STATUS,
+            Intent.HISTORY_QUERY,
             Intent.SMALL_TALK,
             Intent.THANKS,
             Intent.UNKNOWN,
