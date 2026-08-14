@@ -7,15 +7,13 @@ from logging.config import fileConfig
 from sqlalchemy import engine_from_config, make_url, pool
 
 from alembic import context
-from restaurant_bot import db_models  # noqa: F401
 from restaurant_bot.config import get_settings
-from restaurant_bot.persistence.database import Base
+from restaurant_bot.persistence.alembic import target_metadata
 
 config = context.config
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 config.set_main_option("sqlalchemy.url", get_settings().database_url)
-target_metadata = Base.metadata
 
 
 def _connect_args(url_str: str) -> dict[str, str]:

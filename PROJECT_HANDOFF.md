@@ -103,9 +103,15 @@ production refactor не начинать.
 - Hosted CI не проверялся.
 - Production performance на 100 000 товаров не измерена; тест подтверждает только
   bounded `CatalogSearch` interface.
-- Локальный Docker preflight 2026-08-13: контейнер `migrate` не завершает запуск
-  из-за импорта `restaurant_bot.db_models` в `alembic/env.py`; текущий ручной
-  runtime поднят поверх существующей схемы через `docker compose up --no-deps`.
+- DEPLOY-01 подтверждён локально 2026-08-14: `alembic/env.py` загружает модели
+  через `restaurant_bot.persistence.alembic`, а не через отсутствующий
+  `restaurant_bot.db_models`. Цепочка ревизий непрерывна до `0008`, `alembic check`
+  сообщает об отсутствии новых операций. Существующая БД успешно прошла два
+  последовательных `upgrade head`; обычный `docker compose up -d --build`
+  завершил `migrate` с кодом 0, после чего `api` и `worker` стали healthy.
+  Отдельная временная PostgreSQL без общего volume также прошла два `upgrade head`
+  и содержит ровно пять текущих ORM-таблиц. Production и внешние записи не
+  проверялись.
 - Внешняя supplier dispatch должна оставаться выключенной для pilot.
 - Token rotation из незакрытого `SECURITY.md` checklist не подтверждена репозиторием.
 - Production alerts, backup/restore и rollback drill описаны, но не доказаны текущим
