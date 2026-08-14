@@ -71,8 +71,8 @@ def _parse_edit_comment(text: str) -> ParsedCommand | None:
 
     # Явное удаление общего комментария не должно становиться товаром.
     if re.fullmatch(
-        rf"(?:{remove_action}общ\w*\s+{noun}(?:{global_scope})?|"
-        rf"{remove_action}{noun}{global_scope})",
+        rf"(?:{remove_action}общ\w*\s+{noun}(?:\s+{global_scope})?|"
+        rf"{remove_action}(?:все\s+)?{noun}(?:\s+{global_scope})?)",
         normalized,
         re.I,
     ):

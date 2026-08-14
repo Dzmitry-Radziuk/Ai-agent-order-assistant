@@ -1280,10 +1280,15 @@ class ConversationEngine:
         comment = " ".join(command.comment_text.split()).strip(" .,;:-—–")
         if command.comment_scope == "order":
             if command.comment_action == "remove":
+                had_comments = any(
+                    item.status != ItemStatus.SKIPPED and item.comment.strip()
+                    for item in state.cart
+                )
                 clear_all_active_comments(state)
+                notice = "Комментарии удалены" if had_comments else "Комментариев для удаления нет"
                 return EngineResult(
                     state=state,
-                    reply=cart_reply(state, notice="Общий комментарий удалён"),
+                    reply=cart_reply(state, notice=notice),
                 )
             if not comment:
                 return EngineResult(

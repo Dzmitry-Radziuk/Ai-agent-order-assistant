@@ -44,6 +44,9 @@ push.
   manual/product-add, review, submit, failure и new-order modal contexts.
 - Source-evidence reconciliation для product identity, order quantity, packaging и
   comments.
+- Удаление комментариев всей заявки одинаково распознаётся из текста и голосовой
+  транскрипции, очищает только комментарии активных позиций и сохраняет товары и
+  связи с каталогом.
 - Conservative catalog shortlist и deterministic auto-select safety gates.
 - Venue isolation и повторная проверка доступа до внешних effects.
 - Submission lifecycle с read-back, recalc/dispatch uncertainty и at-most-once
@@ -57,6 +60,9 @@ push.
 - Hosted CI не проверялся.
 - Production performance на 100 000 товаров не измерена; тест подтверждает только
   bounded `CatalogSearch` interface.
+- Локальный Docker preflight 2026-08-13: контейнер `migrate` не завершает запуск
+  из-за импорта `restaurant_bot.db_models` в `alembic/env.py`; текущий ручной
+  runtime поднят поверх существующей схемы через `docker compose up --no-deps`.
 - Внешняя supplier dispatch должна оставаться выключенной для pilot.
 - Token rotation из незакрытого `SECURITY.md` checklist не подтверждена репозиторием.
 - Production alerts, backup/restore и rollback drill описаны, но не доказаны текущим
