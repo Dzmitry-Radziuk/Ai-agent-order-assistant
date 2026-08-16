@@ -178,9 +178,44 @@ def remove_global_comment_overlap(item_comment: str, global_comment: str) -> str
 
 def apply_global_comment(state: ConversationState, global_comment: str) -> None:
     """Добавляет общий комментарий один раз ко всем активным товарам заявки."""
+    fragments = normalized_comment_fragments(global_comment)
+    if not fragments:
+        return
     for item in state.cart:
         if item.status != ItemStatus.SKIPPED:
             append_item_comment(item, global_comment)
+            known = {comment_semantic_key(fragment) for fragment in item.order_comment_fragments}
+            for fragment in fragments:
+                key = comment_semantic_key(fragment)
+                if key and key not in known:
+                    item.order_comment_fragments.append(fragment)
+                    known.add(key)
+
+
+def remove_order_comments(state: ConversationState) -> bool:
+    """Удаляет только подтверждённые общие фрагменты комментариев."""
+    removed = False
+    for item in state.cart:
+        if item.status == ItemStatus.SKIPPED or not item.order_comment_fragments:
+            continue
+        global_keys = {
+            comment_semantic_key(fragment)
+            for fragment in item.order_comment_fragments
+            if comment_semantic_key(fragment)
+        }
+        kept = [
+            fragment
+            for fragment in item.comment.split(";")
+            if comment_semantic_key(fragment) not in global_keys
+        ]
+        cleaned = "; ".join(part.strip(" .,;:-—–") for part in kept if part.strip(" .,;:-—–"))
+        if cleaned != item.comment:
+            removed = True
+            item.comment = cleaned
+            if not cleaned:
+                item.comment_source = CommentSource.NONE
+        item.order_comment_fragments = []
+    return removed
 
 
 def clear_all_active_comments(state: ConversationState) -> None:
@@ -193,6 +228,7 @@ def clear_all_active_comments(state: ConversationState) -> None:
 def clear_item_comment(item: CartItem) -> None:
     """Удаляет комментарий позиции и сбрасывает его происхождение."""
     item.comment = ""
+    item.order_comment_fragments = []
     item.comment_source = CommentSource.NONE
 
 
@@ -200,6 +236,19 @@ def append_item_comment(item: CartItem, comment: str) -> None:
     """Добавляет семантический комментарий позиции без повторов."""
     item.comment = merge_comments(_apply_local_correction(item.comment, comment))
     item.comment_source = CommentSource.SEMANTIC
+
+
+def normalized_comment_fragments(comment: str) -> list[str]:
+    """Возвращает непустые нормализованные фрагменты общего комментария."""
+    result: list[str] = []
+    seen: set[str] = set()
+    for value in str(comment or "").split(";"):
+        fragment = " ".join(value.split()).strip(" .,;:-—–")
+        key = comment_semantic_key(fragment)
+        if fragment and key not in seen:
+            result.append(fragment)
+            seen.add(key)
+    return result
 
 
 def _apply_local_correction(existing: str, addition: str) -> str:

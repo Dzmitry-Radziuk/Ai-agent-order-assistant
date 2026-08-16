@@ -87,9 +87,12 @@ def test_remove_all_comments_keeps_cart_and_catalog_bindings(settings) -> None: 
         for item in result.state.cart
     ]
     assert after == before
-    assert [item.comment for item in result.state.cart] == ["", ""]
+    assert [item.comment for item in result.state.cart] == [
+        "спелые; без повреждений; в красной упаковке",
+        "крупная фасовка",
+    ]
     assert result.state.stage is before_stage
-    assert "Комментарии удалены" in result.reply.text
+    assert "Общих комментариев для удаления не найдено" in result.reply.text
 
 
 @pytest.mark.parametrize(
@@ -148,8 +151,8 @@ def test_text_and_voice_comment_removal_have_same_semantics(settings) -> None:  
         ]
 
     assert snapshot(text_result) == snapshot(voice_result)
-    assert "Комментарии удалены" in text_result.reply.text
-    assert "Комментарии удалены" in voice_result.reply.text
+    assert "Общих комментариев для удаления не найдено" in text_result.reply.text
+    assert "Общих комментариев для удаления не найдено" in voice_result.reply.text
 
 
 def test_remove_all_comments_without_comments_is_safe(settings) -> None:  # type: ignore[no-untyped-def]
@@ -170,7 +173,7 @@ def test_remove_all_comments_without_comments_is_safe(settings) -> None:  # type
     assert len(result.state.cart) == 2
     assert all(not item.comment for item in result.state.cart)
     assert "Не нашёл такую позицию" not in result.reply.text
-    assert "Комментариев для удаления нет" in result.reply.text
+    assert "Общих комментариев для удаления не найдено" in result.reply.text
 
 
 @pytest.mark.parametrize(

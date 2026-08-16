@@ -16,11 +16,11 @@ from restaurant_bot.config import Settings
 from restaurant_bot.conversation.comments import (
     append_item_comment,
     apply_global_comment,
-    clear_all_active_comments,
     clear_item_comment,
     comment_scope_items,
     reconcile_comment_target,
     remove_cart_comment_shadows,
+    remove_order_comments,
 )
 from restaurant_bot.conversation.draft import (
     find_duplicate,
@@ -102,7 +102,7 @@ from restaurant_bot.parsing.commands.item_commands import (
 from restaurant_bot.parsing.commands.normalization import (
     has_negated_action,
 )
-from restaurant_bot.presentation.telegram.formatting import escape, heading
+from restaurant_bot.presentation.telegram.formatting import heading
 from restaurant_bot.presentation.telegram.pagination import CART_PAGE_SIZE
 from restaurant_bot.presentation.telegram.product_add import product_add_prompt
 from restaurant_bot.presentation.telegram.progression import render_progression
@@ -799,16 +799,9 @@ class ConversationEngine:
             if command.global_comment:
                 apply_global_comment(state, command.global_comment)
             if command.global_comment and not command.items:
-                active_count = sum(item.status != ItemStatus.SKIPPED for item in state.cart)
                 return EngineResult(
                     state=state,
-                    reply=BotReply(
-                        text=(
-                            "<i>Общий комментарий добавлен</i>\n\n"
-                            f"{escape(command.global_comment)}\n\n"
-                            f"Применён ко всем товарам: {active_count}."
-                        )
-                    ),
+                    reply=cart_reply(state, notice="Общий комментарий добавлен"),
                 )
             if event.kind == InputKind.VOICE and not command.items:
                 return EngineResult(state=state, reply=unrecognized_voice_reply(state))
@@ -1290,12 +1283,12 @@ class ConversationEngine:
         comment = " ".join(command.comment_text.split()).strip(" .,;:-—–")
         if command.comment_scope == "order":
             if command.comment_action == "remove":
-                had_comments = any(
-                    item.status != ItemStatus.SKIPPED and item.comment.strip()
-                    for item in state.cart
+                removed = remove_order_comments(state)
+                notice = (
+                    "Общие комментарии удалены"
+                    if removed
+                    else "Общих комментариев для удаления не найдено"
                 )
-                clear_all_active_comments(state)
-                notice = "Комментарии удалены" if had_comments else "Комментариев для удаления нет"
                 return EngineResult(
                     state=state,
                     reply=cart_reply(state, notice=notice),

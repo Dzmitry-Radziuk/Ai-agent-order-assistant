@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
-from restaurant_bot.conversation.comments import merge_comments
+from restaurant_bot.conversation.comments import merge_comments, normalized_comment_fragments
 from restaurant_bot.domain.models import CartItem, CommentSource, ConversationState, ItemStatus
 from restaurant_bot.domain.units import normalize_unit
+from restaurant_bot.parsing.comment_policy import comment_semantic_key
 
 
 def has_active_draft_items(state: ConversationState) -> bool:
@@ -50,6 +51,14 @@ def remove_exact_cart_duplicates(state: ConversationState) -> None:
         if owner.quantity != item.quantity:
             owner.quantity = (owner.quantity or 0) + (item.quantity or 0)
         owner.comment = merge_comments(owner.comment, item.comment)
+        known_global = {
+            comment_semantic_key(fragment) for fragment in owner.order_comment_fragments
+        }
+        for fragment in normalized_comment_fragments("; ".join(item.order_comment_fragments)):
+            fragment_key = comment_semantic_key(fragment)
+            if fragment_key not in known_global:
+                owner.order_comment_fragments.append(fragment)
+                known_global.add(fragment_key)
         if item.comment and owner.comment_source is CommentSource.NONE:
             owner.comment_source = item.comment_source
         duplicate_ids.add(item.id)

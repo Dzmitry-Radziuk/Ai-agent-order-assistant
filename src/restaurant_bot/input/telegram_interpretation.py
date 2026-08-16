@@ -10,7 +10,7 @@ from typing import Protocol
 import structlog
 from openai import APIConnectionError, APITimeoutError, RateLimitError
 
-from restaurant_bot.conversation.comments import comment_scope_items
+from restaurant_bot.conversation.comments import comment_scope_items, reconcile_comment_target
 from restaurant_bot.conversation.routing.contracts import (
     CompatibilityAction,
     CompatibilityContext,
@@ -30,7 +30,7 @@ from restaurant_bot.domain.text import clean_text, normalize_text
 from restaurant_bot.input.telegram_callbacks import parse_callback
 from restaurant_bot.input.voice_policy import match_visible_action
 from restaurant_bot.integrations.openai_client import CommentScopeDecision
-from restaurant_bot.parsing.commands.api import enrich_command
+from restaurant_bot.parsing.commands.api import enrich_command, infer_intent
 from restaurant_bot.parsing.history import parse_history_query, requires_history_context
 
 logger = structlog.get_logger(__name__)
@@ -156,6 +156,7 @@ class TelegramInputInterpreter:
         if requires_history_context(text):
             return ParsedCommand(intent=Intent.UNKNOWN, text=text)
         parsed = self.provider.parse_text(text)
+        parsed = self._normalize_explicit_comment(text, parsed, state)
         review_command = self._parse_sheet_review_command(text, parsed, state)
         if review_command is not None:
             return review_command
@@ -250,6 +251,32 @@ class TelegramInputInterpreter:
                 }
             )
         return parsed.model_copy(update={"text": text})
+
+    @staticmethod
+    def _normalize_explicit_comment(
+        text: str,
+        parsed: ParsedCommand,
+        state: ConversationState,
+    ) -> ParsedCommand:
+        """Защищает явную цель комментария от ошибочной общей области ИИ."""
+        deterministic = infer_intent(text)
+        if deterministic.intent is not Intent.EDIT_COMMENT:
+            return parsed
+        if deterministic.comment_scope == "order":
+            return deterministic
+        resolution = reconcile_comment_target(
+            state,
+            deterministic.comment_target_query,
+            deterministic.comment_text,
+        )
+        if resolution.ambiguous:
+            return deterministic
+        return deterministic.model_copy(
+            update={
+                "comment_target_query": resolution.target_query,
+                "comment_text": resolution.comment_text,
+            }
+        )
 
     def _parse_pending_comment_scope(
         self,

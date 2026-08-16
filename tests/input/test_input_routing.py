@@ -5,10 +5,12 @@ from unittest.mock import MagicMock
 from restaurant_bot.application.order_review.contracts import ReviewSnapshot
 from restaurant_bot.conversation.routing.state_compatibility import StateCompatibilityPolicy
 from restaurant_bot.domain.models import (
+    CartItem,
     ConversationState,
     ExtractedItem,
     InputKind,
     Intent,
+    ItemStatus,
     ParsedCommand,
     SessionStage,
     TelegramEvent,
@@ -99,6 +101,59 @@ def test_review_deep_link_is_a_dedicated_command() -> None:
 
     assert command.intent is Intent.REVIEW_ORDER
     assert command.callback_target == "6461W6"
+
+
+def test_explicit_cart_comment_target_overrides_ai_global_scope() -> None:
+    """Переводит явную цель комментария в item scope даже при ошибке AI."""
+    provider = MagicMock()
+    provider.parse_text.return_value = ParsedCommand(
+        intent=Intent.ADD_ITEMS,
+        global_comment="привезти завтра к 20:00",
+    )
+    state = ConversationState(
+        cart=[
+            CartItem(
+                id="home",
+                source_query="Горчица Домашняя. Кал-я 170г,СтБ, Россия (1/12) Острая",
+                status=ItemStatus.MATCHED,
+            ),
+            CartItem(
+                id="dijon",
+                source_query="Горчица Дижонская CHATEL, ведро, 1 кг, 6 шт/кор, Франция",
+                status=ItemStatus.MATCHED,
+            ),
+        ]
+    )
+    interpreter = TelegramInputInterpreter(
+        provider, lambda: MagicMock(), StateCompatibilityPolicy()
+    )
+
+    command = interpreter.interpret_text(
+        "Добавь комментарий к горчице домашней привезти завтра к 20:00",
+        state,
+    )
+
+    assert command.intent is Intent.EDIT_COMMENT
+    assert command.comment_scope == "item"
+    assert command.comment_target_query == "горчице домашней"
+    assert command.comment_text == "привезти завтра к 20 00"
+    assert command.global_comment == ""
+    assert command.items == []
+
+
+def test_legacy_cart_item_payload_defaults_comment_provenance() -> None:
+    """Загружает старый CartItem без поля общего provenance."""
+    item = CartItem.model_validate({"id": "legacy", "source_query": "Горчица", "comment": "текст"})
+
+    assert item.order_comment_fragments == []
+    item.order_comment_fragments = ["привезти завтра"]
+    restored = CartItem.model_validate(item.model_dump(mode="json"))
+    assert restored.order_comment_fragments == ["привезти завтра"]
+
+    legacy = CartItem.model_validate(
+        {"id": "legacy-2", "source_query": "Горчица", "comment": "старый текст"}
+    )
+    assert legacy.order_comment_fragments == []
 
 
 def test_review_callbacks_keep_the_token_and_revision() -> None:

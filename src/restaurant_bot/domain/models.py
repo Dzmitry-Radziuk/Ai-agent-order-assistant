@@ -371,6 +371,7 @@ class CartItem(BaseModel):
     supplier_search_locked: bool = False
     rename_attempted: bool = False
     comment: str = ""
+    order_comment_fragments: list[str] = Field(default_factory=list)
     comment_source: CommentSource = CommentSource.NONE
     catalog_comment: str = ""
     catalog_comment_source: CommentSource = CommentSource.NONE

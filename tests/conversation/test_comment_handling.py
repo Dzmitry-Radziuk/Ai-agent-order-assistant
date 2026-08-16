@@ -2,7 +2,12 @@
 
 import pytest
 
-from restaurant_bot.conversation.comments import merge_comments, remove_cart_comment_shadows
+from restaurant_bot.conversation.comments import (
+    apply_global_comment,
+    merge_comments,
+    remove_cart_comment_shadows,
+    remove_order_comments,
+)
 from restaurant_bot.domain.models import (
     CartItem,
     CatalogProduct,
@@ -14,6 +19,7 @@ from restaurant_bot.domain.models import (
     ParsedCommand,
     TelegramEvent,
 )
+from restaurant_bot.parsing.commands.api import infer_intent
 from restaurant_bot.parsing.products import parse_product_lines
 from restaurant_bot.services.engine import ConversationEngine
 
@@ -97,6 +103,10 @@ def test_global_comment_is_appended_to_every_item_comment_and_order_row(settings
     assert [item.comment for item in result.state.cart] == [
         "охлаждённым; на завтра",
         "мраморная; на завтра",
+    ]
+    assert [item.order_comment_fragments for item in result.state.cart] == [
+        ["на завтра"],
+        ["на завтра"],
     ]
     pending = engine._prepare_submission(_event(), result.state)
     assert pending.state.pending_submission is not None
@@ -303,7 +313,83 @@ def test_standalone_global_comment_updates_active_draft_once(settings) -> None: 
     assert len(repeated.state.cart) == 2
     assert repeated.state.cart[0].comment == "желательно на завтра"
     assert repeated.state.cart[1].comment == "в банках; желательно на завтра"
-    assert "Применён ко всем товарам: 2" in repeated.reply.text
+    assert "Черновик заявки" in repeated.reply.text
+    assert "Общий комментарий добавлен" in repeated.reply.text
+    assert "Применён ко всем товарам" not in repeated.reply.text
+    assert repeated.reply.rows
+
+
+def test_global_comment_provenance_removal_preserves_local_fragments() -> None:
+    """Удаляет общий фрагмент и сохраняет локальное пожелание позиции."""
+    state = ConversationState(
+        cart=[
+            CartItem(
+                id="one",
+                source_query="Горчица домашняя",
+                comment="только в железных банках",
+                status=ItemStatus.MATCHED,
+            ),
+            CartItem(id="two", source_query="Горчица дижонская", status=ItemStatus.MATCHED),
+        ]
+    )
+
+    apply_global_comment(state, "привезти завтра до 20:00")
+
+    assert remove_order_comments(state) is True
+    assert state.cart[0].comment == "только в железных банках"
+    assert state.cart[1].comment == ""
+    assert all(not item.order_comment_fragments for item in state.cart)
+
+
+def test_global_comment_removal_returns_draft_with_buttons(settings) -> None:  # type: ignore[no-untyped-def]
+    """Показывает обычный черновик после удаления общего комментария."""
+    engine = ConversationEngine(settings)
+    state = ConversationState(
+        cart=[
+            CartItem(
+                id="one",
+                source_query="Горчица домашняя",
+                comment="только в железных банках",
+                status=ItemStatus.MATCHED,
+            ),
+            CartItem(id="two", source_query="Горчица дижонская", status=ItemStatus.MATCHED),
+        ]
+    )
+    apply_global_comment(state, "привезти завтра до 20:00")
+
+    result = engine.handle(
+        _event(),
+        infer_intent("удали общие комментарии"),
+        state,
+        [],
+    )
+
+    assert "Черновик заявки" in result.reply.text
+    assert "Общие комментарии удалены" in result.reply.text
+    assert [button.text for row in result.reply.rows for button in row] == [
+        "Отправить в корзину",
+        "Добавить ещё товары",
+        "Сбросить и начать заново",
+    ]
+    assert result.state.cart[0].comment == "только в железных банках"
+    assert result.state.cart[1].comment == ""
+
+
+def test_legacy_comment_without_provenance_is_not_removed() -> None:
+    """Не угадывает общий фрагмент в старом черновике без provenance."""
+    state = ConversationState(
+        cart=[
+            CartItem(
+                id="legacy",
+                source_query="Горчица",
+                comment="только в железных банках; привезти завтра",
+                status=ItemStatus.MATCHED,
+            )
+        ]
+    )
+
+    assert remove_order_comments(state) is False
+    assert state.cart[0].comment == "только в железных банках; привезти завтра"
 
 
 def test_parser_keeps_unmarked_tail_in_product_name() -> None:

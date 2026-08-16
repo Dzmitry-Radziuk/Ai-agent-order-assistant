@@ -4,7 +4,11 @@ from __future__ import annotations
 
 from uuid import uuid4
 
-from restaurant_bot.conversation.comments import merge_comments, remove_global_comment_overlap
+from restaurant_bot.conversation.comments import (
+    merge_comments,
+    normalized_comment_fragments,
+    remove_global_comment_overlap,
+)
 from restaurant_bot.domain.departments import normalize_department
 from restaurant_bot.domain.models import CartItem, CommentSource, ExtractedItem
 from restaurant_bot.domain.units import normalize_unit
@@ -51,5 +55,6 @@ def build_cart_item(
         department_quantities=extracted.department_quantities.model_copy(deep=True),
         supplier_hint=extracted.supplier_hint,
         comment=merge_comments(item_comment, global_comment),
+        order_comment_fragments=normalized_comment_fragments(global_comment),
         comment_source=comment_source,
     )
