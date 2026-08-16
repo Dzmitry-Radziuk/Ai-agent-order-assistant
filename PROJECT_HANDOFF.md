@@ -274,7 +274,7 @@ Mypy, Ruff check/format, Markdown links, каталог сценариев, comp
 - Подтверждены сценарии горчицы с `450 мл` и `1/6`, а также огурцов с размерами,
   фасовкой и остаточным `5 шт`; ранее доказанное количество и единица сохраняются.
 - Регрессионные проверки provenance и candidate routing проходят. Полный suite
-  собран на `1509` тестах: `1508 passed`, один известный baseline failure —
+  собран на `1510` тестах: `1509 passed`, один известный baseline failure —
   `tests/quantity/test_unit_handling.py::test_packaging_in_name_and_order_weight_are_kept_separate`.
   База данных, Alembic, Docker, History и дополнительные AI-вызовы в этом этапе
   не менялись.
