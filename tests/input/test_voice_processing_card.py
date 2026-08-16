@@ -242,7 +242,7 @@ def test_high_accuracy_retry_corrects_gram_kilogram_confusion(tmp_path) -> None:
     command = _interpreter(orchestrator).interpret(event, state)
 
     assert command.text == "Один килограмм."
-    orchestrator.openai.parse_text.assert_called_once_with("Один килограмм.")
+    orchestrator.openai.parse_text.assert_not_called()
     assert orchestrator.openai.transcribe.call_count == 2
     assert orchestrator.openai.transcribe.call_args_list[1].kwargs["high_accuracy"] is True
 

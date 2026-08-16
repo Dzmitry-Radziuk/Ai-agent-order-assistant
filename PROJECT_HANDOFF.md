@@ -17,11 +17,11 @@ production refactor не начинать.
 
 - Ветка: `decompose_bot`.
 - Remote: только GitHub `origin` → `Dzmitry-Radziuk/test_bot`.
-- Полный suite после LIVE-HISTORY-04: `1461 passed` (без падений; запуск с
+- Полный suite после MODAL-AUTHORITY-01: `1527 passed` (без падений; запуск с
   локальным `--basetemp`, один предупреждающий `PytestCacheWarning` не связан с
   приложением).
-- Mypy: `156 source files, no issues`.
-- Ruff check: pass; Ruff format: `308 files already formatted`.
+- Mypy: `159 source files, no issues`.
+- Ruff check: pass; Ruff format: `315 files already formatted`.
 - Compileall и `git diff --check`: pass.
 - После refresh Markdown checker проверил 38 файлов.
 - Scenario catalog вырос до 41 содержательного сценария; все mappings
@@ -258,6 +258,34 @@ TEXT / VOICE
   комментария не вызывают дополнительный AI scope call.
 
 После COMMENT-SCOPE-02 полный suite: `1501 passed`; новые regression-тесты — `12`.
+
+## MODAL-AUTHORITY-01 — GENERAL STATE-AWARE MODAL ROUTING
+
+Исправлена граница между предложением глобального parser и авторизацией
+действия активным modal-контекстом:
+
+- quantity modal (`MISSING_QTY`, `UNIT_MISMATCH`, `DUPLICATE_PENDING`) сначала
+  проверяет строгую форму ответа: короткое число, число с единицей, разговорную
+  оболочку и контейнерную единицу. Произвольное числительное внутри фразы больше
+  не меняет количество; неполное числительное остаётся безопасным уточнением.
+- текст и транскрибированный голос используют один `PendingQuantityHandler`;
+  «пять», «пусть будет пять», «три штуки» и «пять коробок» относятся к текущей
+  позиции, а явные независимые команды могут прервать modal.
+- `SELECT_CANDIDATE` разрешён только при текущем `AMBIGUOUS` item; вне candidate
+  context голое число не создаёт выбор кандидата.
+- `StateCompatibilityPolicy` принимает единственное решение о `CONTINUE`,
+  `INTERRUPT` и `AMBIGUOUS` для quantity/duplicate/unit-mismatch контекстов.
+- доказанный независимый ADD_ITEMS в `AWAIT_ADD_MORE_CONFIRM` не теряется из-за
+  отсутствия совпавшей visible action; неуверенный no-op не показывает сообщение
+  об успешном добавлении.
+- provenance каталожной фасовки и количества заказа сохранён: regression для
+  названия с `180 г` и отдельного заказа `500 г` проходит.
+
+Проверки после этапа: полный pytest `1527 passed`, mypy `159 source files, no
+issues`, Ruff check/format, Markdown links (`38 файлов`), каталог сценариев (`41`),
+compileall и `git diff --check` — успешно. Изменены только маршрутизация modal,
+quantity provenance/reconciliation и regression-тесты; DB/Alembic/Docker/History
+source/callback protocol не менялись, новых AI-вызовов не добавлено.
 Mypy, Ruff check/format, Markdown links, каталог сценариев, compileall и
 `git diff --check` прошли. База данных, Alembic, Docker, History и callback protocol
 в этом этапе не менялись.

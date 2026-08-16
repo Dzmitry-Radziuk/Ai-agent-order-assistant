@@ -319,7 +319,7 @@ class CatalogResolutionService:
     @staticmethod
     def _reconcile_quantity_with_catalog_name(item: CartItem, product_name: str) -> None:
         """Отделяет количество заказа от фасовки в имени каталога."""
-        if item.quantity is None or not item.source_line:
+        if not item.source_line:
             return
         authorization = reconcile_order_quantity_evidence(
             item.source_line or item.source_query,
@@ -329,9 +329,9 @@ class CatalogResolutionService:
             catalog_name=product_name,
             packaging_role=item.packaging_role,
         )
-        if authorization.provenance is not QuantityProvenance.ORDER:
-            item.quantity = None
-            item.unit = ""
-        else:
+        if authorization.provenance is QuantityProvenance.ORDER:
             item.quantity = authorization.quantity
             item.unit = authorization.unit
+        elif item.quantity is not None:
+            item.quantity = None
+            item.unit = ""

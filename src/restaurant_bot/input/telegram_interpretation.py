@@ -44,6 +44,9 @@ from restaurant_bot.parsing.semantic_routing import (
     normalize_comment_proposal,
     protect_confirmed_command,
 )
+from restaurant_bot.services.conversation_handlers.pending_quantity import (
+    PendingQuantityHandler,
+)
 
 logger = structlog.get_logger(__name__)
 _OPENAI_TRANSIENT_ERRORS = (APIConnectionError, APITimeoutError, RateLimitError)
@@ -151,10 +154,13 @@ class TelegramInputInterpreter:
         if not has_pending_comment_scope(state):
             callback_data = self._match_visible_action(text, state)
             if callback_data:
-                return enrich_command("", parse_callback(callback_data)).model_copy(
+                visible_command = enrich_command("", parse_callback(callback_data)).model_copy(
                     update={"text": text}
                 )
+                if self._candidate_command_is_authorized(visible_command, state):
+                    return visible_command
         deterministic = self._normalize_explicit_comment(text, infer_intent(text), state)
+        deterministic = self._authorize_candidate_command(deterministic, state, text)
         delivery_wish = has_delivery_wish_shape(text)
         proven_mutation = self._is_proven_mutation(deterministic)
         if deterministic.intent is Intent.EDIT_COMMENT and proven_mutation:
@@ -183,6 +189,7 @@ class TelegramInputInterpreter:
         parsed = self.provider.parse_text(text)
         parsed = normalize_comment_proposal(text, parsed)
         parsed = self._normalize_explicit_comment(text, parsed, state)
+        parsed = self._authorize_candidate_command(parsed, state, text)
         if proven_mutation:
             protected = protect_confirmed_command(deterministic, parsed)
             if protected is not parsed:
@@ -202,14 +209,26 @@ class TelegramInputInterpreter:
             CompatibilityContext.COMMENT_SCOPE,
         ):
             return self._parse_pending_comment_scope(text, state)
+        if (
+            state.stage is SessionStage.AWAIT_ADD_MORE_CONFIRM
+            and deterministic.intent is Intent.ADD_ITEMS
+            and deterministic.items
+            and (
+                parsed.intent is Intent.UNKNOWN
+                or (parsed.intent is Intent.ADD_ITEMS and not parsed.items)
+            )
+        ):
+            return deterministic
         if parsed.intent is Intent.UNKNOWN or (
             parsed.intent is Intent.ADD_ITEMS and not parsed.items
         ):
             callback_data = self._match_visible_action(text, state)
             if callback_data:
-                return enrich_command("", parse_callback(callback_data)).model_copy(
+                visible_command = enrich_command("", parse_callback(callback_data)).model_copy(
                     update={"text": text}
                 )
+                if self._candidate_command_is_authorized(visible_command, state):
+                    return visible_command
         if not self._needs_visible_action_ai(text, parsed, state):
             return parsed
         try:
@@ -223,12 +242,15 @@ class TelegramInputInterpreter:
                 "visible_action_transport_failed",
                 error_type=type(error).__name__,
             )
+            if self._is_proven_mutation(deterministic):
+                return parsed
             return ParsedCommand(intent=Intent.UNKNOWN, text=text)
         if not selected:
-            if parsed.intent is Intent.ADD_ITEMS and parsed.items:
-                return ParsedCommand(intent=Intent.UNKNOWN, text=text)
             return parsed
-        return enrich_command("", parse_callback(selected)).model_copy(update={"text": text})
+        selected_command = enrich_command("", parse_callback(selected)).model_copy(
+            update={"text": text}
+        )
+        return self._authorize_candidate_command(selected_command, state, text)
 
     @staticmethod
     def _history_context_products(state: ConversationState) -> list[str]:
@@ -409,34 +431,33 @@ class TelegramInputInterpreter:
         state: ConversationState,
     ) -> ParsedCommand | None:
         """Распознаёт короткое количество только в открытом modal-количестве."""
-        item = state.current_item()
-        if (
-            item is None
-            or state.stage is not SessionStage.AWAIT_UNIT_QUANTITY
-            or item.status
-            not in {
-                ItemStatus.MISSING_QTY,
-                ItemStatus.UNIT_MISMATCH,
-                ItemStatus.DUPLICATE_PENDING,
-            }
-        ):
-            return None
-        normalized = normalize_text(text).strip(" .,;:!?—–-")
-        if not re.fullmatch(r"(?:\d+(?:[,.]\d+)?|[а-яё]+(?:\s+[а-яё]+)?)", normalized, re.I):
-            return None
-        from restaurant_bot.parsing.quantities import parse_quantity_unit
+        return PendingQuantityHandler.modal_command(text, state)
 
-        quantity, unit = parse_quantity_unit(normalized)
-        if quantity is None:
-            return None
-        if item.status is ItemStatus.UNIT_MISMATCH and unit:
-            return None
-        return ParsedCommand(
-            intent=Intent.EDIT_QUANTITY,
-            text=text,
-            edit_quantity=quantity,
-            edit_unit=unit or item.catalog_unit or item.unit,
+    def _candidate_command_is_authorized(
+        self,
+        command: ParsedCommand,
+        state: ConversationState,
+    ) -> bool:
+        """Проверяет, открыта ли карточка, в которой разрешён выбор кандидата."""
+        if command.intent is not Intent.SELECT_CANDIDATE:
+            return True
+        decision = self.state_compatibility_policy.evaluate(
+            command,
+            state,
+            CompatibilityContext.CANDIDATE_SELECTION,
         )
+        return decision.action is not CompatibilityAction.NOT_APPLICABLE
+
+    def _authorize_candidate_command(
+        self,
+        command: ParsedCommand,
+        state: ConversationState,
+        text: str,
+    ) -> ParsedCommand:
+        """Не разрешает глобальному parser выбирать кандидата вне его карточки."""
+        if self._candidate_command_is_authorized(command, state):
+            return command
+        return ParsedCommand(intent=Intent.UNKNOWN, text=text)
 
     @staticmethod
     def _match_visible_action(text: str, state: ConversationState) -> str:

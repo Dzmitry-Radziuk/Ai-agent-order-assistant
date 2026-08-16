@@ -207,6 +207,13 @@ class ConversationEngine:
         catalog: list[CatalogProduct],
     ) -> EngineResult:
         """Обрабатывает входные данные текущего компонента."""
+        if event.kind is not InputKind.CALLBACK:
+            modal_quantity_command = self.pending_quantity_handler.modal_command(
+                event.text or command.text,
+                state,
+            )
+            if modal_quantity_command is not None:
+                command = modal_quantity_command
         if (
             event.kind in {InputKind.TEXT, InputKind.VOICE}
             and command.dialogue_response is DialogueResponse.NONE
@@ -381,6 +388,22 @@ class ConversationEngine:
             and command.items
         ):
             return EngineResult(state=state, reply=unknown_intent_reply(state))
+        if (
+            not new_order_interrupted
+            and modal_decision.quantity.action is CompatibilityAction.AMBIGUOUS
+            and command.intent
+            in {
+                Intent.UNKNOWN,
+                Intent.ADD_ITEMS,
+                Intent.SELECT_CANDIDATE,
+            }
+        ):
+            current = state.current_item()
+            if current is not None:
+                return EngineResult(
+                    state=state,
+                    reply=issue_reply(current, state_item_index(state, current)),
+                )
         self._remove_navigation_command_items(state)
         remove_cart_comment_shadows(state)
         remove_exact_cart_duplicates(state)
@@ -412,7 +435,12 @@ class ConversationEngine:
         if (
             not new_order_interrupted
             and duplicate_decision.action is CompatibilityAction.AMBIGUOUS
-            and command.intent is Intent.ADD_ITEMS
+            and command.intent
+            in {
+                Intent.ADD_ITEMS,
+                Intent.UNKNOWN,
+                Intent.SELECT_CANDIDATE,
+            }
         ):
             current = state.current_item()
             if current is not None:
@@ -428,7 +456,12 @@ class ConversationEngine:
         if (
             not new_order_interrupted
             and unit_mismatch_decision.action is CompatibilityAction.AMBIGUOUS
-            and command.intent in {Intent.ADD_ITEMS, Intent.UNKNOWN}
+            and command.intent
+            in {
+                Intent.ADD_ITEMS,
+                Intent.UNKNOWN,
+                Intent.SELECT_CANDIDATE,
+            }
         ):
             current = state.current_item()
             if current is not None:

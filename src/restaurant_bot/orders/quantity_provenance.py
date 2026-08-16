@@ -89,14 +89,37 @@ def reconcile_order_quantity_evidence(
 ) -> QuantityAuthorization:
     """Отделяет количество заказа от числовых признаков выбранного каталога."""
     normalized_unit = normalize_unit(proposed_unit)
-    if proposed_quantity is None:
-        return QuantityAuthorization(None, "", QuantityProvenance.NONE)
     if quantity_source == "packaging":
         return QuantityAuthorization(None, "", QuantityProvenance.CATALOG_IDENTITY)
     if quantity_source and quantity_source != "packaging":
+        if proposed_quantity is None:
+            return QuantityAuthorization(None, "", QuantityProvenance.NONE)
         return QuantityAuthorization(proposed_quantity, normalized_unit, QuantityProvenance.ORDER)
 
     source = str(source_text or "").strip()
+    if proposed_quantity is None and source:
+        source_entries = numeric_evidence(source)
+        catalog_entries = numeric_evidence(catalog_name)
+        consumed = _catalog_identity_indexes(source_entries, catalog_entries)
+        residual = [entry for index, entry in enumerate(source_entries) if index not in consumed]
+        if len(residual) == 1 and residual[0].upper_value is None:
+            selected = residual[0]
+            return QuantityAuthorization(
+                selected.value,
+                normalize_unit(selected.unit),
+                QuantityProvenance.ORDER,
+            )
+        if residual and has_explicit_order_marker(source):
+            selected = residual[-1]
+            if selected.upper_value is None:
+                return QuantityAuthorization(
+                    selected.value,
+                    normalize_unit(selected.unit),
+                    QuantityProvenance.ORDER,
+                )
+        return QuantityAuthorization(None, "", QuantityProvenance.NONE)
+    if proposed_quantity is None:
+        return QuantityAuthorization(None, "", QuantityProvenance.NONE)
     if not source:
         return QuantityAuthorization(proposed_quantity, normalized_unit, QuantityProvenance.ORDER)
 

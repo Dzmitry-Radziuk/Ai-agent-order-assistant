@@ -16,7 +16,8 @@ from restaurant_bot.conversation.routing.item_resolution import (
     evaluate_not_found,
     evaluate_product_add_details,
     evaluate_unit_mismatch,
-    has_product_items,
+    has_concrete_new_items,
+    has_named_product_items,
 )
 from restaurant_bot.conversation.routing.order_flow import (
     can_use_add_more_context,
@@ -40,7 +41,14 @@ from restaurant_bot.domain.models import (
 class StateCompatibilityPolicy:
     """Определяет совместимость intent с поддержанным modal state."""
 
-    _QUANTITY_STAGES = frozenset({SessionStage.AWAIT_UNIT_QUANTITY})
+    _QUANTITY_STAGES = frozenset(
+        {
+            SessionStage.COLLECTING,
+            SessionStage.REVIEW,
+            SessionStage.AWAIT_MULTIPLE_QUANTITY,
+            SessionStage.AWAIT_UNIT_QUANTITY,
+        }
+    )
     _CONTINUE_INTENTS = frozenset(
         {
             Intent.EDIT_QUANTITY,
@@ -113,16 +121,21 @@ class StateCompatibilityPolicy:
         ):
             return CompatibilityDecision(CompatibilityAction.NOT_APPLICABLE)
 
-        if command.intent is Intent.ADD_ITEMS and has_product_items(command):
-            return CompatibilityDecision(CompatibilityAction.INTERRUPT)
+        if command.intent is Intent.ADD_ITEMS:
+            if has_concrete_new_items(command) or has_named_product_items(
+                command,
+                command.text,
+            ):
+                return CompatibilityDecision(CompatibilityAction.INTERRUPT)
+            return CompatibilityDecision(CompatibilityAction.AMBIGUOUS)
         if command.intent in self._INTERRUPT_INTENTS:
             return CompatibilityDecision(CompatibilityAction.INTERRUPT)
         if command.intent in self._CONTINUE_INTENTS:
             return CompatibilityDecision(CompatibilityAction.CONTINUE)
+        if command.intent is Intent.SELECT_CANDIDATE:
+            return CompatibilityDecision(CompatibilityAction.AMBIGUOUS)
 
-        # Неизвестная команда остаётся доступной детерминированному обработчику количества
-        # для коротких ответов: отдельного числа или единицы измерения.
-        return CompatibilityDecision(CompatibilityAction.CONTINUE)
+        return CompatibilityDecision(CompatibilityAction.AMBIGUOUS)
 
     def should_try_contextual_fallback(
         self,

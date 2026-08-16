@@ -110,10 +110,12 @@ def evaluate_candidate_selection(
     }:
         return CompatibilityDecision(CompatibilityAction.NOT_APPLICABLE)
     item = state.current_item()
-    if item is None or item.status is not ItemStatus.AMBIGUOUS or not item.candidates:
+    if item is None or item.status is not ItemStatus.AMBIGUOUS:
         return CompatibilityDecision(CompatibilityAction.NOT_APPLICABLE)
 
     if command.intent is Intent.SELECT_CANDIDATE:
+        if not item.candidates:
+            return CompatibilityDecision(CompatibilityAction.CONTINUE)
         candidate_index = (command.selected_index or 0) - 1
         if command.selection_query or 0 <= candidate_index < len(item.candidates):
             return CompatibilityDecision(CompatibilityAction.CONTINUE)
@@ -219,6 +221,7 @@ def evaluate_duplicate_pending(
     if command.intent in {
         Intent.MERGE_DUPLICATE,
         Intent.CONFIRM,
+        Intent.EDIT_QUANTITY,
         Intent.SKIP_CURRENT,
         Intent.CANCEL,
         Intent.UNIT_EDIT,
@@ -229,10 +232,8 @@ def evaluate_duplicate_pending(
     }:
         return CompatibilityDecision(CompatibilityAction.CONTINUE)
     if command.intent is Intent.SELECT_CANDIDATE:
-        # Детерминированный parser может принять произнесённое число за индекс
-        # кандидата. Пока открыта duplicate-карточка, число обрабатывает
-        # существующий quantity flow.
-        return CompatibilityDecision(CompatibilityAction.CONTINUE)
+        # Число обрабатывает quantity flow; кандидат здесь не открыт.
+        return CompatibilityDecision(CompatibilityAction.AMBIGUOUS)
     if command.intent is Intent.UNKNOWN:
         # Обработчик количества ещё может доказать, что это короткий числовой
         # ответ; иначе engine вернёт duplicate-карточку без изменений.
@@ -282,6 +283,9 @@ def evaluate_unit_mismatch(
     if command.intent is Intent.UNKNOWN:
         # Контекстное восстановление ещё может доказать, что это количество
         # или ответ единицей каталога до повторной оценки policy.
+        return CompatibilityDecision(CompatibilityAction.AMBIGUOUS)
+    if command.intent is Intent.SELECT_CANDIDATE:
+        # Число не должно открывать выбор кандидата в карточке единицы.
         return CompatibilityDecision(CompatibilityAction.AMBIGUOUS)
     if command.intent in interrupt_intents:
         return CompatibilityDecision(CompatibilityAction.INTERRUPT)
@@ -350,26 +354,59 @@ def has_named_product_items(command: ParsedCommand, text: str) -> bool:
     normalized_text = normalize_text(text or command.text)
     response_word_stems = (
         "давай",
+        "дава",
         "добав",
+        "добавля",
         "закаж",
+        "объедин",
         "измен",
         "исправ",
         "колич",
+        "введ",
+        "хоч",
+        "лучш",
         "мне",
         "надо",
         "нуж",
+        "ну",
+        "ладн",
+        "потом",
+        "покаж",
+        "помен",
+        "прибав",
+        "плюс",
         "постав",
+        "привез",
         "пусть",
         "сдел",
+        "счит",
+        "слож",
+        "сумм",
         "укаж",
+        "уточн",
         "вес",
         "возьм",
+        "конечн",
+        "окей",
+        "единиц",
+        "кил",
+        "грам",
+        "литр",
+        "миллил",
     )
     for item in command.items:
         query = normalize_text(item.product_query)
-        if not query or query == normalized_text:
+        if not query:
             continue
         query_words = re.findall(r"[a-zа-яё]+", query, flags=re.I)
-        if query_words and any(not word.startswith(response_word_stems) for word in query_words):
+        if not query_words:
+            continue
+        if query == normalized_text and any(
+            word.startswith(response_word_stems)
+            or word in {"товар", "товары", "заявка", "заказ", "вариант"}
+            for word in query_words
+        ):
+            continue
+        if any(not word.startswith(response_word_stems) for word in query_words):
             return True
     return False
