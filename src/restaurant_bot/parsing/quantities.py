@@ -79,12 +79,16 @@ def has_explicit_order_quantity(source_line: str, quantity: float | None) -> boo
             values.append(value)
     if not values or not any(abs(value - quantity) <= 1e-9 for value in values):
         return False
-    if range_spans:
-        return True
     if has_explicit_order_marker(masked_source):
         return True
     if len(values) > 1:
-        return True
+        # Последнее число после названия является заказом;
+        # более ранние меры относятся к фасовке или характеристикам товара.
+        return abs(values[-1] - quantity) <= 1e-9
+    if range_spans:
+        # Число внутри диапазона уже удалено из остатка. Сам факт наличия
+        # диапазона не подтверждает заказанное количество.
+        return False
     return bool(
         re.search(
             rf"(?:^|[-—–:])\s*\d+(?:[,.]\d+)?\s*(?:{unit_pattern})?\s*$",

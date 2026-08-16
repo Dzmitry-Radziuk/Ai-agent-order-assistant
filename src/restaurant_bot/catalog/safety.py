@@ -7,15 +7,15 @@ import re
 from restaurant_bot.catalog.evidence import (
     _canonical_token,
     _catalog_abbreviation_match,
-    _spoken_range_pattern,
     _token_matches,
+    numeric_evidence,
     query_evidence_tokens,
     tokens,
 )
 from restaurant_bot.domain.models import Candidate
 from restaurant_bot.domain.text import normalize_text
 from restaurant_bot.domain.units import UNIT_ALIASES, normalize_unit
-from restaurant_bot.parsing.number_words import NUMBER_WORDS, parse_number_words
+from restaurant_bot.parsing.number_words import NUMBER_WORDS
 
 _QUALIFIER_IGNORED_WORDS = set(UNIT_ALIASES) | {
     "и",
@@ -220,59 +220,10 @@ def is_safe_catalog_name_equivalent(query: str, product_name: str) -> bool:
 
 def _numeric_characteristics(value: str) -> list[tuple[float, float | None, str]]:
     """Извлекает размеры, диапазоны и фасовку из названия товара."""
-    normalized = normalize_text(str(value).replace("–", "-").replace("—", "-")).replace(",", ".")
-    if not normalized:
-        return []
-    unit_pattern = "|".join(
-        sorted(
-            (re.escape(unit) for unit in UNIT_ALIASES),
-            key=len,
-            reverse=True,
-        )
-    )
-    range_pattern = re.compile(
-        rf"(?<!\w)(?P<left>\d+(?:\.\d+)?)\s*(?:--|-|/|на|x|х)\s*"
-        rf"(?P<right>\d+(?:\.\d+)?)(?:\s*(?P<unit>{unit_pattern}))?\b",
-        flags=re.IGNORECASE,
-    )
-    characteristics: list[tuple[float, float | None, str]] = []
-    masked = list(normalized)
-    for match in _spoken_range_pattern().finditer(normalized):
-        left = parse_number_words(match.group("left").split(), 0)
-        right = parse_number_words(match.group("right").split(), 0)
-        if left is None or right is None:
-            continue
-        characteristics.append(
-            (
-                left[0],
-                right[0],
-                _normalize_characteristic_unit(match.group("unit") or ""),
-            )
-        )
-        masked[match.start() : match.end()] = [" "] * (match.end() - match.start())
-    for match in range_pattern.finditer(normalized):
-        characteristics.append(
-            (
-                float(match.group("left")),
-                float(match.group("right")),
-                _normalize_characteristic_unit(match.group("unit") or ""),
-            )
-        )
-        masked[match.start() : match.end()] = [" "] * (match.end() - match.start())
-
-    single_pattern = re.compile(
-        rf"(?<![\w-])(?P<value>\d+(?:\.\d+)?)(?:\s*(?P<unit>{unit_pattern}))?\b",
-        flags=re.IGNORECASE,
-    )
-    for match in single_pattern.finditer("".join(masked)):
-        characteristics.append(
-            (
-                float(match.group("value")),
-                None,
-                _normalize_characteristic_unit(match.group("unit") or ""),
-            )
-        )
-    return characteristics
+    return [
+        (entry.value, entry.upper_value, _normalize_characteristic_unit(entry.unit))
+        for entry in numeric_evidence(value)
+    ]
 
 
 def _normalize_characteristic_unit(value: str) -> str:

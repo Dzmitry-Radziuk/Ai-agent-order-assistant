@@ -9,7 +9,10 @@ from restaurant_bot.conversation.quantity_resolution import (
     is_multiple_warning,
     multiple_warnings,
 )
-from restaurant_bot.conversation.routing.item_resolution import has_named_product_items
+from restaurant_bot.conversation.routing.item_resolution import (
+    has_concrete_new_items,
+    has_named_product_items,
+)
 from restaurant_bot.conversation.state.queries import item_index as state_item_index
 from restaurant_bot.domain.models import (
     CartItem,
@@ -504,7 +507,7 @@ class ContextualCommandPolicy:
 
         if current and current.status == ItemStatus.AMBIGUOUS:
             spoken_index = self._spoken_choice_index(phrase)
-            if spoken_index is not None:
+            if spoken_index is not None and not has_concrete_new_items(command):
                 return ParsedCommand(
                     intent=Intent.SELECT_CANDIDATE,
                     text=raw,

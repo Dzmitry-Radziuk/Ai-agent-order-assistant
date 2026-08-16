@@ -8,9 +8,6 @@ from copy import deepcopy
 from datetime import UTC, datetime
 
 from restaurant_bot.application.conversation.contracts import ConversationInteraction
-from restaurant_bot.catalog.evidence import (
-    query_evidence_tokens,
-)
 from restaurant_bot.catalog.resolver import CatalogResolver
 from restaurant_bot.config import Settings
 from restaurant_bot.conversation.comments import (
@@ -58,7 +55,11 @@ from restaurant_bot.conversation.routing.modal_routing import (
 from restaurant_bot.conversation.routing.state_compatibility import (
     StateCompatibilityPolicy,
 )
-from restaurant_bot.conversation.selection import find_cart_item
+from restaurant_bot.conversation.selection import (
+    CandidateReferenceStatus,
+    find_cart_item,
+    resolve_candidate_reference,
+)
 from restaurant_bot.conversation.state.queries import (
     first_unresolved as first_unresolved_item,
 )
@@ -95,6 +96,10 @@ from restaurant_bot.input.telegram_visible_actions import (
 )
 from restaurant_bot.orders.catalog_resolution import CatalogResolutionService
 from restaurant_bot.orders.product_add import new_product_add_request_id
+from restaurant_bot.orders.quantity_provenance import (
+    QuantityProvenance,
+    reconcile_order_quantity_evidence,
+)
 from restaurant_bot.orders.supplier_minimums import supplier_minimum_warnings
 from restaurant_bot.parsing.commands.api import infer_intent
 from restaurant_bot.parsing.commands.dialogue import dialogue_response_for
@@ -491,15 +496,12 @@ class ConversationEngine:
         ):
             selection_query = normalize_text(event.text or command.text)
             if selection_query:
-                scores = [
-                    len(query_evidence_tokens(selection_query, candidate.name))
-                    for candidate in current.candidates
-                ]
-                best_score = max(scores, default=0)
-                if best_score >= 1 and scores.count(best_score) == 1:
+                reference = resolve_candidate_reference(current, selection_query)
+                if reference.status is CandidateReferenceStatus.UNIQUE:
                     command = ParsedCommand(
                         intent=Intent.SELECT_CANDIDATE,
                         text=event.text or command.text,
+                        items=command.items,
                         selection_query=event.text or command.text,
                         callback_target=str(state_item_index(state, current)),
                     )
@@ -1154,6 +1156,23 @@ class ConversationEngine:
             return outcome.result
         assert outcome.item is not None and outcome.candidate is not None
         item = outcome.item
+        if command.items:
+            extracted = command.items[0]
+            if extracted.source_line:
+                item.source_line = extracted.source_line
+            authorization = reconcile_order_quantity_evidence(
+                extracted.source_line or command.text,
+                extracted.quantity,
+                extracted.unit,
+                quantity_source=extracted.quantity_source,
+                catalog_name=outcome.candidate.name,
+                packaging_role=extracted.packaging_role,
+            )
+            if authorization.provenance is QuantityProvenance.ORDER:
+                item.quantity = authorization.quantity
+                item.unit = authorization.unit
+                if extracted.quantity_source:
+                    item.quantity_source = extracted.quantity_source
         self.catalog_resolution.apply_catalog(item, outcome.candidate, catalog)
         duplicate = find_duplicate(
             ConversationState(cart=[current for current in state.cart if current.id != item.id]),

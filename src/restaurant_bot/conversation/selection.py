@@ -6,6 +6,8 @@ import re
 from dataclasses import dataclass
 from enum import StrEnum
 
+from restaurant_bot.catalog.evidence import numeric_evidence
+from restaurant_bot.catalog.safety import has_compatible_numeric_characteristics
 from restaurant_bot.domain.models import (
     Candidate,
     CartItem,
@@ -13,6 +15,9 @@ from restaurant_bot.domain.models import (
     ItemStatus,
 )
 from restaurant_bot.domain.text import normalize_text
+from restaurant_bot.domain.units import UNIT_ALIASES
+from restaurant_bot.parsing.number_words import NUMBER_WORDS
+from restaurant_bot.parsing.quantities import has_explicit_order_marker
 
 
 class SelectionFailure(StrEnum):
@@ -22,6 +27,14 @@ class SelectionFailure(StrEnum):
     INVALID_CANDIDATE = "invalid_candidate"
 
 
+class CandidateReferenceStatus(StrEnum):
+    """Описывает результат проверки фразы относительно карточки кандидатов."""
+
+    UNIQUE = "unique"
+    AMBIGUOUS = "ambiguous"
+    NO_MATCH = "no_match"
+
+
 @dataclass(frozen=True, slots=True)
 class CandidateSelectionResult:
     """Возвращает выбранную позицию, кандидата или причину отказа."""
@@ -29,6 +42,76 @@ class CandidateSelectionResult:
     item: CartItem | None = None
     candidate: Candidate | None = None
     failure: SelectionFailure | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class CandidateReferenceResult:
+    """Возвращает безопасную оценку фразы в пределах текущих кандидатов."""
+
+    status: CandidateReferenceStatus
+    candidate: Candidate | None = None
+
+
+def _lexical_reference_text(value: str) -> str:
+    """Удаляет числа и единицы, оставляя слова названия товара."""
+    words = re.findall(r"[a-zа-яё0-9%]+", normalize_text(value), flags=re.I)
+    return " ".join(
+        word
+        for word in words
+        if word not in UNIT_ALIASES
+        and word not in NUMBER_WORDS
+        and not any(char.isdigit() for char in word)
+    )
+
+
+def _lexical_match_count(query: str, candidate: str) -> int:
+    """Считает подтверждённые словесные признаки кандидата."""
+    query_tokens = _lexical_reference_text(query).split()
+    candidate_tokens = _lexical_reference_text(candidate).split()
+    return sum(
+        1
+        for query_token in query_tokens
+        if any(
+            query_token == candidate_token or tokens_share_stem(query_token, candidate_token)
+            for candidate_token in candidate_tokens
+        )
+    )
+
+
+def resolve_candidate_reference(
+    item: CartItem,
+    source_text: str,
+) -> CandidateReferenceResult:
+    """Разрешает естественную фразу только среди показанных кандидатов."""
+    source = normalize_text(source_text)
+    if not source or not item.candidates:
+        return CandidateReferenceResult(CandidateReferenceStatus.NO_MATCH)
+    scored: list[tuple[int, Candidate]] = []
+    for candidate in item.candidates:
+        lexical_matches = _lexical_match_count(source, candidate.name)
+        candidate_numbers = numeric_evidence(candidate.name)
+        numeric_match = bool(candidate_numbers) and has_compatible_numeric_characteristics(
+            candidate.name,
+            source,
+        )
+        if lexical_matches < 1:
+            continue
+        if (
+            lexical_matches < 2
+            and not numeric_match
+            and (numeric_evidence(source) or has_explicit_order_marker(source))
+        ):
+            continue
+        score = lexical_matches * 20 + (15 if numeric_match else 0)
+        scored.append((score, candidate))
+    if not scored:
+        return CandidateReferenceResult(CandidateReferenceStatus.NO_MATCH)
+    scored.sort(key=lambda pair: pair[0], reverse=True)
+    best_score = scored[0][0]
+    best = [candidate for score, candidate in scored if score == best_score]
+    if len(best) != 1:
+        return CandidateReferenceResult(CandidateReferenceStatus.AMBIGUOUS)
+    return CandidateReferenceResult(CandidateReferenceStatus.UNIQUE, best[0])
 
 
 def contains_score(target: str, candidate: str) -> int:
@@ -126,6 +209,13 @@ def resolve_candidate_selection(
         candidate_index = (
             scores.index(best_score) if best_score > 0 and scores.count(best_score) == 1 else -1
         )
+        if candidate_index < 0:
+            reference = resolve_candidate_reference(item, query)
+            if (
+                reference.status is CandidateReferenceStatus.UNIQUE
+                and reference.candidate is not None
+            ):
+                candidate_index = item.candidates.index(reference.candidate)
     if candidate_index < 0 or candidate_index >= len(item.candidates):
         return CandidateSelectionResult(
             item=item,

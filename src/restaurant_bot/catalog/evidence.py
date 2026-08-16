@@ -3,12 +3,81 @@
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass
 from difflib import SequenceMatcher
 
 from restaurant_bot.domain.models import CatalogProduct
 from restaurant_bot.domain.text import clean_text, normalize_text
 from restaurant_bot.domain.units import UNIT_ALIASES, normalize_unit
 from restaurant_bot.parsing.number_words import NUMBER_WORDS, parse_number_words
+
+
+@dataclass(frozen=True, slots=True)
+class NumericEvidence:
+    """Описывает одно числовое свидетельство в исходной фразе."""
+
+    value: float
+    upper_value: float | None = None
+    unit: str = ""
+    raw: str = ""
+    start: int = 0
+    end: int = 0
+
+
+_FRACTION_DENOMINATORS = {
+    "одного": 1,
+    "одной": 1,
+    "одному": 1,
+    "одну": 1,
+    "один": 1,
+    "одна": 1,
+    "вторая": 2,
+    "вторые": 2,
+    "вторых": 2,
+    "две": 2,
+    "третья": 3,
+    "третьи": 3,
+    "третьих": 3,
+    "три": 3,
+    "четвертая": 4,
+    "четвертые": 4,
+    "четвертых": 4,
+    "четыре": 4,
+    "пятая": 5,
+    "пятые": 5,
+    "пятых": 5,
+    "пять": 5,
+    "шестая": 6,
+    "шестые": 6,
+    "шестых": 6,
+    "шести": 6,
+    "шесть": 6,
+    "седьмая": 7,
+    "седьмые": 7,
+    "седьмых": 7,
+    "семи": 7,
+    "семь": 7,
+    "восьмая": 8,
+    "восьмые": 8,
+    "восьмых": 8,
+    "восьми": 8,
+    "восемь": 8,
+    "девятая": 9,
+    "девятые": 9,
+    "девятых": 9,
+    "девяти": 9,
+    "девять": 9,
+    "десятая": 10,
+    "десятые": 10,
+    "десятых": 10,
+    "десяти": 10,
+    "десять": 10,
+    "двенадцатая": 12,
+    "двенадцатые": 12,
+    "двенадцатых": 12,
+    "двенадцати": 12,
+    "двенадцать": 12,
+}
 
 _STOP_WORDS = {
     "и",
@@ -136,6 +205,204 @@ def canonical_search_query(value: str) -> str:
     for start, end, replacement in reversed(replacements):
         normalized = f"{normalized[:start]}{replacement}{normalized[end:]}"
     return normalized
+
+
+def _numeric_unit_pattern() -> str:
+    """Строит шаблон единиц для числового свидетельства."""
+    return "|".join(sorted((re.escape(unit) for unit in UNIT_ALIASES), key=len, reverse=True))
+
+
+def _spoken_number_phrase_pattern() -> str:
+    """Строит шаблон словесного числа без привязки к конкретному товару."""
+    words = set(NUMBER_WORDS) | set(_FRACTION_DENOMINATORS)
+    number_word = "|".join(sorted((re.escape(word) for word in words), key=len, reverse=True))
+    return rf"(?:{number_word})(?:\s+(?:{number_word}))*"
+
+
+def _fraction_value(left: str, right: str) -> tuple[float, float] | None:
+    """Возвращает числитель и знаменатель словесной дроби."""
+    numerator = NUMBER_WORDS.get(normalize_text(left))
+    denominator = _FRACTION_DENOMINATORS.get(normalize_text(right))
+    if numerator is None or denominator is None or denominator == 0:
+        return None
+    return numerator, float(denominator)
+
+
+def _spoken_scalar(value: str) -> float | None:
+    """Преобразует обычное числительное с учётом падежной формы."""
+    tokens = normalize_text(value).split()
+    parsed = parse_number_words(tokens, 0)
+    if parsed is not None and parsed[1] == len(tokens):
+        return parsed[0]
+    if len(tokens) == 1:
+        return _FRACTION_DENOMINATORS.get(tokens[0])
+    return None
+
+
+def _spoken_numeric_pairs(value: str) -> list[NumericEvidence]:
+    """\u0420\u0430\u0441\u043f\u043e\u0437\u043d\u0430\u0451\u0442 \u0441\u043b\u043e\u0432\u0435\u0441\u043d\u044b\u0435 \u0434\u0440\u043e\u0431\u0438 \u0438 \u0434\u0438\u0430\u043f\u0430\u0437\u043e\u043d\u044b."""
+    number_phrase = _spoken_number_phrase_pattern()
+    denominator_phrase = "|".join(
+        sorted(
+            (re.escape(word) for word in _FRACTION_DENOMINATORS if word not in NUMBER_WORDS),
+            key=len,
+            reverse=True,
+        )
+    )
+    result: list[NumericEvidence] = []
+    occupied: list[tuple[int, int]] = []
+
+    fraction_pattern = re.compile(
+        rf"(?<!\w)(?P<numerator>{number_phrase})\s+(?P<denominator>{denominator_phrase})\b",
+        flags=re.IGNORECASE,
+    )
+    for match in fraction_pattern.finditer(value):
+        fraction = _fraction_value(match.group("numerator"), match.group("denominator"))
+        if fraction is None:
+            continue
+        occupied.append(match.span())
+        result.append(
+            NumericEvidence(
+                value=fraction[0],
+                upper_value=fraction[1],
+                raw=match.group(0),
+                start=match.start(),
+                end=match.end(),
+            )
+        )
+
+    ratio_pattern = re.compile(
+        rf"(?<!\w)(?P<numerator>{number_phrase})\s+(?:\u043a|\u043d\u0430)\s+"
+        rf"(?P<denominator>{number_phrase})\b",
+        flags=re.IGNORECASE,
+    )
+    for match in ratio_pattern.finditer(value):
+        if any(start < match.end() and match.start() < end for start, end in occupied):
+            continue
+        numerator = _spoken_scalar(match.group("numerator"))
+        denominator = _spoken_scalar(match.group("denominator"))
+        if numerator is None or denominator is None or denominator == 0:
+            continue
+        occupied.append(match.span())
+        result.append(
+            NumericEvidence(
+                value=numerator,
+                upper_value=denominator,
+                raw=match.group(0),
+                start=match.start(),
+                end=match.end(),
+            )
+        )
+
+    range_pattern = re.compile(
+        rf"(?<!\w)(?P<left>{number_phrase})\s*(?:\u043d\u0430|\u0434\u043e|[-])\s*"
+        rf"(?P<right>{number_phrase})(?:\s*(?P<unit>{_numeric_unit_pattern()}))?\b",
+        flags=re.IGNORECASE,
+    )
+    for match in range_pattern.finditer(value):
+        if any(start < match.end() and match.start() < end for start, end in occupied):
+            continue
+        left = _spoken_scalar(match.group("left"))
+        right = _spoken_scalar(match.group("right"))
+        if left is None or right is None:
+            continue
+        occupied.append(match.span())
+        result.append(
+            NumericEvidence(
+                value=left,
+                upper_value=right,
+                unit=normalize_unit(match.group("unit") or ""),
+                raw=match.group(0),
+                start=match.start(),
+                end=match.end(),
+            )
+        )
+    return result
+
+
+def numeric_evidence(value: str) -> list[NumericEvidence]:
+    """Возвращает нормализованные числовые свидетельства с исходными позициями."""
+    normalized = normalize_text(str(value or "").replace("\u2013", "-").replace("\u2014", "-"))
+    if not normalized:
+        return []
+    unit_pattern = _numeric_unit_pattern()
+    result: list[NumericEvidence] = []
+    occupied: list[tuple[int, int]] = []
+    range_pattern = re.compile(
+        rf"(?<!\w)(?P<left>\d+(?:[.,]\d+)?)\s*(?:--|[-/]|на|x|х)\s*"
+        rf"(?P<right>\d+(?:[.,]\d+)?)(?:\s*(?P<unit>{unit_pattern}))?\b",
+        flags=re.IGNORECASE,
+    )
+    for match in range_pattern.finditer(normalized):
+        occupied.append(match.span())
+        result.append(
+            NumericEvidence(
+                value=float(match.group("left").replace(",", ".")),
+                upper_value=float(match.group("right").replace(",", ".")),
+                unit=normalize_unit(match.group("unit") or ""),
+                raw=match.group(0),
+                start=match.start(),
+                end=match.end(),
+            )
+        )
+
+    compact_pattern = re.compile(
+        rf"(?<!\w)(?P<value>\d+(?:[.,]\d+)?)(?P<unit>{unit_pattern})\b",
+        flags=re.IGNORECASE,
+    )
+    for match in compact_pattern.finditer(normalized):
+        if any(start < match.end() and match.start() < end for start, end in occupied):
+            continue
+        occupied.append(match.span())
+        result.append(
+            NumericEvidence(
+                value=float(match.group("value").replace(",", ".")),
+                unit=normalize_unit(match.group("unit")),
+                raw=match.group(0),
+                start=match.start(),
+                end=match.end(),
+            )
+        )
+
+    spoken_pairs = _spoken_numeric_pairs(normalized)
+    for evidence in spoken_pairs:
+        if any(start < evidence.end and evidence.start < end for start, end in occupied):
+            continue
+        occupied.append((evidence.start, evidence.end))
+        result.append(evidence)
+
+    masked = list(normalized)
+    for start, end in occupied:
+        masked[start:end] = [" "] * (end - start)
+    token_matches = list(re.finditer(r"[a-zа-яё0-9%]+", "".join(masked), flags=re.I))
+    token_values = [normalize_text(match.group(0)) for match in token_matches]
+    for index, token in enumerate(token_values):
+        parsed = parse_number_words(token_values, index)
+        if parsed is None:
+            continue
+        quantity, end_index = parsed
+        raw_unit = token_values[end_index] if end_index < len(token_values) else ""
+        if raw_unit not in UNIT_ALIASES and raw_unit != "%":
+            if not re.fullmatch(r"\d+(?:\.\d+)?", token):
+                continue
+            raw_unit = ""
+            span_end_index = end_index - 1
+        else:
+            span_end_index = end_index
+        start = token_matches[index].start()
+        end = token_matches[span_end_index - 1].end()
+        if any(start < existing.end and existing.start < end for existing in result):
+            continue
+        result.append(
+            NumericEvidence(
+                value=quantity,
+                unit=normalize_unit(raw_unit) if raw_unit != "%" else "%",
+                raw=normalized[start:end],
+                start=start,
+                end=end,
+            )
+        )
+    return sorted(result, key=lambda evidence: (evidence.start, evidence.end))
 
 
 def remove_phrase_overlap(source_text: str, phrase: str) -> str:

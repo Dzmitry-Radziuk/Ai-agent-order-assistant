@@ -29,13 +29,12 @@ from restaurant_bot.domain.models import (
 )
 from restaurant_bot.domain.text import normalize_text
 from restaurant_bot.domain.units import UNIT_ALIASES, normalize_unit
-from restaurant_bot.parsing.numeric_ranges import numeric_range_spans
-from restaurant_bot.parsing.products import parse_product_lines
-from restaurant_bot.parsing.quantities import (
-    has_explicit_order_marker,
-    has_explicit_order_quantity,
-    parse_quantity_unit,
+from restaurant_bot.orders.quantity_provenance import (
+    QuantityProvenance,
+    reconcile_order_quantity_evidence,
 )
+from restaurant_bot.parsing.numeric_ranges import numeric_range_spans
+from restaurant_bot.parsing.quantities import has_explicit_order_marker
 
 
 class CatalogResolutionService:
@@ -292,19 +291,21 @@ class CatalogResolutionService:
     ) -> None:
         """Удаляет факты каталога из количества и комментария до решения."""
         product_name = candidate.name if candidate is not None else ""
-        if item.quantity is not None and item.unit and not item.quantity_source:
-            quantity_text = f"{item.quantity:g} {item.unit}"
-            explicit_order = has_explicit_order_quantity(item.source_line, item.quantity)
-            if (
-                has_compatible_numeric_characteristics(quantity_text, product_name)
-                and (item.packaging_role == "catalog_attribute" or not explicit_order)
-            ) or (
-                not explicit_order
-                and item.source_line
-                and normalize_text(item.source_line) == normalize_text(product_name)
-            ):
+        if item.quantity is not None and item.unit and candidate is not None and item.source_line:
+            authorization = reconcile_order_quantity_evidence(
+                item.source_line or item.source_query,
+                item.quantity,
+                item.unit,
+                quantity_source=item.quantity_source,
+                catalog_name=product_name,
+                packaging_role=item.packaging_role,
+            )
+            if authorization.provenance is not QuantityProvenance.ORDER:
                 item.quantity = None
                 item.unit = ""
+            else:
+                item.quantity = authorization.quantity
+                item.unit = authorization.unit
         item.comment = remove_catalog_fact_comments(
             item.comment,
             item.source_query,
@@ -318,51 +319,19 @@ class CatalogResolutionService:
     @staticmethod
     def _reconcile_quantity_with_catalog_name(item: CartItem, product_name: str) -> None:
         """Отделяет количество заказа от фасовки в имени каталога."""
-        if item.quantity_source:
+        if item.quantity is None or not item.source_line:
             return
-        if (
-            item.quantity is not None
-            and item.source_line
-            and normalize_text(item.source_line) == normalize_text(product_name)
-            and not has_explicit_order_quantity(item.source_line, item.quantity)
-        ):
+        authorization = reconcile_order_quantity_evidence(
+            item.source_line or item.source_query,
+            item.quantity,
+            item.unit,
+            quantity_source=item.quantity_source,
+            catalog_name=product_name,
+            packaging_role=item.packaging_role,
+        )
+        if authorization.provenance is not QuantityProvenance.ORDER:
             item.quantity = None
             item.unit = ""
-            return
-        if numeric_range_spans(item.source_line):
-            parsed_source = parse_product_lines(item.source_line)
-            if len(parsed_source) == 1:
-                parsed_item = parsed_source[0]
-                if not has_explicit_order_quantity(item.source_line, item.quantity):
-                    item.quantity = parsed_item.quantity
-                    item.unit = parsed_item.unit if parsed_item.quantity is not None else ""
-                return
-            # Общая строка нескольких товаров уже обработана parser-ом.
-            return
-        source_tokens = re.findall(r"[a-zа-яё0-9%]+", normalize_text(item.source_line), flags=re.I)
-        product_tokens = re.findall(r"[a-zа-яё0-9%]+", normalize_text(product_name), flags=re.I)
-        if not source_tokens or not product_tokens or len(source_tokens) < len(product_tokens):
-            return
-
-        product_start = next(
-            (
-                index
-                for index in range(len(source_tokens) - len(product_tokens) + 1)
-                if source_tokens[index : index + len(product_tokens)] == product_tokens
-            ),
-            None,
-        )
-        if product_start is None:
-            return
-
-        before = " ".join(source_tokens[:product_start])
-        after = " ".join(source_tokens[product_start + len(product_tokens) :])
-        explicit_quantity: tuple[float | None, str] = (None, "")
-        for outside_name in (after, before):
-            quantity, unit = parse_quantity_unit(outside_name)
-            if quantity is not None:
-                explicit_quantity = (quantity, unit)
-                break
-
-        if item.quantity is None and explicit_quantity[0] is not None:
-            item.quantity, item.unit = explicit_quantity
+        else:
+            item.quantity = authorization.quantity
+            item.unit = authorization.unit

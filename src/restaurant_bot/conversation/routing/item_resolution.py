@@ -5,6 +5,10 @@ from __future__ import annotations
 import re
 
 from restaurant_bot.conversation.routing.contracts import CompatibilityAction, CompatibilityDecision
+from restaurant_bot.conversation.selection import (
+    CandidateReferenceStatus,
+    resolve_candidate_reference,
+)
 from restaurant_bot.domain.models import (
     CartItem,
     ConversationState,
@@ -116,11 +120,28 @@ def evaluate_candidate_selection(
         return CompatibilityDecision(CompatibilityAction.REJECT)
 
     if command.intent is Intent.ADD_ITEMS:
+        source_text = command.text or (
+            command.items[0].source_line if command.items else item.source_line or item.source_query
+        )
+        reference = resolve_candidate_reference(item, source_text)
+        if reference.status is CandidateReferenceStatus.UNIQUE:
+            return CompatibilityDecision(CompatibilityAction.CONTINUE)
+        if reference.status is CandidateReferenceStatus.AMBIGUOUS:
+            return CompatibilityDecision(CompatibilityAction.AMBIGUOUS)
         if has_concrete_new_items(command):
             return CompatibilityDecision(CompatibilityAction.INTERRUPT)
         return CompatibilityDecision(CompatibilityAction.AMBIGUOUS)
 
-    if command.intent in {Intent.UNKNOWN, Intent.CLARIFY_CURRENT, Intent.CANCEL}:
+    if command.intent is Intent.UNKNOWN:
+        source_text = command.text or item.source_line or item.source_query
+        reference = resolve_candidate_reference(item, source_text)
+        if reference.status is CandidateReferenceStatus.UNIQUE:
+            return CompatibilityDecision(CompatibilityAction.CONTINUE)
+        if reference.status is CandidateReferenceStatus.AMBIGUOUS:
+            return CompatibilityDecision(CompatibilityAction.AMBIGUOUS)
+        return CompatibilityDecision(CompatibilityAction.AMBIGUOUS)
+
+    if command.intent in {Intent.CLARIFY_CURRENT, Intent.CANCEL}:
         return CompatibilityDecision(CompatibilityAction.AMBIGUOUS)
     return CompatibilityDecision(CompatibilityAction.INTERRUPT)
 
