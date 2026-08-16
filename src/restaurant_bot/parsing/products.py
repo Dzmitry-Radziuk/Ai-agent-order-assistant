@@ -16,7 +16,11 @@ from restaurant_bot.parsing.packaging import (
     _single_product_packaging_item,
     _spoken_measurement_pair,
 )
-from restaurant_bot.parsing.quantities import _is_standalone_quantity, shared_quantity_phrase
+from restaurant_bot.parsing.quantities import (
+    _is_standalone_quantity,
+    has_explicit_order_marker,
+    shared_quantity_phrase,
+)
 
 
 def _query_with_unmarked_tail(name: str, tail: str) -> str:
@@ -44,17 +48,7 @@ def _prepare_product_lines(text: str, unit_pattern: str) -> tuple[str, list[str]
     if not source:
         return source, []
     lines = [clean_text(line) for line in re.split(r"\n+", source) if clean_text(line)]
-    if (
-        len(lines) == 1
-        and source.count(",") >= 2
-        and not re.search(r"[.!?]", source)
-        and _spoken_measurement_pair(source, unit_pattern) is None
-    ):
-        comma_parts = [
-            clean_text(line) for line in re.split(r"(?<!\d),(?!\d)", source) if clean_text(line)
-        ]
-        if not any(_is_standalone_quantity(part) for part in comma_parts):
-            lines = comma_parts
+    # Запятая внутри одной строки не подтверждает границу товара.
     return source, lines
 
 
@@ -71,6 +65,13 @@ def _build_product_line_patterns(unit_pattern: str) -> _ProductLinePatterns:
     )
     packaging = re.compile(
         rf"(?:"
+        rf"\d+(?:[,.]\d+)?\s*(?:{unit_pattern})\s*/\s*(?:"
+        rf"\d+(?:[,.]\d+)?\s*(?:{unit_pattern})|"
+        rf"(?:кор\w*|короб\w*|упак\w*|ящик\w*)"
+        rf")"
+        rf"(?:\s*/\s*(?:\d+(?:[,.]\d+)?\s*(?:{unit_pattern})|"
+        rf"(?:кор\w*|короб\w*|упак\w*|ящик\w*)))*"
+        rf"|"
         rf"\d+(?:[,.]\d+)?\s*(?:{unit_pattern})\s*[*xх×]\s*\d+(?:[,.]\d+)?"
         rf"(?:\s*\(\s*~?\s*\d+(?:[,.]\d+)?\s*(?:{unit_pattern})\s*\))?"
         rf"|"
@@ -131,6 +132,7 @@ def _catalog_measurement_item(
     source_line: str,
     quantity_marks: list[re.Match[str]],
     has_explicit_order_lead: bool,
+    has_packaging_span: bool,
 ) -> ExtractedItem | None:
     """Собирает позицию с каталожной мерой вместо количества заказа."""
     if (
@@ -156,6 +158,15 @@ def _catalog_measurement_item(
             packaging_text=clean_text(mark.group(0)),
             packaging_role="catalog_attribute",
             packaging_confidence=0.9,
+        )
+    if len(quantity_marks) == 1 and has_packaging_span and not has_explicit_order_lead:
+        mark = quantity_marks[0]
+        return ExtractedItem(
+            product_query=stripped,
+            source_line=source_line,
+            packaging_text=clean_text(mark.group(0)),
+            packaging_role="catalog_attribute",
+            packaging_confidence=0.85,
         )
     return None
 
@@ -422,7 +433,7 @@ def _parse_product_line(
             normalize_text(line),
             flags=re.I,
         )
-    )
+    ) or has_explicit_order_marker(line)
     stripped = re.sub(r"^(?:добавь|добавить|закажи|заказать|нужно|надо)\s+", "", line, flags=re.I)
     if _is_standalone_quantity(stripped):
         return []
@@ -446,6 +457,7 @@ def _parse_product_line(
         line,
         quantity_marks,
         has_explicit_order_lead,
+        any("/" in stripped[start:end] for start, end in packaging_spans),
     )
     if catalog_item is not None:
         return [catalog_item]

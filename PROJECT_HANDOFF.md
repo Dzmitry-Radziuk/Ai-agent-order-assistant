@@ -1,14 +1,15 @@
 # PROJECT HANDOFF
 
-Актуально для ветки `decompose_bot` после добавления venue-level запросов к истории
-заявок 2026-08-16. Git SHA текущей версии документа нужно получать командой
+Актуально для ветки `decompose_bot` после исправления границы сложных каталожных
+позиций 2026-08-16. Git SHA текущей версии документа нужно получать командой
 `git rev-parse HEAD`.
 
 ## Текущая задача
 
-Завершить проверенный функциональный этап запросов к истории заявок и перейти
-только к подготовке контролируемого Telegram pilot. Новую общую декомпозицию и
-production refactor не начинать.
+Завершить проверенный функциональный этап PRODUCT-BOUNDARY-01: отделить границы
+сложной каталожной позиции, фасовку, количество заказа и комментарий. После этого
+пересобрать контейнеры и перейти только к подготовке контролируемого Telegram
+pilot. Новую общую декомпозицию и production refactor не начинать.
 
 Подробный verdict и scores:
 [`docs/INDEPENDENT_ENGINEERING_AUDIT.md`](docs/INDEPENDENT_ENGINEERING_AUDIT.md).
@@ -17,11 +18,11 @@ production refactor не начинать.
 
 - Ветка: `decompose_bot`.
 - Remote: только GitHub `origin` → `Dzmitry-Radziuk/test_bot`.
-- Полный suite после MODAL-AUTHORITY-01: `1527 passed` (без падений; запуск с
+- Полный suite после PRODUCT-BOUNDARY-01: `1533 passed` (без падений; запуск с
   локальным `--basetemp`, один предупреждающий `PytestCacheWarning` не связан с
   приложением).
 - Mypy: `159 source files, no issues`.
-- Ruff check: pass; Ruff format: `315 files already formatted`.
+- Ruff check: pass; Ruff format: `316 files already formatted`.
 - Compileall и `git diff --check`: pass.
 - После refresh Markdown checker проверил 38 файлов.
 - Scenario catalog вырос до 41 содержательного сценария; все mappings
@@ -92,6 +93,13 @@ production refactor не начинать.
   `AWAIT_UNIT_QUANTITY`, а выбор кандидата остаётся отдельным контекстом.
 - После PROD-SEMANTICS-01 полный suite: `1477 passed`; mypy, Ruff, форматирование,
   Markdown links, каталог сценариев, compileall и `git diff --check` прошли.
+- PRODUCT-BOUNDARY-01: запятая больше не считается границей товара без отдельного
+  доказательства; цепочки `число единица/число единица` и `число единица/кор` остаются
+  признаками каталога. Полная исходная строка сохраняется в `source_line`, а каталог
+  участвует в окончательной сверке количества и комментария. Неподтверждённое
+  `quantity_source` не авторизует заказ автоматически; независимые photo/order-entry
+  источники сохраняются. Добавлены шесть regression-тестов для pepper, mustard,
+  повторяющихся чисел и смешанных комментариев.
 
 Финальные post-doc проверки зелёные. Documentation impact checker после commit
 также прошёл; код истории сопровождается обновлённым каталогом сценариев.

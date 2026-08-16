@@ -6,6 +6,7 @@ import re
 from collections.abc import Sequence
 from dataclasses import dataclass
 
+from restaurant_bot.catalog.evidence import NumericEvidence, numeric_evidence
 from restaurant_bot.conversation.selection import contains_score
 from restaurant_bot.domain.models import (
     CartItem,
@@ -380,6 +381,58 @@ def remove_catalog_fact_comments(
 ) -> str:
     """Убирает из комментария характеристики, подтверждённые каталогом."""
 
+    def remove_catalog_numeric_fragments(value: str) -> str:
+        """Удаляет только числовые фрагменты, подтверждённые названием каталога."""
+        normalized = normalize_text(value)
+        catalog_numbers = numeric_evidence(product_name)
+        source_numbers = numeric_evidence(normalized)
+        if not catalog_numbers or not source_numbers:
+            return value
+
+        def same_number(left: NumericEvidence, right: NumericEvidence) -> bool:
+            """Сравнивает число, диапазон и единицу измерения."""
+            if abs(left.value - right.value) > 1e-9:
+                return False
+            if (left.upper_value is None) != (right.upper_value is None):
+                return False
+            if left.upper_value is not None:
+                assert right.upper_value is not None
+                if abs(left.upper_value - right.upper_value) > 1e-9:
+                    return False
+            return (
+                not left.unit
+                or not right.unit
+                or normalize_unit(left.unit) == normalize_unit(right.unit)
+            )
+
+        intervals: list[tuple[int, int]] = []
+        for source_number in source_numbers:
+            if not any(
+                same_number(source_number, catalog_number) for catalog_number in catalog_numbers
+            ):
+                continue
+            start, end = source_number.start, source_number.end
+            if source_number.unit:
+                unit_pattern = "|".join(
+                    sorted((re.escape(unit) for unit in UNIT_ALIASES), key=len, reverse=True)
+                )
+                unit_match = re.match(rf"\s*(?:{unit_pattern})", normalized[end:], flags=re.I)
+                if unit_match:
+                    end += unit_match.end()
+            prefix = normalized[:start]
+            connector = re.search(r"(?:\s+(?:на|и|/)\s*)+$", prefix, flags=re.I)
+            if connector:
+                start = connector.start()
+            elif re.fullmatch(r"\s*(?:на|и|/)\s*", prefix, flags=re.I):
+                start = 0
+            intervals.append((start, end))
+        if not intervals:
+            return value
+        masked = list(normalized)
+        for start, end in intervals:
+            masked[start:end] = [" "] * (end - start)
+        return clean_text("".join(masked)).strip(" ,;:.-")
+
     def canonical_words(value: str) -> list[str]:
         """Канонизирует числа и подпись «номер» для сравнения с каталогом."""
         words = re.findall(r"[a-zа-яё0-9]+", normalize_text(value), flags=re.I)
@@ -478,6 +531,14 @@ def remove_catalog_fact_comments(
         ):
             kept.append(cleaned)
             continue
+        numeric_residue = remove_catalog_numeric_fragments(cleaned)
+        if numeric_residue != cleaned:
+            cleaned = numeric_residue
+            if not cleaned:
+                continue
+            part_words = canonical_words(cleaned)
+            normalized_part_words = [packaging_aliases.get(word, word) for word in part_words]
+            part_compact = compact_words(cleaned)
         all_catalog_facts = all(
             word in catalog_facts
             or word in query_facts

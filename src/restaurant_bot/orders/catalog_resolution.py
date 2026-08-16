@@ -6,6 +6,7 @@ import re
 
 from restaurant_bot.catalog.evidence import (
     has_complete_query_evidence,
+    numeric_evidence,
     query_evidence_tokens,
     remove_phrase_overlap,
 )
@@ -37,6 +38,21 @@ from restaurant_bot.parsing.numeric_ranges import numeric_range_spans
 from restaurant_bot.parsing.quantities import has_explicit_order_marker
 
 
+def _catalog_search_query(item: CartItem) -> str:
+    """Собирает поисковую строку из полного источника без комментария."""
+    source_line = item.source_line.strip()
+    source_query = item.source_query.strip()
+    if (
+        source_line
+        and source_query
+        and not item.quantity_source
+        and normalize_text(source_query) in normalize_text(source_line)
+        and not numeric_evidence(source_query)
+    ):
+        return remove_phrase_overlap(source_line, item.comment)
+    return remove_phrase_overlap(source_query or source_line, item.comment)
+
+
 class CatalogResolutionService:
     """Применяет найденный каталог к позициям черновика заказа."""
 
@@ -55,7 +71,7 @@ class CatalogResolutionService:
         """Ищет кандидатов и применяет безопасное решение к позиции."""
         search_backend = catalog_search or ListCatalogSearch(self.catalog_resolver, catalog or ())
         self._remove_unanchored_supplier_hint(item)
-        search_query = remove_phrase_overlap(item.source_query, item.comment)
+        search_query = _catalog_search_query(item)
         search = search_backend.search(
             search_query,
             supplier_hint=item.supplier_hint,
@@ -84,7 +100,7 @@ class CatalogResolutionService:
                 item.comment = merge_comments(item.comment, split.supplier_comment)
                 item.comment_source = CommentSource.EXPLICIT_MARKER
                 item.source_query = split.product_query
-                search_query = remove_phrase_overlap(item.source_query, item.comment)
+                search_query = _catalog_search_query(item)
                 search = search_backend.search(
                     search_query,
                     supplier_hint=item.supplier_hint,
@@ -100,16 +116,16 @@ class CatalogResolutionService:
         reconciliation_candidate: Candidate | None = None
         if candidates:
             primary = candidates[0]
-            primary_evidence = query_evidence_tokens(item.source_query, primary.name)
+            primary_evidence = query_evidence_tokens(search_query, primary.name)
             primary_decision = self.catalog_resolver.decide(
-                item.source_query,
+                search_query,
                 candidates,
                 comment=item.comment,
                 packaging_text=item.packaging_text,
                 packaging_role=item.packaging_role,
             )
             if (
-                has_complete_query_evidence(item.source_query, primary.name)
+                has_complete_query_evidence(search_query, primary.name)
                 or primary_decision is CatalogDecision.AUTO_SELECT
                 or (len(candidates) == 1 and len(primary_evidence) >= 2)
             ):
@@ -231,6 +247,8 @@ class CatalogResolutionService:
         if item.quantity is None or not item.unit or item.quantity_source:
             return None
         source = normalize_text(item.source_line)
+        if not source:
+            source = normalize_text(item.source_query)
         if not source or has_explicit_order_marker(source) or numeric_range_spans(source):
             return None
 
@@ -291,12 +309,23 @@ class CatalogResolutionService:
     ) -> None:
         """Удаляет факты каталога из количества и комментария до решения."""
         product_name = candidate.name if candidate is not None else ""
-        if item.quantity is not None and item.unit and candidate is not None and item.source_line:
+        preserve_source_free_quantity = (
+            not item.source_line
+            and not item.quantity_source
+            and has_complete_query_evidence(item.source_query, product_name)
+        )
+        if (
+            item.quantity is not None
+            and item.unit
+            and candidate is not None
+            and not preserve_source_free_quantity
+        ):
             authorization = reconcile_order_quantity_evidence(
                 item.source_line or item.source_query,
                 item.quantity,
                 item.unit,
                 quantity_source=item.quantity_source,
+                order_entry_type=item.order_entry_type,
                 catalog_name=product_name,
                 packaging_role=item.packaging_role,
             )
@@ -319,13 +348,19 @@ class CatalogResolutionService:
     @staticmethod
     def _reconcile_quantity_with_catalog_name(item: CartItem, product_name: str) -> None:
         """Отделяет количество заказа от фасовки в имени каталога."""
-        if not item.source_line:
+        if (
+            not item.source_line
+            and not item.quantity_source
+            and item.quantity is not None
+            and has_complete_query_evidence(item.source_query, product_name)
+        ):
             return
         authorization = reconcile_order_quantity_evidence(
             item.source_line or item.source_query,
             item.quantity,
             item.unit,
             quantity_source=item.quantity_source,
+            order_entry_type=item.order_entry_type,
             catalog_name=product_name,
             packaging_role=item.packaging_role,
         )

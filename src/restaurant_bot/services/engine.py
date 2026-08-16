@@ -1198,6 +1198,7 @@ class ConversationEngine:
                 extracted.quantity,
                 extracted.unit,
                 quantity_source=extracted.quantity_source,
+                order_entry_type=extracted.order_entry_type,
                 catalog_name=outcome.candidate.name,
                 packaging_role=extracted.packaging_role,
             )

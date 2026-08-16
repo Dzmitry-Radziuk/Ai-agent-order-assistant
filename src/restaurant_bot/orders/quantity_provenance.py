@@ -28,6 +28,37 @@ class QuantityAuthorization:
     provenance: QuantityProvenance
 
 
+_INDEPENDENT_QUANTITY_SOURCES = frozenset(
+    {
+        "department_columns",
+        "handwritten",
+        "handwritten_correction",
+        "photo_order_entry",
+    }
+)
+_INDEPENDENT_ORDER_ENTRY_TYPES = frozenset(
+    {
+        "typed",
+        "typed_order_entry",
+        "handwritten",
+        "handwritten_correction",
+    }
+)
+
+
+def _has_independent_order_provenance(
+    quantity_source: str,
+    order_entry_text: str,
+    order_entry_type: str,
+) -> bool:
+    """Проверяет независимое подтверждение количества заказа."""
+    return bool(
+        str(order_entry_text or "").strip()
+        or str(order_entry_type or "").strip().casefold() in _INDEPENDENT_ORDER_ENTRY_TYPES
+        or str(quantity_source or "").strip().casefold() in _INDEPENDENT_QUANTITY_SOURCES
+    )
+
+
 def _same_evidence(left: NumericEvidence, right: NumericEvidence) -> bool:
     """Сравнивает два числовых свидетельства после нормализации."""
     if abs(left.value - right.value) > 1e-9:
@@ -84,6 +115,8 @@ def reconcile_order_quantity_evidence(
     proposed_unit: str = "",
     *,
     quantity_source: str = "",
+    order_entry_text: str = "",
+    order_entry_type: str = "",
     catalog_name: str = "",
     packaging_role: str = "none",
 ) -> QuantityAuthorization:
@@ -91,7 +124,15 @@ def reconcile_order_quantity_evidence(
     normalized_unit = normalize_unit(proposed_unit)
     if quantity_source == "packaging":
         return QuantityAuthorization(None, "", QuantityProvenance.CATALOG_IDENTITY)
-    if quantity_source and quantity_source != "packaging":
+    if (
+        quantity_source
+        and quantity_source != "packaging"
+        and _has_independent_order_provenance(
+            quantity_source,
+            order_entry_text,
+            order_entry_type,
+        )
+    ):
         if proposed_quantity is None:
             return QuantityAuthorization(None, "", QuantityProvenance.NONE)
         return QuantityAuthorization(proposed_quantity, normalized_unit, QuantityProvenance.ORDER)
@@ -121,7 +162,7 @@ def reconcile_order_quantity_evidence(
     if proposed_quantity is None:
         return QuantityAuthorization(None, "", QuantityProvenance.NONE)
     if not source:
-        return QuantityAuthorization(proposed_quantity, normalized_unit, QuantityProvenance.ORDER)
+        return QuantityAuthorization(None, "", QuantityProvenance.NONE)
 
     source_entries = numeric_evidence(source)
     if not source_entries:
