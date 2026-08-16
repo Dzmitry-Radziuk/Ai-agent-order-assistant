@@ -72,7 +72,7 @@ def _parse_edit_comment(text: str) -> ParsedCommand | None:
     # Полная очистка пользовательских комментариев отделена от удаления
     # только order-фрагментов.
     if re.fullmatch(
-        rf"{remove_action}(?:(?:все|всё)\s+{noun}(?:у\s+всех\s+(?:товар\w*|позиц\w*))?|{noun}у\s+всех\s+(?:товар\w*|позиц\w*))",
+        rf"{remove_action}(?:(?:все|всё)\s+{noun}(?:(?:у\s+всех\s+(?:товар\w*|позиц\w*))|(?:из\s+(?:заявк\w*|заказ\w*)))?|{noun}у\s+всех\s+(?:товар\w*|позиц\w*))",
         normalized,
         re.I,
     ):
@@ -90,7 +90,7 @@ def _parse_edit_comment(text: str) -> ParsedCommand | None:
     # Явное удаление комментария конкретной позиции.
     remove_patterns = (
         re.compile(
-            rf"^{remove_action}{noun}(?:у|к|для)\s+(?P<target>.+)$",
+            rf"^{remove_action}(?:все\s+)?{noun}(?:у|к|для)\s+(?P<target>.+)$",
             re.I,
         ),
         re.compile(

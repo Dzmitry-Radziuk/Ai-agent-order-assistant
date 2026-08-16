@@ -99,6 +99,7 @@ def test_remove_all_comments_keeps_cart_and_catalog_bindings(settings) -> None: 
         "убери все комментарии",
         "очисти все комментарии",
         "удали все комментарии у всех товаров",
+        "удали все комментарии из заявки",
     ],
 )
 def test_remove_all_comment_variants_use_order_scope(text: str) -> None:
@@ -177,6 +178,7 @@ def test_remove_all_comments_without_comments_is_safe(settings) -> None:  # type
     ("text", "intent", "target"),
     [
         ("удали комментарий у огурцов", Intent.EDIT_COMMENT, "огурцов"),
+        ("удали все комментарии у горчицы", Intent.EDIT_COMMENT, "горчицы"),
         ("удали огурцы", Intent.REMOVE_ITEM, "огурцы"),
         ("удали все товары", Intent.REMOVE_ITEM, "все товары"),
     ],
