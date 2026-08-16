@@ -10,7 +10,11 @@ from typing import Protocol
 import structlog
 from openai import APIConnectionError, APITimeoutError, RateLimitError
 
-from restaurant_bot.conversation.comments import comment_scope_items, reconcile_comment_target
+from restaurant_bot.conversation.comments import (
+    comment_scope_items,
+    reconcile_comment_target,
+    resolve_comment_scope_text,
+)
 from restaurant_bot.conversation.routing.contracts import (
     CompatibilityAction,
     CompatibilityContext,
@@ -32,13 +36,13 @@ from restaurant_bot.input.telegram_callbacks import parse_callback
 from restaurant_bot.input.voice_policy import match_visible_action
 from restaurant_bot.integrations.openai_client import CommentScopeDecision
 from restaurant_bot.parsing.commands.api import enrich_command, infer_intent
-from restaurant_bot.parsing.comment_scope import (
-    has_explicit_global_comment_scope,
-    parse_comment_scope_text,
-)
+from restaurant_bot.parsing.comment_scope import has_explicit_global_comment_scope
 from restaurant_bot.parsing.delivery_language import has_delivery_wish_shape
 from restaurant_bot.parsing.history import parse_history_query, requires_history_context
-from restaurant_bot.parsing.semantic_routing import protect_confirmed_command
+from restaurant_bot.parsing.semantic_routing import (
+    normalize_comment_proposal,
+    protect_confirmed_command,
+)
 
 logger = structlog.get_logger(__name__)
 _OPENAI_TRANSIENT_ERRORS = (APIConnectionError, APITimeoutError, RateLimitError)
@@ -139,8 +143,8 @@ class TelegramInputInterpreter:
         quantity_reply = self._parse_quantity_modal_reply(text, state)
         if quantity_reply is not None:
             return quantity_reply
-        if state.pending_comment_items and parse_comment_scope_text(
-            text, len(comment_scope_items(state))
+        if state.pending_comment_items and resolve_comment_scope_text(
+            text, comment_scope_items(state)
         ):
             return self._parse_pending_comment_scope(text, state)
         if not state.pending_comment_items:
@@ -176,6 +180,7 @@ class TelegramInputInterpreter:
             if requires_history_context(text):
                 return ParsedCommand(intent=Intent.UNKNOWN, text=text)
         parsed = self.provider.parse_text(text)
+        parsed = normalize_comment_proposal(text, parsed)
         parsed = self._normalize_explicit_comment(text, parsed, state)
         if proven_mutation:
             protected = protect_confirmed_command(deterministic, parsed)
@@ -358,7 +363,7 @@ class TelegramInputInterpreter:
             elif target == "cancel":
                 action = "cancel"
         else:
-            deterministic_scope = parse_comment_scope_text(text, item_count)
+            deterministic_scope = resolve_comment_scope_text(text, scope_items)
             if deterministic_scope is not None:
                 action, target_indexes, confidence = deterministic_scope
             else:
@@ -407,8 +412,13 @@ class TelegramInputInterpreter:
         item = state.current_item()
         if (
             item is None
-            or item.status is not ItemStatus.MISSING_QTY
             or state.stage is not SessionStage.AWAIT_UNIT_QUANTITY
+            or item.status
+            not in {
+                ItemStatus.MISSING_QTY,
+                ItemStatus.UNIT_MISMATCH,
+                ItemStatus.DUPLICATE_PENDING,
+            }
         ):
             return None
         normalized = normalize_text(text).strip(" .,;:!?—–-")
@@ -419,11 +429,13 @@ class TelegramInputInterpreter:
         quantity, unit = parse_quantity_unit(normalized)
         if quantity is None:
             return None
+        if item.status is ItemStatus.UNIT_MISMATCH and unit:
+            return None
         return ParsedCommand(
             intent=Intent.EDIT_QUANTITY,
             text=text,
             edit_quantity=quantity,
-            edit_unit=unit,
+            edit_unit=unit or item.catalog_unit or item.unit,
         )
 
     @staticmethod

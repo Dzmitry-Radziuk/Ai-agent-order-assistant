@@ -49,6 +49,7 @@ from restaurant_bot.parsing.commands.item_commands import has_explicit_add_items
 from restaurant_bot.parsing.comment_scope import has_explicit_global_comment_scope
 from restaurant_bot.parsing.numeric import to_float
 from restaurant_bot.parsing.numeric_ranges import numeric_range_spans
+from restaurant_bot.parsing.semantic_routing import normalize_comment_proposal
 
 __all__ = [
     "CommentBindingSchema",
@@ -322,12 +323,7 @@ class OpenAIService:
                 "retry_requested": retry_requested_for(text),
             }
         )
-        if command.global_comment and not command.items:
-            # A standalone request such as «добавь общий комментарий:
-            # желательно на завтра» изменяет текущий черновик. Это не запрос
-            # на добавление товаров, даже если детерминированный fallback
-            # разделил слова «комментарий» и «общий» на ложные позиции.
-            command = command.model_copy(update={"intent": Intent.ADD_ITEMS})
+        command = normalize_comment_proposal(text, command)
         if (
             command.intent == Intent.ADD_MORE
             and deterministic.intent == Intent.ADD_ITEMS

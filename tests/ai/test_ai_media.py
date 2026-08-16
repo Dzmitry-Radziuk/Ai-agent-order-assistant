@@ -993,8 +993,11 @@ def test_standalone_global_comment_is_not_replaced_by_fake_deterministic_items(
 
     command = service.parse_text("Добавь комментарий, желательно на завтра, общий.")
 
-    assert command.intent is Intent.ADD_ITEMS
-    assert command.global_comment == "желательно на завтра"
+    assert command.intent is Intent.EDIT_COMMENT
+    assert command.comment_action == "add"
+    assert command.comment_scope == "order"
+    assert command.comment_text == "желательно на завтра"
+    assert command.global_comment == ""
     assert command.items == []
 
 

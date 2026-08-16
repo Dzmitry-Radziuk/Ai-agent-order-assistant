@@ -218,3 +218,19 @@ TEXT / VOICE
 - `docs/archive/architecture/ARCHITECTURE_DECOMPOSITION.md`,
   `docs/archive/data-integrity/` и остальные block
   reports — исторические snapshots, не текущий roadmap.
+
+## PROD-SEMANTICS-01 — CORRECTIVE BLOCK
+
+Исправлены оставшиеся границы семантики комментариев и количества:
+
+- формы удаления комментария с предлогами «о», «об» и «про» остаются `EDIT_COMMENT`;
+- явный общий комментарий без товаров проходит как `EDIT_COMMENT` области `order`, а не как `ADD_ITEMS`;
+- область комментария разрешается только среди позиций текущего состояния: поддержаны named, ordinal, all, order и cancel; неоднозначный выбор безопасно приводит к уточнению;
+- голосовой транскрипт использует тот же `TelegramInputInterpreter.interpret_text`, что и текст;
+- bare quantity в `AWAIT_UNIT_QUANTITY` поддерживает `MISSING_QTY`, `UNIT_MISMATCH` и `DUPLICATE_PENDING`, применяя ожидаемую единицу каталога; явная единица в `UNIT_MISMATCH` сохраняет путь high-accuracy разбора;
+- candidate modal по-прежнему владеет числовым выбором вне quantity-modal;
+- комментарии, область комментария, история и quantity-modal завершаются до catalog resolution.
+
+Проверка после corrective-block: `1489 passed`, focused semantic/comment/voice набор — `89 passed`, mypy — `158 source files, no issues`, Ruff check и format — pass, Markdown links — `38 files`, scenario catalog — `41 сценарий`, compileall и `git diff --check` — pass.
+
+Изменения ограничены parsing, input interpretation, semantic routing, comment scope и regression tests. Схема базы данных, Alembic, callback protocol и Docker-конфигурация не менялись.

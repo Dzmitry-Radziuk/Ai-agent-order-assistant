@@ -8,6 +8,7 @@ from restaurant_bot.domain.models import Intent, ParsedCommand
 from restaurant_bot.domain.text import clean_text
 from restaurant_bot.parsing.commands.item_commands import clean_command_target
 from restaurant_bot.parsing.commands.normalization import normalize_command_text
+from restaurant_bot.parsing.comment_scope import has_explicit_global_comment_scope
 
 _COMMENT_NOUN_RE = r"(?:комментар\w*|примечан\w*)"
 _COMMENT_ACTION_RE = r"(?:добав\w*|внес\w*|запиш\w*|укаж\w*|измени\w*|поправ\w*)"
@@ -40,6 +41,14 @@ def _build_edit_comment(
     """Создаёт команду изменения комментария только с явным товаром и пожеланием."""
     target = clean_command_target(target)
     comment = clean_text(comment).strip(" ,;:-—–.!?")
+    if action == "add" and scope == "order":
+        comment = re.sub(r"(?:[,;:]|\s+)\s*общ\w*$", "", comment, flags=re.I).strip(" ,;:-—–.!?")
+        comment = re.sub(
+            r"\s+(?:для|ко|на)\s+(?:всей|всю|всего|весь)\s+(?:заявк\w*|заказ\w*)$",
+            "",
+            comment,
+            flags=re.I,
+        ).strip(" ,;:-—–.!?")
     if scope == "item" and not target:
         return None
     if action == "add" and (not comment or (require_wish and not _COMMENT_WISH_RE.search(comment))):
@@ -90,11 +99,11 @@ def _parse_edit_comment(text: str) -> ParsedCommand | None:
     # Явное удаление комментария конкретной позиции.
     remove_patterns = (
         re.compile(
-            rf"^{remove_action}(?:все\s+)?{noun}(?:у|к|для)\s+(?P<target>.+)$",
+            rf"^{remove_action}(?:все\s+)?{noun}(?:у|к|для|о|об|про)\s+(?P<target>.+)$",
             re.I,
         ),
         re.compile(
-            rf"^{remove_action}(?:у|к|для)\s+(?P<target>.+?)\s+{noun}$",
+            rf"^{remove_action}(?:у|к|для|о|об|про)\s+(?P<target>.+?)\s+{noun}$",
             re.I,
         ),
     )
@@ -112,13 +121,19 @@ def _parse_edit_comment(text: str) -> ParsedCommand | None:
             re.I,
         ),
         re.compile(
-            rf"^{_COMMENT_ACTION_RE}\s+общ\w*\s+{noun}(?::\s*|\s+)(?P<comment>.+)$",
+            rf"^{_COMMENT_ACTION_RE}\s+(?:в\s+)?общ\w*\s+{noun}(?::\s*|\s+)(?P<comment>.+)$",
+            re.I,
+        ),
+        re.compile(
+            rf"^{_COMMENT_ACTION_RE}\s+(?:в\s+)?{noun}(?::\s*|\s+)(?P<comment>.+)$",
             re.I,
         ),
     )
     for pattern in global_patterns:
         match = pattern.fullmatch(normalized)
         if match is not None:
+            if not has_explicit_global_comment_scope(source):
+                continue
             return _build_edit_comment(
                 "", match.group("comment"), source, scope="order", require_wish=False
             )

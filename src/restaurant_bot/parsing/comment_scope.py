@@ -17,10 +17,13 @@ def parse_comment_scope_text(
         return None
     if re.fullmatch(r"(?:не\s+добавля\w*|не\s+надо(?:\s+комментар\w*)?|отмен\w*)", normalized):
         return "cancel", [], 1.0
-    if re.search(r"(?:для|на|ко?)\s+(?:всей|всю|всем?)\s+(?:заявк\w*|заказ\w*)", normalized):
+    if re.search(
+        r"(?:для|на|ко?)\s+(?:всей|всю|всего|весь|всем?)\s+(?:заявк\w*|заказ\w*)",
+        normalized,
+    ):
         return "order", [], 1.0
     if re.fullmatch(
-        r"(?:для\s+)?(?:всех\s+товар\w*|ко\s+всем|для\s+обоих|обоим|обеим)",
+        r"(?:для\s+)?(?:всех(?:\s+этих)?\s+товар\w*|для\s+всех|ко\s+всем(?:\s+товар\w*)?|для\s+обоих|для\s+обеих|обоим|обеим)",
         normalized,
     ):
         return "items", list(range(item_count)), 1.0

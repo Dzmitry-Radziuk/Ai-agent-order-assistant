@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Sequence
 from dataclasses import dataclass
 
 from restaurant_bot.conversation.selection import contains_score
@@ -16,6 +17,7 @@ from restaurant_bot.domain.models import (
 from restaurant_bot.domain.text import clean_text, normalize_text
 from restaurant_bot.domain.units import UNIT_ALIASES, normalize_unit
 from restaurant_bot.parsing.comment_policy import comment_semantic_key
+from restaurant_bot.parsing.comment_scope import parse_comment_scope_text
 from restaurant_bot.parsing.number_words import NUMBER_WORDS
 
 
@@ -532,3 +534,55 @@ def comment_scope_items(state: ConversationState) -> list[ExtractedItem]:
         for item in comment_scope_existing_items(state)
     ]
     return existing + [item.model_copy(deep=True) for item in state.pending_comment_items]
+
+
+def resolve_comment_scope_text(
+    text: str,
+    scope_items: Sequence[ExtractedItem],
+) -> tuple[str, list[int], float] | None:
+    """Разрешает текстовую область комментария только среди показанных позиций."""
+    lexical = parse_comment_scope_text(text, len(scope_items))
+    if lexical is not None:
+        return lexical
+    normalized = normalize_text(text).strip(" .,;:!?—–-")
+    if not normalized:
+        return None
+    if re.fullmatch(r"(?:для|к|ко)\s+одн\w*\s+товар\w*", normalized):
+        return "ambiguous", [], 0.0
+
+    ordinal_patterns = (
+        (r"перв\w*", 0),
+        (r"втор\w*", 1),
+        (r"трет\w*", 2),
+        (r"четверт\w*", 3),
+        (r"пят\w*", 4),
+    )
+    ordinal_prefix = r"(?:(?:только\s+)?(?:для|к|ко)\s+|только\s+)?"
+    for pattern, index in ordinal_patterns:
+        if re.fullmatch(
+            rf"{ordinal_prefix}{pattern}(?:\s+товар\w*)?",
+            normalized,
+        ):
+            if index >= len(scope_items):
+                return "ambiguous", [], 0.0
+            return "items", [index], 1.0
+
+    target_match = re.fullmatch(
+        r"(?:только\s+)?(?:для|к|ко)\s+(?P<target>.+)",
+        normalized,
+    )
+    if target_match is None:
+        return None
+    target = re.sub(r"\s+товар\w*$", "", target_match.group("target")).strip()
+    if not target:
+        return "ambiguous", [], 0.0
+    if re.search(r"\b(?:перв|втор|трет|четверт|пят)\w*\s+и\s+", target):
+        return None
+    scores = [
+        contains_score(normalize_text(target), normalize_text(item.product_query))
+        for item in scope_items
+    ]
+    best_score = max(scores, default=0)
+    if best_score <= 0 or scores.count(best_score) != 1:
+        return "ambiguous", [], 0.0
+    return "items", [scores.index(best_score)], 1.0
