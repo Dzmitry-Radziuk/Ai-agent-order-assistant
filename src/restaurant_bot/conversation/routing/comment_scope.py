@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from restaurant_bot.conversation.comments import has_pending_comment_scope
 from restaurant_bot.conversation.routing.contracts import CompatibilityAction, CompatibilityDecision
 from restaurant_bot.domain.models import ConversationState, Intent, ParsedCommand
 
@@ -11,7 +12,7 @@ def evaluate_comment_scope(
     state: ConversationState,
 ) -> CompatibilityDecision:
     """Разделяет ответ области комментария и независимый intent."""
-    if not state.pending_comment_items:
+    if not has_pending_comment_scope(state):
         return CompatibilityDecision(CompatibilityAction.NOT_APPLICABLE)
 
     if command.comment_scope_action in {"items", "order", "cancel"}:

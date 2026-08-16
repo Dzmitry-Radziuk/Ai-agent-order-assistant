@@ -12,6 +12,7 @@ from openai import APIConnectionError, APITimeoutError, RateLimitError
 
 from restaurant_bot.conversation.comments import (
     comment_scope_items,
+    has_pending_comment_scope,
     reconcile_comment_target,
     resolve_comment_scope_text,
 )
@@ -36,7 +37,7 @@ from restaurant_bot.input.telegram_callbacks import parse_callback
 from restaurant_bot.input.voice_policy import match_visible_action
 from restaurant_bot.integrations.openai_client import CommentScopeDecision
 from restaurant_bot.parsing.commands.api import enrich_command, infer_intent
-from restaurant_bot.parsing.comment_scope import has_explicit_global_comment_scope
+from restaurant_bot.parsing.comment_scope import has_explicit_order_comment_scope
 from restaurant_bot.parsing.delivery_language import has_delivery_wish_shape
 from restaurant_bot.parsing.history import parse_history_query, requires_history_context
 from restaurant_bot.parsing.semantic_routing import (
@@ -112,7 +113,7 @@ class TelegramInputInterpreter:
         """Выбирает семантический путь для нормализованного Telegram-события."""
         if event.input_type == InputKind.CALLBACK and event.callback_data.startswith("v2:review"):
             return enrich_command("", parse_callback(event.callback_data))
-        if event.input_type == InputKind.CALLBACK and state.pending_comment_items:
+        if event.input_type == InputKind.CALLBACK and has_pending_comment_scope(state):
             return self._parse_pending_comment_scope(event.callback_data, state)
         if event.input_type == InputKind.CALLBACK:
             return enrich_command("", parse_callback(event.callback_data))
@@ -143,11 +144,11 @@ class TelegramInputInterpreter:
         quantity_reply = self._parse_quantity_modal_reply(text, state)
         if quantity_reply is not None:
             return quantity_reply
-        if state.pending_comment_items and resolve_comment_scope_text(
+        if has_pending_comment_scope(state) and resolve_comment_scope_text(
             text, comment_scope_items(state)
         ):
             return self._parse_pending_comment_scope(text, state)
-        if not state.pending_comment_items:
+        if not has_pending_comment_scope(state):
             callback_data = self._match_visible_action(text, state)
             if callback_data:
                 return enrich_command("", parse_callback(callback_data)).model_copy(
@@ -193,13 +194,12 @@ class TelegramInputInterpreter:
         review_command = self._parse_sheet_review_command(text, parsed, state)
         if review_command is not None:
             return review_command
-        if (
-            state.pending_comment_items
-            and self.state_compatibility_policy.should_try_contextual_fallback(
-                state,
-                parsed,
-                CompatibilityContext.COMMENT_SCOPE,
-            )
+        if has_pending_comment_scope(
+            state
+        ) and self.state_compatibility_policy.should_try_contextual_fallback(
+            state,
+            parsed,
+            CompatibilityContext.COMMENT_SCOPE,
         ):
             return self._parse_pending_comment_scope(text, state)
         if parsed.intent is Intent.UNKNOWN or (
@@ -297,7 +297,7 @@ class TelegramInputInterpreter:
             return parsed
         if deterministic.comment_scope == "order":
             return deterministic
-        if has_explicit_global_comment_scope(text):
+        if has_explicit_order_comment_scope(text):
             return deterministic.model_copy(
                 update={"comment_target_query": "", "comment_scope": "order"}
             )

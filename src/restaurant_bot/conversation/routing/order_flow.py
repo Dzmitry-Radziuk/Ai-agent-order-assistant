@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
+from restaurant_bot.conversation.comments import has_pending_comment_scope
 from restaurant_bot.conversation.routing.contracts import (
     CompatibilityAction,
     CompatibilityContext,
@@ -285,7 +286,7 @@ def can_use_add_more_context(state: ConversationState) -> bool:
     if state.stage is not SessionStage.AWAIT_ADD_MORE_CONFIRM:
         return False
     if (
-        state.pending_comment_items
+        has_pending_comment_scope(state)
         or state.current_issue_item_id
         or state.pending_product_add_request_id
         or state.manual_item_index is not None
@@ -312,7 +313,7 @@ def can_use_submit_confirm_context(state: ConversationState) -> bool:
     if state.stage is not SessionStage.AWAIT_SUBMIT_CONFIRM or state.review_mode != "cart":
         return False
     if (
-        state.pending_comment_items
+        has_pending_comment_scope(state)
         or state.current_issue_item_id
         or state.pending_product_add_request_id
         or state.manual_item_index is not None

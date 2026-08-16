@@ -19,6 +19,7 @@ from restaurant_bot.conversation.comments import (
     clear_all_active_comments,
     clear_item_comment,
     comment_scope_items,
+    has_pending_comment_scope,
     reconcile_comment_target,
     remove_cart_comment_shadows,
     remove_order_comments,
@@ -350,7 +351,7 @@ class ConversationEngine:
                 state.status = "review"
         if (
             not new_order_interrupted
-            and state.pending_comment_items
+            and has_pending_comment_scope(state)
             and modal_decision.comment_scope.action
             in {
                 CompatibilityAction.CONTINUE,
@@ -1113,7 +1114,7 @@ class ConversationEngine:
 
     def _resume_after_new_order_confirmation(self, state: ConversationState) -> EngineResult:
         """Показывает сохранённый underlying modal context после отказа."""
-        if state.pending_comment_items:
+        if has_pending_comment_scope(state):
             return EngineResult(
                 state=state,
                 reply=comment_scope_clarification_reply(
@@ -1283,6 +1284,17 @@ class ConversationEngine:
         """Изменяет комментарий только у однозначно найденного товара черновика."""
         target = clean_command_target(command.comment_target_query)
         comment = " ".join(command.comment_text.split()).strip(" .,;:-—–")
+        if command.comment_scope_action == "items":
+            if command.comment_action != "add" or not comment:
+                return EngineResult(
+                    state=state,
+                    reply=cart_reply(state, notice="Не указан текст комментария"),
+                )
+            active_items = [item for item in state.cart if item.status is not ItemStatus.SKIPPED]
+            for active_item in active_items:
+                append_item_comment(active_item, comment)
+            notice = "Комментарий добавлен" if active_items else "В черновике нет активных товаров"
+            return EngineResult(state=state, reply=cart_reply(state, notice=notice))
         if command.comment_scope == "order":
             if command.comment_action == "clear_all":
                 had_comments = any(

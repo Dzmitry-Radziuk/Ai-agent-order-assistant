@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from restaurant_bot.domain.models import Intent, ParsedCommand
-from restaurant_bot.parsing.comment_scope import has_explicit_global_comment_scope
+from restaurant_bot.parsing.comment_scope import has_explicit_order_comment_scope
 
 
 def normalize_comment_proposal(source_text: str, command: ParsedCommand) -> ParsedCommand:
@@ -11,7 +11,7 @@ def normalize_comment_proposal(source_text: str, command: ParsedCommand) -> Pars
     if (
         command.global_comment
         and not command.items
-        and has_explicit_global_comment_scope(source_text)
+        and has_explicit_order_comment_scope(source_text)
     ):
         return command.model_copy(
             update={

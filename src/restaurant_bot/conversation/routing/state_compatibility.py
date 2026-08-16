@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from restaurant_bot.conversation.comments import has_pending_comment_scope
 from restaurant_bot.conversation.routing.comment_scope import evaluate_comment_scope
 from restaurant_bot.conversation.routing.contracts import (
     CompatibilityAction,
@@ -150,7 +151,7 @@ class StateCompatibilityPolicy:
             return CompatibilityContext.NEW_ORDER_CONFIRMATION
         if state.stage is SessionStage.REVIEW and state.review_mode == "sheet_link":
             return CompatibilityContext.SHEET_REVIEW
-        if state.pending_comment_items:
+        if has_pending_comment_scope(state):
             return CompatibilityContext.COMMENT_SCOPE
         item = state.current_item()
         if (

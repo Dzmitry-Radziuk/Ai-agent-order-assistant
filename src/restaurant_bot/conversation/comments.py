@@ -13,6 +13,7 @@ from restaurant_bot.domain.models import (
     ConversationState,
     ExtractedItem,
     ItemStatus,
+    SessionStage,
 )
 from restaurant_bot.domain.text import clean_text, normalize_text
 from restaurant_bot.domain.units import UNIT_ALIASES, normalize_unit
@@ -499,6 +500,20 @@ def clear_pending_comment(state: ConversationState) -> None:
     state.pending_comment_existing_item_ids = []
     state.pending_comment_text = ""
     state.pending_comment_global_comment = ""
+
+
+def has_pending_comment_scope(state: ConversationState) -> bool:
+    """Проверяет, что в состоянии есть действующее уточнение области комментария."""
+    if state.stage is not SessionStage.AWAIT_COMMENT_SCOPE:
+        return False
+    if not clean_text(state.pending_comment_text).strip():
+        return False
+    if comment_scope_existing_items(state):
+        return True
+    return any(
+        clean_text(item.product_query or item.source_line).strip()
+        for item in state.pending_comment_items
+    )
 
 
 def prune_pending_comment_item_ids(state: ConversationState) -> None:

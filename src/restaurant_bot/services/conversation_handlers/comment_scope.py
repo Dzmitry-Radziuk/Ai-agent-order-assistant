@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from restaurant_bot.conversation.comments import (
+    apply_global_comment,
     clear_pending_comment,
     comment_scope_existing_items,
     comment_scope_items,
@@ -21,6 +22,7 @@ from restaurant_bot.domain.models import (
 )
 from restaurant_bot.presentation.telegram.pagination import CART_PAGE_SIZE
 from restaurant_bot.presentation.telegram.replies import (
+    cart_reply,
     comment_scope_clarification_reply,
 )
 
@@ -52,9 +54,17 @@ class CommentScopeHandler:
         ):
             pending_items = [item.model_copy(deep=True) for item in state.pending_comment_items]
             clear_pending_comment(state)
-            state.stage = SessionStage.COLLECTING
+            state.stage = SessionStage.COLLECTING if pending_items else SessionStage.REVIEW
             state.status = state.stage.value
             normalize_cart_page(state, page_size=CART_PAGE_SIZE)
+            if not pending_items:
+                return CommentScopeOutcome(
+                    result=EngineResult(
+                        state=state,
+                        reply=cart_reply(state, notice="Комментарий не добавлен"),
+                    ),
+                    clear_event_text=True,
+                )
             return CommentScopeOutcome(
                 reprocess_command=ParsedCommand(
                     intent=Intent.ADD_ITEMS,
@@ -127,6 +137,19 @@ class CommentScopeHandler:
                     }
                 )
         clear_pending_comment(state)
+        if not pending_items and existing_items:
+            if action == "order":
+                apply_global_comment(state, global_comment)
+            state.stage = SessionStage.REVIEW
+            state.status = state.stage.value
+            normalize_cart_page(state, page_size=CART_PAGE_SIZE)
+            return CommentScopeOutcome(
+                result=EngineResult(
+                    state=state,
+                    reply=cart_reply(state, notice="Комментарий добавлен"),
+                ),
+                clear_event_text=True,
+            )
         state.stage = SessionStage.COLLECTING
         state.status = "collecting"
         return CommentScopeOutcome(

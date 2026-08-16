@@ -288,6 +288,8 @@ def test_pending_comment_answer_uses_dedicated_scope_resolver() -> None:
             ExtractedItem(product_query="Огурцы", quantity=4, unit="кг"),
         ],
         pending_comment_text="положить отдельно",
+        stage=SessionStage.AWAIT_COMMENT_SCOPE,
+        status="await_comment_scope",
     )
 
     command = _interpreter(service).interpret_text("Для всех товаров", state)
@@ -308,6 +310,8 @@ def test_pending_comment_callback_selects_last_item_without_ai() -> None:
             ExtractedItem(product_query="Огурцы"),
         ],
         pending_comment_text="положить отдельно",
+        stage=SessionStage.AWAIT_COMMENT_SCOPE,
+        status="await_comment_scope",
     )
 
     command = _interpreter(service).interpret(

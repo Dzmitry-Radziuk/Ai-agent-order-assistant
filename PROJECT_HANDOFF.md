@@ -234,3 +234,30 @@ TEXT / VOICE
 Проверка после corrective-block: `1489 passed`, focused semantic/comment/voice набор — `89 passed`, mypy — `158 source files, no issues`, Ruff check и format — pass, Markdown links — `38 files`, scenario catalog — `41 сценарий`, compileall и `git diff --check` — pass.
 
 Изменения ограничены parsing, input interpretation, semantic routing, comment scope и regression tests. Схема базы данных, Alembic, callback protocol и Docker-конфигурация не менялись.
+
+## COMMENT-SCOPE-02 — EXISTING-ITEM COMMENT SCOPE
+
+Исправлен жизненный цикл уточнения комментария для уже существующих позиций:
+
+- активный scope определяется единым channel-neutral `has_pending_comment_scope`;
+  обязательны стадия `AWAIT_COMMENT_SCOPE`, текст комментария и хотя бы одна
+  действующая цель — активный ID существующей позиции или ожидающая новая позиция;
+- пустой `pending_comment_items` больше не закрывает scope, если в состоянии
+  сохранены действующие existing item IDs; пропущенные и устаревшие IDs не считаются
+  целью;
+- ответы `для всех товаров`, named и `только для последнего` применяются к
+  существующим товарам без повторного `ADD_ITEMS` и без обращения к каталогу;
+  `для всей заявки` сохраняет `order_comment_fragments`, а отмена не меняет корзину;
+- смешанный existing + pending-new поток сохраняет прежнее добавление новых позиций:
+  локальный групповой комментарий применяется до обычного catalog resolution,
+  order provenance не создаётся для групповой области;
+- прямые команды комментария разделяют GROUP и ORDER: групповой суффикс удаляется
+  в parsing owner и не создаёт order provenance, заявочный суффикс сохраняет
+  provenance всей заявки;
+- text и voice используют один deterministic scope resolver, поэтому ответы области
+  комментария не вызывают дополнительный AI scope call.
+
+После COMMENT-SCOPE-02 полный suite: `1501 passed`; новые regression-тесты — `12`.
+Mypy, Ruff check/format, Markdown links, каталог сценариев, compileall и
+`git diff --check` прошли. База данных, Alembic, Docker, History и callback protocol
+в этом этапе не менялись.

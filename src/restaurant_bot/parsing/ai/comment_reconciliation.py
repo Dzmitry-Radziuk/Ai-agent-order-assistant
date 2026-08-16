@@ -10,17 +10,13 @@ from restaurant_bot.domain.models import CommentSource
 from restaurant_bot.domain.text import clean_text, normalize_text
 from restaurant_bot.parsing.ai.quantity_reconciliation import _remove_matching_quantity
 from restaurant_bot.parsing.comment_policy import explicit_supplier_comment, supplier_comment_start
-from restaurant_bot.parsing.comment_scope import has_explicit_global_comment_scope
+from restaurant_bot.parsing.comment_scope import (
+    has_explicit_global_comment_scope,
+    has_explicit_group_comment_scope,
+)
 from restaurant_bot.parsing.numeric import to_float
 
 _COMMENT_BINDING_CONFIDENCE = 0.9
-
-_EXPLICIT_GROUP_COMMENT_SCOPE_RE = re.compile(
-    r"\b(?:оба|обе|обоих|обеих|обоим|обеим)\b"
-    r"|\b(?:эти|данные|перечисленные|указанные)\s+(?:товар\w*|позиц\w*)\b"
-    r"|\b(?:каждому|к\s+каждому)\s+из\s+(?:них|этих)\b",
-    flags=re.I,
-)
 
 _RELATIONAL_COMMENT_RE = re.compile(
     r"\b(?:отдельно|раздельно|вместе|по\s+отдельности|не\s+смешивать)\b",
@@ -305,9 +301,7 @@ def _comment_scope_context(source_text: str, comment: str) -> str:
 
 def _has_explicit_group_comment_scope(source_text: str, comment: str) -> bool:
     """Находит явное указание на несколько позиций без расширения до всей заявки."""
-    return bool(
-        _EXPLICIT_GROUP_COMMENT_SCOPE_RE.search(_comment_scope_context(source_text, comment))
-    )
+    return has_explicit_group_comment_scope(_comment_scope_context(source_text, comment))
 
 
 def _is_verified_root_group_comment(comment: str, source_text: str) -> bool:
