@@ -116,3 +116,50 @@ def test_explicit_order_quantity_survives_complex_catalog_resolution(settings: S
     assert item.quantity == 5
     assert item.unit == "\u0448\u0442"
     assert item.status is ItemStatus.MATCHED
+
+
+def test_simple_product_query_remains_primary_catalog_retrieval(settings: Settings) -> None:
+    """Ищет простой товар по названию, а не по полной фразе пользователя."""
+    item = CartItem(
+        id="onion",
+        source_query="\u043b\u0443\u043a",
+        source_line="\u041c\u043d\u0435 \u043d\u0443\u0436\u0435\u043d \u043b\u0443\u043a, \u0441\u0440\u0435\u0437 \u043a\u043e\u0440\u043d\u044f \u043e\u0442 \u043f\u044f\u0442\u0438 \u0441\u0430\u043d\u0442\u0438\u043c\u0435\u0442\u0440\u043e\u0432, 10 \u043a\u0438\u043b\u043e\u0433\u0440\u0430\u043c\u043c.",
+        quantity=10,
+        unit="\u043a\u0433",
+        comment="\u0441\u0440\u0435\u0437 \u043a\u043e\u0440\u043d\u044f \u043e\u0442 \u043f\u044f\u0442\u0438 \u0441\u0430\u043d\u0442\u0438\u043c\u0435\u0442\u0440\u043e\u0432",
+    )
+    product = CatalogProduct(
+        product_id="onion",
+        name="\u041b\u0443\u043a \u0440\u0435\u043f\u0447\u0430\u0442\u044b\u0439",
+        unit="\u043a\u0433",
+    )
+
+    ConversationEngine(settings).catalog_resolution.match_item(item, [product])
+
+    assert item.source_query == "\u043b\u0443\u043a"
+    assert item.candidates
+    assert item.candidates[0].product_id == "onion"
+
+
+def test_source_numeric_evidence_distinguishes_catalog_variants(settings: Settings) -> None:
+    """Использует фасовку источника для выбора варианта после базового поиска."""
+    source = "\u041f\u0435\u0440\u0435\u0446 \u0425\u0430\u043b\u0430\u043f\u0435\u043d\u044c\u043e HELCOM, \u0441\u0442/\u0431, 720 \u043c\u043b/680 \u0433\u0440/330 \u0433\u0440, 8 \u0448\u0442/\u043a\u043e\u0440, \u041f\u043e\u043b\u044c\u0448\u0430"
+    item = CartItem(
+        id="pepper-evidence",
+        source_query="\u041f\u0435\u0440\u0435\u0446 \u0425\u0430\u043b\u0430\u043f\u0435\u043d\u044c\u043e HELCOM",
+        source_line=source,
+    )
+    catalog = [
+        CatalogProduct(product_id="exact", name=source, unit="\u0448\u0442"),
+        CatalogProduct(
+            product_id="other",
+            name="\u041f\u0435\u0440\u0435\u0446 \u0425\u0430\u043b\u0430\u043f\u0435\u043d\u044c\u043e HELCOM, \u0441\u0442/\u0431, 370 \u043c\u043b, 12 \u0448\u0442/\u043a\u043e\u0440, \u041f\u043e\u043b\u044c\u0448\u0430",
+            unit="\u0448\u0442",
+        ),
+    ]
+
+    ConversationEngine(settings).catalog_resolution.match_item(item, catalog)
+
+    assert item.catalog_product_id == "exact"
+    assert [candidate.product_id for candidate in item.candidates] == ["exact"]
+    assert item.status is ItemStatus.MISSING_QTY

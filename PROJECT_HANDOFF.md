@@ -1,15 +1,17 @@
 # PROJECT HANDOFF
 
-Актуально для ветки `decompose_bot` после исправления границы сложных каталожных
-позиций 2026-08-16. Git SHA текущей версии документа нужно получать командой
-`git rev-parse HEAD`.
+Актуально для ветки `decompose_bot` после исправления границы канонического
+поискового запроса и source evidence 2026-08-16. Git SHA текущей версии документа
+нужно получать командой `git rev-parse HEAD`.
 
 ## Текущая задача
 
-Завершить проверенный функциональный этап PRODUCT-BOUNDARY-01: отделить границы
-сложной каталожной позиции, фасовку, количество заказа и комментарий. После этого
-пересобрать контейнеры и перейти только к подготовке контролируемого Telegram
-pilot. Новую общую декомпозицию и production refactor не начинать.
+Завершить corrective-pass после PRODUCT-BOUNDARY-01: сохранить канонический
+`product_query` главным запросом retrieval, использовать `source_line` только как
+вторичное доказательство и не заменять чистое название товара разговорной
+оболочкой или пунктуацией. После этого перейти только к подготовке
+контролируемого Telegram pilot. Новую общую декомпозицию и production refactor не
+начинать.
 
 Подробный verdict и scores:
 [`docs/INDEPENDENT_ENGINEERING_AUDIT.md`](docs/INDEPENDENT_ENGINEERING_AUDIT.md).
@@ -21,6 +23,9 @@ pilot. Новую общую декомпозицию и production refactor н�
 - Полный suite после PRODUCT-BOUNDARY-01: `1533 passed` (без падений; запуск с
   локальным `--basetemp`, один предупреждающий `PytestCacheWarning` не связан с
   приложением).
+- После corrective-pass сохранения search semantics: `1537 passed`; добавлены
+  regression-тесты для простого retrieval, числового source evidence и чистого
+  product query.
 - Mypy: `159 source files, no issues`.
 - Ruff check: pass; Ruff format: `316 files already formatted`.
 - Compileall и `git diff --check`: pass.
@@ -104,6 +109,12 @@ pilot. Новую общую декомпозицию и production refactor н�
   `migrate` завершился с кодом 0, `api` и `worker` имеют состояние healthy,
   `beat` запущен, PostgreSQL и Redis healthy. Объёмы и Docker-конфигурация не
   изменялись.
+- В corrective-pass `CatalogResolutionService` передаёт в `CatalogSearch` только
+  канонический `source_query`; числовые признаки `source_line` применяются после
+  поиска для проверки совместимых вариантов. Независимые photo/handwritten
+  источники и детерминированное количество не превращаются в каталожные числа.
+- Сверка AI не заменяет `product_query="лук"` на `лук.` или «Мне нужен лук»:
+  семантическое сравнение игнорирует внешнюю пунктуацию и вежливую оболочку.
 
 Финальные post-doc проверки зелёные. Documentation impact checker после commit
 также прошёл; код истории сопровождается обновлённым каталогом сценариев.

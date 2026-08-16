@@ -86,6 +86,12 @@ def _query_is_already_represented(known_query: str, recovered_query: str) -> boo
     )
 
 
+def _semantic_product_query(value: str) -> str:
+    """Возвращает название товара без незначимой внешней пунктуации."""
+    normalized = normalize_text(value).strip(" .,;:-—–")
+    return re.sub(r"\s+(?:пожалуйста|прошу)$", "", normalized, flags=re.I).strip(" .,;:-—–")
+
+
 _NON_PRODUCT_FRAGMENT_WORDS = (
     set(UNIT_ALIASES)
     | set(NUMBER_WORDS)
@@ -308,7 +314,9 @@ def _restore_dropped_unclassified_terms(
                 break
             remaining.remove(word)
         else:
-            if normalize_text(recovered_query) == normalize_text(item.get("product_query")):
+            if _semantic_product_query(recovered_query) == _semantic_product_query(
+                item.get("product_query") or ""
+            ):
                 continue
             item["product_query"] = recovered_query
             item["source_line"] = recovered.source_line or item.get("source_line") or ""

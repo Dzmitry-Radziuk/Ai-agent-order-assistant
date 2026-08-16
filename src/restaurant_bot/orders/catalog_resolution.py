@@ -28,29 +28,100 @@ from restaurant_bot.domain.models import (
     ItemStatus,
     SearchScope,
 )
-from restaurant_bot.domain.text import normalize_text
+from restaurant_bot.domain.text import clean_text, normalize_text
 from restaurant_bot.domain.units import UNIT_ALIASES, normalize_unit
 from restaurant_bot.orders.quantity_provenance import (
     QuantityProvenance,
     reconcile_order_quantity_evidence,
 )
 from restaurant_bot.parsing.numeric_ranges import numeric_range_spans
+from restaurant_bot.parsing.products import parse_product_lines
 from restaurant_bot.parsing.quantities import has_explicit_order_marker
 
 
 def _catalog_search_query(item: CartItem) -> str:
-    """Собирает поисковую строку из полного источника без комментария."""
-    source_line = item.source_line.strip()
+    """Возвращает каноническое название товара для получения кандидатов."""
     source_query = item.source_query.strip()
-    if (
-        source_line
-        and source_query
-        and not item.quantity_source
-        and normalize_text(source_query) in normalize_text(source_line)
-        and not numeric_evidence(source_query)
-    ):
-        return remove_phrase_overlap(source_line, item.comment)
-    return remove_phrase_overlap(source_query or source_line, item.comment)
+    return remove_phrase_overlap(source_query or item.source_line, item.comment)
+
+
+def _format_numeric_evidence(value: object) -> str:
+    """Представляет числовой признак в компактной форме для сверки каталога."""
+    evidence = value
+    upper_value = getattr(evidence, "upper_value", None)
+    number = getattr(evidence, "value", None)
+    unit = getattr(evidence, "unit", "")
+    if number is None:
+        return ""
+    if upper_value is None:
+        text = f"{number:g}".replace(".", ",")
+    else:
+        text = f"{number:g}-{upper_value:g}".replace(".", ",")
+    return clean_text(f"{text}{unit}")
+
+
+def _catalog_evidence_query(item: CartItem) -> str:
+    """Добавляет к каноническому запросу только безопасные признаки источника."""
+    query = _catalog_search_query(item)
+    source = item.source_line.strip()
+    if not source:
+        return query
+
+    deterministic = parse_product_lines(source)
+    parsed = deterministic[0] if len(deterministic) == 1 else None
+    if item.quantity_source or item.order_entry_type:
+        return query
+    if parsed is not None and parsed.packaging_role == "catalog_attribute":
+        if not parsed.packaging_text:
+            return query
+        source = parsed.packaging_text
+    elif parsed is not None and parsed.quantity is not None:
+        return query
+
+    source_entries = numeric_evidence(source)
+    if not source_entries:
+        return query
+
+    removable_index: int | None = None
+    if item.quantity is not None and item.unit:
+        matching_indexes = [
+            index
+            for index, entry in enumerate(source_entries)
+            if entry.upper_value is None
+            and abs(entry.value - item.quantity) <= 1e-9
+            and normalize_unit(entry.unit) == normalize_unit(item.unit)
+        ]
+        if matching_indexes:
+            # В обычной фразе отдельное количество заказа стоит после названия.  # noqa: RUF003
+            # Для повторяющегося числа это оставляет каталожное в источнике.
+            removable_index = matching_indexes[-1]
+
+    evidence_parts = [
+        _format_numeric_evidence(entry)
+        for index, entry in enumerate(source_entries)
+        if index != removable_index
+    ]
+    evidence_parts = [part for part in evidence_parts if part]
+    if not evidence_parts:
+        return query
+    return clean_text(f"{query} {' '.join(evidence_parts)}")
+
+
+def _prioritize_catalog_evidence(
+    candidates: list[Candidate],
+    evidence_query: str,
+) -> list[Candidate]:
+    """Ставит выше кандидатов, подтверждённых числовыми признаками источника."""
+    if not numeric_evidence(evidence_query):
+        return candidates
+    compatible = [
+        candidate
+        for candidate in candidates
+        if has_compatible_numeric_characteristics(evidence_query, candidate.name)
+    ]
+    if not compatible or len(compatible) == len(candidates):
+        return candidates
+    return compatible
 
 
 class CatalogResolutionService:
@@ -72,12 +143,14 @@ class CatalogResolutionService:
         search_backend = catalog_search or ListCatalogSearch(self.catalog_resolver, catalog or ())
         self._remove_unanchored_supplier_hint(item)
         search_query = _catalog_search_query(item)
+        evidence_query = _catalog_evidence_query(item)
         search = search_backend.search(
             search_query,
             supplier_hint=item.supplier_hint,
             search_scope=search_scope,
         )
         candidates = list(search.candidates)
+        candidates = _prioritize_catalog_evidence(candidates, evidence_query)
         packaging_measurement = self._catalog_packaging_measurement(item, candidates)
         if packaging_measurement is not None:
             packaging_value, packaging_unit = packaging_measurement
@@ -101,12 +174,14 @@ class CatalogResolutionService:
                 item.comment_source = CommentSource.EXPLICIT_MARKER
                 item.source_query = split.product_query
                 search_query = _catalog_search_query(item)
+                evidence_query = _catalog_evidence_query(item)
                 search = search_backend.search(
                     search_query,
                     supplier_hint=item.supplier_hint,
                     search_scope=search_scope,
                 )
                 candidates = list(search.candidates)
+                candidates = _prioritize_catalog_evidence(candidates, evidence_query)
                 item.candidates = candidates
                 item.supplier_search_locked = search.supplier_search_locked
                 if not search.found_in_scope:
@@ -116,23 +191,23 @@ class CatalogResolutionService:
         reconciliation_candidate: Candidate | None = None
         if candidates:
             primary = candidates[0]
-            primary_evidence = query_evidence_tokens(search_query, primary.name)
+            primary_evidence = query_evidence_tokens(evidence_query, primary.name)
             primary_decision = self.catalog_resolver.decide(
-                search_query,
+                evidence_query,
                 candidates,
                 comment=item.comment,
                 packaging_text=item.packaging_text,
                 packaging_role=item.packaging_role,
             )
             if (
-                has_complete_query_evidence(search_query, primary.name)
+                has_complete_query_evidence(evidence_query, primary.name)
                 or primary_decision is CatalogDecision.AUTO_SELECT
                 or (len(candidates) == 1 and len(primary_evidence) >= 2)
             ):
                 reconciliation_candidate = primary
         self._sanitize_catalog_facts_before_resolution(item, reconciliation_candidate)
         decision = self.catalog_resolver.decide(
-            item.source_query,
+            evidence_query,
             candidates,
             comment=item.comment,
             packaging_text=item.packaging_text,

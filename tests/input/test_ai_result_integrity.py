@@ -70,6 +70,26 @@ def test_absent_comment_is_not_invented_by_postprocessing() -> None:
     assert restored["items"][0]["comment"] == ""
 
 
+def test_clean_product_query_is_not_replaced_by_source_punctuation() -> None:
+    """Не заменяет чистое название товара только из-за точки в источнике."""
+    source = "\u041c\u043d\u0435 \u043d\u0443\u0436\u0435\u043d \u043b\u0443\u043a."
+    payload = _item_payload(source, "\u043b\u0443\u043a")
+
+    restored = recover_omitted_explicit_items(payload, source)
+
+    assert restored["items"][0]["product_query"] == "\u043b\u0443\u043a"
+
+
+def test_clean_product_query_is_not_replaced_by_conversational_wrapper() -> None:
+    """Не восстанавливает разговорную вводную поверх названия товара."""
+    source = "\u041c\u043d\u0435 \u043d\u0443\u0436\u0435\u043d \u043b\u0443\u043a, \u043f\u043e\u0436\u0430\u043b\u0443\u0439\u0441\u0442\u0430."
+    payload = _item_payload(source, "\u043b\u0443\u043a")
+
+    restored = recover_omitted_explicit_items(payload, source)
+
+    assert restored["items"][0]["product_query"] == "\u043b\u0443\u043a"
+
+
 def test_source_evidence_reconciliation_is_idempotent() -> None:
     """Повторная сверка не дублирует комментарий или количество."""
     source = "свиная шея 5 кг без костей без кожи"
