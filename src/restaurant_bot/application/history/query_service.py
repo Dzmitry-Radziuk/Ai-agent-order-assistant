@@ -13,7 +13,9 @@ from restaurant_bot.domain.history import (
     HistoryAnswer,
     HistoryDeliveryDateRelation,
     HistoryMatch,
+    HistoryProductEntry,
     HistoryQuery,
+    HistoryQuestionType,
 )
 from restaurant_bot.history.answers import build_history_answer
 from restaurant_bot.history.matching import match_product_query
@@ -45,6 +47,50 @@ def _annotate_date_relations(
             update={"delivery_date_relation": _date_relation(match.entry.delivery_date, today)}
         )
         for match in matches
+    ]
+
+
+def _venue_entry_key(entry: HistoryProductEntry) -> tuple[object, ...]:
+    """Возвращает консервативный ключ точного доказательства поставки."""
+    return (
+        entry.order_number,
+        entry.product_name,
+        entry.supplier,
+        entry.delivery_date,
+        entry.stage,
+    )
+
+
+def _venue_matches(entries: list[HistoryProductEntry], today: date) -> list[HistoryMatch]:
+    """Создаёт упорядоченные совпадения для venue-level списка поставок."""
+    unique: list[HistoryProductEntry] = []
+    seen: set[tuple[object, ...]] = set()
+    for entry in entries:
+        key = _venue_entry_key(entry)
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(entry)
+    relation_order = {
+        HistoryDeliveryDateRelation.TODAY: 0,
+        HistoryDeliveryDateRelation.FUTURE: 1,
+        HistoryDeliveryDateRelation.MISSING: 2,
+        HistoryDeliveryDateRelation.PAST: 3,
+    }
+    unique.sort(
+        key=lambda entry: (
+            relation_order[_date_relation(entry.delivery_date, today)],
+            entry.delivery_date or date.max,
+            entry.product_name.casefold(),
+        )
+    )
+    return [
+        HistoryMatch(
+            entry=entry,
+            score=100,
+            delivery_date_relation=_date_relation(entry.delivery_date, today),
+        )
+        for entry in unique
     ]
 
 
@@ -85,6 +131,36 @@ class HistoryQueryService:
             for entry in entries
             if is_relevant_status(entry.stage, query.question_type, query.temporal_scope)
         ]
+        if query.question_type is HistoryQuestionType.VENUE_DELIVERIES:
+            venue_entries = relevant_entries
+            if target_date is not None:
+                venue_entries = [
+                    entry for entry in venue_entries if entry.delivery_date == target_date
+                ]
+            matches = _venue_matches(venue_entries, business_today)
+            answer = build_history_answer(
+                query,
+                matches,
+                history_row_count=len(rows),
+                expanded_product_count=len(entries),
+                had_matching_products=bool(relevant_entries),
+                target_date=target_date,
+                active_without_delivery_date_count=sum(
+                    entry.delivery_date is None for entry in relevant_entries
+                ),
+            )
+            logger.info(
+                "history_query_completed",
+                question_type=query.question_type.value,
+                has_date_filter=target_date is not None,
+                history_row_count=len(rows),
+                expanded_product_count=len(entries),
+                candidate_count=len(matches),
+                relevant_match_count=len(answer.matches),
+                outcome=answer.kind.value,
+                duration_ms=round((perf_counter() - started) * 1000),
+            )
+            return answer
         matching_entries = [
             entry
             for entry in entries

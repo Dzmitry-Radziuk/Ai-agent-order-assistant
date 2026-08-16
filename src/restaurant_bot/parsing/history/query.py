@@ -178,6 +178,11 @@ _HISTORY_PHRASE_PATTERNS = (
     re.compile(r"\bпоставк\w*\s+по\b"),
     re.compile(r"\bмне\s+.+\s+ждат\w*\b"),
 )
+_INDEFINITE_OBJECT_RE = re.compile(r"\b(?:что|чего)(?:[-\s](?:нибудь|то))\b")
+_GENERAL_DELIVERY_RE = re.compile(
+    r"\b(?:приед\w*|приех\w*|привез\w*|достав\w*|ожида\w*|"
+    r"буд(?:ет|ут|у|ем|ешь|ете)|ждат\w*)\b"
+)
 
 
 def _contains_stem(text: str, stems: tuple[str, ...]) -> bool:
@@ -224,6 +229,24 @@ def _has_history_signal(normalized: str, *, raw_text: str = "") -> bool:
     )
 
 
+def _venue_delivery_shape(normalized: str, products: Sequence[str]) -> tuple[bool, bool]:
+    """Распознаёт общий вопрос о поставках и возможную ссылку на человека."""
+    indefinite = _INDEFINITE_OBJECT_RE.search(normalized)
+    if indefinite and _GENERAL_DELIVERY_RE.search(normalized):
+        subject_tokens = [
+            token
+            for token in history_tokens(normalized[: indefinite.start()])
+            if not _is_service_token(token)
+        ]
+        return True, bool(subject_tokens)
+    has_general_supply = any(stem in normalized for stem in ("поставк", "доставк"))
+    if has_general_supply and not products:
+        return True, False
+    if re.search(r"\bчто\b.*" + _GENERAL_DELIVERY_RE.pattern, normalized) and not products:
+        return True, False
+    return False, False
+
+
 def _context_product_query(
     normalized: str,
     context_product_queries: Sequence[str],
@@ -266,14 +289,25 @@ def parse_history_query(
     if re.search(r"\b(?:добав\w*|закаж\w*|полож\w*|внес\w*|куп\w*)\b", normalized):
         return None
     products = _product_queries(normalized)
-    if not products:
-        products = _context_product_query(normalized, context_product_queries)
-    if not products:
-        return None
+    is_venue_delivery, actor_specific = _venue_delivery_shape(normalized, products)
     reference, explicit_date = date_reference_for(
         normalized,
         today=today or business_today(timezone_name),
     )
+    if is_venue_delivery:
+        return HistoryQuery(
+            product_queries=[],
+            question_type=HistoryQuestionType.VENUE_DELIVERIES,
+            temporal_scope=HistoryTemporalScope.ACTIVE,
+            date_reference=reference,
+            explicit_date=explicit_date,
+            original_text=text,
+            actor_specific=actor_specific,
+        )
+    if not products:
+        products = _context_product_query(normalized, context_product_queries)
+    if not products:
+        return None
     if _contains_stem(normalized, ("отмен", "в силе")):
         question_type = HistoryQuestionType.CURRENT_STATUS
         scope = HistoryTemporalScope.ACTIVE

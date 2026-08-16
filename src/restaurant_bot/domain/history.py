@@ -6,7 +6,7 @@ from datetime import date, datetime
 from enum import StrEnum
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 class HistoryQuestionType(StrEnum):
@@ -18,6 +18,7 @@ class HistoryQuestionType(StrEnum):
     ARRIVAL_STATUS = "arrival_status"
     ACTIVE_DELIVERY = "active_delivery"
     PAST_DELIVERY = "past_delivery"
+    VENUE_DELIVERIES = "venue_deliveries"
 
 
 class HistoryTemporalScope(StrEnum):
@@ -59,12 +60,21 @@ class HistoryDeliveryDateRelation(StrEnum):
 class HistoryQuery(BaseModel):
     """Описывает структурированный вопрос пользователя о поставке."""
 
-    product_queries: list[str] = Field(min_length=1)
+    product_queries: list[str] = Field(default_factory=list)
     question_type: HistoryQuestionType
     temporal_scope: HistoryTemporalScope = HistoryTemporalScope.ACTIVE
     date_reference: HistoryDateReference = HistoryDateReference.NONE
     explicit_date: date | None = None
     original_text: str = ""
+    actor_specific: bool = False
+
+    @model_validator(mode="after")
+    def validate_product_scope(self) -> HistoryQuery:
+        """Разрешает пустой список товаров только для venue-level вопроса."""
+        has_product = any(query.strip() for query in self.product_queries)
+        if self.question_type is not HistoryQuestionType.VENUE_DELIVERIES and not has_product:
+            raise ValueError("Для товарного вопроса нужен хотя бы один товар")
+        return self
 
 
 class HistoryRow(BaseModel):
@@ -127,3 +137,5 @@ class HistoryAnswer(BaseModel):
     history_row_count: int = 0
     expanded_product_count: int = 0
     target_date: date | None = None
+    active_without_delivery_date_count: int = 0
+    additional_match_count: int = 0

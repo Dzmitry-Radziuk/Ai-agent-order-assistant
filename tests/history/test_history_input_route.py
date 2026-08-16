@@ -173,3 +173,27 @@ def test_history_text_and_voice_transcript_share_boundary_route() -> None:
 
     assert voice_command == text_command
     assert voice_command.intent is Intent.HISTORY_QUERY
+
+
+def test_venue_history_ai_payload_is_read_only_and_has_no_items() -> None:
+    """Нормализует venue-level ответ AI в историю без изменения черновика."""
+    provider = MagicMock()
+    provider.parse_text.return_value = ParsedCommand(
+        intent=Intent.HISTORY_QUERY,
+        history_query=HistoryQuery(
+            product_queries=[],
+            question_type=HistoryQuestionType.VENUE_DELIVERIES,
+            original_text="Что по поставкам?",
+        ),
+    )
+    interpreter = TelegramInputInterpreter(
+        provider, lambda: MagicMock(), StateCompatibilityPolicy()
+    )
+
+    command = interpreter.interpret_text("Есть ли сегодня поставки вообще", ConversationState())
+
+    assert command.intent is Intent.HISTORY_QUERY
+    assert command.items == []
+    assert command.explicit_add_items is False
+    assert command.history_query is not None
+    assert command.history_query.product_queries == []

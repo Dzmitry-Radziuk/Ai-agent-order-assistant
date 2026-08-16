@@ -75,6 +75,147 @@ def test_add_command_is_not_reclassified_as_history() -> None:
     assert parse_history_query("добавь говядину сегодня") is None
 
 
+def test_venue_delivery_phrases_have_no_product_query() -> None:
+    """Распознаёт общие вопросы о поставках без выдуманного товара."""
+    phrases = (
+        "Доставка вообще сегодня будет?",
+        "Что по поставкам?",
+        "Сегодня что-нибудь привезут?",
+        "Есть сегодня поставки?",
+        "Будет сегодня доставка?",
+        "Что у нас сегодня по поставкам?",
+        "Сегодня вообще что-нибудь ожидается?",
+    )
+
+    queries = [parse_history_query(phrase, today=date(2026, 8, 16)) for phrase in phrases]
+
+    assert all(query is not None for query in queries)
+    assert all(query.question_type is HistoryQuestionType.VENUE_DELIVERIES for query in queries)
+    assert all(query.product_queries == [] for query in queries)
+    assert [query.date_reference.value for query in queries] == [
+        "today",
+        "none",
+        "today",
+        "today",
+        "today",
+        "today",
+        "today",
+    ]
+
+
+def test_actor_shaped_venue_question_does_not_create_product() -> None:
+    """Не принимает имя человека за товар или поставщика."""
+    query = parse_history_query("Женя сегодня чего-нибудь привезет?")
+
+    assert query is not None
+    assert query.question_type is HistoryQuestionType.VENUE_DELIVERIES
+    assert query.product_queries == []
+    assert query.actor_specific is True
+
+
+def test_product_named_like_person_stays_product_scoped() -> None:
+    """Сохраняет товар «Иван-чай» в обычном вопросе истории."""
+    query = parse_history_query("Иван-чай сегодня приедет?")
+
+    assert query is not None
+    assert query.question_type is not HistoryQuestionType.VENUE_DELIVERIES
+    assert query.product_queries == ["иван чай"]
+
+
+def test_venue_today_uses_exact_delivery_date_only() -> None:
+    """Показывает на сегодня только строки с точной датой поставки."""
+    rows = [
+        _row(
+            "Говядина",
+            delivery_date=date(2026, 8, 16),
+            stage="Заявка подтверждена поставщиком",
+            supplier="Раджабов",
+        ),
+        _row("Вино", delivery_date=date(2026, 8, 17), stage="Подтверждена"),
+        _row("Хлеб", delivery_date=None, stage="В пути"),
+    ]
+    query = parse_history_query("Доставка вообще сегодня будет?", today=date(2026, 8, 16))
+
+    assert query is not None
+    answer = HistoryQueryService(_Reader(rows), today=date(2026, 8, 16)).execute(
+        query,
+        spreadsheet_id="sheet",
+        venue_name="Кафе",
+    )
+
+    assert answer.kind is HistoryAnswerKind.RESULTS
+    assert [match.entry.product_name for match in answer.matches] == ["Говядина"]
+    assert answer.active_without_delivery_date_count == 1
+
+
+def test_venue_general_question_lists_active_rows_without_matching() -> None:
+    """Возвращает общий список поставок без запуска товарного matching."""
+    rows = [
+        _row("Говядина", delivery_date=date(2026, 8, 16)),
+        _row("Вино", delivery_date=date(2026, 8, 17)),
+        _row("Хлеб", delivery_date=None),
+        _row("Старый товар", stage="Завершена", delivery_date=date(2026, 8, 1)),
+    ]
+    query = parse_history_query("Что по поставкам?")
+
+    assert query is not None
+    answer = HistoryQueryService(_Reader(rows), today=date(2026, 8, 16)).execute(
+        query,
+        spreadsheet_id="sheet",
+        venue_name="Кафе",
+    )
+
+    assert answer.kind is HistoryAnswerKind.RESULTS
+    assert [match.entry.product_name for match in answer.matches] == [
+        "Говядина",
+        "Вино",
+        "Хлеб",
+    ]
+    rendered = history_reply(answer).text
+    assert "<u>📦 Актуальные поставки</u>" in rendered
+    assert "Старый товар" not in rendered
+
+
+def test_venue_actor_reply_keeps_delivery_person_unproven() -> None:
+    """Показывает поставки, не приписывая доставку названному человеку."""
+    row = _row("Говядина", delivery_date=date(2026, 8, 16))
+    query = parse_history_query("Женя сегодня чего-нибудь привезет?")
+
+    assert query is not None
+    answer = HistoryQueryService(_Reader([row]), today=date(2026, 8, 16)).execute(
+        query,
+        spreadsheet_id="sheet",
+        venue_name="Кафе",
+    )
+
+    rendered = history_reply(answer).text
+    assert "кто именно их привезёт" in rendered
+    assert "Женя привезёт" not in rendered
+    assert "Говядина" in rendered
+
+
+def test_venue_today_without_exact_date_does_not_make_absolute_claim() -> None:
+    """Различает отсутствие точной даты и доказанное отсутствие поставки."""
+    rows = [
+        _row("Вино", delivery_date=date(2026, 8, 17)),
+        _row("Хлеб", delivery_date=None),
+    ]
+    query = parse_history_query("Есть сегодня поставки?", today=date(2026, 8, 16))
+
+    assert query is not None
+    answer = HistoryQueryService(_Reader(rows), today=date(2026, 8, 16)).execute(
+        query,
+        spreadsheet_id="sheet",
+        venue_name="Кафе",
+    )
+
+    rendered = history_reply(answer).text
+    assert answer.kind is HistoryAnswerKind.NO_ACTIVE
+    assert "с указанной датой не найдено" in rendered
+    assert "активные заявки без указанной даты" in rendered
+    assert "поставки не будет" not in rendered
+
+
 def test_yearless_explicit_date_uses_injected_business_clock() -> None:
     """Разбирает дату без года относительно переданной даты приложения."""
     query = parse_history_query(
