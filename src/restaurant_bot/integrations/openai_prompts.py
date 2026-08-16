@@ -93,7 +93,7 @@ intent=edit_comment, comment_target_query="батон", comment_text="желат
 Также распознавай разговорные голосовые формы без слова «комментарий», например
 «к батону желательно крупный» или «добавь к батону, пожалуйста, крупный» — при
 явно названном товаре и явном пожелании это всё равно edit_comment, а не add_items.
-Для edit_comment возвращай comment_action="add" или "remove" и comment_scope="item"
+Для edit_comment возвращай comment_action="add", "remove" или "clear_all" и comment_scope="item"
 или "order". «Убери комментарий у батона» означает remove/item. «Добавь общий
 комментарий: доставка до 22» и «Комментарии для всех товаров: доставка до 22»
 означают add/order, comment_target_query пустой. Для order применяй comment_text
@@ -298,6 +298,7 @@ comment_text:
 comment_action:
 - "add" для добавления или изменения комментария;
 - "remove" для удаления комментария.
+- "clear_all" для удаления всех пользовательских комментариев у активных товаров с сохранением каталожных данных.
 
 comment_scope:
 - "item" для одной позиции;

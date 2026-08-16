@@ -16,7 +16,7 @@ from restaurant_bot.parsing.packaging import (
     _single_product_packaging_item,
     _spoken_measurement_pair,
 )
-from restaurant_bot.parsing.quantities import _is_standalone_quantity
+from restaurant_bot.parsing.quantities import _is_standalone_quantity, shared_quantity_phrase
 
 
 def _query_with_unmarked_tail(name: str, tail: str) -> str:
@@ -495,6 +495,21 @@ def _parse_product_line(
 
 def parse_product_lines(text: str) -> list[ExtractedItem]:
     """Разбирает список товаров из текста."""
+    shared = shared_quantity_phrase(text)
+    if shared is not None:
+        names, quantity, unit, tail = shared
+        return [
+            ExtractedItem(
+                product_query=name,
+                quantity=quantity,
+                unit=unit,
+                comment=tail,
+                user_comment_to_supplier=tail,
+                comment_source=CommentSource.SEMANTIC if tail else CommentSource.NONE,
+                source_line=clean_text(text),
+            )
+            for name in names
+        ]
     unit_pattern = _build_unit_pattern()
     source, lines = _prepare_product_lines(text, unit_pattern)
     if not source:

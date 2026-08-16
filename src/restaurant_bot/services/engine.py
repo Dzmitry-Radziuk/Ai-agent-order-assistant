@@ -16,6 +16,7 @@ from restaurant_bot.config import Settings
 from restaurant_bot.conversation.comments import (
     append_item_comment,
     apply_global_comment,
+    clear_all_active_comments,
     clear_item_comment,
     comment_scope_items,
     reconcile_comment_target,
@@ -71,6 +72,7 @@ from restaurant_bot.domain.models import (
     Button,
     CartItem,
     CatalogProduct,
+    CommentSource,
     ConversationState,
     DialogueResponse,
     EngineResult,
@@ -1282,6 +1284,23 @@ class ConversationEngine:
         target = clean_command_target(command.comment_target_query)
         comment = " ".join(command.comment_text.split()).strip(" .,;:-—–")
         if command.comment_scope == "order":
+            if command.comment_action == "clear_all":
+                had_comments = any(
+                    item.status != ItemStatus.SKIPPED
+                    and (
+                        item.comment
+                        or item.order_comment_fragments
+                        or item.comment_source is not CommentSource.NONE
+                    )
+                    for item in state.cart
+                )
+                clear_all_active_comments(state)
+                notice = (
+                    "Все пользовательские комментарии удалены"
+                    if had_comments
+                    else "Пользовательских комментариев для удаления не найдено"
+                )
+                return EngineResult(state=state, reply=cart_reply(state, notice=notice))
             if command.comment_action == "remove":
                 removed = remove_order_comments(state)
                 notice = (

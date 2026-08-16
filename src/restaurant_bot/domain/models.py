@@ -304,7 +304,7 @@ class ParsedCommand(BaseModel):
     global_comment: str = ""
     comment_target_query: str = ""
     comment_text: str = ""
-    comment_action: Literal["add", "remove"] = "add"
+    comment_action: Literal["add", "remove", "clear_all"] = "add"
     comment_scope: Literal["item", "order"] = "item"
     comment_clarification: str = ""
     comment_scope_action: str = ""

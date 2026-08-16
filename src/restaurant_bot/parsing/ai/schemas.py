@@ -34,7 +34,7 @@ class ParsedInputSchema(BaseModel):
     global_comment: str = ""
     comment_target_query: str = ""
     comment_text: str = ""
-    comment_action: Literal["add", "remove"] = "add"
+    comment_action: Literal["add", "remove", "clear_all"] = "add"
     comment_scope: Literal["item", "order"] = "item"
     comment_bindings: list[CommentBindingSchema] = Field(default_factory=list)
     document_type: str = ""

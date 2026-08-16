@@ -16,13 +16,11 @@ from restaurant_bot.domain.models import (
     ConversationState,
     EngineResult,
     Intent,
-    ItemStatus,
     ParsedCommand,
     SessionStage,
 )
 from restaurant_bot.presentation.telegram.pagination import CART_PAGE_SIZE
 from restaurant_bot.presentation.telegram.replies import (
-    cart_reply,
     comment_scope_clarification_reply,
 )
 
@@ -52,19 +50,18 @@ class CommentScopeHandler:
             command.intent in {Intent.BACK, Intent.CANCEL}
             or command.comment_scope_action == "cancel"
         ):
+            pending_items = [item.model_copy(deep=True) for item in state.pending_comment_items]
             clear_pending_comment(state)
-            state.stage = (
-                SessionStage.REVIEW
-                if any(item.status != ItemStatus.SKIPPED for item in state.cart)
-                else SessionStage.COLLECTING
-            )
+            state.stage = SessionStage.COLLECTING
             state.status = state.stage.value
             normalize_cart_page(state, page_size=CART_PAGE_SIZE)
             return CommentScopeOutcome(
-                result=EngineResult(
-                    state=state,
-                    reply=cart_reply(state, title="Комментарий не добавлен"),
-                )
+                reprocess_command=ParsedCommand(
+                    intent=Intent.ADD_ITEMS,
+                    items=pending_items,
+                    global_comment="",
+                ),
+                clear_event_text=True,
             )
 
         action = command.comment_scope_action

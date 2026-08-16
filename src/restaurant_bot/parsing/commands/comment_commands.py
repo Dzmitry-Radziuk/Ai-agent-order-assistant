@@ -44,9 +44,9 @@ def _build_edit_comment(
         return None
     if action == "add" and (not comment or (require_wish and not _COMMENT_WISH_RE.search(comment))):
         return None
-    if action == "remove":
+    if action in {"remove", "clear_all"}:
         comment = ""
-    if scope not in {"item", "order"} or action not in {"add", "remove"}:
+    if scope not in {"item", "order"} or action not in {"add", "remove", "clear_all"}:
         return None
     return ParsedCommand(
         intent=Intent.EDIT_COMMENT,
@@ -68,6 +68,15 @@ def _parse_edit_comment(text: str) -> ParsedCommand | None:
     remove_action = rf"{_COMMENT_REMOVE_ACTION_RE}\s+"
     noun = rf"{_COMMENT_NOUN_RE}\s*"
     global_scope = rf"{_COMMENT_GLOBAL_SCOPE_RE}"
+
+    # Полная очистка пользовательских комментариев отделена от удаления
+    # только order-фрагментов.
+    if re.fullmatch(
+        rf"{remove_action}(?:(?:все|всё)\s+{noun}(?:у\s+всех\s+(?:товар\w*|позиц\w*))?|{noun}у\s+всех\s+(?:товар\w*|позиц\w*))",
+        normalized,
+        re.I,
+    ):
+        return _build_edit_comment("", "", source, action="clear_all", scope="order")
 
     # Явное удаление общего комментария не должно становиться товаром.
     if re.fullmatch(
@@ -132,6 +141,20 @@ def _parse_edit_comment(text: str) -> ParsedCommand | None:
         return None
 
     action = rf"{_COMMENT_ACTION_RE}\s+"
+    direct_target_match = re.fullmatch(
+        rf"^{noun}(?:к|для)\s+(?P<target>.+?)\s*:\s*(?P<comment>.+)$",
+        clean_text(source),
+        re.I,
+    )
+    if direct_target_match is not None:
+        result = _build_edit_comment(
+            direct_target_match.group("target"),
+            direct_target_match.group("comment"),
+            source,
+            require_wish=False,
+        )
+        if result is not None:
+            return result
     patterns = (
         re.compile(
             rf"^{action}{noun}(?:к|для)\s+(?P<target>.+?)(?:\s*[,;:—–-]\s*|\s+)(?P<comment>.+)$",
@@ -143,6 +166,10 @@ def _parse_edit_comment(text: str) -> ParsedCommand | None:
         ),
         re.compile(
             rf"^(?:к|для)\s+(?P<target>.+?)\s+{noun}(?:[:—–-]\s*|\s+)(?P<comment>.+)$",
+            re.I,
+        ),
+        re.compile(
+            rf"^{noun}(?:к|для)\s+(?P<target>.+?)\s*[:—–-]\s*(?P<comment>.+)$",
             re.I,
         ),
     )

@@ -181,8 +181,8 @@ def test_scope_with_any_out_of_range_index_is_rejected_as_a_whole(settings) -> N
     assert "Уточните комментарий" in result.reply.text
 
 
-def test_cancelled_comment_discards_pending_items_without_touching_draft(settings) -> None:  # type: ignore[no-untyped-def]
-    """Отменяет спорное добавление без загрязнения существующего черновика."""
+def test_cancelled_comment_continues_pending_items_without_touching_draft(settings) -> None:  # type: ignore[no-untyped-def]
+    """Отмена комментария продолжает добавление ожидающих позиций."""
     existing = CartItem(id="milk", source_query="Молоко", status=ItemStatus.MATCHED)
     started = _start_clarification(settings, ConversationState(cart=[existing]))
 
@@ -194,8 +194,8 @@ def test_cancelled_comment_discards_pending_items_without_touching_draft(setting
     )
 
     assert result.state.pending_comment_items == []
-    assert result.state.cart == [existing]
-    assert "Комментарий не добавлен" in result.reply.text
+    assert [item.source_query for item in result.state.cart] == ["Молоко", "Помидоры", "Огурцы"]
+    assert "Комментарий не добавлен" not in result.reply.text
 
 
 def test_skipping_the_only_unresolved_item_does_not_claim_it_was_added(settings) -> None:  # type: ignore[no-untyped-def]

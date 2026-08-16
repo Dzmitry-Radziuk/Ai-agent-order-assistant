@@ -9,6 +9,32 @@ from restaurant_bot.domain.units import UNIT_ALIASES, normalize_unit
 from restaurant_bot.parsing.number_words import NUMBER_WORDS, parse_number_words
 from restaurant_bot.parsing.numeric_ranges import numeric_range_spans
 
+
+def shared_quantity_phrase(text: str) -> tuple[list[str], float, str, str] | None:
+    """Извлекает список товаров с общей конструкцией «все по N единиц»."""
+    source = normalize_text(text).strip(" .,;:!?—–-")
+    marker = re.search(r"\b(?:все|всё|каждого|оба|обоих)\s+по\s+", source, re.I)
+    if marker is None:
+        return None
+    prefix = source[: marker.start()].strip(" .,;:!?—–-")
+    suffix = source[marker.end() :].strip(" .,;:!?—–-")
+    unit_match = re.search(
+        rf"\b(?P<unit>{'|'.join(sorted((re.escape(unit) for unit in UNIT_ALIASES), key=len, reverse=True))})\b",
+        suffix,
+        re.I,
+    )
+    if unit_match is None:
+        return None
+    quantity, parsed_unit = parse_quantity_unit(suffix[: unit_match.end()])
+    if quantity is None or not parsed_unit:
+        return None
+    names = [part.strip(" .,;:!?—–-") for part in re.split(r"\s+и\s+", prefix) if part.strip()]
+    if len(names) < 2:
+        return None
+    tail = suffix[unit_match.end() :].strip(" .,;:!?—–-")
+    return names, quantity, parsed_unit, tail
+
+
 _EXPLICIT_ORDER_QUANTITY_RE = re.compile(
     r"(?:мне\s+)?(?:нужн(?:о|а|ы)|надо|закаж(?:и|ем|у)|добав(?:ь|ить)|"
     r"постав(?:ь|ить)|возьм(?:и|ем)|количеств(?:о|ом)?|вес)\b",

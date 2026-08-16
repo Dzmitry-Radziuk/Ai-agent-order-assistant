@@ -32,9 +32,13 @@ from restaurant_bot.input.telegram_callbacks import parse_callback
 from restaurant_bot.input.voice_policy import match_visible_action
 from restaurant_bot.integrations.openai_client import CommentScopeDecision
 from restaurant_bot.parsing.commands.api import enrich_command, infer_intent
-from restaurant_bot.parsing.comment_scope import has_explicit_global_comment_scope
+from restaurant_bot.parsing.comment_scope import (
+    has_explicit_global_comment_scope,
+    parse_comment_scope_text,
+)
 from restaurant_bot.parsing.delivery_language import has_delivery_wish_shape
 from restaurant_bot.parsing.history import parse_history_query, requires_history_context
+from restaurant_bot.parsing.semantic_routing import protect_confirmed_command
 
 logger = structlog.get_logger(__name__)
 _OPENAI_TRANSIENT_ERRORS = (APIConnectionError, APITimeoutError, RateLimitError)
@@ -132,6 +136,13 @@ class TelegramInputInterpreter:
                 text=text,
                 callback_target=review_match.group(1),
             )
+        quantity_reply = self._parse_quantity_modal_reply(text, state)
+        if quantity_reply is not None:
+            return quantity_reply
+        if state.pending_comment_items and parse_comment_scope_text(
+            text, len(comment_scope_items(state))
+        ):
+            return self._parse_pending_comment_scope(text, state)
         if not state.pending_comment_items:
             callback_data = self._match_visible_action(text, state)
             if callback_data:
@@ -166,8 +177,10 @@ class TelegramInputInterpreter:
                 return ParsedCommand(intent=Intent.UNKNOWN, text=text)
         parsed = self.provider.parse_text(text)
         parsed = self._normalize_explicit_comment(text, parsed, state)
-        if proven_mutation and parsed.intent is Intent.HISTORY_QUERY:
-            return deterministic
+        if proven_mutation:
+            protected = protect_confirmed_command(deterministic, parsed)
+            if protected is not parsed:
+                return protected
         if delivery_wish and parsed.intent is Intent.HISTORY_QUERY:
             return self._safe_delivery_wish_command(text, state)
         if delivery_wish and not proven_mutation and parsed.intent is Intent.ADD_ITEMS:
@@ -345,21 +358,25 @@ class TelegramInputInterpreter:
             elif target == "cancel":
                 action = "cancel"
         else:
-            try:
-                decision = self.provider.resolve_comment_scope(
-                    text,
-                    [item.product_query for item in scope_items],
-                )
-            except _OPENAI_TRANSIENT_ERRORS as error:
-                logger.warning(
-                    "comment_scope_transport_failed",
-                    error_type=type(error).__name__,
-                )
-                action = "ambiguous"
+            deterministic_scope = parse_comment_scope_text(text, item_count)
+            if deterministic_scope is not None:
+                action, target_indexes, confidence = deterministic_scope
             else:
-                action = decision.action
-                target_indexes = decision.target_item_indexes
-                confidence = decision.confidence
+                try:
+                    decision = self.provider.resolve_comment_scope(
+                        text,
+                        [item.product_query for item in scope_items],
+                    )
+                except _OPENAI_TRANSIENT_ERRORS as error:
+                    logger.warning(
+                        "comment_scope_transport_failed",
+                        error_type=type(error).__name__,
+                    )
+                    action = "ambiguous"
+                else:
+                    action = decision.action
+                    target_indexes = decision.target_item_indexes
+                    confidence = decision.confidence
         carries_items = action in {"items", "order"}
         intent = (
             Intent.ADD_ITEMS
@@ -379,6 +396,34 @@ class TelegramInputInterpreter:
             comment_scope_action=action or "ambiguous",
             comment_target_indexes=target_indexes,
             confidence=confidence,
+        )
+
+    @staticmethod
+    def _parse_quantity_modal_reply(
+        text: str,
+        state: ConversationState,
+    ) -> ParsedCommand | None:
+        """Распознаёт короткое количество только в открытом modal-количестве."""
+        item = state.current_item()
+        if (
+            item is None
+            or item.status is not ItemStatus.MISSING_QTY
+            or state.stage is not SessionStage.AWAIT_UNIT_QUANTITY
+        ):
+            return None
+        normalized = normalize_text(text).strip(" .,;:!?—–-")
+        if not re.fullmatch(r"(?:\d+(?:[,.]\d+)?|[а-яё]+(?:\s+[а-яё]+)?)", normalized, re.I):
+            return None
+        from restaurant_bot.parsing.quantities import parse_quantity_unit
+
+        quantity, unit = parse_quantity_unit(normalized)
+        if quantity is None:
+            return None
+        return ParsedCommand(
+            intent=Intent.EDIT_QUANTITY,
+            text=text,
+            edit_quantity=quantity,
+            edit_unit=unit,
         )
 
     @staticmethod
