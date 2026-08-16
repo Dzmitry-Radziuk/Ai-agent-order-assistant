@@ -13,6 +13,7 @@ from restaurant_bot.domain.history import (
     HistoryTemporalScope,
 )
 from restaurant_bot.domain.text import normalize_text
+from restaurant_bot.parsing.delivery_language import has_delivery_wish_shape
 from restaurant_bot.parsing.history.dates import business_today, date_reference_for
 from restaurant_bot.parsing.history.normalization import history_stem, history_tokens
 
@@ -284,7 +285,11 @@ def parse_history_query(
 ) -> HistoryQuery | None:
     """Распознаёт общий смысл естественного вопроса о товарной поставке."""
     normalized = normalize_text(text)
-    if not normalized or not _has_history_signal(normalized, raw_text=text):
+    if (
+        not normalized
+        or has_delivery_wish_shape(normalized)
+        or not _has_history_signal(normalized, raw_text=text)
+    ):
         return None
     if re.search(r"\b(?:добав\w*|закаж\w*|полож\w*|внес\w*|куп\w*)\b", normalized):
         return None

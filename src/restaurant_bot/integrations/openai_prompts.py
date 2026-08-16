@@ -40,6 +40,13 @@ continue_current, check_min_sum, add_supplier_items, submit_as_is,
 accept_suggested_quantity, keep_current_quantity, enter_other_quantity,
 use_catalog_unit, show_final_review, order_status, product_add_list,
 start_new_order, history_query, unknown.
+История — это вопрос о уже существующей или ранее отправленной поставке, а не
+любая фраза со словами «привезти», «доставить», «завтра» или «сегодня».
+Пожелание о будущем способе или времени доставки относится к add_items либо
+edit_comment, если в сообщении есть подтверждённый товар или явная область
+комментария. Не создавай history_query для приказа или пожелания доставить
+товар: «Привезти завтра к 20:00», «Чтобы привезли завтра до восьми» и
+«Желательно привезти завтра утром».
 Для вопросов о ранее отправленных поставках используй intent=history_query и
 заполняй только вложенное поле history_query. В history_query передавай названия
 товаров из сообщения, тип вопроса, временную область и явно названную дату.

@@ -22,6 +22,7 @@ from restaurant_bot.domain.models import (
     ConversationState,
     InputKind,
     Intent,
+    ItemStatus,
     ParsedCommand,
     SessionStage,
     TelegramEvent,
@@ -31,6 +32,8 @@ from restaurant_bot.input.telegram_callbacks import parse_callback
 from restaurant_bot.input.voice_policy import match_visible_action
 from restaurant_bot.integrations.openai_client import CommentScopeDecision
 from restaurant_bot.parsing.commands.api import enrich_command, infer_intent
+from restaurant_bot.parsing.comment_scope import has_explicit_global_comment_scope
+from restaurant_bot.parsing.delivery_language import has_delivery_wish_shape
 from restaurant_bot.parsing.history import parse_history_query, requires_history_context
 
 logger = structlog.get_logger(__name__)
@@ -135,28 +138,40 @@ class TelegramInputInterpreter:
                 return enrich_command("", parse_callback(callback_data)).model_copy(
                     update={"text": text}
                 )
-        history_query = parse_history_query(
-            text,
-            context_product_queries=self._history_context_products(state),
-            today=self.today,
-            timezone_name=self.timezone_name,
-        )
-        if history_query is not None:
-            logger.info(
-                "history_query_parsed",
-                question_type=history_query.question_type.value,
-                product_count=len(history_query.product_queries),
-                has_date_filter=history_query.date_reference.value != "none",
+        deterministic = self._normalize_explicit_comment(text, infer_intent(text), state)
+        delivery_wish = has_delivery_wish_shape(text)
+        proven_mutation = self._is_proven_mutation(deterministic)
+        if deterministic.intent is Intent.EDIT_COMMENT and proven_mutation:
+            return deterministic
+        if not proven_mutation:
+            history_query = parse_history_query(
+                text,
+                context_product_queries=self._history_context_products(state),
+                today=self.today,
+                timezone_name=self.timezone_name,
             )
-            return ParsedCommand(
-                intent=Intent.HISTORY_QUERY,
-                text=text,
-                history_query=history_query,
-            )
-        if requires_history_context(text):
-            return ParsedCommand(intent=Intent.UNKNOWN, text=text)
+            if history_query is not None:
+                logger.info(
+                    "history_query_parsed",
+                    question_type=history_query.question_type.value,
+                    product_count=len(history_query.product_queries),
+                    has_date_filter=history_query.date_reference.value != "none",
+                )
+                return ParsedCommand(
+                    intent=Intent.HISTORY_QUERY,
+                    text=text,
+                    history_query=history_query,
+                )
+            if requires_history_context(text):
+                return ParsedCommand(intent=Intent.UNKNOWN, text=text)
         parsed = self.provider.parse_text(text)
         parsed = self._normalize_explicit_comment(text, parsed, state)
+        if proven_mutation and parsed.intent is Intent.HISTORY_QUERY:
+            return deterministic
+        if delivery_wish and parsed.intent is Intent.HISTORY_QUERY:
+            return self._safe_delivery_wish_command(text, state)
+        if delivery_wish and not proven_mutation and parsed.intent is Intent.ADD_ITEMS:
+            return self._safe_delivery_wish_command(text, state)
         review_command = self._parse_sheet_review_command(text, parsed, state)
         if review_command is not None:
             return review_command
@@ -264,6 +279,10 @@ class TelegramInputInterpreter:
             return parsed
         if deterministic.comment_scope == "order":
             return deterministic
+        if has_explicit_global_comment_scope(text):
+            return deterministic.model_copy(
+                update={"comment_target_query": "", "comment_scope": "order"}
+            )
         resolution = reconcile_comment_target(
             state,
             deterministic.comment_target_query,
@@ -277,6 +296,28 @@ class TelegramInputInterpreter:
                 "comment_text": resolution.comment_text,
             }
         )
+
+    @staticmethod
+    def _is_proven_mutation(command: ParsedCommand) -> bool:
+        """Проверяет, содержит ли детерминированная команда доказанную мутацию заказа."""
+        if command.intent is Intent.EDIT_COMMENT:
+            return True
+        if command.intent is not Intent.ADD_ITEMS:
+            return False
+        return command.explicit_add_items or any(
+            item.quantity is not None and bool(item.unit) for item in command.items
+        )
+
+    @staticmethod
+    def _safe_delivery_wish_command(text: str, state: ConversationState) -> ParsedCommand:
+        """Не допускает историю и просит уточнить область пожелания о доставке."""
+        if any(item.status is not ItemStatus.SKIPPED for item in state.cart):
+            return ParsedCommand(
+                intent=Intent.ADD_ITEMS,
+                text=text,
+                comment_clarification=text,
+            )
+        return ParsedCommand(intent=Intent.UNKNOWN, text=text)
 
     def _parse_pending_comment_scope(
         self,

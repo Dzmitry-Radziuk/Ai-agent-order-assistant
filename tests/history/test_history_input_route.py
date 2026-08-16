@@ -16,6 +16,7 @@ from restaurant_bot.domain.models import (
     TelegramEvent,
 )
 from restaurant_bot.input.telegram_interpretation import TelegramInputInterpreter
+from restaurant_bot.parsing.history import parse_history_query
 
 
 def test_history_text_is_independent_of_pending_quantity() -> None:
@@ -197,3 +198,119 @@ def test_venue_history_ai_payload_is_read_only_and_has_no_items() -> None:
     assert command.explicit_add_items is False
     assert command.history_query is not None
     assert command.history_query.product_queries == []
+
+
+def test_delivery_vocabulary_uses_intent_precedence() -> None:
+    """Разделяет вопросы о поставке и пожелания к текущему заказу."""
+    provider = MagicMock()
+    provider.parse_text.return_value = ParsedCommand(intent=Intent.HISTORY_QUERY)
+    interpreter = TelegramInputInterpreter(
+        provider, lambda: MagicMock(), StateCompatibilityPolicy()
+    )
+    cases = (
+        ("Когда привезут калькан?", Intent.HISTORY_QUERY),
+        ("Калькан завтра привезут?", Intent.HISTORY_QUERY),
+        ("Калькан уже привезли?", Intent.HISTORY_QUERY),
+        ("Что с кальканом?", Intent.HISTORY_QUERY),
+        ("Доставка вообще сегодня будет?", Intent.HISTORY_QUERY),
+        ("Сегодня что-нибудь привезут?", Intent.HISTORY_QUERY),
+        ("Женя сегодня чего-нибудь привезет?", Intent.HISTORY_QUERY),
+        ("Привезти завтра к 20:00", Intent.UNKNOWN),
+        ("Чтобы привезли завтра до восьми", Intent.UNKNOWN),
+        ("Желательно привезти завтра утром", Intent.UNKNOWN),
+        (
+            "Добавь комментарий к горчице домашней привезти завтра к 20:00",
+            Intent.EDIT_COMMENT,
+        ),
+        ("Добавь общий комментарий: привезти завтра к 20:00", Intent.EDIT_COMMENT),
+        ("Добавь калькан 5 кг, привезти завтра к 20:00", Intent.ADD_ITEMS),
+        ("Калькан 5 кг привезти завтра к 20:00", Intent.ADD_ITEMS),
+        ("Женя, привези калькан завтра", Intent.UNKNOWN),
+        (
+            "Комментарий для всех товаров: доставить завтра утром",
+            Intent.EDIT_COMMENT,
+        ),
+    )
+
+    for phrase, expected_intent in cases:
+        command = interpreter.interpret_text(phrase, ConversationState())
+        assert command.intent is expected_intent, phrase
+        if expected_intent is Intent.HISTORY_QUERY:
+            assert command.history_query is not None
+        else:
+            assert command.history_query is None
+
+
+def test_delivery_wish_is_clarified_for_active_cart_without_silent_mutation() -> None:
+    """Просит выбрать область пожелания, если в черновике несколько товаров."""
+    provider = MagicMock()
+    provider.parse_text.return_value = ParsedCommand(intent=Intent.HISTORY_QUERY)
+    interpreter = TelegramInputInterpreter(
+        provider, lambda: MagicMock(), StateCompatibilityPolicy()
+    )
+    state = ConversationState(
+        cart=[
+            CartItem(id="one", source_query="Горчица домашняя"),
+            CartItem(id="two", source_query="Горчица дижонская"),
+        ]
+    )
+
+    command = interpreter.interpret_text("Привезти завтра к 20:00", state)
+
+    assert command.intent is Intent.ADD_ITEMS
+    assert command.comment_clarification == "Привезти завтра к 20:00"
+    assert command.items == []
+    assert command.global_comment == ""
+    assert command.history_query is None
+
+
+def test_delivery_wish_without_cart_is_safe_unknown() -> None:
+    """Не создаёт товар из отдельного пожелания без черновика."""
+    provider = MagicMock()
+    provider.parse_text.return_value = ParsedCommand(intent=Intent.HISTORY_QUERY)
+    interpreter = TelegramInputInterpreter(
+        provider, lambda: MagicMock(), StateCompatibilityPolicy()
+    )
+
+    command = interpreter.interpret_text("Привезти завтра к 20:00", ConversationState())
+
+    assert command.intent is Intent.UNKNOWN
+    assert command.items == []
+    assert command.history_query is None
+
+
+def test_delivery_wish_history_parser_declines_instruction_shape() -> None:
+    """Не считает форму пожелания самостоятельным запросом истории."""
+    assert parse_history_query("Калькан 5 кг привезти завтра к 20:00") is None
+    assert parse_history_query("Привезти завтра к 20:00") is None
+
+
+def test_voice_delivery_wish_and_history_share_text_route() -> None:
+    """Голосовая транскрипция использует ту же границу истории и заказа."""
+    provider = MagicMock()
+    provider.parse_text.return_value = ParsedCommand(intent=Intent.HISTORY_QUERY)
+
+    class TranscriptRecognizer:
+        """Передаёт распознанный текст в общий интерпретатор."""
+
+        def recognize_media(self, event, state, parse_text, processing_message_id=None):
+            """Вызывает тот же text-путь, что и обычное сообщение."""
+            del processing_message_id
+            return parse_text(event.text, state)
+
+    interpreter = TelegramInputInterpreter(
+        provider, lambda: TranscriptRecognizer(), StateCompatibilityPolicy()
+    )
+    state = ConversationState()
+    for transcript, expected in (
+        ("калькан пять килограмм привезти завтра к двадцати", Intent.ADD_ITEMS),
+        ("когда привезут калькан", Intent.HISTORY_QUERY),
+        ("доставка сегодня будет", Intent.HISTORY_QUERY),
+    ):
+        text_command = interpreter.interpret_text(transcript, state)
+        voice_command = interpreter.interpret(
+            TelegramEvent(update_id=1, chat_id="chat", input_type=InputKind.VOICE, text=transcript),
+            state,
+        )
+        assert voice_command == text_command
+        assert voice_command.intent is expected
