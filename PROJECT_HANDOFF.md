@@ -100,6 +100,10 @@ pilot. Новую общую декомпозицию и production refactor н�
   `quantity_source` не авторизует заказ автоматически; независимые photo/order-entry
   источники сохраняются. Добавлены шесть regression-тестов для pepper, mustard,
   повторяющихся чисел и смешанных комментариев.
+- После коммита PRODUCT-BOUNDARY-01 выполнен `docker compose up -d --build`:
+  `migrate` завершился с кодом 0, `api` и `worker` имеют состояние healthy,
+  `beat` запущен, PostgreSQL и Redis healthy. Объёмы и Docker-конфигурация не
+  изменялись.
 
 Финальные post-doc проверки зелёные. Documentation impact checker после commit
 также прошёл; код истории сопровождается обновлённым каталогом сценариев.
