@@ -120,13 +120,18 @@ def _single_product_packaging_item(
     )
     number = r"\d+(?:[,.]\d+)?"
     unit = r"(?:г|гр|грамм\w*|кг|килограмм\w*|мл|л|шт|штук\w*|бан\w*|"
-    unit += r"бут\w*|упак\w*|короб\w*|ведр\w*)"
+    unit += r"бут\w*|упак\w*|кор\w*|короб\w*|ведр\w*)"
     connector = re.search(
-        rf"(?P<pack>{number}\s*{unit}\s*(?:на|/|[*xх×])\s*{number}\s*{unit})",
+        rf"(?P<pack>{number}\s*{unit}\s*(?:"
+        rf"на\s*{number}\s*{unit}|"
+        rf"/\s*(?:{number}\s*)?{unit}|"
+        rf"[*xх×]\s*{number}\s*{unit}))",
         text,
         flags=re.I,
     )
-    has_packaging_connector = connector is not None and connector.start() <= first.start()
+    has_packaging_connector = (
+        connector is not None and first.start() <= connector.start() < last.start()
+    )
 
     if not has_packaging_connector:
         residual = re.sub(
@@ -154,13 +159,26 @@ def _single_product_packaging_item(
             packaging_confidence=0.85,
         )
 
+    assert connector is not None
     if len(quantity_marks) == 2:
+        if connector.start() > first.end() and not order_lead:
+            product_end = last.start()
+            product_query = clean_text(text[:product_end]).strip(" .,;:!?-—–")
+            if product_query:
+                return ExtractedItem(
+                    product_query=product_query,
+                    quantity=float(last.group(1).replace(",", ".")),
+                    unit=normalize_unit(last.group("unit") or ""),
+                    source_line=source_line,
+                    packaging_text=clean_text(f"{first.group(0)} {connector.group('pack')}"),
+                    packaging_role="catalog_attribute",
+                    packaging_confidence=0.9,
+                )
         # Без отдельного заказа сохраняем прежний путь постобработки AI:
         # он удаляет ложную позицию-связку и нормализует исходную строку.
         # Здесь объединяем вариант, если присутствует третье заказанное количество.
         return None
 
-    assert connector is not None
     product_end = last.start()
     if order_lead:
         product_end = first.end() + order_lead.start()

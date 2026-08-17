@@ -4,7 +4,16 @@ from __future__ import annotations
 
 from restaurant_bot.config import Settings
 from restaurant_bot.conversation.comments import remove_catalog_fact_comments
-from restaurant_bot.domain.models import CartItem, CatalogProduct, ItemStatus
+from restaurant_bot.domain.models import (
+    CartItem,
+    CatalogProduct,
+    ConversationState,
+    InputKind,
+    Intent,
+    ItemStatus,
+    ParsedCommand,
+    TelegramEvent,
+)
 from restaurant_bot.orders.quantity_provenance import (
     QuantityProvenance,
     reconcile_order_quantity_evidence,
@@ -19,6 +28,10 @@ _PEPPER_SOURCE = (
 _MUSTARD_SOURCE = (
     "\u0413\u043e\u0440\u0447\u0438\u0446\u0430 \u0417\u0435\u0440\u043d\u0438\u0441\u0442\u0430\u044f CHATEL, \u0432\u0435\u0434\u0440\u043e, "
     "1 \u043a\u0433, 6 \u0448\u0442/\u043a\u043e\u0440, \u0424\u0440\u0430\u043d\u0446\u0438\u044f"
+)
+_COCONUT_SOURCE = (
+    '\u041c\u0430\u0441\u043b\u043e \u041a\u043e\u043a\u043e\u0441\u043e\u0432\u043e\u0435 Exrta Virgin \u0422\u041c "Aroy-D", '
+    "450\u043c\u043b, \u0441\u0442\u0435\u043a\u043b.\u0431, 12 \u0448\u0442/\u043a\u043e\u0440, \u0418\u043d\u0434\u043e\u043d\u0435\u0437\u0438\u044f, 10 \u0448\u0442\u0443\u043a"
 )
 
 
@@ -41,6 +54,108 @@ def test_packaging_ratio_is_not_order_quantity() -> None:
     assert item.quantity is None
     assert item.unit == ""
     assert item.packaging_role == "catalog_attribute"
+
+
+def test_long_catalog_title_with_attribute_tail_stays_one_order_item() -> None:
+    """Сохраняет длинное название каталога и хвост фасовки одной позицией заказа."""
+    items = parse_product_lines(_COCONUT_SOURCE)
+
+    assert len(items) == 1
+    item = items[0]
+    assert item.source_line == _COCONUT_SOURCE
+    assert item.quantity == 10
+    assert item.unit == "\u0448\u0442"
+    assert item.product_query.endswith("\u0418\u043d\u0434\u043e\u043d\u0435\u0437\u0438\u044f")
+    assert "\u0441\u0442\u0435\u043a\u043b.\u0431" in item.product_query
+    assert "12 \u0448\u0442/\u043a\u043e\u0440" in item.product_query
+    assert item.packaging_role == "catalog_attribute"
+    assert "450\u043c\u043b" in item.packaging_text
+    assert "12 \u0448\u0442/\u043a\u043e\u0440" in item.packaging_text
+
+
+def test_long_catalog_title_creates_one_cart_item(settings: Settings) -> None:
+    """Добавляет длинное каталожное название в черновик одной позицией."""
+    catalog_name = _COCONUT_SOURCE.removesuffix(", 10 \u0448\u0442\u0443\u043a")
+    command = ParsedCommand(intent=Intent.ADD_ITEMS, items=parse_product_lines(_COCONUT_SOURCE))
+    result = ConversationEngine(settings).handle(
+        TelegramEvent(
+            update_id=1,
+            chat_id="boundary-test",
+            input_type=InputKind.TEXT,
+            text=_COCONUT_SOURCE,
+        ),
+        command,
+        ConversationState(),
+        [CatalogProduct(product_id="coconut", name=catalog_name, unit="\u0448\u0442")],
+    )
+
+    assert len(result.state.cart) == 1
+    assert result.state.cart[0].quantity == 10
+    assert result.state.cart[0].unit == "\u0448\u0442"
+    assert result.state.cart[0].catalog_name == catalog_name
+    assert result.state.cart[0].status is ItemStatus.MATCHED
+
+
+def test_text_and_voice_transcripts_share_product_boundary_result() -> None:
+    """Сводит текстовый ввод и транскрипцию голоса к одной позиции заказа."""
+    text_items = parse_product_lines(_COCONUT_SOURCE)
+    voice_items = parse_product_lines(_COCONUT_SOURCE)
+
+    assert [
+        (item.product_query, item.quantity, item.unit, item.packaging_role) for item in text_items
+    ] == [
+        (item.product_query, item.quantity, item.unit, item.packaging_role) for item in voice_items
+    ]
+
+
+def test_plain_comma_lists_are_split_only_when_all_parts_are_products() -> None:
+    """Разделяет короткие списки товаров и не принимает каталожный хвост за позицию."""
+    assert [
+        item.product_query
+        for item in parse_product_lines(
+            "\u043b\u0443\u043a, \u043a\u0430\u0440\u0442\u043e\u0448\u043a\u0430, \u043c\u043e\u0440\u043a\u043e\u0432\u044c"
+        )
+    ] == [
+        "\u043b\u0443\u043a",
+        "\u043a\u0430\u0440\u0442\u043e\u0448\u043a\u0430",
+        "\u043c\u043e\u0440\u043a\u043e\u0432\u044c",
+    ]
+    assert [
+        item.product_query
+        for item in parse_product_lines(
+            "\u043c\u043e\u043b\u043e\u043a\u043e, \u0445\u043b\u0435\u0431, \u044f\u0439\u0446\u0430"
+        )
+    ] == [
+        "\u043c\u043e\u043b\u043e\u043a\u043e",
+        "\u0445\u043b\u0435\u0431",
+        "\u044f\u0439\u0446\u0430",
+    ]
+    packaged = parse_product_lines(
+        "\u0421\u043e\u0443\u0441 XYZ, 450 \u043c\u043b/12 \u0448\u0442, \u0418\u043d\u0434\u043e\u043d\u0435\u0437\u0438\u044f, 10 \u0448\u0442"
+    )[0]
+    assert (packaged.quantity, packaged.unit) == (10, "\u0448\u0442")
+    assert packaged.packaging_role == "catalog_attribute"
+    assert packaged.packaging_text == "450 \u043c\u043b/12 \u0448\u0442"
+    assert (
+        len(
+            parse_product_lines(
+                "\u0421\u043e\u0443\u0441 XYZ, 700 \u043c\u043b, \u043f\u043b.\u0431., 6 \u0448\u0442/\u043a\u043e\u0440, \u0422\u0430\u0438\u043b\u0430\u043d\u0434"
+            )
+        )
+        == 1
+    )
+
+
+def test_genuine_duplicate_requests_remain_separate() -> None:
+    """Не подавляет две самостоятельные заявки на один и тот же товар."""
+    items = parse_product_lines(
+        "\u043b\u0443\u043a 5 \u043a\u0433, \u043b\u0443\u043a 3 \u043a\u0433"
+    )
+
+    assert [(item.product_query, item.quantity, item.unit) for item in items] == [
+        ("\u043b\u0443\u043a", 5, "\u043a\u0433"),
+        ("\u043b\u0443\u043a", 3, "\u043a\u0433"),
+    ]
 
 
 def test_repeated_value_uses_residual_order_occurrence() -> None:

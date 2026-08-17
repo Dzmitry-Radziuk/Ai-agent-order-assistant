@@ -47,9 +47,75 @@ def _prepare_product_lines(text: str, unit_pattern: str) -> tuple[str, list[str]
     source = str(text or "").replace(";", "\n").strip()
     if not source:
         return source, []
-    lines = [clean_text(line) for line in re.split(r"\n+", source) if clean_text(line)]
-    # Запятая внутри одной строки не подтверждает границу товара.
+    lines: list[str] = []
+    for raw_line in re.split(r"\n+", source):
+        line = clean_text(raw_line)
+        if not line:
+            continue
+        lines.extend(_split_comma_product_list(line, unit_pattern))
     return source, lines
+
+
+def _has_independent_product_evidence(value: str, unit_pattern: str) -> bool:
+    """Проверяет, содержит ли фрагмент самостоятельное описание товара."""
+    fragment = clean_text(value).strip(" .,;:!?-—–")
+    if not fragment or explicit_supplier_comment(fragment):
+        return False
+    normalized = normalize_text(fragment)
+    if re.search(r"[a-zа-яё]\.[a-zа-яё]", normalized, flags=re.I):
+        return False
+    if numeric_range_spans(fragment):
+        return False
+    residual = re.sub(
+        rf"\d+(?:[,.]\d+)?\s*(?:{unit_pattern})\b",
+        " ",
+        normalized,
+        flags=re.I,
+    )
+    residual = re.sub(r"\d+(?:[,.]\d+)?", " ", residual)
+    words = re.findall(r"[a-zа-яё]+", residual, flags=re.I)
+    product_words = [
+        word
+        for word in words
+        if word not in UNIT_ALIASES
+        and word not in NUMBER_WORDS
+        and word not in {"и", "а", "или", "либо", "на"}
+    ]
+    return bool(product_words)
+
+
+def _split_comma_product_list(line: str, unit_pattern: str) -> list[str]:
+    """Разделяет запятую только при подтверждённом списке независимых товаров."""
+    parts = [clean_text(part) for part in re.split(r",", line)]
+    if len(parts) < 2 or not all(parts):
+        return [line]
+    if re.search(r"[a-zа-яё]\.[ \t]+[a-zа-яё]", line, flags=re.I):
+        return [line]
+    if not all(_has_independent_product_evidence(part, unit_pattern) for part in parts):
+        return [line]
+    quantity_pattern = re.compile(
+        rf"(?:\d+(?:[,.]\d+)?\s*(?:{unit_pattern})\b)",
+        flags=re.I,
+    )
+    word_quantity_pattern = re.compile(
+        rf"(?:({'|'.join(re.escape(word) for word in NUMBER_WORDS)})\s+"
+        rf"(?:{unit_pattern})\b)",
+        flags=re.I,
+    )
+    broad_quantity_pattern = re.compile(r"\d+(?:[,.]\d+)?\s+\w+", flags=re.I)
+    part_has_quantity = [
+        bool(
+            quantity_pattern.search(part)
+            or word_quantity_pattern.search(part)
+            or broad_quantity_pattern.search(part)
+        )
+        for part in parts
+    ]
+    if any(part_has_quantity) and not all(part_has_quantity):
+        return [line]
+    if all(part_has_quantity) or len(parts) >= 3:
+        return parts
+    return [line]
 
 
 def _build_product_line_patterns(unit_pattern: str) -> _ProductLinePatterns:
@@ -133,6 +199,7 @@ def _catalog_measurement_item(
     quantity_marks: list[re.Match[str]],
     has_explicit_order_lead: bool,
     has_packaging_span: bool,
+    packaging_spans: list[tuple[int, int]],
 ) -> ExtractedItem | None:
     """Собирает позицию с каталожной мерой вместо количества заказа."""
     if (
@@ -161,6 +228,21 @@ def _catalog_measurement_item(
         )
     if len(quantity_marks) == 1 and has_packaging_span and not has_explicit_order_lead:
         mark = quantity_marks[0]
+        if any(mark.start() > end for _, end in packaging_spans):
+            packaging_text = clean_text(
+                " ".join(stripped[start:end] for start, end in packaging_spans)
+            )
+            product_query = clean_text(stripped[: mark.start()]).strip(" .,;:!?-—–")
+            if product_query:
+                return ExtractedItem(
+                    product_query=product_query,
+                    quantity=float(mark.group(1).replace(",", ".")),
+                    unit=normalize_unit(mark.group("unit") or ""),
+                    source_line=source_line,
+                    packaging_text=packaging_text,
+                    packaging_role="catalog_attribute",
+                    packaging_confidence=0.9,
+                )
         return ExtractedItem(
             product_query=stripped,
             source_line=source_line,
@@ -458,6 +540,7 @@ def _parse_product_line(
         quantity_marks,
         has_explicit_order_lead,
         any("/" in stripped[start:end] for start, end in packaging_spans),
+        packaging_spans,
     )
     if catalog_item is not None:
         return [catalog_item]
