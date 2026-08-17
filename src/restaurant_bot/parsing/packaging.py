@@ -212,14 +212,50 @@ def _packaging_paraphrase_item(text: str, source_line: str) -> ExtractedItem | N
     packaging_span = catalog_packaging_span(text)
     if packaging_span is None:
         return None
-    measurement_facts = [
-        fact for fact in extract_semantic_facts(text) if fact.provenance == "source.measurement"
-    ]
-    if not measurement_facts or not all(
-        packaging_span[0] <= fact.start and fact.end <= packaging_span[1]
-        for fact in measurement_facts
+    natural_relation = re.search(
+        r"\b(?:в|на)\s+(?:упаковк\w*|коробк\w*|пачк\w*)\b|"
+        r"\b(?:упаковк\w*|коробк\w*|пачк\w*)\s+по\b",
+        text[packaging_span[0] : packaging_span[1]],
+        flags=re.I,
+    )
+    if natural_relation and re.match(
+        r"\s*упаковки\b", text[packaging_span[0] : packaging_span[1]], flags=re.I
     ):
         return None
+    if not natural_relation and re.search(
+        r"\d+(?:[,.]\d+)?\s*[\wё]+",
+        text[packaging_span[1] :],
+        flags=re.I,
+    ):
+        return None
+    facts = extract_semantic_facts(text)
+    relation_measurements = [
+        fact
+        for fact in facts
+        if fact.provenance in {"source.measurement", "source.packaging_measurement"}
+        and packaging_span[0] <= fact.start
+        and fact.end <= packaging_span[1]
+    ]
+    if not relation_measurements:
+        return None
+    order_match = re.search(
+        r"\b(?:нужно|надо|закаж\w*|добав\w*|постав\w*)\s+"
+        r"(?P<quantity>\d+(?:[,.]\d+)?)\s*(?P<unit>[\wё]+)",
+        text[packaging_span[1] :],
+        flags=re.I,
+    )
+    if order_match is not None:
+        absolute_start = packaging_span[1] + order_match.start()
+        product_query = clean_text(text[:absolute_start]).strip(" .,;:!?-—–")
+        return ExtractedItem(
+            product_query=product_query,
+            quantity=float(order_match.group("quantity").replace(",", ".")),
+            unit=normalize_unit(order_match.group("unit")),
+            source_line=source_line,
+            packaging_text=catalog_attribute_text(text),
+            packaging_role="catalog_attribute",
+            packaging_confidence=0.95,
+        )
     return ExtractedItem(
         product_query=clean_text(text),
         source_line=source_line,

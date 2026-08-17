@@ -42,7 +42,8 @@ def recover_omitted_explicit_items(payload: dict[str, Any], source_text: str) ->
     deterministic = parse_product_lines(source_text)
     remove_unsupported_query_qualifiers(items, source_text)
     global_comment = _strip_global_comment_scope(clean_text(payload.get("global_comment")))
-    items = _apply_semantic_comment_bindings(payload, items, bindings, source_text)
+    payload["global_comment"] = global_comment
+    items = _apply_semantic_comment_bindings(payload, items, bindings, source_text, deterministic)
     global_comment = _strip_global_comment_scope(clean_text(payload.get("global_comment")))
 
     # ИИ иногда дублирует локальную привязку в global_comment. Такой текст

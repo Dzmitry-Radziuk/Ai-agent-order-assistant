@@ -13,10 +13,48 @@ from restaurant_bot.parsing.comment_policy import explicit_supplier_comment, sup
 from restaurant_bot.parsing.comment_scope import (
     has_explicit_global_comment_scope,
     has_explicit_group_comment_scope,
+    has_explicit_order_comment_scope,
 )
 from restaurant_bot.parsing.numeric import to_float
+from restaurant_bot.parsing.semantic.boundaries import (
+    build_item_references,
+    query_anchor_overlap,
+)
+from restaurant_bot.parsing.semantic.measurements import (
+    extract_semantic_facts,
+    is_catalog_tail_text,
+)
+from restaurant_bot.parsing.semantic.models import SemanticFactKind
 
 _COMMENT_BINDING_CONFIDENCE = 0.9
+_COMMENT_ACTION_RE = re.compile(
+    r"\b(?:разлож\w*|привез\w*|достав\w*|постав\w*|упаков\w*|выбер\w*|"
+    r"желательн\w*|обязательн\w*|позвон\w*|смешив\w*)\b",
+    flags=re.I,
+)
+
+
+def _comment_source_is_authorized(comment: str, source_text: str) -> bool:
+    """Проверяет, что текст комментария не является числовым фактом каталога."""
+    value = normalize_text(comment).strip(" .,;:-—–")
+    source = normalize_text(source_text)
+    if not value or value not in source:
+        return False
+    if re.search(r"\b(?:примерно|приблизительно|около)\s+\d", value, flags=re.I):
+        return False
+    if is_catalog_tail_text(comment, source_text) and not _COMMENT_ACTION_RE.search(value):
+        return False
+    return not any(
+        fact.kind
+        in {
+            SemanticFactKind.CATALOG_ATTRIBUTE,
+            SemanticFactKind.MEASUREMENT,
+            SemanticFactKind.ORDER_QUANTITY,
+        }
+        and value == normalize_text(fact.original_text)
+        for fact in extract_semantic_facts(source_text)
+    )
+
 
 _RELATIONAL_COMMENT_RE = re.compile(
     r"\b(?:отдельно|раздельно|вместе|по\s+отдельности|не\s+смешивать)\b",
@@ -109,11 +147,13 @@ def _strip_global_comment_scope(value: str) -> str:
     comment = re.sub(
         r"^(?:(?:и|а)\s+)?(?:все|всё|всем|для всех)"
         r"(?:\s+(?:товар\w*|позици\w*|это(?:\s+дело)?))?"
+        r"(?:\s+(?:нужно|надо|требуется|просьба))?"
         r"(?:\s*[,;:—–-]\s*|\s+)",
         "",
         comment,
         flags=re.I,
     )
+    comment = re.sub(r"^(?:нужно|надо|требуется|просьба)\s+", "", comment, flags=re.I)
     return clean_text(comment).strip(" .,;:-—–")
 
 
@@ -152,6 +192,40 @@ def _binding_target_indexes(binding: dict[str, Any], item_count: int) -> list[in
         ):
             indexes.append(value)
     return indexes
+
+
+def _validated_binding_target_indexes(
+    binding: dict[str, Any],
+    items: list[dict[str, Any]],
+    deterministic: list[Any] | None,
+) -> list[int]:
+    """Переводит индекс AI в подтверждённую ссылку на товарную позицию."""
+    indexes = _binding_target_indexes(binding, len(items))
+    if not indexes or not deterministic:
+        return indexes
+    references = build_item_references(deterministic)
+    resolved: list[int] = []
+    for index in indexes:
+        query = items[index].get("product_query") or ""
+        reference_scores = [query_anchor_overlap(query, reference) for reference in references]
+        best_reference_score = max(reference_scores, default=0)
+        if best_reference_score <= 0:
+            continue
+        reference = references[reference_scores.index(best_reference_score)]
+        item_scores = [
+            query_anchor_overlap(item.get("product_query") or "", reference) for item in items
+        ]
+        best_item_score = max(item_scores, default=0)
+        best_items = [
+            item_index for item_index, score in enumerate(item_scores) if score == best_item_score
+        ]
+        if best_item_score > item_scores[index]:
+            if len(best_items) != 1:
+                continue
+            resolved.append(best_items[0])
+        else:
+            resolved.append(index)
+    return list(dict.fromkeys(resolved))
 
 
 def _merge_global_comment(payload: dict[str, Any], comment: str) -> None:
@@ -356,19 +430,24 @@ def _discard_unverified_item_comments(
             ):
                 continue
             source_supported = normalized_fragment in normalized_context
+            semantic_source_supported = _comment_source_is_authorized(fragment, context)
             if source_supported and normalized_fragment in normalized_query:
                 kept.append(fragment)
                 semantic_found = True
                 continue
-            if normalized_fragment in bound_comments and source_supported:
+            if (
+                normalized_fragment in bound_comments
+                and source_supported
+                and semantic_source_supported
+            ):
                 kept.append(fragment)
                 semantic_found = True
                 continue
-            if verified_semantic and source_supported:
+            if verified_semantic and source_supported and semantic_source_supported:
                 kept.append(fragment)
                 semantic_found = True
                 continue
-            if verified_explicit and normalized_fragment in normalized_context:
+            if verified_explicit and source_supported and semantic_source_supported:
                 kept.append(fragment)
                 explicit_found = True
                 continue
@@ -419,10 +498,15 @@ def _apply_semantic_comment_bindings(
     items: list[dict[str, Any]],
     bindings: list[dict[str, Any]],
     source_text: str,
+    deterministic: list[Any] | None = None,
 ) -> list[dict[str, Any]]:
     """Применяет проверенные ИИ-привязки комментариев и удаляет их ложные товары."""
     if not bindings:
         return items
+
+    payload["global_comment"] = _strip_global_comment_scope(
+        clean_text(payload.get("global_comment"))
+    )
 
     bound_comments = {clean_text(binding.get("text")).strip(" .,;:-—–") for binding in bindings}
     for comment in bound_comments:
@@ -435,7 +519,23 @@ def _apply_semantic_comment_bindings(
         comment = clean_text(binding.get("text")).strip(" .,;:-—–")
         scope = clean_text(binding.get("scope")).casefold()
         confidence = to_float(binding.get("confidence")) or 0.0
-        target_indexes = _binding_target_indexes(binding, len(items))
+        target_indexes = (
+            _validated_binding_target_indexes(binding, items, deterministic)
+            if scope == "item"
+            else _binding_target_indexes(binding, len(items))
+        )
+        scope_context = _comment_scope_context(source_text, comment)
+        explicit_order_scope = has_explicit_order_comment_scope(scope_context) or bool(
+            re.search(
+                r"\bвсем\s+товар\w*\s+(?:нужно|надо|требуется)\b",
+                normalize_text(scope_context),
+                flags=re.I,
+            )
+        )
+        if explicit_order_scope:
+            scope = "order"
+            target_indexes = []
+            comment = _strip_global_comment_scope(comment)
         if scope == "item" and len(target_indexes) == 1:
             comment = _strip_conversational_product_leadin(comment)
             comment = _strip_product_facts_from_item_binding(

@@ -12,6 +12,7 @@ class SemanticFactKind(StrEnum):
     PRODUCT = "product"
     CATALOG_ATTRIBUTE = "catalog_attribute"
     ORDER_QUANTITY = "order_quantity"
+    MEASUREMENT = "measurement"
     COMMENT = "comment"
     SEPARATOR = "separator"
     COMMAND_TEXT = "command_text"

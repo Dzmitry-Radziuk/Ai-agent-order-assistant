@@ -6,7 +6,9 @@ import re
 
 from restaurant_bot.domain.text import clean_text, normalize_text
 from restaurant_bot.domain.units import UNIT_ALIASES, normalize_unit
+from restaurant_bot.parsing.number_words import NUMBER_WORDS
 from restaurant_bot.parsing.numeric_ranges import numeric_range_spans
+from restaurant_bot.parsing.quantities import has_explicit_order_marker
 from restaurant_bot.parsing.semantic.models import SemanticFact, SemanticFactKind
 
 _NUMBER = r"\d+(?:[,.]\d+)?"
@@ -46,6 +48,12 @@ _COMMENT_MARKERS = {
     "покрупнее",
     "покрупней",
 }
+_WORD_MEASUREMENT_RE = re.compile(
+    rf"(?P<number>(?:{'|'.join(sorted((re.escape(word) for word in NUMBER_WORDS), key=len, reverse=True))})"
+    rf"(?:\s+(?:{'|'.join(sorted((re.escape(word) for word in NUMBER_WORDS), key=len, reverse=True))}))*)\s+"
+    rf"(?P<unit>{_UNIT})\b",
+    flags=re.I,
+)
 
 
 def _span_overlaps(span: tuple[int, int], other: tuple[int, int]) -> bool:
@@ -97,10 +105,19 @@ def extract_semantic_facts(source_text: str) -> tuple[SemanticFact, ...]:
         in_range = any(
             _span_overlaps(span, range_span) for range_span in numeric_range_spans(source)
         )
+        explicit_order = has_explicit_order_marker(source)
+        marker_prefix = source[max(0, match.start() - 24) : match.start()]
+        local_order_marker = bool(
+            re.search(r"\b(?:нужно|надо|закаж\w*|добав\w*|постав\w*)\b", marker_prefix, re.I)
+        )
         kind = (
             SemanticFactKind.CATALOG_ATTRIBUTE
             if in_packaging or in_range
-            else SemanticFactKind.ORDER_QUANTITY
+            else (
+                SemanticFactKind.ORDER_QUANTITY
+                if explicit_order or local_order_marker
+                else SemanticFactKind.MEASUREMENT
+            )
         )
         facts.append(
             SemanticFact(
@@ -109,8 +126,36 @@ def extract_semantic_facts(source_text: str) -> tuple[SemanticFact, ...]:
                 end=match.end(),
                 original_text=clean_text(match.group(0)),
                 normalized_value=normalized,
-                confidence=0.95 if in_packaging or in_range else 0.6,
-                provenance="source.measurement",
+                confidence=(
+                    0.95
+                    if in_packaging or in_range
+                    else (0.9 if explicit_order or local_order_marker else 0.45)
+                ),
+                provenance=(
+                    "source.packaging_measurement"
+                    if in_packaging
+                    else (
+                        "source.order_marker"
+                        if explicit_order or local_order_marker
+                        else "source.measurement"
+                    )
+                ),
+            )
+        )
+    for match in _WORD_MEASUREMENT_RE.finditer(source):
+        if any(_span_overlaps(match.span(), packaging_span) for packaging_span in packaging_spans):
+            continue
+        if match.end() < len(source) and source[match.end() :].strip(" .,;:-—–"):
+            continue
+        facts.append(
+            SemanticFact(
+                kind=SemanticFactKind.ORDER_QUANTITY,
+                start=match.start(),
+                end=match.end(),
+                original_text=clean_text(match.group(0)),
+                normalized_value=normalize_text(match.group(0)),
+                confidence=0.8,
+                provenance="source.trailing_order_quantity",
             )
         )
     for start, end in packaging_spans:
@@ -214,7 +259,7 @@ def catalog_attribute_text(source_text: str) -> str:
         measurements = [
             fact.original_text
             for fact in extract_semantic_facts(source)
-            if fact.provenance == "source.measurement"
+            if fact.provenance in {"source.measurement", "source.packaging_measurement"}
             and span[0] <= fact.start
             and fact.end <= span[1]
         ]

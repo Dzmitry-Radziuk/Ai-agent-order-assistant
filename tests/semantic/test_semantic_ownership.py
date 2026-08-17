@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from restaurant_bot.parsing.ai.comment_reconciliation import _apply_semantic_comment_bindings
 from restaurant_bot.parsing.ai.reconciliation import recover_omitted_explicit_items
 from restaurant_bot.parsing.products import parse_product_lines
 from restaurant_bot.parsing.semantic.measurements import extract_semantic_facts
@@ -142,3 +143,156 @@ def test_orphan_ai_fragment_fails_closed_to_deterministic_item() -> None:
     expected = parse_product_lines(source)[0]
     assert result["items"][0]["product_query"] == expected.product_query
     assert result["items"][0]["quantity"] is None
+
+
+def test_spoken_packaging_variants_keep_neighboring_weight_as_catalog_fact() -> None:
+    """Сохраняет вес макарон каталожным признаком во всех разговорных вариантах."""
+    for relation in (
+        "15 шт/упак",
+        "15 штук в упаковке",
+        "в упаковке 15 штук",
+        "упаковка по 15 штук",
+    ):
+        source = f"Макароны CASA MILO, пакет, 500 грамм, {relation}, Италия"
+        item = parse_product_lines(source)[0]
+        assert item.quantity is None
+        assert item.packaging_role == "catalog_attribute"
+        assert "500 грамм" in item.product_query
+        assert "Италия" in item.product_query
+
+
+def test_spoken_packaging_with_explicit_order_quantity_keeps_one_item() -> None:
+    """Отделяет заказанное количество от веса и фасовки макарон."""
+    source = "Макароны CASA MILO, пакет, 500 грамм, 15 штук в упаковке, Италия, нужно 10 штук"
+    item = parse_product_lines(source)[0]
+    assert (item.quantity, item.unit) == (10, "шт")
+    assert item.packaging_text == "15 штук"
+    assert "500 грамм" in item.product_query
+    assert "Италия" in item.product_query
+
+
+def test_two_ai_projections_of_one_anchor_collapse_to_one_operation() -> None:
+    """Не превращает две AI-проекции одного стейка в две операции заказа."""
+    source = "Стейк скерт Блэк Ангус Мираторг"
+    result = recover_omitted_explicit_items(
+        {
+            "intent": "add_items",
+            "items": [
+                {"product_query": "Стейк скерт Блэк Ангус", "source_line": source},
+                {"product_query": "Стейк Блэк Ангус Мираторг", "source_line": source},
+            ],
+        },
+        source,
+    )
+    assert len(result["items"]) == 1
+
+
+def test_explicit_order_comment_scope_strips_control_words() -> None:
+    """Сохраняет общий охват и оставляет только текст пожелания."""
+    source = "Всем товарам нужно привезти завтра до восьми вечера"
+    payload = {"global_comment": source}
+    items = [{"product_query": "Говядина", "source_line": source}]
+    _apply_semantic_comment_bindings(
+        payload,
+        items,
+        [{"text": source, "scope": "item", "target_item_indexes": [0], "confidence": 0.99}],
+        source,
+    )
+    assert payload["global_comment"] == "привезти завтра до восьми вечера"
+    assert items[0]["comment"] == ""
+
+
+def test_supplier_name_inside_product_does_not_lock_scope() -> None:
+    """Не принимает название поставщика внутри товара за область поиска."""
+    source = "Стейк скерт Блэк Ангус Мираторг"
+    result = recover_omitted_explicit_items(
+        {
+            "intent": "add_items",
+            "items": [
+                {
+                    "product_query": source,
+                    "supplier_hint": "Мираторг",
+                    "source_line": source,
+                }
+            ],
+        },
+        source,
+    )
+    assert result["items"][0]["supplier_hint"] == ""
+
+
+def test_explicit_supplier_relation_is_preserved() -> None:
+    """Сохраняет поставщика при явно названной связи с ним."""
+    source = "Стейк скерт Блэк Ангус у поставщика Мираторг"
+    result = recover_omitted_explicit_items(
+        {
+            "intent": "add_items",
+            "items": [
+                {
+                    "product_query": source,
+                    "supplier_hint": "Мираторг",
+                    "source_line": source,
+                }
+            ],
+        },
+        source,
+    )
+    assert result["items"][0]["supplier_hint"] == "Мираторг"
+
+
+def test_numeric_source_fragment_is_not_comment() -> None:
+    """Не сохраняет приблизительное числовое описание как пожелание поставщику."""
+    source = "Говядина приблизительно 8"
+    result = recover_omitted_explicit_items(
+        {
+            "intent": "add_items",
+            "items": [
+                {
+                    "product_query": "Говядина",
+                    "comment": "приблизительно 8",
+                    "source_line": source,
+                }
+            ],
+        },
+        source,
+    )
+    assert result["items"][0]["comment"] == ""
+
+
+def test_comment_target_survives_shadow_item_collapse() -> None:
+    """Сохраняет комментарий у товара после удаления теневой AI-позиции."""
+    source = "Стейк скерт Блэк Ангус 5 кг, желательно без костей"
+    result = recover_omitted_explicit_items(
+        {
+            "intent": "add_items",
+            "items": [
+                {
+                    "product_query": "Стейк без костей",
+                    "source_line": source,
+                },
+                {
+                    "product_query": "Стейк скерт Блэк Ангус",
+                    "quantity": 5,
+                    "unit": "кг",
+                    "source_line": source,
+                },
+            ],
+            "comment_bindings": [
+                {
+                    "text": "без костей",
+                    "scope": "item",
+                    "target_item_indexes": [0],
+                    "confidence": 0.99,
+                }
+            ],
+        },
+        source,
+    )
+    owner = next(
+        item for item in result["items"] if item["product_query"] == "Стейк скерт Блэк Ангус"
+    )
+    assert "без костей" in owner["comment"]
+    assert all(
+        item["product_query"] == "Стейк скерт Блэк Ангус" or not item["comment"]
+        for item in result["items"]
+    )
