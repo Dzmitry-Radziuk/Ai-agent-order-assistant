@@ -37,9 +37,14 @@ from restaurant_bot.input.telegram_callbacks import parse_callback
 from restaurant_bot.input.voice_policy import match_visible_action
 from restaurant_bot.integrations.openai_client import CommentScopeDecision
 from restaurant_bot.parsing.commands.api import enrich_command, infer_intent
-from restaurant_bot.parsing.comment_scope import has_explicit_order_comment_scope
+from restaurant_bot.parsing.comment_scope import (
+    has_explicit_global_comment_scope,
+    has_explicit_order_comment_scope,
+    strip_explicit_comment_scope_prefix,
+)
 from restaurant_bot.parsing.delivery_language import has_delivery_wish_shape
 from restaurant_bot.parsing.history import parse_history_query, requires_history_context
+from restaurant_bot.parsing.products import has_multiple_explicit_order_items
 from restaurant_bot.parsing.semantic_routing import (
     normalize_comment_proposal,
     protect_confirmed_command,
@@ -159,33 +164,53 @@ class TelegramInputInterpreter:
                 )
                 if self._candidate_command_is_authorized(visible_command, state):
                     return visible_command
+        history_query = parse_history_query(
+            text,
+            context_product_queries=self._history_context_products(state),
+            today=self.today,
+            timezone_name=self.timezone_name,
+        )
+        if history_query is not None and not has_multiple_explicit_order_items(text):
+            logger.info(
+                "history_query_parsed",
+                question_type=history_query.question_type.value,
+                product_count=len(history_query.product_queries),
+                has_date_filter=history_query.date_reference.value != "none",
+            )
+            return ParsedCommand(
+                intent=Intent.HISTORY_QUERY,
+                text=text,
+                history_query=history_query,
+            )
+        if requires_history_context(text):
+            return ParsedCommand(intent=Intent.UNKNOWN, text=text)
+        if has_explicit_global_comment_scope(text) and has_delivery_wish_shape(text):
+            comment_text = strip_explicit_comment_scope_prefix(text)
+            if comment_text:
+                if any(item.status is not ItemStatus.SKIPPED for item in state.cart):
+                    return ParsedCommand(
+                        intent=Intent.EDIT_COMMENT,
+                        text=text,
+                        comment_action="add",
+                        comment_scope="order",
+                        comment_text=comment_text,
+                    )
+                deterministic_comment = self._normalize_explicit_comment(
+                    text,
+                    infer_intent(text),
+                    state,
+                )
+                if deterministic_comment.intent is Intent.EDIT_COMMENT:
+                    return deterministic_comment
+                return ParsedCommand(intent=Intent.UNKNOWN, text=text)
         deterministic = self._normalize_explicit_comment(text, infer_intent(text), state)
         deterministic = self._authorize_candidate_command(deterministic, state, text)
+        if deterministic.intent is Intent.ORDER_STATUS:
+            return deterministic
         delivery_wish = has_delivery_wish_shape(text)
         proven_mutation = self._is_proven_mutation(deterministic)
         if deterministic.intent is Intent.EDIT_COMMENT and proven_mutation:
             return deterministic
-        if not proven_mutation:
-            history_query = parse_history_query(
-                text,
-                context_product_queries=self._history_context_products(state),
-                today=self.today,
-                timezone_name=self.timezone_name,
-            )
-            if history_query is not None:
-                logger.info(
-                    "history_query_parsed",
-                    question_type=history_query.question_type.value,
-                    product_count=len(history_query.product_queries),
-                    has_date_filter=history_query.date_reference.value != "none",
-                )
-                return ParsedCommand(
-                    intent=Intent.HISTORY_QUERY,
-                    text=text,
-                    history_query=history_query,
-                )
-            if requires_history_context(text):
-                return ParsedCommand(intent=Intent.UNKNOWN, text=text)
         parsed = self.provider.parse_text(text)
         parsed = normalize_comment_proposal(text, parsed)
         parsed = self._normalize_explicit_comment(text, parsed, state)

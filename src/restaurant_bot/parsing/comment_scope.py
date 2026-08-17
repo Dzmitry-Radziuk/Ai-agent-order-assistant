@@ -118,6 +118,23 @@ def has_explicit_order_comment_scope(text: str) -> bool:
     return "общ" in normalized and "комментар" in normalized
 
 
+def strip_explicit_comment_scope_prefix(value: str) -> str:
+    """Убирает из общего комментария слова, задающие область всей заявки."""
+    comment = clean_text(value).strip(" .,;:-—–")
+    if not comment:
+        return ""
+    pattern = (
+        r"^(?:"
+        r"всем(?:\s+товар\w*|\s+позици\w*)?|"
+        r"для\s+всех(?:\s+товар\w*|\s+позици\w*)?|"
+        r"ко\s+всем(?:\s+товар\w*|\s+позици\w*)?|"
+        r"(?:для|ко|на)\s+всей\s+(?:заявк\w*|заказ\w*)"
+        r")"
+        r"(?:\s+(?:нужно|надо|следует|просьба))?\s*"
+    )
+    return re.sub(pattern, "", comment, count=1, flags=re.I).strip(" .,;:-—–")
+
+
 def strip_comment_scope_suffix(value: str, scope: str) -> str:
     """Удаляет из текста комментария один явно указанный суффикс области."""
     comment = clean_text(value).strip(" .,;:-—–")

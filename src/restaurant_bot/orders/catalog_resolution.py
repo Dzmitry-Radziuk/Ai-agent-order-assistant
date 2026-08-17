@@ -9,6 +9,7 @@ from restaurant_bot.catalog.evidence import (
     numeric_evidence,
     query_evidence_tokens,
     remove_phrase_overlap,
+    tokens,
 )
 from restaurant_bot.catalog.resolver import CatalogDecision, CatalogResolver
 from restaurant_bot.catalog.safety import has_compatible_numeric_characteristics
@@ -124,6 +125,16 @@ def _prioritize_catalog_evidence(
     return compatible
 
 
+def _has_catalog_anchor(query: str, catalog: list[CatalogProduct]) -> bool:
+    """Проверяет, есть ли в исходном запросе подтверждённое слово товара из каталога."""
+    return any(query_evidence_tokens(query, product.name) for product in catalog)
+
+
+def _looks_like_unanchored_gibberish(query: str) -> bool:
+    """Выделяет многословный запрос без признаков осмысленного товара для уточнения."""
+    return len(tokens(query)) >= 3
+
+
 class CatalogResolutionService:
     """Применяет найденный каталог к позициям черновика заказа."""
 
@@ -162,6 +173,14 @@ class CatalogResolutionService:
         item.candidates = candidates
         item.supplier_search_locked = search.supplier_search_locked
         if not search.found_in_scope:
+            if (
+                catalog is not None
+                and item.quantity is None
+                and not _has_catalog_anchor(search_query, catalog)
+                and _looks_like_unanchored_gibberish(search_query)
+            ):
+                item.status = ItemStatus.AMBIGUOUS
+                return
             item.status = ItemStatus.NOT_FOUND
             return
         if not item.comment and len(candidates) >= 2:

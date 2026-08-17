@@ -1328,7 +1328,7 @@ class ConversationEngine:
         if outcome is DraftActionOutcome.ADVANCE:
             return self._advance(state)
         if outcome is DraftActionOutcome.REMOVED:
-            return EngineResult(state=state, reply=cart_reply(state, title="Позиция удалена"))
+            return EngineResult(state=state, reply=cart_reply(state, notice="Позиция удалена"))
         return EngineResult(state=state, reply=BotReply(text="Не нашёл такую позицию в черновике."))
 
     def _edit_existing_comment(

@@ -48,6 +48,8 @@ def is_relevant_status(
     """Решает, может ли строка участвовать в заданном временном вопросе."""
     status = classify_status(raw_status)
     if question_type is HistoryQuestionType.VENUE_DELIVERIES:
+        if scope is HistoryTemporalScope.ALL_RELEVANT:
+            return True
         return status in {HistoryStatusClass.ACTIVE, HistoryStatusClass.UNKNOWN}
     if scope is HistoryTemporalScope.PAST or question_type is HistoryQuestionType.PAST_DELIVERY:
         return status in {HistoryStatusClass.COMPLETED, HistoryStatusClass.DELIVERED}

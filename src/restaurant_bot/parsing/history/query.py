@@ -19,8 +19,6 @@ from restaurant_bot.parsing.history.normalization import history_stem, history_t
 
 _QUESTION_MARKERS = (
     "когда",
-    "сегодня",
-    "завтра",
     "статус",
     "поставк",
     "приезж",
@@ -32,12 +30,10 @@ _QUESTION_MARKERS = (
     "отмен",
     "опазды",
     "новост",
-    "что",
-    "как",
-    "где",
-    "почему",
+    "истори",
 )
 _STOP_STEMS = {
+    "и",
     "когда",
     "сегодн",
     "завтр",
@@ -126,6 +122,27 @@ _STOP_STEMS = {
     "эту",
     "этой",
     "этим",
+    "истори",
+    "товар",
+    "заказ",
+    "заяв",
+    "покаж",
+    "показ",
+    "посмотр",
+    "давай",
+    "давайте",
+    "пойдем",
+    "проверь",
+    "последн",
+    "прошл",
+    "наши",
+    "верн",
+    "вернут",
+    "вернуться",
+    "черновик",
+    "посмотреть",
+    "уточн",
+    "минималк",
 }
 _PAST_MARKERS = ("последн", "раньше", "был", "приезжал", "привозил")
 _ARRIVAL_MARKERS = ("уже приех", "уже привез", "достав", "приехал", "отмен", "задерж", "опаздыва")
@@ -167,6 +184,8 @@ _SERVICE_PREFIXES = (
     "почему",
     "силе",
     "сил",
+    "заказ",
+    "заяв",
 )
 _CONTEXT_PRONOUNS = ("он", "она", "оно", "они")
 _HISTORY_VERB_RE = re.compile(
@@ -178,6 +197,7 @@ _HISTORY_PHRASE_PATTERNS = (
     re.compile(r"\bчто\s+там\s+по\b"),
     re.compile(r"\bпоставк\w*\s+по\b"),
     re.compile(r"\bмне\s+.+\s+ждат\w*\b"),
+    re.compile(r"\b(?:был\w*|были)\s+ли\s+заказан\w*\b"),
 )
 _INDEFINITE_OBJECT_RE = re.compile(r"\b(?:что|чего)(?:[-\s](?:нибудь|то))\b")
 _GENERAL_DELIVERY_RE = re.compile(
@@ -220,13 +240,53 @@ def _is_service_token(token: str) -> bool:
     )
 
 
+def _is_global_history_request(normalized: str) -> bool:
+    """Распознаёт запрос всей истории без выдуманного товара."""
+    if "истори" not in normalized:
+        return bool(re.search(r"\bчто\s+мы\s+заказ\w*\s+раньше\b", normalized))
+    tokens = history_tokens(normalized)
+    return bool(tokens) and not any(
+        not (
+            _is_service_token(token) or history_stem(token) in {"истори", "товар", "заказ", "заяв"}
+        )
+        for token in tokens
+    )
+
+
+def _is_global_order_status_request(normalized: str) -> bool:
+    """Распознаёт общий статус заявок без области товарной истории."""
+    return bool(
+        re.fullmatch(
+            r"(?:покаж\w*\s+)?статус\w*\s+(?:(?:моих|наших|ваших|моей|нашей)\s+)?"
+            r"(?:заяв\w*|заказ\w*)[ .!?]*",
+            normalized,
+        )
+        or re.fullmatch(
+            r"(?:какой|какие)\s+статус\w*\s+(?:(?:моих|наших|ваших|моей|нашей)\s+)?"
+            r"(?:заяв\w*|заказ\w*)[ .!?]*",
+            normalized,
+        )
+        or re.fullmatch(
+            r"что\s+с\s+(?:(?:моими|нашими|вашими)\s+)?(?:заяв\w*|заказ\w*)[ .!?]*",
+            normalized,
+        )
+    )
+
+
 def _has_history_signal(normalized: str, *, raw_text: str = "") -> bool:
     """Проверяет смысловые признаки вопроса о поставке."""
+    if _HISTORY_VERB_RE.search(normalized):
+        return True
+    if any(pattern.search(normalized) for pattern in _HISTORY_PHRASE_PATTERNS):
+        return True
+    if any(marker in normalized for marker in _QUESTION_MARKERS):
+        return True
     return bool(
-        any(marker in normalized for marker in _QUESTION_MARKERS)
-        or _HISTORY_VERB_RE.search(normalized)
-        or ("?" in raw_text and re.search(r"\b\d{1,2}[./-]\d{1,2}(?:[./-]\d{2,4})?\b", normalized))
-        or any(pattern.search(normalized) for pattern in _HISTORY_PHRASE_PATTERNS)
+        "?" in raw_text
+        and (
+            re.search(r"\b\d{1,2}[./-]\d{1,2}(?:[./-]\d{2,4})?\b", normalized)
+            or re.search(r"\b(?:что|как|где|почему)\b", normalized)
+        )
     )
 
 
@@ -285,13 +345,31 @@ def parse_history_query(
 ) -> HistoryQuery | None:
     """Распознаёт общий смысл естественного вопроса о товарной поставке."""
     normalized = normalize_text(text)
-    if (
-        not normalized
-        or has_delivery_wish_shape(normalized)
-        or not _has_history_signal(normalized, raw_text=text)
+    if _is_global_order_status_request(normalized):
+        return None
+    if re.fullmatch(
+        r"(?:да[, ]*)?(?:добавля\w*|плюсуй|суммируй|объединим|сложи\s+вместе|пусть\s+будет\s+вместе|окей|конечно)",
+        normalized,
     ):
         return None
+    if not normalized or has_delivery_wish_shape(normalized):
+        return None
     if re.search(r"\b(?:добав\w*|закаж\w*|полож\w*|внес\w*|куп\w*)\b", normalized):
+        return None
+    if _is_global_history_request(normalized):
+        reference, explicit_date = date_reference_for(
+            normalized,
+            today=today or business_today(timezone_name),
+        )
+        return HistoryQuery(
+            product_queries=[],
+            question_type=HistoryQuestionType.VENUE_DELIVERIES,
+            temporal_scope=HistoryTemporalScope.ALL_RELEVANT,
+            date_reference=reference,
+            explicit_date=explicit_date,
+            original_text=text,
+        )
+    if not _has_history_signal(normalized, raw_text=text):
         return None
     products = _product_queries(normalized)
     is_venue_delivery, actor_specific = _venue_delivery_shape(normalized, products)

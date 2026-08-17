@@ -146,6 +146,28 @@ def test_plain_comma_lists_are_split_only_when_all_parts_are_products() -> None:
     )
 
 
+def test_attribute_only_packaging_fragment_is_not_admitted_as_product() -> None:
+    """Не принимает одну фасовочную характеристику за товарную позицию."""
+    assert parse_product_lines("500 г 15 шт/упак") == []
+
+
+def test_unanchored_gibberish_stays_ambiguous(settings: Settings) -> None:
+    """Оставляет бессмысленный запрос на уточнение без подстановки каталога."""
+    item = CartItem(
+        id="gibberish",
+        source_query="абра кадабра фыва олдж",
+        source_line="абра кадабра фыва олдж",
+    )
+    ConversationEngine(settings).catalog_resolution.match_item(
+        item,
+        [CatalogProduct(product_id="onion", name="Лук репчатый", unit="кг")],
+    )
+
+    assert item.status is ItemStatus.AMBIGUOUS
+    assert item.catalog_product_id == ""
+    assert item.catalog_name == ""
+
+
 def test_genuine_duplicate_requests_remain_separate() -> None:
     """Не подавляет две самостоятельные заявки на один и тот же товар."""
     items = parse_product_lines(

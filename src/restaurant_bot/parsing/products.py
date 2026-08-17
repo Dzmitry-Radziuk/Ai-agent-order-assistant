@@ -23,6 +23,47 @@ from restaurant_bot.parsing.quantities import (
     shared_quantity_phrase,
 )
 
+_CATALOG_ATTRIBUTE_WORDS = {
+    "в",
+    "во",
+    "на",
+    "по",
+    "упаковка",
+    "упаковке",
+    "упаковки",
+    "коробка",
+    "коробке",
+    "коробки",
+    "пачка",
+    "пачке",
+    "пачки",
+    "пакет",
+    "пакете",
+    "фасовка",
+    "фасовке",
+    "примерно",
+    "приблизительно",
+    "около",
+}
+_COUNTRY_WORDS = {
+    "австрия",
+    "бельгия",
+    "германия",
+    "индия",
+    "индонезия",
+    "италия",
+    "китай",
+    "нидерланды",
+    "польша",
+    "россия",
+    "таиланд",
+    "турция",
+    "франция",
+    "чехия",
+    "южная",
+    "корея",
+}
+
 
 def _query_with_unmarked_tail(name: str, tail: str) -> str:
     """Возвращает неподтверждённый хвост в возможное название товара."""
@@ -63,10 +104,8 @@ def _has_independent_product_evidence(value: str, unit_pattern: str) -> bool:
     if not fragment or explicit_supplier_comment(fragment):
         return False
     normalized = normalize_text(fragment)
-    if re.search(r"[a-zа-яё]\.[a-zа-яё]", normalized, flags=re.I):
-        return False
-    if numeric_range_spans(fragment):
-        return False
+    has_compact_abbreviation = bool(re.search(r"[a-zа-яё]\.[a-zа-яё]", normalized, flags=re.I))
+    has_numeric_range = bool(numeric_range_spans(fragment))
     residual = re.sub(
         rf"\d+(?:[,.]\d+)?\s*(?:{unit_pattern})\b",
         " ",
@@ -80,19 +119,43 @@ def _has_independent_product_evidence(value: str, unit_pattern: str) -> bool:
         for word in words
         if word not in UNIT_ALIASES
         and word not in NUMBER_WORDS
-        and word not in {"и", "а", "или", "либо", "на"}
+        and word not in {"и", "а", "или", "либо"}
+        and word not in _CATALOG_ATTRIBUTE_WORDS
+        and word not in _COUNTRY_WORDS
     ]
+    if product_words and all(
+        word in _COUNTRY_WORDS or word in _CATALOG_ATTRIBUTE_WORDS for word in words
+    ):
+        return False
+    if (
+        normalized.startswith(("примерно ", "приблизительно ", "около "))
+        and len(product_words) <= 2
+    ):
+        return False
+    if has_compact_abbreviation and len(product_words) <= 1:
+        return False
+    if has_numeric_range and not product_words:
+        return False
     return bool(product_words)
 
 
 def _split_comma_product_list(line: str, unit_pattern: str) -> list[str]:
     """Разделяет запятую только при подтверждённом списке независимых товаров."""
-    parts = [clean_text(part) for part in re.split(r",", line)]
+    # Запятая внутри десятичного числа остаётся частью измерения, остальные
+    # запятые рассматриваются как возможные границы списка.
+    parts = [clean_text(part) for part in re.split(r"(?<!\d),(?!\d)", line)]
     if len(parts) < 2 or not all(parts):
         return [line]
     if re.search(r"[a-zа-яё]\.[ \t]+[a-zа-яё]", line, flags=re.I):
         return [line]
     if not all(_has_independent_product_evidence(part, unit_pattern) for part in parts):
+        return [line]
+    # Уточнение с числом после первой части обычно относится к уже названному  # noqa: RUF003
+    # товару (например, «срез корня до 5 см»), а не начинает новую позицию.  # noqa: RUF003
+    if any(
+        re.search(r"\b(?:до|от|около|примерно|приблизительно)\s+\d", part, flags=re.I)
+        for part in parts[1:]
+    ):
         return [line]
     quantity_pattern = re.compile(
         rf"(?:\d+(?:[,.]\d+)?\s*(?:{unit_pattern})\b)",
@@ -114,7 +177,11 @@ def _split_comma_product_list(line: str, unit_pattern: str) -> list[str]:
     ]
     if any(part_has_quantity) and not all(part_has_quantity):
         return [line]
-    if all(part_has_quantity) or len(parts) >= 3:
+    # Если количество есть только у первой части, последующие слова чаще  # noqa: RUF003
+    # являются хвостовым уточнением или комментарием этой позиции. Разделяем
+    # только полноценный список без количеств либо список, где количество
+    # подтверждено у каждого товара.  # noqa: RUF003
+    if all(part_has_quantity) or (len(parts) >= 2 and not any(part_has_quantity)):
         return parts
     return [line]
 
@@ -522,6 +589,8 @@ def _parse_product_line(
         return []
     spoken_pair = _spoken_measurement_pair(stripped, unit_pattern)
     if spoken_pair is not None:
+        if not _has_independent_product_evidence(stripped, unit_pattern):
+            return []
         packaging_text, packaging_role, packaging_confidence = spoken_pair
         return [
             ExtractedItem(
@@ -534,6 +603,8 @@ def _parse_product_line(
         ]
     paraphrase_item = _packaging_paraphrase_item(stripped, line)
     if paraphrase_item is not None:
+        if not _has_independent_product_evidence(stripped, unit_pattern):
+            return []
         return [paraphrase_item]
     packaging_spans, alternative_packaging_spans, reference_range_spans, quantity_marks = (
         _find_quantity_marks(stripped, unit_pattern, packaging, alternative_packaging)
@@ -559,10 +630,14 @@ def _parse_product_line(
     if single_items is not None:
         return single_items
     if packaging_spans and not quantity_marks:
-        return [ExtractedItem(product_query=stripped, source_line=line)]
+        if _has_independent_product_evidence(stripped, unit_pattern):
+            return [ExtractedItem(product_query=stripped, source_line=line)]
+        return []
     if reference_range_spans and not quantity_marks and not has_explicit_bare_quantity:
         # Без отдельного маркера диапазон не может быть заказанным.
-        return [ExtractedItem(product_query=stripped, source_line=line)]
+        if _has_independent_product_evidence(stripped, unit_pattern):
+            return [ExtractedItem(product_query=stripped, source_line=line)]
+        return []
     alternative_item = _alternative_packaging_quantity(
         stripped,
         line,
@@ -587,7 +662,11 @@ def _parse_product_line(
     )
     if word_item is not None:
         return [word_item]
-    if (lines_count > 1 or len(stripped.split()) <= 8) and re.search(r"[a-zа-яё]", stripped, re.I):
+    if (
+        (lines_count > 1 or len(stripped.split()) <= 8)
+        and re.search(r"[a-zа-яё]", stripped, re.I)
+        and _has_independent_product_evidence(stripped, unit_pattern)
+    ):
         return [ExtractedItem(product_query=stripped, source_line=line)]
     return []
 
@@ -618,3 +697,9 @@ def parse_product_lines(text: str) -> list[ExtractedItem]:
     for line in lines:
         items.extend(_parse_product_line(line, len(lines), unit_pattern, patterns))
     return items
+
+
+def has_multiple_explicit_order_items(text: str) -> bool:
+    """Проверяет, содержит ли исходная фраза несколько позиций с явным количеством заказа."""
+    items = parse_product_lines(text)
+    return len(items) > 1 and all(item.quantity is not None and bool(item.unit) for item in items)

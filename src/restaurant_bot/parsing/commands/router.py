@@ -31,7 +31,8 @@ from restaurant_bot.parsing.commands.normalization import (
 )
 from restaurant_bot.parsing.commands.patterns import _COMMANDS, _NATURAL_COMMANDS
 from restaurant_bot.parsing.comment_scope import _extract_global_comment
-from restaurant_bot.parsing.products import parse_product_lines
+from restaurant_bot.parsing.history import parse_history_query, requires_history_context
+from restaurant_bot.parsing.products import has_multiple_explicit_order_items, parse_product_lines
 
 
 def _infer_negated_command(normalized: str) -> Intent | None:
@@ -107,6 +108,11 @@ def parse_text_command(text: str) -> ParsedCommand:
     # законченной фразой, поэтому точка не должна превращать «Добавить еще
     # товары» в товар под названием «товары».
     normalized = normalize_command_text(text)
+    history_query = parse_history_query(text)
+    if history_query is not None and not has_multiple_explicit_order_items(text):
+        return ParsedCommand(intent=Intent.HISTORY_QUERY, text=text, history_query=history_query)
+    if requires_history_context(text):
+        return ParsedCommand(intent=Intent.UNKNOWN, text=text)
     if status_command := _parse_order_status_navigation(normalized, text):
         return status_command
     if _AFFIRM_NEW_ORDER_RE.fullmatch(normalized):
@@ -141,6 +147,13 @@ def parse_text_command(text: str) -> ParsedCommand:
 
     if free_form_intent := _infer_free_form_navigation(normalized):
         return ParsedCommand(intent=free_form_intent, text=text)
+
+    if re.fullmatch(
+        r"(?:да\s*,?\s*)?добавляй|пусть\s+будет\s+вместе",
+        normalized,
+        flags=re.IGNORECASE,
+    ):
+        return ParsedCommand(intent=Intent.ADD_ITEMS, text=text)
 
     if match := _SELECT_RE.match(normalized):
         return ParsedCommand(
