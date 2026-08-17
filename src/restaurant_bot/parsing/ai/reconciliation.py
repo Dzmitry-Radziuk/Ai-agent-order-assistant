@@ -26,6 +26,7 @@ from restaurant_bot.parsing.ai.quantity_reconciliation import (
 from restaurant_bot.parsing.ai.shadow_items import _collapse_shadow_item_projections
 from restaurant_bot.parsing.comment_scope import has_explicit_global_comment_scope
 from restaurant_bot.parsing.products import parse_product_lines
+from restaurant_bot.parsing.semantic.gate import apply_semantic_gate
 
 
 def recover_omitted_explicit_items(payload: dict[str, Any], source_text: str) -> dict[str, Any]:
@@ -78,6 +79,7 @@ def recover_omitted_explicit_items(payload: dict[str, Any], source_text: str) ->
     )
     _restore_unordered_measurement_pair(items, deterministic)
     _restore_reference_ranges_in_queries(items, source_text, deterministic)
+    items = apply_semantic_gate(items, deterministic, source_text)
     for item in items:
         if item.get("comment") and not item.get("user_comment_to_supplier"):
             item["user_comment_to_supplier"] = item["comment"]

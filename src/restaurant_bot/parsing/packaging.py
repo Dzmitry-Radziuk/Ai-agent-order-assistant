@@ -9,6 +9,11 @@ from restaurant_bot.domain.text import clean_text, normalize_text
 from restaurant_bot.domain.units import normalize_unit
 from restaurant_bot.parsing.comment_policy import explicit_supplier_comment
 from restaurant_bot.parsing.numeric_ranges import numeric_range_spans
+from restaurant_bot.parsing.semantic.measurements import (
+    catalog_attribute_text,
+    catalog_packaging_span,
+    extract_semantic_facts,
+)
 
 _PACKAGING_REFERENCE_PREFIX_RE = re.compile(
     r"(?:\b(?:в|на)\s+)?(?:упаковк\w*|фасовк\w*|бутылк(?:а|е|у|ой))\s*$",
@@ -199,4 +204,26 @@ def _single_product_packaging_item(
         packaging_text=clean_text(connector.group("pack")),
         packaging_role="catalog_attribute",
         packaging_confidence=0.9,
+    )
+
+
+def _packaging_paraphrase_item(text: str, source_line: str) -> ExtractedItem | None:
+    """Собирает одну позицию для разговорной формулировки фасовки."""
+    packaging_span = catalog_packaging_span(text)
+    if packaging_span is None:
+        return None
+    measurement_facts = [
+        fact for fact in extract_semantic_facts(text) if fact.provenance == "source.measurement"
+    ]
+    if not measurement_facts or not all(
+        packaging_span[0] <= fact.start and fact.end <= packaging_span[1]
+        for fact in measurement_facts
+    ):
+        return None
+    return ExtractedItem(
+        product_query=clean_text(text),
+        source_line=source_line,
+        packaging_text=catalog_attribute_text(text),
+        packaging_role="catalog_attribute",
+        packaging_confidence=0.95,
     )

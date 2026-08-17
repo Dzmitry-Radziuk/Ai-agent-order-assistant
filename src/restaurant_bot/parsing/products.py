@@ -13,6 +13,7 @@ from restaurant_bot.parsing.numeric_ranges import numeric_range_spans
 from restaurant_bot.parsing.packaging import (
     _is_compact_catalog_measurement,
     _is_packaging_reference_prefix,
+    _packaging_paraphrase_item,
     _single_product_packaging_item,
     _spoken_measurement_pair,
 )
@@ -531,6 +532,9 @@ def _parse_product_line(
                 packaging_confidence=packaging_confidence,
             )
         ]
+    paraphrase_item = _packaging_paraphrase_item(stripped, line)
+    if paraphrase_item is not None:
+        return [paraphrase_item]
     packaging_spans, alternative_packaging_spans, reference_range_spans, quantity_marks = (
         _find_quantity_marks(stripped, unit_pattern, packaging, alternative_packaging)
     )
