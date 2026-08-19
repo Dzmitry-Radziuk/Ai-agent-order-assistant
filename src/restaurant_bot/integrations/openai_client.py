@@ -639,15 +639,13 @@ class OpenAIService:
         import base64
 
         preparation = prepare_photo_views(path, mime_type)
-        product_view_size = preparation.product_view_size
-        order_view_size = preparation.order_view_size
+        table_focus_view_size = preparation.table_focus_view_size
         logger.info(
             "photo_image_views_prepared",
             original_width=preparation.original_width,
             original_height=preparation.original_height,
             view_count=len(preparation.views),
-            product_view_size=list(product_view_size) if product_view_size else None,
-            order_view_size=list(order_view_size) if order_view_size else None,
+            table_focus_view_size=(list(table_focus_view_size) if table_focus_view_size else None),
             upscale_factor=preparation.upscale_factor,
             dense_table_views_used=preparation.dense_table_views_used,
         )
@@ -655,10 +653,12 @@ class OpenAIService:
         if preparation.dense_table_views_used:
             input_text = (
                 f"{input_text}\n\n"
-                "Это разные виды одного и того же документа, а не отдельные заявки. "
-                "Используй оригинал для общей структуры, увеличенный товарный вид "
-                "для названий и увеличенный вид колонок заказа для точной привязки. "
-                "Объедини все виды в одно PhotoDocumentObservation."
+                "Это оригинал и увеличенный полноширинный вид одной заявки. "
+                "Для client_order_sheet сначала найди таблицу внутри изображения и игнорируй "
+                "браузер, вкладки и окружающий интерфейс. В увеличенном виде просматривай "
+                "колонки «Зал», «Бар», «Кухня» сверху вниз. Для каждого заполненного количества "
+                "проведи по той же горизонтальной строке к названию товара и комментарию. "
+                "Возвращай только строки с фактическим количеством заказа. Не используй соседнюю строку."
             )
         content: list[dict[str, Any]] = [{"type": "input_text", "text": input_text}]
         for view in preparation.views:

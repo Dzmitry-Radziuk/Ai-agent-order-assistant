@@ -190,6 +190,26 @@ def normalize_photo_observation(
             dropped_rows=len(observation.rows),
             reason=integrity.reason,
         )
+    if document_type == "client_order_sheet":
+        unresolved_rows = [
+            row for row in observation.rows if _client_sheet_quantity_without_department(row)
+        ]
+        if unresolved_rows:
+            logger.warning(
+                "photo_client_sheet_quantity_without_department",
+                row_indexes=[row.row_index for row in unresolved_rows],
+                row_count=len(unresolved_rows),
+            )
+            return PhotoNormalizationResult(
+                command=ParsedCommand(
+                    intent=Intent.ADD_ITEMS,
+                    photo_outcome="incomplete_photo_read",
+                ),
+                document_type="incomplete",
+                admitted_rows=0,
+                dropped_rows=len(observation.rows),
+                reason="client_sheet_quantity_without_department",
+            )
     logger.info(
         "photo_document_classified",
         proposed_type=canonical_photo_identity(observation.document_type_proposal),
@@ -428,6 +448,15 @@ def _row_has_potential_order_evidence(row: PhotoRowObservation) -> bool:
         _positive_or_none(value) is not None
         for value in (row.hall_quantity, row.bar_quantity, row.kitchen_quantity)
     ) or _row_has_order_evidence(row)
+
+
+def _client_sheet_quantity_without_department(row: PhotoRowObservation) -> bool:
+    """Находит quantity evidence клиентского листа без подтверждённой колонки отдела."""
+    has_department_quantity = any(
+        _positive_or_none(value) is not None
+        for value in (row.hall_quantity, row.bar_quantity, row.kitchen_quantity)
+    )
+    return _row_has_order_evidence(row) and not has_department_quantity
 
 
 def _authorized_document_comment(observation: PhotoDocumentObservation) -> str:

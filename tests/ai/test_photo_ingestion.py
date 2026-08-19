@@ -137,6 +137,25 @@ def test_client_sheet_drops_blank_row_without_transferring_neighbor_quantity(set
     assert [item.quantity for item in result.command.items] == [3, 10]
 
 
+def test_client_sheet_generic_quantity_without_department_is_incomplete_photo(
+    settings,
+) -> None:  # type: ignore[no-untyped-def]
+    """Не скрывает quantity без department под сообщением об отсутствии количеств."""
+    result = normalize_photo_observation(
+        PhotoDocumentObservation(
+            document_type_proposal="client_order_sheet",
+            detected_columns=["Товар", "Зал", "Бар", "Кухня"],
+            has_table_structure=True,
+            rows=[_row("Васаби", explicit_order_quantity=3, order_entry_text="3")],
+        ),
+        settings,
+    )
+
+    assert result.command.photo_outcome == "incomplete_photo_read"
+    assert result.document_type == "incomplete"
+    assert result.reason == "client_sheet_quantity_without_department"
+
+
 def test_row_count_mismatch_keeps_reliable_filled_rows(settings) -> None:  # type: ignore[no-untyped-def]
     """Не отклоняет заполненные строки из-за пропущенной пустой строки каталога."""
     result = normalize_photo_observation(

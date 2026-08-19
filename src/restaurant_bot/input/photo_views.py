@@ -11,10 +11,8 @@ from PIL import Image, UnidentifiedImageError
 _DENSE_TABLE_MIN_WIDTH = 1200
 _DENSE_TABLE_MIN_HEIGHT = 700
 _DENSE_TABLE_MIN_ASPECT_RATIO = 1.25
-_PRODUCT_VIEW_START = 0.0
-_PRODUCT_VIEW_END = 0.65
-_ORDER_VIEW_START = 0.35
-_ORDER_VIEW_END = 0.98
+_TABLE_FOCUS_TOP_MARGIN = 0.18
+_TABLE_FOCUS_BOTTOM_MARGIN = 0.98
 _CROP_UPSCALE_FACTOR = 2
 
 
@@ -40,18 +38,13 @@ class PhotoImagePreparation:
     dense_table_views_used: bool
 
     @property
-    def product_view_size(self) -> tuple[int, int] | None:
-        """Возвращает размер увеличенного товарного view."""
-        return _view_size(self.views, "product")
-
-    @property
-    def order_view_size(self) -> tuple[int, int] | None:
-        """Возвращает размер увеличенного order view."""
-        return _view_size(self.views, "order")
+    def table_focus_view_size(self) -> tuple[int, int] | None:
+        """Возвращает размер увеличенного полноширинного вида таблицы."""
+        return _view_size(self.views, "table_focus")
 
 
 def prepare_photo_views(path: Path, mime_type: str) -> PhotoImagePreparation:
-    """Готовит максимум три view, сохраняя исходное изображение без изменений."""
+    """Готовит исходное изображение и один полноширинный вид плотной таблицы."""
     original_data = path.read_bytes()
     try:
         with Image.open(BytesIO(original_data)) as image:
@@ -65,18 +58,7 @@ def prepare_photo_views(path: Path, mime_type: str) -> PhotoImagePreparation:
                     dense_table_views_used=False,
                 )
 
-            product_view = _build_crop_view(
-                image,
-                "product",
-                _PRODUCT_VIEW_START,
-                _PRODUCT_VIEW_END,
-            )
-            order_view = _build_crop_view(
-                image,
-                "order",
-                _ORDER_VIEW_START,
-                _ORDER_VIEW_END,
-            )
+            table_focus_view = _build_table_focus_view(image)
     except (UnidentifiedImageError, OSError):
         return PhotoImagePreparation(
             views=(PhotoImageView("original", original_data, mime_type, 0, 0),),
@@ -89,8 +71,7 @@ def prepare_photo_views(path: Path, mime_type: str) -> PhotoImagePreparation:
     return PhotoImagePreparation(
         views=(
             PhotoImageView("original", original_data, mime_type, width, height),
-            product_view,
-            order_view,
+            table_focus_view,
         ),
         original_width=width,
         original_height=height,
@@ -108,16 +89,11 @@ def _is_dense_table(width: int, height: int) -> bool:
     )
 
 
-def _build_crop_view(
-    image: Image.Image,
-    name: str,
-    start_ratio: float,
-    end_ratio: float,
-) -> PhotoImageView:
-    """Вырезает перекрывающийся регион и увеличивает его без изменения пропорций."""
-    start = max(0, min(image.width - 1, round(image.width * start_ratio)))
-    end = max(start + 1, min(image.width, round(image.width * end_ratio)))
-    crop = image.crop((start, 0, end, image.height))
+def _build_table_focus_view(image: Image.Image) -> PhotoImageView:
+    """Вырезает таблицу по вертикали, сохраняя всю ширину строки."""
+    start = max(0, min(image.height - 1, round(image.height * _TABLE_FOCUS_TOP_MARGIN)))
+    end = max(start + 1, min(image.height, round(image.height * _TABLE_FOCUS_BOTTOM_MARGIN)))
+    crop = image.crop((0, start, image.width, end))
     enlarged = crop.resize(
         (crop.width * _CROP_UPSCALE_FACTOR, crop.height * _CROP_UPSCALE_FACTOR),
         resample=Image.Resampling.LANCZOS,
@@ -125,7 +101,7 @@ def _build_crop_view(
     output = BytesIO()
     enlarged.save(output, format="PNG", optimize=False)
     return PhotoImageView(
-        name=name,
+        name="table_focus",
         data=output.getvalue(),
         mime_type="image/png",
         width=enlarged.width,

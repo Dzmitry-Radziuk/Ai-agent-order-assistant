@@ -12,27 +12,30 @@ pixels and the model could incorrectly report `order_area_complete=true`.
 ### Image preparation
 
 For dense wide images (`width >= 1200`, `height >= 700`, aspect ratio `>= 1.25`) the
-runtime now sends three representations of the same document in one user message:
-the untouched original, a 0%-65% product crop, and a 35%-98% order/comment crop.
-The two crops are enlarged 2x with Pillow/LANCZOS, encoded as PNG, and overlap by 30%
-of the source width so the model can confirm horizontal row ownership. Ordinary smaller
-or non-wide photos keep the original-only path. No perspective correction, OCR or
-second AI pass was added.
+runtime now sends two representations of the same document in one user message: the
+untouched original and one full-width table-focus crop from approximately 18%-98% of
+the image height. The crop keeps product, supplier, Hall/Bar/Kitchen and Comment in the
+same horizontal row, is enlarged 2x with Pillow/LANCZOS, and encoded as PNG. Ordinary
+smaller or non-wide photos keep the original-only path. No perspective correction, OCR
+or second AI pass was added.
 
 ### Contracts and boundaries
 
 - `responses.parse()` remains exactly one call per photo.
 - `PhotoDocumentObservation`, same-row authorization, department quantities,
   incomplete-photo handling and trusted venue identity remain unchanged.
+- A client sheet row with generic order evidence but no Hall/Bar/Kitchen quantity now
+  returns `incomplete_photo_read` with reason
+  `client_sheet_quantity_without_department`; the backend never infers Kitchen.
 - The model and catalog behavior are unchanged.
 - Added dependency: `Pillow` only; OpenCV and external OCR were not added.
-- `photo_image_views_prepared` logs only dimensions, view count, upscale factor and the
-  dense-table flag; image bytes are not logged.
+- `photo_image_views_prepared` logs dimensions, table-focus size, view count, upscale
+  factor and the dense-table flag; image bytes are not logged.
 
 ### Verification
 
-- Targeted photo/view/OpenAI request tests: passed.
-- Full pytest: `1615 passed`.
+- Targeted photo/view/OpenAI request and ingestion guard tests: passed.
+- Full pytest: `1616 tests collected`, all passed.
 - Ruff, mypy (`166` source files), compileall and `git diff --check`: passed.
 - Manual real-image acceptance: `NOT VERIFIED` here — five clean-screenshot runs and
   three monitor-photo runs still need to be performed in Telegram. Unit tests prove only

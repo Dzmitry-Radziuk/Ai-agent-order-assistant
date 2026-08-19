@@ -302,10 +302,8 @@ def test_photo_parser_passes_caption_and_high_detail_image_as_structured_input(
     assert content[1]["detail"] == "high"
 
 
-def test_dense_photo_parser_sends_three_views_in_one_vision_request(
-    settings, tmp_path: Path
-) -> None:  # type: ignore[no-untyped-def]
-    """Передаёт original и два увеличенных view одним structured vision запросом."""
+def test_dense_photo_parser_sends_two_views_in_one_vision_request(settings, tmp_path: Path) -> None:  # type: ignore[no-untyped-def]
+    """Передаёт original и table-focus одним structured vision запросом."""
     responses = _Responses(PhotoDocumentObservation())
     service = _service(settings, SimpleNamespace(responses=responses))
     photo = tmp_path / "dense-table.png"
@@ -317,9 +315,10 @@ def test_dense_photo_parser_sends_three_views_in_one_vision_request(
     call = responses.calls[0]
     content = call["input"][0]["content"]  # type: ignore[index]
     images = [part for part in content if part["type"] == "input_image"]
-    assert len(images) == 3
+    assert len(images) == 2
     assert all(part["detail"] == "high" for part in images)
-    assert "разные виды одного и того же документа" in content[0]["text"]
+    assert "полноширинный вид одной заявки" in content[0]["text"]
+    assert "Не используй соседнюю строку" in content[0]["text"]
     assert call["text_format"] is PhotoDocumentObservation
 
 
