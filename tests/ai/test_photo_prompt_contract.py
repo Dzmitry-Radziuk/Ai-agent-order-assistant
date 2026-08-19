@@ -22,6 +22,8 @@ def test_photo_prompt_prioritizes_filled_department_cells() -> None:
     assert "hall_quantity" in prompt
     assert "bar_quantity" in prompt
     assert "kitchen_quantity" in prompt
+    assert "обязательно помещай в соответствующее department-поле" in prompt
+    assert "не заменяй его только на explicit_order_quantity" in prompt
     assert "order_area_complete=false" in prompt
     assert "uncertain_order_row_count" in prompt
 

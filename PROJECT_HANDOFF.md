@@ -37,6 +37,11 @@ second AI pass was added.
 - Manual real-image acceptance: `NOT VERIFIED` here — five clean-screenshot runs and
   three monitor-photo runs still need to be performed in Telegram. Unit tests prove only
   deterministic view preparation and one-call request composition, not vision accuracy.
+- One live Telegram run after the first build (`update_id=247308058`) prepared all three
+  views and vision returned four rows, but put their quantities into generic order-entry
+  fields instead of `kitchen_quantity`; the backend correctly dropped those rows rather
+  than inventing a department. A short prompt clarification now makes the department-field
+  ownership explicit. The required repeated acceptance runs remain pending.
 
 ## PHOTO-PROMPT-RESET-13 - current corrective pass
 
