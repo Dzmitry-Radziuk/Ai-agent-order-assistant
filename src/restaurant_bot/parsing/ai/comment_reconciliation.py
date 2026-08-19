@@ -44,6 +44,13 @@ def _comment_source_is_authorized(comment: str, source_text: str) -> bool:
         return False
     if is_catalog_tail_text(comment, source_text) and not _COMMENT_ACTION_RE.search(value):
         return False
+    facts = extract_semantic_facts(source_text)
+    if any(
+        fact.kind is SemanticFactKind.ORDER_QUANTITY
+        and normalize_text(fact.original_text) in value
+        for fact in facts
+    ):
+        return False
     return not any(
         fact.kind
         in {
@@ -144,6 +151,13 @@ def _strip_global_comment_scope(value: str) -> str:
     comment = clean_text(value).strip(" .,;:-—–")
     if not comment:
         return ""
+    if re.match(
+        r"^\s*(?:\u0432\u0441\u0435\u0433\u043e|\u0438\u0442\u043e\u0433\u043e)\s+"
+        r"(?:\u043d\u0443\u0436\u043d\u043e|\u043d\u0430\u0434\u043e|\u0442\u0440\u0435\u0431\u0443\u0435\u0442\u0441\u044f)\b",
+        comment,
+        flags=re.I,
+    ):
+        return comment
     comment = re.sub(
         r"^(?:(?:и|а)\s+)?(?:все|всё|всем|для всех)"
         r"(?:\s+(?:товар\w*|позици\w*|это(?:\s+дело)?))?"
@@ -403,7 +417,11 @@ def _discard_unverified_item_comments(
     connectors = {"на", "и", "или", "либо", "а", "также"}
     for item_index, item in enumerate(items):
         existing = clean_text(item.get("comment") or item.get("user_comment_to_supplier"))
-        context = clean_text(item.get("source_line")) or clean_text(source_text)
+        context = (
+            clean_text(item.get("source_span"))
+            or clean_text(item.get("source_line"))
+            or clean_text(source_text)
+        )
         normalized_context = normalize_text(context)
         context_words = re.findall(r"[a-zа-яё0-9]+", normalized_context, flags=re.I)
         verified_semantic = bool(

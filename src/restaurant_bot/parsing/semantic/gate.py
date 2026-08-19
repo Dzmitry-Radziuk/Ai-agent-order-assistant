@@ -62,7 +62,8 @@ def _clear_catalog_comments(items: list[dict[str, Any]], source_text: str) -> No
     """Удаляет комментарии, совпадающие только с фактами каталога."""
     for item in items:
         comment = clean_text(item.get("comment") or item.get("user_comment_to_supplier"))
-        if comment and not _source_supports_comment(comment, source_text):
+        context = clean_text(item.get("source_span")) or clean_text(item.get("source_line")) or source_text
+        if comment and not _source_supports_comment(comment, context):
             item["comment"] = ""
             item["user_comment_to_supplier"] = ""
             item["comment_source"] = CommentSource.NONE.value
@@ -101,7 +102,7 @@ def _merge_order_quantity(
     if target.get("quantity") is not None or candidate.get("quantity") is None:
         return
     quantity = reconcile_order_quantity_evidence(
-        source_text,
+        clean_text(candidate.get("source_span")) or source_text,
         candidate.get("quantity"),
         candidate.get("unit") or "",
         quantity_source=candidate.get("quantity_source") or "",
@@ -130,7 +131,10 @@ def apply_semantic_gate(
         item
         for item in items
         if not item.get("source_line")
-        or normalize_text(item.get("source_line")) == normalize_text(source_text)
+        or (
+            not item.get("source_span")
+            and normalize_text(item.get("source_line")) == normalize_text(source_text)
+        )
     ]
     if len(deterministic) == 1 and same_source:
         reference = references[0]
@@ -157,7 +161,10 @@ def apply_semantic_gate(
                 )
                 if (
                     candidate_comment
-                    and _source_supports_comment(candidate_comment, source_text)
+                    and _source_supports_comment(
+                        candidate_comment,
+                        clean_text(candidate.get("source_span")) or source_text,
+                    )
                     and not merged.get("comment")
                 ):
                     merged["comment"] = candidate_comment
@@ -193,8 +200,10 @@ def apply_semantic_gate(
     accepted: list[dict[str, Any]] = []
     for item in items:
         query = item.get("product_query") or ""
-        if not item.get("source_line") or normalize_text(item.get("source_line")) != normalize_text(
-            source_text
+        if (
+            item.get("source_span")
+            or not item.get("source_line")
+            or normalize_text(item.get("source_line")) != normalize_text(source_text)
         ):
             accepted.append(item)
             continue

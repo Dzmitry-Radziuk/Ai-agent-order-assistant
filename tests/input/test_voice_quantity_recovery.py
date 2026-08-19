@@ -35,6 +35,99 @@ def test_compact_catalog_measurement_does_not_become_order_quantity() -> None:
     assert item["packaging_role"] == "catalog_attribute"
 
 
+def test_multi_item_source_spans_keep_order_quantity_local_to_last_item() -> None:
+    """Проверяет локальную принадлежность quantity и отсутствие заказа в названии товара."""
+    source = (
+        "\u0425\u0440\u0435\u043d \u0441\u0442\u043e\u043b\u043e\u0432\u044b\u0439 \u0434\u043e\u043c\u0430\u0448\u043d\u0438\u0439 \u043a\u0430\u043b\u043e\u0440\u0438\u0439\u043d\u044b\u0439, 160 GRT \u0411, \u0420\u043e\u0441\u0441\u0438\u044f 12 \u043a \u043e\u0434\u043d\u043e\u043c\u0443, 5 \u0448\u0442\u0443\u043a, \u0438 "
+        "\u0433\u043e\u0440\u0447\u0438\u0446\u0430 \u0434\u0438\u0436\u043e\u043d\u0441\u043a\u0430\u044f, \u0447\u0430\u0442\u043b, \u0432\u0435\u0434\u0440\u043e, 1 \u043a\u0438\u043b\u043e\u0433\u0440\u0430\u043c\u043c, 6 \u0448\u0442\u0443\u043a \u0432 \u043a\u043e\u0440\u043e\u0431\u043a\u0435, \u0424\u0440\u0430\u043d\u0446\u0438\u044f. "
+        "\u041d\u0443\u0436\u043d\u043e 13 \u0448\u0442\u0443\u043a."
+    )
+    result = recover_omitted_explicit_items(
+        {
+            "intent": Intent.ADD_ITEMS,
+            "global_comment": "\u041d\u0443\u0436\u043d\u043e 13 \u0448\u0442\u0443\u043a",
+            "items": [
+                {
+                    "product_query": "\u0425\u0440\u0435\u043d \u0441\u0442\u043e\u043b\u043e\u0432\u044b\u0439 \u0434\u043e\u043c\u0430\u0448\u043d\u0438\u0439 \u043a\u0430\u043b\u043e\u0440\u0438\u0439\u043d\u044b\u0439",
+                    "quantity": 5,
+                    "unit": "\u0448\u0442",
+                    "source_line": "",
+                },
+                {
+                    "product_query": "\u0433\u043e\u0440\u0447\u0438\u0446\u0430 \u0434\u0438\u0436\u043e\u043d\u0441\u043a\u0430\u044f, \u0447\u0430\u0442\u043b, \u0432\u0435\u0434\u0440\u043e",
+                    "quantity": 6,
+                    "unit": "\u0448\u0442",
+                    "source_line": "",
+                },
+            ],
+        },
+        source,
+    )
+
+    assert result["global_comment"] == ""
+    assert result.get("comment_clarification", "") == ""
+    assert [(item["quantity"], item["unit"]) for item in result["items"]] == [
+        (5.0, "\u0448\u0442"),
+        (13.0, "\u0448\u0442"),
+    ]
+    assert all(not item["comment"] for item in result["items"])
+    assert "13" not in result["items"][1]["product_query"]
+    assert result["items"][0]["source_line"] == source
+    assert result["items"][0]["source_span"] != result["items"][1]["source_span"]
+
+
+@pytest.mark.parametrize(
+    ("source", "quantities", "global_comment", "clarification"),
+    [
+        (
+            "\u041b\u0443\u043a 5 \u043a\u0433 \u0438 \u043a\u0430\u0440\u0442\u043e\u0448\u043a\u0430 10 \u043a\u0433",
+            [5.0, 10.0],
+            "",
+            "",
+        ),
+        (
+            "\u041b\u0443\u043a 5 \u043a\u0433, \u043a\u0430\u0440\u0442\u043e\u0448\u043a\u0430. \u041d\u0443\u0436\u043d\u043e 10 \u043a\u0433",
+            [5.0, 10.0],
+            "\u041d\u0443\u0436\u043d\u043e 10 \u043a\u0433",
+            "",
+        ),
+        (
+            "\u041b\u0443\u043a \u0438 \u043a\u0430\u0440\u0442\u043e\u0448\u043a\u0430, \u0432\u0441\u0435\u0433\u043e \u043d\u0443\u0436\u043d\u043e 15 \u043a\u0433",
+            [None, None],
+            "\u0412\u0441\u0435\u0433\u043e \u043d\u0443\u0436\u043d\u043e 15 \u043a\u0433",
+            "\u0412\u0441\u0435\u0433\u043e \u043d\u0443\u0436\u043d\u043e 15 \u043a\u0433",
+        ),
+        (
+            "\u041b\u0443\u043a 5 \u043a\u0433, \u043a\u0430\u0440\u0442\u043e\u0448\u043a\u0430 10 \u043a\u0433. \u041d\u0443\u0436\u043d\u043e 20 \u043a\u0433",
+            [5.0, 10.0],
+            "\u041d\u0443\u0436\u043d\u043e 20 \u043a\u0433",
+            "20 \u043a\u0433",
+        ),
+    ],
+)
+def test_multi_item_quantity_ownership_matrix(
+    source: str,
+    quantities: list[float | None],
+    global_comment: str,
+    clarification: str,
+) -> None:
+    """Проверяет локальные, detached и конфликтующие количества в списке."""
+    result = recover_omitted_explicit_items(
+        {
+            "intent": Intent.ADD_ITEMS,
+            "global_comment": global_comment,
+            "items": [
+                {"product_query": "\u043b\u0443\u043a", "quantity": quantities[0], "unit": "\u043a\u0433", "source_line": ""},
+                {"product_query": "\u043a\u0430\u0440\u0442\u043e\u0448\u043a\u0430", "quantity": quantities[1], "unit": "\u043a\u0433", "source_line": ""},
+            ],
+        },
+        source,
+    )
+
+    assert [item["quantity"] for item in result["items"]] == quantities
+    assert result.get("comment_clarification", "") == clarification
+
+
 def test_voice_recovery_restores_quantity_and_unit_from_shared_source_line() -> None:
     """Проверяет, что голос восстановление восстанавливает количество и единица измерения из общая исходный строка."""
     source = "Сироп роза 10 штук, говядина 5 кг"

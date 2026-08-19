@@ -44,6 +44,7 @@ def build_cart_item(
         id=uuid4().hex[:12],
         source_query=extracted.product_query,
         source_line=extracted.source_line,
+        source_span=extracted.source_span,
         quantity_source=extracted.quantity_source,
         order_entry_type=extracted.order_entry_type,
         packaging_text=extracted.packaging_text,

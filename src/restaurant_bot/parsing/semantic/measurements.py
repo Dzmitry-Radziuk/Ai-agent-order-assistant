@@ -47,6 +47,10 @@ _COMMENT_MARKERS = {
     "покрупнее",
     "покрупней",
 }
+_GLOBAL_QUANTITY_SCOPE_RE = re.compile(
+    r"\b(?:\u0432\u0441\u0435\u0433\u043e|\u0438\u0442\u043e\u0433\u043e|\u043d\u0430\s+\u0432\u0441\u0435\u0445|\u043e\u0431\u0449\u0435\s+\u043a\u043e\u043b\u0438\u0447\u0435\u0441\u0442\u0432\u043e)\b",
+    flags=re.I,
+)
 _WORD_MEASUREMENT_RE = re.compile(
     rf"(?P<number>(?:{'|'.join(sorted((re.escape(word) for word in NUMBER_WORDS), key=len, reverse=True))})"
     rf"(?:\s+(?:{'|'.join(sorted((re.escape(word) for word in NUMBER_WORDS), key=len, reverse=True))}))*)\s+"
@@ -105,11 +109,12 @@ def extract_semantic_facts(source_text: str) -> tuple[SemanticFact, ...]:
             _span_overlaps(span, range_span) for range_span in numeric_range_spans(source)
         )
         marker_prefix = source[max(0, match.start() - 24) : match.start()]
+        global_quantity_scope = bool(_GLOBAL_QUANTITY_SCOPE_RE.search(marker_prefix))
         local_order_marker = bool(
             re.search(r"\b(?:нужно|надо|закаж\w*|добав\w*|постав\w*)\b", marker_prefix, re.I)
         )
         terminal_order_quantity = not source[match.end() :].strip(" \t\r\n.,;:!?()[]{}")
-        explicit_order = local_order_marker or terminal_order_quantity
+        explicit_order = (local_order_marker or terminal_order_quantity) and not global_quantity_scope
         kind = (
             SemanticFactKind.CATALOG_ATTRIBUTE
             if in_packaging or in_range
@@ -203,6 +208,53 @@ def extract_semantic_facts(source_text: str) -> tuple[SemanticFact, ...]:
             )
         )
     return tuple(sorted(facts, key=lambda fact: (fact.start, fact.end, fact.kind)))
+
+
+def has_global_quantity_scope(source_text: str) -> bool:
+    """Проверяет, относится ли названное количество ко всему списку товаров."""
+    return bool(_GLOBAL_QUANTITY_SCOPE_RE.search(normalize_text(source_text)))
+
+
+def strip_order_quantity_from_query(query: str, source_text: str) -> str:
+    """Удаляет из поискового названия только подтверждённый заказной хвост."""
+    value = clean_text(query)
+    if not value:
+        return ""
+    normalized_value = normalize_text(value)
+    source_has_global_scope = has_global_quantity_scope(source_text)
+    for fact in extract_semantic_facts(source_text):
+        if fact.kind is not SemanticFactKind.ORDER_QUANTITY and not (
+            source_has_global_scope and fact.kind is SemanticFactKind.MEASUREMENT
+        ):
+            continue
+        if (
+            fact.kind is SemanticFactKind.ORDER_QUANTITY
+            and not re.search(r"\s", fact.original_text)
+            and not re.search(r"\b(?:\u043d\u0443\u0436\u043d\u043e|\u043d\u0430\u0434\u043e)\b", source_text, re.I)
+        ):
+            continue
+        term = normalize_text(fact.original_text)
+        position = normalized_value.find(term)
+        if position < 0:
+            continue
+        prefix = normalized_value[:position]
+        marker = re.search(
+            r"(?:\b(?:\u0432\u0441\u0435\u0433\u043e|\u0438\u0442\u043e\u0433\u043e)\b\s+)?"
+            r"(?:\b(?:\u043d\u0443\u0436\u043d\u043e|\u043d\u0430\u0434\u043e|\u0437\u0430\u043a\u0430\u0436\w*|\u0434\u043e\u0431\u0430\u0432\w*)\b\s*)$",
+            prefix,
+            flags=re.I,
+        )
+        cut = marker.start() if marker is not None else position
+        return value[:cut].strip(" .,;:-—–")
+    marker = re.search(
+        r"(?:\b(?:\u0432\u0441\u0435\u0433\u043e|\u0438\u0442\u043e\u0433\u043e)\b\s+)?"
+        r"\b(?:\u043d\u0443\u0436\u043d\u043e|\u043d\u0430\u0434\u043e|\u0437\u0430\u043a\u0430\u0436\w*|\u0434\u043e\u0431\u0430\u0432\w*)\b.*$",
+        normalized_value,
+        flags=re.I,
+    )
+    if marker is not None:
+        return value[: marker.start()].strip(" .,;:-—–")
+    return value
 
 
 def catalog_packaging_span(source_text: str) -> tuple[int, int] | None:

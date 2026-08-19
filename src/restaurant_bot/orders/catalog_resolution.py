@@ -40,10 +40,15 @@ from restaurant_bot.parsing.products import parse_product_lines
 from restaurant_bot.parsing.quantities import has_explicit_order_marker
 
 
+def _semantic_source(item: CartItem) -> str:
+    """Возвращает локальный span для semantic-проверок товара."""
+    return item.source_span.strip() or item.source_line.strip()
+
+
 def _catalog_search_query(item: CartItem) -> str:
     """Возвращает каноническое название товара для получения кандидатов."""
     source_query = item.source_query.strip()
-    return remove_phrase_overlap(source_query or item.source_line, item.comment)
+    return remove_phrase_overlap(source_query or _semantic_source(item), item.comment)
 
 
 def _format_numeric_evidence(value: object) -> str:
@@ -64,7 +69,7 @@ def _format_numeric_evidence(value: object) -> str:
 def _catalog_evidence_query(item: CartItem) -> str:
     """Добавляет к каноническому запросу только безопасные признаки источника."""
     query = _catalog_search_query(item)
-    source = item.source_line.strip()
+    source = _semantic_source(item)
     if not source:
         return query
 
@@ -340,7 +345,7 @@ class CatalogResolutionService:
         """Находит фасовку, распознанную голосом как количество заказа."""
         if item.quantity is None or not item.unit or item.quantity_source:
             return None
-        source = normalize_text(item.source_line)
+        source = normalize_text(_semantic_source(item))
         if not source:
             source = normalize_text(item.source_query)
         if not source or has_explicit_order_marker(source) or numeric_range_spans(source):
@@ -382,7 +387,7 @@ class CatalogResolutionService:
     def _remove_unanchored_supplier_hint(item: CartItem) -> None:
         """Удаляет неподтверждённую подсказку поставщика из хвоста строки."""
         hint = normalize_text(item.supplier_hint)
-        source = normalize_text(item.source_line)
+        source = normalize_text(_semantic_source(item))
         if not hint or not source:
             return
         explicit_supplier = re.search(
@@ -404,7 +409,7 @@ class CatalogResolutionService:
         """Удаляет факты каталога из количества и комментария до решения."""
         product_name = candidate.name if candidate is not None else ""
         preserve_source_free_quantity = (
-            not item.source_line
+            not _semantic_source(item)
             and not item.quantity_source
             and has_complete_query_evidence(item.source_query, product_name)
         )
@@ -415,7 +420,7 @@ class CatalogResolutionService:
             and not preserve_source_free_quantity
         ):
             authorization = reconcile_order_quantity_evidence(
-                item.source_line or item.source_query,
+                _semantic_source(item) or item.source_query,
                 item.quantity,
                 item.unit,
                 quantity_source=item.quantity_source,
@@ -433,7 +438,7 @@ class CatalogResolutionService:
             item.comment,
             item.source_query,
             product_name,
-            source_line=item.source_line,
+            source_line=_semantic_source(item),
             include_source_query=False,
         )
         if not item.comment:
@@ -443,14 +448,14 @@ class CatalogResolutionService:
     def _reconcile_quantity_with_catalog_name(item: CartItem, product_name: str) -> None:
         """Отделяет количество заказа от фасовки в имени каталога."""
         if (
-            not item.source_line
+            not _semantic_source(item)
             and not item.quantity_source
             and item.quantity is not None
             and has_complete_query_evidence(item.source_query, product_name)
         ):
             return
         authorization = reconcile_order_quantity_evidence(
-            item.source_line or item.source_query,
+            _semantic_source(item) or item.source_query,
             item.quantity,
             item.unit,
             quantity_source=item.quantity_source,

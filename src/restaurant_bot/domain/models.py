@@ -239,6 +239,7 @@ class ExtractedItem(BaseModel):
     user_comment_to_supplier: str = ""
     comment_source: CommentSource = CommentSource.NONE
     source_line: str = ""
+    source_span: str = ""
     source_department: str = ""
     department_quantities: DepartmentQuantities = Field(default_factory=DepartmentQuantities)
     quantity_source: str = ""
@@ -262,6 +263,7 @@ class ExtractedItem(BaseModel):
         "comment",
         "user_comment_to_supplier",
         "source_line",
+        "source_span",
         "source_department",
         "quantity_source",
         "printed_reference_text",
@@ -353,6 +355,7 @@ class CartItem(BaseModel):
     id: str
     source_query: str
     source_line: str = ""
+    source_span: str = ""
     quantity_source: str = ""
     order_entry_type: str = ""
     packaging_text: str = ""
@@ -396,6 +399,7 @@ class CartItem(BaseModel):
     @field_validator(
         "source_query",
         "source_line",
+        "source_span",
         "quantity_source",
         "order_entry_type",
         "catalog_comment",

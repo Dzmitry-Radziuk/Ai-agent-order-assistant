@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from enum import StrEnum
 
@@ -86,6 +87,18 @@ def _matches_proposal(
     normalized_unit = normalize_unit(unit)
     return (
         not normalized_unit or not evidence.unit or normalized_unit == normalize_unit(evidence.unit)
+    )
+
+
+def _has_local_order_marker(source: str, evidence: NumericEvidence) -> bool:
+    """Проверяет order-marker непосредственно перед конкретным числовым span."""
+    prefix = source[max(0, evidence.start - 32) : evidence.start]
+    return bool(
+        re.search(
+            r"\b(?:\u043d\u0443\u0436\u043d\u043e|\u043d\u0430\u0434\u043e|\u0437\u0430\u043a\u0430\u0436\w*|\u0434\u043e\u0431\u0430\u0432\w*)\b",
+            prefix,
+            flags=re.I,
+        )
     )
 
 
@@ -192,17 +205,8 @@ def reconcile_order_quantity_evidence(
             QuantityProvenance.ORDER,
         )
 
-    if has_explicit_order_marker(source) and proposed_source:
+    if any(_has_local_order_marker(source, entry) for entry in proposed_source):
         return QuantityAuthorization(proposed_quantity, normalized_unit, QuantityProvenance.ORDER)
-
-    if residual and (has_explicit_order_marker(source) or len(residual) == 1):
-        selected = residual[-1]
-        if selected.upper_value is None:
-            return QuantityAuthorization(
-                selected.value,
-                normalize_unit(selected.unit),
-                QuantityProvenance.ORDER,
-            )
 
     if proposed_source:
         return QuantityAuthorization(None, "", QuantityProvenance.CATALOG_IDENTITY)

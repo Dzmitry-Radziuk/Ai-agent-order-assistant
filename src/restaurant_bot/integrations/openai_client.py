@@ -772,6 +772,7 @@ class OpenAIService:
             "supplier_hint": item.supplier_hint,
             "comment": item.comment,
             "source_line": item.source_line,
+            "source_span": item.source_span,
             "source_department": item.source_department,
             "department_quantities": item.department_quantities.model_dump(),
             "quantity_source": item.quantity_source,

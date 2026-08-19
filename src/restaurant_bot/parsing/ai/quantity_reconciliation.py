@@ -151,20 +151,37 @@ def _explicit_order_quantity_from_source(
     return candidates[-1]
 
 
+def _mark_item_source(item: dict[str, Any], source: str) -> None:
+    """Сохраняет локальный semantic span, не перезаписывая полный source_line."""
+    if not source:
+        return
+    item["source_span"] = source
+    if not clean_text(item.get("source_line")):
+        item["source_line"] = source
+
+
 def restore_explicit_order_terms(
     items: list[dict[str, Any]], source_text: str = ""
 ) -> list[dict[str, Any]]:
     """Восстанавливает явно указанное количество или единицу."""
     recovered_from_message = parse_product_lines(source_text)
     for index, item in enumerate(items):
-        original_line = clean_text(item.get("source_line")) or clean_text(source_text)
+        original_line = clean_text(item.get("source_span")) or clean_text(item.get("source_line"))
+        if not original_line and len(items) == 1:
+            original_line = clean_text(source_text)
         terminal_quantity, terminal_unit = _terminal_order_quantity(original_line)
+        if terminal_quantity is not None and terminal_unit and not any(
+            fact.kind is SemanticFactKind.ORDER_QUANTITY
+            and abs((parse_quantity_unit(fact.original_text)[0] or -1) - terminal_quantity) <= 1e-9
+            for fact in extract_semantic_facts(original_line)
+        ):
+            terminal_quantity, terminal_unit = None, ""
         shared_source = len(items) > 1 and (
             "\n" in str(item.get("source_line") or "")
             or normalize_text(original_line) == normalize_text(clean_text(source_text))
         )
         if terminal_quantity is not None and not shared_source:
-            item["source_line"] = original_line
+            _mark_item_source(item, original_line)
             item["quantity"] = terminal_quantity
             item["unit"] = terminal_unit
             continue
@@ -173,7 +190,7 @@ def restore_explicit_order_terms(
             original_line,
         )
         if outside_quantity is not None:
-            item["source_line"] = original_line
+            _mark_item_source(item, original_line)
             item["quantity"] = outside_quantity
             item["unit"] = outside_unit
             continue
@@ -208,7 +225,7 @@ def restore_explicit_order_terms(
             ):
                 source_quantity = float(source_item.quantity)
                 source_unit = normalize_unit(source_item.unit)
-            item["source_line"] = original_line
+            _mark_item_source(item, original_line)
             if source_item is not None:
                 item["packaging_text"] = (
                     clean_text(item.get("packaging_text")) or source_item.packaging_text
@@ -231,7 +248,7 @@ def restore_explicit_order_terms(
             if len(explicit_terms) == 1 and trailing_quantity is not None:
                 # После справочного диапазона безопасным количеством является
                 # только отдельно названное значение заказа.
-                item["source_line"] = original_line
+                _mark_item_source(item, original_line)
                 item["quantity"], item["unit"] = trailing_quantity, trailing_unit
                 continue
             if len(explicit_terms) == 1 and model_quantity is not None:
@@ -239,13 +256,13 @@ def restore_explicit_order_terms(
                 if abs(model_quantity - explicit_quantity) <= 1e-9:
                     # Разрешаем комментарий после явно распознанного заказа,
                     # например ``... 10 кг, желательно завтра``.
-                    item["source_line"] = original_line
+                    _mark_item_source(item, original_line)
                     item["quantity"], item["unit"] = explicit_quantity, explicit_unit
                     continue
             if not explicit_terms or len(explicit_terms) == 1:
                 # ИИ не должен превращать первую границу диапазона в заказ.
                 # Дальше обычный диалог попросит пользователя уточнить объём.
-                item["source_line"] = original_line
+                _mark_item_source(item, original_line)
                 item["quantity"] = None
                 item["unit"] = ""
                 continue
@@ -269,20 +286,20 @@ def restore_explicit_order_terms(
                 abs(explicit_terms[-1][0] - model_quantity) <= 1e-9
                 and explicit_terms[-1][1] == model_unit
             ):
-                item["source_line"] = original_line
+                _mark_item_source(item, original_line)
                 item["quantity"] = model_quantity
                 item["unit"] = model_unit
                 continue
             if source_item is not None and source_item.quantity is not None:
                 item["quantity"] = source_item.quantity
                 item["unit"] = source_item.unit
-                item["source_line"] = original_line
+                _mark_item_source(item, original_line)
                 if source_item.packaging_role != "none":
                     item["packaging_text"] = source_item.packaging_text
                     item["packaging_role"] = source_item.packaging_role
                     item["packaging_confidence"] = source_item.packaging_confidence
                 continue
-            item["source_line"] = original_line
+            _mark_item_source(item, original_line)
             item["quantity"] = model_quantity
             item["unit"] = model_unit
             continue
@@ -293,19 +310,20 @@ def restore_explicit_order_terms(
         # если оба перечисления имеют одинаковую длину. Модель часто копирует  # noqa: RUF003
         # всё сообщение в каждую строку source_line, поэтому разбор этого поля первым
         # присвоил бы количество последнего товара всем предыдущим позициям.
+        source_line = clean_text(item.get("source_span")) or clean_text(item.get("source_line"))
         source = None
         if len(items) == len(recovered_from_message):
             source = recovered_from_message[index]
         if source is None:
-            source_line = clean_text(item.get("source_line"))
             recovered = parse_product_lines(source_line)
             source = recovered[0] if len(recovered) == 1 else None
         if source is not None:
             if not clean_text(item.get("source_line")):
-                item["source_line"] = source.source_line or clean_text(source_text)
-            source_terminal_quantity, source_terminal_unit = _terminal_order_quantity(
-                source.source_line
+                _mark_item_source(item, source.source_line or clean_text(source_text))
+            source_context = source_line if clean_text(item.get("source_span")) else (
+                source.source_line or source_line
             )
+            source_terminal_quantity, source_terminal_unit = _terminal_order_quantity(source_context)
             if source_terminal_quantity is not None:
                 item["quantity"] = source_terminal_quantity
                 item["unit"] = source_terminal_unit
@@ -313,9 +331,22 @@ def restore_explicit_order_terms(
             # Исходная строка пользователя имеет приоритет. В частности,  # noqa: RUF003
             # модель не должна придумывать «одну бутылку» для строки,
             # в которой количество отсутствует.
-            item["quantity"] = source.quantity
-            item["unit"] = source.unit if source.quantity is not None else ""
-            if source.quantity is not None:
+            if (
+                not clean_text(item.get("source_span"))
+                and source.quantity is not None
+                and normalize_text(source.source_line) == normalize_text(source_line)
+            ):
+                source_quantity = float(source.quantity)
+                source_unit = normalize_unit(source.unit)
+            else:
+                source_quantity, source_unit = _explicit_order_quantity_from_source(
+                    source_context,
+                    source.quantity,
+                    source.unit,
+                )
+            item["quantity"] = source_quantity
+            item["unit"] = source_unit if source_quantity is not None else ""
+            if source_quantity is not None:
                 continue
 
         # Словесное «пару яблок» — явное количество этой позиции,

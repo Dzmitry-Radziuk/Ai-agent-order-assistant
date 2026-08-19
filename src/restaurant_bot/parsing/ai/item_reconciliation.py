@@ -16,6 +16,7 @@ from restaurant_bot.parsing.ai.comment_reconciliation import (
 from restaurant_bot.parsing.number_words import NUMBER_WORDS
 from restaurant_bot.parsing.numeric import to_float
 from restaurant_bot.parsing.products import parse_product_lines
+from restaurant_bot.parsing.semantic.measurements import strip_order_quantity_from_query
 
 _MIXED_SCRIPT_TOKEN_RE = re.compile(r"[A-Za-zА-Яа-яЁё]+")
 
@@ -273,13 +274,14 @@ def _restore_dropped_unclassified_terms(
         pairs.append((items[0], deterministic[0]))
     else:
         for item in items:
-            source_line = clean_text(item.get("source_line"))
+            source_line = clean_text(item.get("source_span")) or clean_text(item.get("source_line"))
             recovered_from_line = parse_product_lines(source_line)
             if len(recovered_from_line) == 1:
                 pairs.append((item, recovered_from_line[0]))
 
     normalized_global = normalize_text(global_comment).strip(" .,;:-—–")
     for item, recovered in pairs:
+        source_line = clean_text(item.get("source_span")) or clean_text(item.get("source_line"))
         if (
             clean_text(item.get("comment") or item.get("user_comment_to_supplier"))
             or clean_text(item.get("supplier_hint"))
@@ -288,6 +290,7 @@ def _restore_dropped_unclassified_terms(
         ):
             continue
         recovered_query = _strip_conversational_product_leadin(recovered.product_query)
+        recovered_query = strip_order_quantity_from_query(recovered_query, source_line)
         if normalized_global:
             recovered_query = re.sub(
                 re.escape(normalized_global),
@@ -319,7 +322,8 @@ def _restore_dropped_unclassified_terms(
             ):
                 continue
             item["product_query"] = recovered_query
-            item["source_line"] = recovered.source_line or item.get("source_line") or ""
+            if not clean_text(item.get("source_line")):
+                item["source_line"] = recovered.source_line or ""
             item["comment_source"] = CommentSource.NONE.value
 
 

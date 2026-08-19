@@ -90,6 +90,43 @@ def test_residual_order_quantity_survives_catalog_identity() -> None:
     assert authorization.unit == "шт"
 
 
+def test_repeated_packaging_and_order_occurrences_use_the_latter_order_span() -> None:
+    """Различает фасовочные и заказные одинаковые числа по их occurrence span."""
+    source = (
+        "\u0413\u043e\u0440\u0447\u0438\u0446\u0430 1 \u043a\u0433, 6 \u0448\u0442\u0443\u043a \u0432 \u043a\u043e\u0440\u043e\u0431\u043a\u0435. "
+        "\u041d\u0443\u0436\u043d\u043e 6 \u0448\u0442\u0443\u043a"
+    )
+    catalog_name = "\u0413\u043e\u0440\u0447\u0438\u0446\u0430 1 \u043a\u0433 6 \u0448\u0442\u0443\u043a \u0432 \u043a\u043e\u0440\u043e\u0431\u043a\u0435"
+
+    authorization = reconcile_order_quantity_evidence(
+        source,
+        6,
+        "\u0448\u0442",
+        catalog_name=catalog_name,
+        packaging_role="catalog_attribute",
+    )
+
+    assert authorization.provenance is QuantityProvenance.ORDER
+    assert authorization.quantity == 6
+
+
+def test_catalog_packaging_occurrence_does_not_authorize_cart_quantity() -> None:
+    """Отклоняет число фасовки, если независимого order occurrence нет."""
+    source = "\u0413\u043e\u0440\u0447\u0438\u0446\u0430 1 \u043a\u0433, 6 \u0448\u0442\u0443\u043a \u0432 \u043a\u043e\u0440\u043e\u0431\u043a\u0435"
+    catalog_name = "\u0413\u043e\u0440\u0447\u0438\u0446\u0430 1 \u043a\u0433 6 \u0448\u0442\u0443\u043a \u0432 \u043a\u043e\u0440\u043e\u0431\u043a\u0435"
+
+    authorization = reconcile_order_quantity_evidence(
+        source,
+        6,
+        "\u0448\u0442",
+        catalog_name=catalog_name,
+        packaging_role="catalog_attribute",
+    )
+
+    assert authorization.provenance is QuantityProvenance.CATALOG_IDENTITY
+    assert authorization.quantity is None
+
+
 def test_cucumber_catalog_dimensions_leave_only_residual_order_quantity() -> None:
     """Отделяет размеры и фасовку огурцов от отдельного количества заказа."""
     authorization = reconcile_order_quantity_evidence(

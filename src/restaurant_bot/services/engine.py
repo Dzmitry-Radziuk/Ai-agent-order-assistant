@@ -1193,6 +1193,8 @@ class ConversationEngine:
             extracted = command.items[0]
             if extracted.source_line:
                 item.source_line = extracted.source_line
+            if extracted.source_span:
+                item.source_span = extracted.source_span
             authorization = reconcile_order_quantity_evidence(
                 extracted.source_line or command.text,
                 extracted.quantity,

@@ -1,6 +1,6 @@
 # PROJECT HANDOFF
 
-## PRODUCTION-HARDENING-04 — текущий corrective pass
+## ITEM-LOCAL-SEMANTICS-05 — текущий corrective pass
 
 Подтверждённые изменения ограничены семантическим admission и маршрутизацией.
 Детерминированный product parser сохраняет один товарный anchor для длинных
@@ -17,10 +17,10 @@
 Изменения не добавляют AI-вызовов, не меняют persistence, callbacks, Docker,
 Alembic или transport.
 
-Проверено: полный suite — `1560 passed`; mypy, Ruff check/format, Markdown links,
-compileall и `git diff --check` прошли. Текущий HEAD остаётся
-`d4b6d9d704c193c9be7d9960ab155a989df0fe85`; изменения пока не закоммичены и не
-отправлены. `.env` не отслеживается и не читался.
+Проверено: локальные source spans отделяют семантическую область позиции от полного
+`source_line`, поэтому явное количество заказа не смешивается с фасовкой соседней
+позиции. Полный suite, mypy, Ruff, compileall и `git diff --check` проходят.
+Изменения ещё не закоммичены; `.env` не отслеживается и не читался.
 
 Актуально для ветки `decompose_bot` после исправления границы канонического
 поискового запроса, source evidence и product-line boundary 2026-08-17. Git SHA
@@ -29,12 +29,24 @@ compileall и `git diff --check` прошли. Текущий HEAD остаёт�
 
 ## Текущая задача
 
-QUANTITY-PROVENANCE-04B завершена в текущем checkout: числовые source-факты
-разделяются на `measurement`, `catalog_attribute` и `order_quantity`. Явное
-количество заказа больше не заменяется числом фасовки; неподтверждённая
-фасовочная цифра отклоняется. Для наблюдаемости reconciliation пишет
-`quantity_reconciliation_decision` без пользовательского payload. Проверено на
-тексте и voice-runtime для `22 шт`, в корзине и на таблице вариантов `7/10/24/18/None`.
+ITEM-LOCAL-SEMANTICS-05 завершена в текущем checkout. Для многопозиционного
+голосового ввода детерминированно вычисляется `source_span` каждой позиции, а
+полный `source_line` сохраняется как неизменяемое audit evidence. Для сценария с
+`5 штук` у первой позиции, фасовкой `6` у второй и финальным `13 штук` результат
+подтверждён как количества `5` и `13`; `1 кг` остаётся единицей каталога, `6` —
+фасовочным атрибутом, а `13` не попадает в `product_query`.
+
+Покрыты также отдельные количества по позициям, detached quantity, общий итог и
+конфликт общего итога с уже указанными позициями. При неоднозначном общем итоге
+система сохраняет уточнение вместо произвольного распределения. Catalog
+resolution и comment authorization используют локальный `source_span`; в логах
+reconciliation добавлены item id, span, candidate/authorized quantity, occurrence,
+fact role, provenance, catalog identity match и decision без пользовательского
+payload.
+
+QUANTITY-PROVENANCE-04B остаётся подтверждённой базой: числовые source-факты
+разделяются на `measurement`, `catalog_attribute` и `order_quantity`, а явное
+количество заказа больше не заменяется числом фасовки.
 
 PRODUCTION-HARDENING-04 завершён в текущем незакоммиченном checkout; ниже
 сохранены исторические записи предыдущих этапов.
