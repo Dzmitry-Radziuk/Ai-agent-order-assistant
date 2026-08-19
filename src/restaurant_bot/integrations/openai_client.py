@@ -16,6 +16,7 @@ from restaurant_bot.domain.models import ExtractedItem, Intent, ParsedCommand
 from restaurant_bot.domain.text import clean_text, normalize_text
 from restaurant_bot.domain.units import UNIT_ALIASES, normalize_unit
 from restaurant_bot.input.photo_ingestion import normalize_photo_observation
+from restaurant_bot.input.photo_views import prepare_photo_views
 from restaurant_bot.integrations.openai_prompts import (
     _COMMENT_SCOPE_SYSTEM,
     _MATCH_SYSTEM,
@@ -637,7 +638,38 @@ class OpenAIService:
         """Извлекает товары из фотографии."""
         import base64
 
-        encoded = base64.b64encode(path.read_bytes()).decode("ascii")
+        preparation = prepare_photo_views(path, mime_type)
+        product_view_size = preparation.product_view_size
+        order_view_size = preparation.order_view_size
+        logger.info(
+            "photo_image_views_prepared",
+            original_width=preparation.original_width,
+            original_height=preparation.original_height,
+            view_count=len(preparation.views),
+            product_view_size=list(product_view_size) if product_view_size else None,
+            order_view_size=list(order_view_size) if order_view_size else None,
+            upscale_factor=preparation.upscale_factor,
+            dense_table_views_used=preparation.dense_table_views_used,
+        )
+        input_text = caption or "Распознай заявку на фото"
+        if preparation.dense_table_views_used:
+            input_text = (
+                f"{input_text}\n\n"
+                "Это разные виды одного и того же документа, а не отдельные заявки. "
+                "Используй оригинал для общей структуры, увеличенный товарный вид "
+                "для названий и увеличенный вид колонок заказа для точной привязки. "
+                "Объедини все виды в одно PhotoDocumentObservation."
+            )
+        content: list[dict[str, Any]] = [{"type": "input_text", "text": input_text}]
+        for view in preparation.views:
+            encoded = base64.b64encode(view.data).decode("ascii")
+            content.append(
+                {
+                    "type": "input_image",
+                    "image_url": f"data:{view.mime_type};base64,{encoded}",
+                    "detail": "high",
+                }
+            )
         with self.tracer.generation(
             "openai.parse_photo",
             model=self.settings.openai_vision_model,
@@ -657,17 +689,7 @@ class OpenAIService:
                     [
                         {
                             "role": "user",
-                            "content": [
-                                {
-                                    "type": "input_text",
-                                    "text": caption or "Распознай заявку на фото",
-                                },
-                                {
-                                    "type": "input_image",
-                                    "image_url": f"data:{mime_type};base64,{encoded}",
-                                    "detail": "high",
-                                },
-                            ],
+                            "content": content,
                         }
                     ],
                 ),

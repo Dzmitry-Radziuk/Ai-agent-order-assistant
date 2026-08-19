@@ -6,6 +6,7 @@ from types import SimpleNamespace
 import httpx
 import pytest
 from openai import APITimeoutError
+from PIL import Image
 
 from restaurant_bot.domain.history import HistoryQuery, HistoryQuestionType
 from restaurant_bot.domain.models import ExtractedItem, Intent, ParsedCommand
@@ -18,6 +19,7 @@ from restaurant_bot.integrations.openai_client import (
     restore_explicit_order_terms,
 )
 from restaurant_bot.observability import Tracer
+from restaurant_bot.parsing.ai.schemas import PhotoDocumentObservation
 
 
 class _Transcriptions:
@@ -298,6 +300,27 @@ def test_photo_parser_passes_caption_and_high_detail_image_as_structured_input(
     assert content[1]["type"] == "input_image"
     assert content[1]["image_url"].startswith("data:image/jpeg;base64,")
     assert content[1]["detail"] == "high"
+
+
+def test_dense_photo_parser_sends_three_views_in_one_vision_request(
+    settings, tmp_path: Path
+) -> None:  # type: ignore[no-untyped-def]
+    """Передаёт original и два увеличенных view одним structured vision запросом."""
+    responses = _Responses(PhotoDocumentObservation())
+    service = _service(settings, SimpleNamespace(responses=responses))
+    photo = tmp_path / "dense-table.png"
+    Image.new("RGB", (1600, 900), "white").save(photo, format="PNG")
+
+    service.parse_photo(photo, "image/png")
+
+    assert len(responses.calls) == 1
+    call = responses.calls[0]
+    content = call["input"][0]["content"]  # type: ignore[index]
+    images = [part for part in content if part["type"] == "input_image"]
+    assert len(images) == 3
+    assert all(part["detail"] == "high" for part in images)
+    assert "разные виды одного и того же документа" in content[0]["text"]
+    assert call["text_format"] is PhotoDocumentObservation
 
 
 def test_catalog_matcher_uses_only_structured_candidate_decision(settings) -> None:  # type: ignore[no-untyped-def]

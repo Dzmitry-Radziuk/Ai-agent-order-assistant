@@ -1,5 +1,43 @@
 # PROJECT HANDOFF
 
+## PHOTO-GEOMETRY-14 - current corrective pass
+
+### Root cause
+
+Prompt-only changes were insufficient: the vision response was structurally valid but
+could omit small filled cells or bind a quantity to the neighboring spreadsheet row.
+The runtime sent one dense full image, so small Hall/Bar/Kitchen cells had too few useful
+pixels and the model could incorrectly report `order_area_complete=true`.
+
+### Image preparation
+
+For dense wide images (`width >= 1200`, `height >= 700`, aspect ratio `>= 1.25`) the
+runtime now sends three representations of the same document in one user message:
+the untouched original, a 0%-65% product crop, and a 35%-98% order/comment crop.
+The two crops are enlarged 2x with Pillow/LANCZOS, encoded as PNG, and overlap by 30%
+of the source width so the model can confirm horizontal row ownership. Ordinary smaller
+or non-wide photos keep the original-only path. No perspective correction, OCR or
+second AI pass was added.
+
+### Contracts and boundaries
+
+- `responses.parse()` remains exactly one call per photo.
+- `PhotoDocumentObservation`, same-row authorization, department quantities,
+  incomplete-photo handling and trusted venue identity remain unchanged.
+- The model and catalog behavior are unchanged.
+- Added dependency: `Pillow` only; OpenCV and external OCR were not added.
+- `photo_image_views_prepared` logs only dimensions, view count, upscale factor and the
+  dense-table flag; image bytes are not logged.
+
+### Verification
+
+- Targeted photo/view/OpenAI request tests: passed.
+- Full pytest: `1615 passed`.
+- Ruff, mypy (`166` source files), compileall and `git diff --check`: passed.
+- Manual real-image acceptance: `NOT VERIFIED` here — five clean-screenshot runs and
+  three monitor-photo runs still need to be performed in Telegram. Unit tests prove only
+  deterministic view preparation and one-call request composition, not vision accuracy.
+
 ## PHOTO-PROMPT-RESET-13 - current corrective pass
 
 ### Что изменено

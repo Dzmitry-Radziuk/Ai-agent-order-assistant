@@ -27,6 +27,7 @@ dependencies = [
   "tenacity>=9.1,<10",
   "langfuse>=4.7,<5",
   "python-multipart>=0.0.20,<1",
+  "pillow>=11.3,<12",
 ]
 
 [project.optional-dependencies]
