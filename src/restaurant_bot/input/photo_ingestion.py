@@ -34,8 +34,12 @@ _ORDER_HEADERS = {
     "заказано",
     "фактический заказ",
     "количество заказа",
+    "actual_order_quantity",
     "actual order quantity",
+    "order_quantity",
     "order quantity",
+    "ordered_quantity",
+    "quantity_decimal",
 }
 _COMMENT_HEADERS = {"комментарий", "комментарии", "comment", "comments", "примечание"}
 _REFERENCE_HEADERS = {

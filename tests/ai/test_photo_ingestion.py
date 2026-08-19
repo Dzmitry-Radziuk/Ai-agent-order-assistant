@@ -358,6 +358,18 @@ def test_product_card_and_reference_numbers_create_no_order(settings) -> None:  
     assert result.command.items == []
 
 
+def test_short_screenshot_order_headers_are_not_classified_as_product_card() -> None:
+    """Распознаёт технические варианты order-заголовков как таблицу заказа."""
+    observation = PhotoDocumentObservation(
+        document_type_proposal="order_table",
+        detected_columns=["product", "order_quantity", "quantity_decimal", "price"],
+        has_table_structure=True,
+        rows=[_row("Васаби", explicit_order_quantity=3, order_entry_text="3")],
+    )
+
+    assert classify_photo_document(observation) == "order_table"
+
+
 def test_product_card_structure_rejects_model_invented_generic_quantity(settings) -> None:  # type: ignore[no-untyped-def]
     """Не принимает quantity, если структура фотографии доказывает только карточку товара."""
     result = normalize_photo_observation(

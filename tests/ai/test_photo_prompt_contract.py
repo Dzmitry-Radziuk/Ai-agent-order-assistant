@@ -25,18 +25,26 @@ def test_photo_prompt_prioritizes_filled_department_cells() -> None:
     assert "обязательно помещай в соответствующее department-поле" in prompt
     assert "не заменяй его только на explicit_order_quantity" in prompt
     assert "браузер" in prompt
+    assert "скриншот" in prompt
+    assert "панели чата" in prompt
     assert "соседнюю строку" in prompt
     assert "order_area_complete=false" in prompt
     assert "uncertain_order_row_count" in prompt
 
 
-def test_photo_prompt_allows_omitting_blank_catalog_rows() -> None:
-    """Проверяет, что пустые строки каталога не требуют полного перечисления."""
+def test_photo_prompt_requires_contiguous_rows_for_table_geometry() -> None:
+    """Проверяет, что пустые строки внутри диапазона заказа сохраняют геометрию."""
     prompt = f"{_PHOTO_SYSTEM}\n{_PHOTO_OBSERVATION_CONTRACT}"
 
-    assert "Пустые строки каталога можно не перечислять" in prompt
+    assert (
+        "Строки между первой видимой товарной строкой и последней строкой с заказом обязательны"
+        in prompt
+    )
+    assert "Не пропускай и не объединяй" in prompt
+    assert "пустые строки внутри этого диапазона" in prompt
     assert "точность важнее полноты" not in prompt
-    assert "полностью пропусти эту строку" not in prompt
+    assert "не сжимай список только" in prompt
+    assert "до строк с количеством" in prompt
 
 
 def test_photo_prompt_preserves_same_row_quantity_and_corrections() -> None:

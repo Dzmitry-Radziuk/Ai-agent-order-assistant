@@ -121,7 +121,9 @@ def _log_quantity_reconciliation(
         candidate_occurrence_span=(selected.get("occurrence_span") if selected else None),
         fact_role=selected["role"] if selected else "none",
         provenance=selected["provenance"] if selected else "none",
-        catalog_identity_match=bool(selected and selected["role"] == SemanticFactKind.CATALOG_ATTRIBUTE.value),
+        catalog_identity_match=bool(
+            selected and selected["role"] == SemanticFactKind.CATALOG_ATTRIBUTE.value
+        ),
         decision=reason,
         reason=reason,
     )
@@ -130,19 +132,61 @@ def _log_quantity_reconciliation(
 def _comment_has_order_quantity(value: str) -> bool:
     """Проверяет, является ли текст комментария заказным количеством."""
     return any(
-        fact.kind is SemanticFactKind.ORDER_QUANTITY
-        for fact in extract_semantic_facts(value)
+        fact.kind is SemanticFactKind.ORDER_QUANTITY for fact in extract_semantic_facts(value)
     )
 
 
-def _resolve_item_source_spans(
-    items: list[dict[str, Any]], source_text: str
-) -> tuple[Any, ...]:
+def _extend_partial_source_with_order_tail(provided: str, derived: str) -> str:
+    """Добавляет к укороченной строке только доказанный хвост заказа."""
+    provided = clean_text(provided)
+    derived = clean_text(derived)
+    if not provided or not derived or normalize_text(provided) == normalize_text(derived):
+        return derived or provided
+    prefix = derived[: len(provided)]
+    if normalize_text(prefix) != normalize_text(provided):
+        return provided
+    suffix = derived[len(provided) :]
+    order_facts = [
+        fact
+        for fact in extract_semantic_facts(suffix)
+        if fact.kind is SemanticFactKind.ORDER_QUANTITY
+    ]
+    if not order_facts:
+        return provided
+    return clean_text(derived[: len(provided) + max(fact.end for fact in order_facts)])
+
+
+def _resolve_item_source_spans(items: list[dict[str, Any]], source_text: str) -> tuple[Any, ...]:
     """Заполняет локальные source span, сохраняя полный исходный source_line."""
     had_source_spans = any(clean_text(item.get("source_span")) for item in items)
     provided_sources = [clean_text(item.get("source_line")) for item in items]
     for item in items:
         item["source_span"] = ""
+    has_partial_provided_source = any(
+        normalize_text(source) != normalize_text(source_text) for source in provided_sources
+    )
+    if (
+        len(items) > 1
+        and all(provided_sources)
+        and has_partial_provided_source
+        and not had_source_spans
+    ):
+        # source_line модели может быть неполным: например, она часто оставляет
+        # количество из хвоста списка за пределами строки товара. Сначала строим
+        # границы по независимым товарным якорям исходного сообщения. Это
+        # сохраняет строгую provenance-проверку и не требует доверять числу ИИ.
+        derived = derive_item_source_spans(source_text, items)
+        if all(span is not None for span in derived):
+            for item, provided_source, span in zip(items, provided_sources, derived, strict=True):
+                assert span is not None
+                item["source_span"] = _extend_partial_source_with_order_tail(
+                    provided_source, span.text
+                )
+            return derived
+        for item, provided_source in zip(items, provided_sources, strict=True):
+            if normalize_text(provided_source) != normalize_text(source_text):
+                item["source_span"] = provided_source
+        return tuple(None for _ in items)
     if items and all(provided_sources) and not had_source_spans:
         for item, provided_source in zip(items, provided_sources, strict=True):
             if normalize_text(provided_source) != normalize_text(source_text):

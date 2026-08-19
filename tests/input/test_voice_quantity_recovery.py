@@ -76,6 +76,42 @@ def test_multi_item_source_spans_keep_order_quantity_local_to_last_item() -> Non
     assert result["items"][0]["source_span"] != result["items"][1]["source_span"]
 
 
+def test_partial_ai_source_lines_are_bound_to_their_product_anchors() -> None:
+    """Восстанавливает хвост количества по границе товара, а не по соседней фасовке."""
+    source = (
+        "Свинина Окорок Пармский с/к 5 кг,"
+        "Хрен столовый Домашний, Кал-й,160грт/Б, Россия (12/1) 10 штук"
+    )
+    restored = recover_omitted_explicit_items(
+        {
+            "intent": Intent.ADD_ITEMS,
+            "items": [
+                {
+                    "product_query": "Свинина Окорок Пармский с/к 5 кг",
+                    "quantity": 5,
+                    "unit": "кг",
+                    "source_line": "Свинина Окорок Пармский с/к 5 кг",
+                },
+                {
+                    "product_query": "Хрен столовый Домашний, Кал-й,160грт/Б, Россия",
+                    "quantity": 10,
+                    "unit": "шт",
+                    "source_line": "Хрен столовый Домашний, Кал-й,160грт/Б, Россия (12/1)",
+                },
+            ],
+        },
+        source,
+    )
+
+    first, second = restored["items"]
+    assert (first["quantity"], first["unit"]) == (5.0, "кг")
+    assert first.get("packaging_text") in (None, "")
+    assert (second["quantity"], second["unit"]) == (10.0, "шт")
+    assert second["packaging_text"] == "12/1"
+    assert second["packaging_role"] == "catalog_attribute"
+    assert "10 штук" in second["source_span"]
+
+
 @pytest.mark.parametrize(
     ("source", "quantities", "global_comment", "clarification"),
     [
@@ -117,8 +153,18 @@ def test_multi_item_quantity_ownership_matrix(
             "intent": Intent.ADD_ITEMS,
             "global_comment": global_comment,
             "items": [
-                {"product_query": "\u043b\u0443\u043a", "quantity": quantities[0], "unit": "\u043a\u0433", "source_line": ""},
-                {"product_query": "\u043a\u0430\u0440\u0442\u043e\u0448\u043a\u0430", "quantity": quantities[1], "unit": "\u043a\u0433", "source_line": ""},
+                {
+                    "product_query": "\u043b\u0443\u043a",
+                    "quantity": quantities[0],
+                    "unit": "\u043a\u0433",
+                    "source_line": "",
+                },
+                {
+                    "product_query": "\u043a\u0430\u0440\u0442\u043e\u0448\u043a\u0430",
+                    "quantity": quantities[1],
+                    "unit": "\u043a\u0433",
+                    "source_line": "",
+                },
             ],
         },
         source,

@@ -170,10 +170,15 @@ def restore_explicit_order_terms(
         if not original_line and len(items) == 1:
             original_line = clean_text(source_text)
         terminal_quantity, terminal_unit = _terminal_order_quantity(original_line)
-        if terminal_quantity is not None and terminal_unit and not any(
-            fact.kind is SemanticFactKind.ORDER_QUANTITY
-            and abs((parse_quantity_unit(fact.original_text)[0] or -1) - terminal_quantity) <= 1e-9
-            for fact in extract_semantic_facts(original_line)
+        if (
+            terminal_quantity is not None
+            and terminal_unit
+            and not any(
+                fact.kind is SemanticFactKind.ORDER_QUANTITY
+                and abs((parse_quantity_unit(fact.original_text)[0] or -1) - terminal_quantity)
+                <= 1e-9
+                for fact in extract_semantic_facts(original_line)
+            )
         ):
             terminal_quantity, terminal_unit = None, ""
         shared_source = len(items) > 1 and (
@@ -320,10 +325,14 @@ def restore_explicit_order_terms(
         if source is not None:
             if not clean_text(item.get("source_line")):
                 _mark_item_source(item, source.source_line or clean_text(source_text))
-            source_context = source_line if clean_text(item.get("source_span")) else (
-                source.source_line or source_line
+            source_context = (
+                source_line
+                if clean_text(item.get("source_span"))
+                else (source.source_line or source_line)
             )
-            source_terminal_quantity, source_terminal_unit = _terminal_order_quantity(source_context)
+            source_terminal_quantity, source_terminal_unit = _terminal_order_quantity(
+                source_context
+            )
             if source_terminal_quantity is not None:
                 item["quantity"] = source_terminal_quantity
                 item["unit"] = source_terminal_unit
@@ -464,17 +473,18 @@ def _restore_reference_ranges_in_queries(
 ) -> None:
     """Не даёт ИИ потерять размер или фасовку из поискового названия."""
     for index, item in enumerate(items):
-        source_line = clean_text(item.get("source_line"))
+        source_span = clean_text(item.get("source_span"))
+        source_line = source_span or clean_text(item.get("source_line"))
         ranges = _source_numeric_ranges(source_line)
         if not ranges and len(items) == 1:
             ranges = _source_numeric_ranges(source_text)
-        if not ranges and len(items) == len(deterministic):
+        if not ranges and not source_span and len(items) == len(deterministic):
             ranges = _source_numeric_ranges(deterministic[index].source_line)
         if len(ranges) != 1:
             continue
         range_text = ranges[0]
         role, confidence = _packaging_role_from_context(
-            item, source_line or source_text, range_text
+            item, source_line or (source_text if len(items) == 1 else ""), range_text
         )
         item["packaging_text"] = range_text
         item["packaging_role"] = role
@@ -483,11 +493,10 @@ def _restore_reference_ranges_in_queries(
             _append_reference_range_to_query(item, range_text)
             _remove_reference_range_from_comment(item, range_text)
         elif role == "user_preference" and not clean_text(item.get("comment")):
-            preference_match = _PACKAGING_PREFERENCE_RE.search(source_line or source_text)
+            preference_source = source_line or (source_text if len(items) == 1 else "")
+            preference_match = _PACKAGING_PREFERENCE_RE.search(preference_source)
             if preference_match:
-                item["comment"] = clean_text(
-                    (source_line or source_text)[preference_match.start() :]
-                )
+                item["comment"] = clean_text(preference_source[preference_match.start() :])
                 item["user_comment_to_supplier"] = item["comment"]
                 item["comment_source"] = CommentSource.EXPLICIT_MARKER.value
 

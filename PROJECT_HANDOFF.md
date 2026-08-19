@@ -5,26 +5,56 @@
 ### Root cause
 
 Prompt-only changes were insufficient: the vision response was structurally valid but
-could omit small filled cells or bind a quantity to the neighboring spreadsheet row.
-The runtime sent one dense full image, so small Hall/Bar/Kitchen cells had too few useful
-pixels and the model could incorrectly report `order_area_complete=true`.
+could omit blank rows and bind a quantity to the neighboring spreadsheet row. The
+runtime also sent two representations of the same dense screenshot and used a vertical
+crop for taller images. The latest live runs showed nondeterministic results for the same
+445px screenshot: one run returned ten rows but marked the order area incomplete, and the
+next returned zero rows. A separate live run assigned the first quantity to the preceding
+`Тестовый товар` row instead of `Васаби`. The catalog then correctly resolved the wrong
+observation; it was not the source of the error. The duplicate per-request row-filtering
+instruction is removed, and the runtime now uses one canonical reading view so the
+first and last visible rows remain in the same coordinate system.
+
+The latest correction keeps one coordinate system but narrows a clearly recognized
+Google Sheets viewport to the product/order/comment area, excluding summary columns that
+consume image width. Ambiguous layouts keep the full frame, so tables without Hall/Bar/Kitchen
+columns and ordinary photos are not cropped by assumption.
 
 ### Image preparation
 
 For dense wide images (`width >= 900`, `height >= 200`, aspect ratio `>= 1.25`) the
-runtime now sends two representations of the same document in one user message: the
-untouched original and one full-width table-focus crop. Large screenshots use
-approximately 18%-98% of the image height to remove browser UI; already short wide
-screenshots keep their full height so the first product row is not cut off. The crop
-keeps product, supplier, Hall/Bar/Kitchen and Comment in the same horizontal row, is
-enlarged 2x with Pillow/LANCZOS, and encoded as PNG. Smaller or non-wide photos keep
-the original-only path. No perspective correction, OCR or second AI pass was added.
+runtime sends one `table_focus` view. When a Google Sheets-like header is reliably visible,
+the view starts at that table header and ends after the warm-colored order/comment area,
+before the green summary columns. This is a visual-layout reduction only: it does not read
+text, infer quantities or change row coordinates. If the header pattern is absent or
+ambiguous, the complete original frame is retained, which covers ordinary photos, printed
+forms and tables without Hall/Bar/Kitchen columns. The selected view is enlarged 2x normally,
+3x when its source height is below 700px, and 5x when a very short wide screenshot leaves
+less than 320px for the table rows. This keeps small-font screenshots readable without OCR,
+perspective correction or a second AI pass.
 
 ### Contracts and boundaries
 
 - `responses.parse()` remains exactly one call per photo.
 - `PhotoDocumentObservation`, same-row authorization, department quantities,
   incomplete-photo handling and trusted venue identity remain unchanged.
+- For a table with order quantities, the observation contract now requires a contiguous
+  row range from the first visible product row through the last row with an order cell;
+  blank rows inside that range must be returned with their own `visual_row_index`.
+- Dense-photo input no longer adds a conflicting row-filtering instruction and explicitly
+  identifies the single canonical reading view as the geometry source. It requires row
+  bands to be established from top to bottom before any quantity is attached, so a first
+  filled cell cannot be assigned to a preceding test row.
+- The photo contract explicitly covers paper photos, direct table screenshots and screenshots
+  containing a chat or browser around the document. It requires the largest readable document
+  region to be used and the surrounding interface/preview to be ignored.
+- `crossed_out_quantity_text` is never summed with `corrected_quantity_text`; the handwritten
+  replacement is the only active quantity. `printed_reference_text`, packaging, stock, price
+  and product-name measurements cannot authorize an order quantity. The same observation
+  contract supports `order_table` and `free_list` documents without department columns.
+- Header aliases such as `order_quantity`, `actual_order_quantity`, `ordered_quantity` and
+  `quantity_decimal` are recognized as order-column evidence, so a short screenshot is not
+  downgraded to `product_card` only because the model used a technical column name.
 - A client sheet row with generic order evidence but no Hall/Bar/Kitchen quantity now
   returns `incomplete_photo_read` with reason
   `client_sheet_quantity_without_department`; the backend never infers Kitchen.
@@ -35,24 +65,83 @@ the original-only path. No perspective correction, OCR or second AI pass was add
 
 ### Verification
 
-- Targeted photo/view/OpenAI request and ingestion guard tests: passed.
-- Full pytest: `1616 tests collected`, all passed.
-- Ruff, mypy (`166` source files), compileall and `git diff --check`: passed.
+- Targeted photo/view/OpenAI request and ingestion guard tests: passed, including guarded
+  Sheets-header cropping and full-frame fallback for non-Sheets images.
+- Full pytest with a fresh basetemp: all tests passed.
+- Ruff, format check, mypy for changed modules, `python scripts/build_agent_context.py`
+  and `git diff --check`: passed.
+- The new regression checks pass for very short `1280x210` screenshots, technical order-column
+  aliases, screenshot prompt handling, handwritten corrections, free lists and packaging
+  provenance. Full pytest passes `1611` tests.
+- Docker Compose rebuild completed after the adaptive short-screenshot changes. API and
+  worker are healthy, beat is running, and Postgres/Redis are healthy.
 - Manual real-image acceptance: `NOT VERIFIED` here — five clean-screenshot runs and
   three monitor-photo runs still need to be performed in Telegram. Unit tests prove only
   deterministic view preparation and one-call request composition, not vision accuracy.
-- The first post-rebuild Telegram check (`update_id=247308064`) arrived as `1280x680`,
-  below the old dense-height threshold, so it used original-only input and returned the
-  right quantities but misidentified the first product. The dense threshold is now 600px
-  so this screenshot class receives table-focus; the required acceptance rerun is pending.
-- The next Telegram check (`update_id=247308072`) arrived as a short `1280x350` table
-  crop; it still used original-only input and returned row numbers `6,8,9,10` instead
-  of the filled rows `3,7,9,11`. Short wide screenshots now use full-height table-focus.
-- One live Telegram run after the first build (`update_id=247308058`) prepared all three
-  views and vision returned four rows, but put their quantities into generic order-entry
-  fields instead of `kitchen_quantity`; the backend correctly dropped those rows rather
-  than inventing a department. A short prompt clarification now makes the department-field
-  ownership explicit. The required repeated acceptance runs remain pending.
+- The first post-rebuild Telegram check (`update_id=247308064`) arrived as `1280x680`
+  and used the previous original-only path, returning the right quantities but
+  misidentifying the first product. The next check (`update_id=247308072`) arrived as a
+  short `1280x350` crop and also used the previous original-only path. The current
+  preparation sends a full-height table-focus view for this screenshot class.
+- The latest old-build checks (`update_id=247308101` and `247308102`) used
+  `view_count=2` on the same 1280x445 screenshot. The first returned ten rows but
+  `order_area_complete=false`; the second returned zero rows. These runs are not
+  acceptance evidence for the new one-view preparation because they occurred before the
+  current local rebuild.
+- The first small-font check on the one-view build (`update_id=247308113`) used
+  `1280x508` and therefore only 2x under the old 400px threshold. Vision saw 24 rows
+  but returned no rows. The threshold is now 700px so this screenshot class receives
+  3x before the next acceptance run.
+- The first live check with horizontal Sheets focusing (`update_id=247308128`) used
+  `1280x722` and produced one `2493x1482` view, but Vision still returned zero rows.
+  This confirmed that the remaining loss was caused by the empty lower part of the
+  screenshot, not only by summary-column width. The reading view now also removes a
+  confirmed empty tail after the last dark order/comment content; the latest rebuild
+  containing that change still needs a new Telegram acceptance run.
+- The first two post-final-rebuild compact screenshot checks succeeded: `update_id=247308132`
+  (`1280x446`, one `2544x924` view) and `update_id=247308139` (`1280x475`, one `2553x930`
+  view) both returned and admitted all four expected rows: Vasabi, Dijon mustard, domestic
+  horseradish and 5kg horseradish. Repeated final-build checks `update_id=247308150` and
+  `update_id=247308151` used the same full-screen `1280x719` input and the same single
+  `2475x1473` 3x reading view, but Vision returned `visible_product_row_count=24` with
+  `returned_row_count=0` both times. The backend then correctly failed closed as
+  `unknown`/`no_items_recognized`; the catalog was never given a product to resolve.
+  This confirms the remaining gap is dense full-screen Vision recall, not image-preparation
+  randomness, catalog matching or row-admission logic.
+- The next paired check separated two different inputs: `update_id=247308149` was a
+  screenshot of the Telegram conversation itself, with the spreadsheet only as a small
+  preview (`1280x210`). Vision returned ten rows but classified the resulting structure as
+  `product_card`, so the backend correctly admitted zero items. The direct spreadsheet
+  screenshot `update_id=247308156` (`1280x529`) returned and admitted all four expected
+  rows with quantities `3, 5, 4, 2`. This is not a recognition regression: the bot must
+  receive the original table image, not a Telegram chat screenshot containing a thumbnail.
+- Older live runs before this corrective pass prepared multiple views and had inconsistent
+  department-field ownership; the backend correctly dropped those rows rather than
+  inventing a department. The required repeated acceptance runs on the rebuilt one-view
+  image path remain pending. The new reading-view detector also needs a real Telegram
+  check: a Sheets screenshot with summary columns should log a smaller table-focus width,
+  while a photo without recognized headers should retain the full-frame dimensions.
+
+### Latest text-search evidence
+
+- `update_id=247308190` entered the OpenAI text path because the mixed product line did not
+  satisfy the deterministic-list contract. The model returned the first product with quantity
+  `5 кг`, but the catalog produced two equally strong candidates (`100.0` vs `100.0`), so the
+  safety gate correctly blocked automatic selection and requested clarification.
+- For the second product the model returned `10 шт`, but its `source_line`/`source_span` ended
+  at the product text and omitted the trailing `10 штук`. Quantity reconciliation therefore
+  found no authorized order fact and rejected the value, while correctly preserving `(12/1)` as
+  packaging. This was an AI-to-source-evidence contract defect, not random catalog search.
+- The parser boundary now derives a local `source_span` from the ordered product anchors when
+  several AI items contain shortened source lines. It extends a provided local line only through
+  a proven order-quantity suffix; arbitrary trailing comments are not absorbed. Packaging-range
+  recovery uses the same local span and never falls back to the full multi-item message for a
+  specific item. The strict reconciliation and the catalog ambiguity gate remain fail-closed.
+- Regression coverage includes the exact mixed line from `update_id=247308190`: the second item
+  keeps `10 штук`, `(12/1)` remains `catalog_attribute`, and the first item receives no leaked
+  packaging. Full verification after the fix: `1612` tests passed, mypy passed for `166` files,
+  and Ruff check/format passed. The equal-score catalog tie remains intentionally blocked and
+  must be resolved by clarification or stronger source/catalog evidence.
 
 ## PHOTO-PROMPT-RESET-13 - current corrective pass
 
