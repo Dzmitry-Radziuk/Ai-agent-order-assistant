@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import Any
 
+import structlog
+
 from restaurant_bot.domain.models import Intent
 from restaurant_bot.domain.text import clean_text, normalize_text
 from restaurant_bot.parsing.ai.comment_reconciliation import (
@@ -26,7 +28,88 @@ from restaurant_bot.parsing.ai.quantity_reconciliation import (
 from restaurant_bot.parsing.ai.shadow_items import _collapse_shadow_item_projections
 from restaurant_bot.parsing.comment_scope import has_explicit_global_comment_scope
 from restaurant_bot.parsing.products import parse_product_lines
+from restaurant_bot.parsing.quantities import parse_quantity_unit
 from restaurant_bot.parsing.semantic.gate import apply_semantic_gate
+from restaurant_bot.parsing.semantic.measurements import extract_semantic_facts
+from restaurant_bot.parsing.semantic.models import SemanticFactKind
+
+logger = structlog.get_logger(__name__)
+
+
+def _numeric_fact_log(source_text: str) -> list[dict[str, Any]]:
+    """Готовит короткий список числовых source-фактов для structured log."""
+    facts: list[dict[str, Any]] = []
+    for fact in extract_semantic_facts(source_text):
+        if fact.kind not in {
+            SemanticFactKind.CATALOG_ATTRIBUTE,
+            SemanticFactKind.MEASUREMENT,
+            SemanticFactKind.ORDER_QUANTITY,
+        }:
+            continue
+        quantity, unit = parse_quantity_unit(fact.original_text)
+        if quantity is None:
+            continue
+        facts.append(
+            {
+                "value": quantity,
+                "unit": unit,
+                "role": fact.kind.value,
+                "provenance": fact.provenance,
+            }
+        )
+    return facts
+
+
+def _log_quantity_reconciliation(
+    before: dict[str, Any], after: dict[str, Any], source_text: str
+) -> None:
+    """Пишет решение provenance-сверки без пользовательского payload."""
+    numeric_facts = _numeric_fact_log(source_text)
+    after_quantity = after.get("quantity")
+    after_unit = clean_text(after.get("unit"))
+    selected = next(
+        (
+            fact
+            for fact in reversed(numeric_facts)
+            if fact["role"] == SemanticFactKind.ORDER_QUANTITY.value
+            and fact["value"] == after_quantity
+            and (not after_unit or fact["unit"] == after_unit)
+        ),
+        None,
+    )
+    if selected is None and after_quantity is not None:
+        selected = next(
+            (
+                fact
+                for fact in reversed(numeric_facts)
+                if fact["value"] == after_quantity
+                and (not after_unit or fact["unit"] == after_unit)
+            ),
+            None,
+        )
+    before_quantity = before.get("quantity")
+    if selected and selected["role"] == SemanticFactKind.ORDER_QUANTITY.value:
+        reason = (
+            "preserved_explicit_order_quantity"
+            if before_quantity == after_quantity
+            else "recovered_explicit_order_quantity"
+        )
+    elif after_quantity is None:
+        reason = "rejected_unproven_quantity"
+    else:
+        reason = "preserved_non_order_quantity"
+    logger.info(
+        "quantity_reconciliation_decision",
+        before_quantity=before_quantity,
+        before_unit=clean_text(before.get("unit")),
+        after_quantity=after_quantity,
+        after_unit=after_unit,
+        numeric_facts=numeric_facts,
+        selected_fact_role=selected["role"] if selected else "none",
+        selected_fact_provenance=selected["provenance"] if selected else "none",
+        rejected_competing_facts=[fact for fact in numeric_facts if fact is not selected],
+        reason=reason,
+    )
 
 
 def recover_omitted_explicit_items(payload: dict[str, Any], source_text: str) -> dict[str, Any]:
@@ -71,7 +154,10 @@ def recover_omitted_explicit_items(payload: dict[str, Any], source_text: str) ->
         payload["global_comment"] = global_comment
         return payload
 
+    before_quantity_reconciliation = [dict(item) for item in items]
     restore_explicit_order_terms(items, source_text)
+    for before, after in zip(before_quantity_reconciliation, items, strict=False):
+        _log_quantity_reconciliation(before, after, source_text)
     _discard_unverified_item_comments(items, bindings, source_text, global_comment)
     _restore_dropped_unclassified_terms(items, deterministic, global_comment)
     items = _restore_omitted_explicit_items(items, deterministic, global_comment)

@@ -112,6 +112,23 @@ def test_voice_quantity_phrase_is_shared_with_text_parser() -> None:
     assert [item.model_dump() for item in voice_items] == [item.model_dump() for item in text_items]
 
 
+def test_explicit_order_fact_is_separate_from_measurement_and_packaging() -> None:
+    """Разделяет 1 кг, 6 штук в коробке и заказанные 22 штуки."""
+    source = (
+        "\u0413\u043e\u0440\u0447\u0438\u0446\u0430 \u0437\u0435\u0440\u043d\u0438\u0441\u0442\u0430\u044f Chatel \u0432\u0435\u0434\u0440\u043e 1 \u043a\u0433, "
+        "6 \u0448\u0442\u0443\u043a \u0432 \u043a\u043e\u0440\u043e\u0431\u043a\u0435, \u0424\u0440\u0430\u043d\u0446\u0438\u044f, \u043c\u043d\u0435 \u043d\u0443\u0436\u043d\u043e 22 \u0448\u0442\u0443\u043a\u0438."
+    )
+    facts = extract_semantic_facts(source)
+
+    by_text = {fact.original_text: fact for fact in facts}
+    assert by_text["1 кг"].kind is SemanticFactKind.MEASUREMENT
+    assert by_text["1 кг"].provenance == "source.measurement"
+    assert by_text["6 штук"].kind is SemanticFactKind.CATALOG_ATTRIBUTE
+    assert by_text["6 штук в коробке"].kind is SemanticFactKind.CATALOG_ATTRIBUTE
+    assert by_text["22 штуки"].kind is SemanticFactKind.ORDER_QUANTITY
+    assert by_text["22 штуки"].provenance == "source.order_marker"
+
+
 def test_semantic_facts_keep_measurement_provenance() -> None:
     """Различает каталожную фасовку и возможное количество заказа."""
     facts = extract_semantic_facts("Соус 450 мл, 12 шт/кор, десять штук")

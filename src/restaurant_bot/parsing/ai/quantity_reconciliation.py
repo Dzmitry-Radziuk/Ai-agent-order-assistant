@@ -13,6 +13,8 @@ from restaurant_bot.parsing.numeric import to_float
 from restaurant_bot.parsing.numeric_ranges import numeric_range_spans
 from restaurant_bot.parsing.products import parse_product_lines
 from restaurant_bot.parsing.quantities import parse_quantity_unit
+from restaurant_bot.parsing.semantic.measurements import extract_semantic_facts
+from restaurant_bot.parsing.semantic.models import SemanticFactKind
 
 _PACKAGING_ROLE_CONFIDENCE_THRESHOLD = 0.85
 
@@ -46,7 +48,17 @@ def _quantity_outside_packaged_query(
     for outside_query in (after, before):
         quantity, unit = parse_quantity_unit(outside_query)
         if quantity is not None and unit:
-            return quantity, unit
+            authorized_quantity, authorized_unit = _explicit_order_quantity_from_source(
+                source_line,
+                quantity,
+                unit,
+            )
+            if (
+                authorized_quantity is not None
+                and abs(authorized_quantity - quantity) <= 1e-9
+                and authorized_unit == unit
+            ):
+                return quantity, unit
     return None, ""
 
 
@@ -113,6 +125,32 @@ def _trailing_quantity_with_unit(source_line: str) -> tuple[float | None, str]:
     return float(match.group("quantity").replace(",", ".")), normalize_unit(match.group("unit"))
 
 
+def _explicit_order_quantity_from_source(
+    source_line: str,
+    proposed_quantity: float | None,
+    proposed_unit: str,
+) -> tuple[float | None, str]:
+    """Находит заказанное количество только среди source-фактов роли order_quantity."""
+    candidates: list[tuple[float, str]] = []
+    for fact in extract_semantic_facts(source_line):
+        if fact.kind is not SemanticFactKind.ORDER_QUANTITY:
+            continue
+        quantity, unit = parse_quantity_unit(fact.original_text)
+        if quantity is not None:
+            candidates.append((quantity, normalize_unit(unit)))
+    if not candidates:
+        return None, ""
+    normalized_proposed_unit = normalize_unit(proposed_unit)
+    for quantity, unit in candidates:
+        if (
+            proposed_quantity is not None
+            and abs(quantity - proposed_quantity) <= 1e-9
+            and (not normalized_proposed_unit or not unit or normalized_proposed_unit == unit)
+        ):
+            return proposed_quantity, normalized_proposed_unit or unit
+    return candidates[-1]
+
+
 def restore_explicit_order_terms(
     items: list[dict[str, Any]], source_text: str = ""
 ) -> list[dict[str, Any]]:
@@ -145,6 +183,45 @@ def restore_explicit_order_terms(
         explicit_terms = _quantities_with_units(original_line)
         model_quantity = to_float(item.get("quantity"))
         model_unit = normalize_unit(item.get("unit"))
+        source_item = recovered_from_message[0] if len(recovered_from_message) == 1 else None
+        source_order_facts = [
+            fact
+            for fact in extract_semantic_facts(original_line)
+            if fact.kind is SemanticFactKind.ORDER_QUANTITY
+        ]
+        if len(items) == 1 and (
+            (
+                source_item is not None
+                and source_item.packaging_role in {"catalog_attribute", "user_preference"}
+            )
+            or len(source_order_facts) == 1
+        ):
+            source_quantity, source_unit = _explicit_order_quantity_from_source(
+                original_line,
+                model_quantity,
+                model_unit,
+            )
+            if (
+                source_quantity is None
+                and source_item is not None
+                and source_item.quantity is not None
+            ):
+                source_quantity = float(source_item.quantity)
+                source_unit = normalize_unit(source_item.unit)
+            item["source_line"] = original_line
+            if source_item is not None:
+                item["packaging_text"] = (
+                    clean_text(item.get("packaging_text")) or source_item.packaging_text
+                )
+                item["packaging_role"] = (
+                    clean_text(item.get("packaging_role")) or source_item.packaging_role
+                )
+                item["packaging_confidence"] = (
+                    item.get("packaging_confidence") or source_item.packaging_confidence
+                )
+            item["quantity"] = source_quantity
+            item["unit"] = source_unit if source_quantity is not None else ""
+            continue
         if numeric_range_spans(original_line):
             trailing_quantity, trailing_unit = _trailing_quantity_with_unit(original_line)
             if trailing_quantity is None:
@@ -182,19 +259,6 @@ def restore_explicit_order_terms(
                 for quantity, unit in explicit_terms
             )
         ):
-            source_item = recovered_from_message[0] if len(recovered_from_message) == 1 else None
-            if (
-                source_item is not None
-                and source_item.quantity is not None
-                and source_item.packaging_role in {"catalog_attribute", "user_preference"}
-            ):
-                item["source_line"] = original_line
-                item["quantity"] = source_item.quantity
-                item["unit"] = source_item.unit
-                item["packaging_text"] = source_item.packaging_text
-                item["packaging_role"] = source_item.packaging_role
-                item["packaging_confidence"] = source_item.packaging_confidence
-                continue
             # При нескольких мерах значение модели безопасно только тогда,
             # когда оно является последним явно названным значением заказа.
             # Более ранние меры относятся к фасовке или характеристикам

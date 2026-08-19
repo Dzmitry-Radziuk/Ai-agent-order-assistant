@@ -418,6 +418,34 @@ def test_ai_history_payload_is_normalized_to_read_only_command(settings) -> None
     assert command.items == []
 
 
+def test_parse_text_runtime_preserves_explicit_quantity_over_packaging(settings) -> None:  # type: ignore[no-untyped-def]
+    """Проверяет через runtime, что фасовка не меняет количество заказа."""
+    source = (
+        "\u0413\u043e\u0440\u0447\u0438\u0446\u0430 \u0437\u0435\u0440\u043d\u0438\u0441\u0442\u0430\u044f Chatel \u0432\u0435\u0434\u0440\u043e 1 \u043a\u0433, "
+        "6 \u0448\u0442\u0443\u043a \u0432 \u043a\u043e\u0440\u043e\u0431\u043a\u0435, \u0424\u0440\u0430\u043d\u0446\u0438\u044f, \u043c\u043d\u0435 \u043d\u0443\u0436\u043d\u043e 22 \u0448\u0442\u0443\u043a\u0438."
+    )
+    parsed = ParsedInputSchema(
+        intent=Intent.ADD_ITEMS,
+        items=[
+            ExtractedItem(
+                product_query="\u0413\u043e\u0440\u0447\u0438\u0446\u0430 \u0437\u0435\u0440\u043d\u0438\u0441\u0442\u0430\u044f Chatel \u0432\u0435\u0434\u0440\u043e 1 \u043a\u0433",
+                quantity=22,
+                unit="\u0448\u0442",
+                comment="6 \u0448\u0442\u0443\u043a \u0432 \u043a\u043e\u0440\u043e\u0431\u043a\u0435, \u0424\u0440\u0430\u043d\u0446\u0438\u044f",
+                source_line=source,
+            )
+        ],
+    )
+    service = _service(settings, SimpleNamespace(responses=_Responses(parsed)))
+
+    command = service._parse_text_once(source)
+
+    item = command.items[0]
+    assert (item.quantity, item.unit) == (22.0, "\u0448\u0442")
+    assert item.comment == ""
+    assert item.user_comment_to_supplier == ""
+
+
 def test_parse_text_runtime_reconciles_ai_comment_with_source(settings) -> None:  # type: ignore[no-untyped-def]
     """Проверяет provenance reconciliation через runtime boundary."""
     parsed = ParsedInputSchema(

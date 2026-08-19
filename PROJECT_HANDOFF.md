@@ -29,6 +29,13 @@ compileall и `git diff --check` прошли. Текущий HEAD остаёт�
 
 ## Текущая задача
 
+QUANTITY-PROVENANCE-04B завершена в текущем checkout: числовые source-факты
+разделяются на `measurement`, `catalog_attribute` и `order_quantity`. Явное
+количество заказа больше не заменяется числом фасовки; неподтверждённая
+фасовочная цифра отклоняется. Для наблюдаемости reconciliation пишет
+`quantity_reconciliation_decision` без пользовательского payload. Проверено на
+тексте и voice-runtime для `22 шт`, в корзине и на таблице вариантов `7/10/24/18/None`.
+
 PRODUCTION-HARDENING-04 завершён в текущем незакоммиченном checkout; ниже
 сохранены исторические записи предыдущих этапов.
 

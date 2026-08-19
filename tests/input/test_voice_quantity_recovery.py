@@ -1,5 +1,7 @@
 """Проверяет поведение, связанное с модулем «test voice quantity recovery»."""
 
+import pytest
+
 from restaurant_bot.domain.models import Intent
 from restaurant_bot.integrations.openai_client import (
     recover_omitted_explicit_items,
@@ -150,6 +152,92 @@ def test_model_quantity_wins_when_source_also_contains_packaging() -> None:
     assert restored[0]["quantity"] == 10.0
     assert restored[0]["unit"] == "шт"
     assert restored[0]["source_line"] == source
+
+
+def test_explicit_order_quantity_is_not_overwritten_by_catalog_packaging() -> None:
+    """Сохраняет 22 шт и отбрасывает фасовочный комментарий."""
+    source = (
+        "\u0413\u043e\u0440\u0447\u0438\u0446\u0430 \u0437\u0435\u0440\u043d\u0438\u0441\u0442\u0430\u044f Chatel \u0432\u0435\u0434\u0440\u043e 1 \u043a\u0433, "
+        "6 \u0448\u0442\u0443\u043a \u0432 \u043a\u043e\u0440\u043e\u0431\u043a\u0435, \u0424\u0440\u0430\u043d\u0446\u0438\u044f, \u043c\u043d\u0435 \u043d\u0443\u0436\u043d\u043e 22 \u0448\u0442\u0443\u043a\u0438."
+    )
+    restored = recover_omitted_explicit_items(
+        {
+            "intent": Intent.ADD_ITEMS,
+            "items": [
+                {
+                    "product_query": "\u0413\u043e\u0440\u0447\u0438\u0446\u0430 \u0437\u0435\u0440\u043d\u0438\u0441\u0442\u0430\u044f Chatel \u0432\u0435\u0434\u0440\u043e 1 \u043a\u0433",
+                    "quantity": 22,
+                    "unit": "\u0448\u0442",
+                    "comment": "6 \u0448\u0442\u0443\u043a \u0432 \u043a\u043e\u0440\u043e\u0431\u043a\u0435, \u0424\u0440\u0430\u043d\u0446\u0438\u044f",
+                    "user_comment_to_supplier": "6 \u0448\u0442\u0443\u043a \u0432 \u043a\u043e\u0440\u043e\u0431\u043a\u0435, \u0424\u0440\u0430\u043d\u0446\u0438\u044f",
+                    "source_line": source,
+                }
+            ],
+        },
+        source,
+    )
+
+    item = restored["items"][0]
+    assert (item["quantity"], item["unit"]) == (22.0, "\u0448\u0442")
+    assert item["packaging_role"] == "catalog_attribute"
+    assert item["comment"] == ""
+    assert item["user_comment_to_supplier"] == ""
+    assert item["comment_source"] == "none"
+
+
+@pytest.mark.parametrize(
+    ("source", "expected_quantity", "expected_unit"),
+    [
+        (
+            "\u0421\u043e\u0443\u0441 500 \u0433, 12 \u0448\u0442\u0443\u043a \u0432 \u043a\u043e\u0440\u043e\u0431\u043a\u0435, \u043d\u0443\u0436\u043d\u043e 7 \u0448\u0442\u0443\u043a",
+            7.0,
+            "\u0448\u0442",
+        ),
+        (
+            "\u041c\u0430\u043a\u0430\u0440\u043e\u043d\u044b 500 \u0433, 15 \u0448\u0442/\u0443\u043f\u0430\u043a, \u043c\u043d\u0435 \u043d\u0443\u0436\u043d\u043e 10 \u0448\u0442\u0443\u043a",
+            10.0,
+            "\u0448\u0442",
+        ),
+        (
+            "\u041c\u0430\u0441\u043b\u043e 450 \u043c\u043b, 12 \u0448\u0442/\u043a\u043e\u0440, \u0437\u0430\u043a\u0430\u0437\u0430\u0442\u044c 24 \u0448\u0442\u0443\u043a",
+            24.0,
+            "\u0448\u0442",
+        ),
+        (
+            "\u0422\u043e\u0432\u0430\u0440 1 \u043a\u0433, \u043a\u043e\u0440\u043e\u0431\u043a\u0430 \u043f\u043e 6 \u0448\u0442\u0443\u043a, \u0434\u043e\u0431\u0430\u0432\u0438\u0442\u044c 18 \u0448\u0442\u0443\u043a",
+            18.0,
+            "\u0448\u0442",
+        ),
+        (
+            "\u0422\u043e\u0432\u0430\u0440 1 \u043a\u0433, 6 \u0448\u0442\u0443\u043a \u0432 \u043a\u043e\u0440\u043e\u0431\u043a\u0435",
+            None,
+            "",
+        ),
+    ],
+)
+def test_quantity_provenance_table_keeps_only_order_quantity(
+    source: str,
+    expected_quantity: float | None,
+    expected_unit: str,
+) -> None:
+    """Проверяет таблицу фасовок и явных количеств заказа."""
+    restored = recover_omitted_explicit_items(
+        {
+            "intent": Intent.ADD_ITEMS,
+            "items": [
+                {
+                    "product_query": source.split()[0],
+                    "quantity": 6,
+                    "unit": "\u0448\u0442",
+                    "source_line": source,
+                }
+            ],
+        },
+        source,
+    )
+
+    item = restored["items"][0]
+    assert (item["quantity"], item["unit"]) == (expected_quantity, expected_unit)
 
 
 def test_spoken_range_does_not_replace_explicit_order_quantity() -> None:

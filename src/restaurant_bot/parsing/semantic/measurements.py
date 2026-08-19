@@ -8,7 +8,6 @@ from restaurant_bot.domain.text import clean_text, normalize_text
 from restaurant_bot.domain.units import UNIT_ALIASES, normalize_unit
 from restaurant_bot.parsing.number_words import NUMBER_WORDS
 from restaurant_bot.parsing.numeric_ranges import numeric_range_spans
-from restaurant_bot.parsing.quantities import has_explicit_order_marker
 from restaurant_bot.parsing.semantic.models import SemanticFact, SemanticFactKind
 
 _NUMBER = r"\d+(?:[,.]\d+)?"
@@ -105,18 +104,17 @@ def extract_semantic_facts(source_text: str) -> tuple[SemanticFact, ...]:
         in_range = any(
             _span_overlaps(span, range_span) for range_span in numeric_range_spans(source)
         )
-        explicit_order = has_explicit_order_marker(source)
         marker_prefix = source[max(0, match.start() - 24) : match.start()]
         local_order_marker = bool(
             re.search(r"\b(?:нужно|надо|закаж\w*|добав\w*|постав\w*)\b", marker_prefix, re.I)
         )
+        terminal_order_quantity = not source[match.end() :].strip(" \t\r\n.,;:!?()[]{}")
+        explicit_order = local_order_marker or terminal_order_quantity
         kind = (
             SemanticFactKind.CATALOG_ATTRIBUTE
             if in_packaging or in_range
             else (
-                SemanticFactKind.ORDER_QUANTITY
-                if explicit_order or local_order_marker
-                else SemanticFactKind.MEASUREMENT
+                SemanticFactKind.ORDER_QUANTITY if explicit_order else SemanticFactKind.MEASUREMENT
             )
         )
         facts.append(
@@ -127,18 +125,12 @@ def extract_semantic_facts(source_text: str) -> tuple[SemanticFact, ...]:
                 original_text=clean_text(match.group(0)),
                 normalized_value=normalized,
                 confidence=(
-                    0.95
-                    if in_packaging or in_range
-                    else (0.9 if explicit_order or local_order_marker else 0.45)
+                    0.95 if in_packaging or in_range else (0.9 if explicit_order else 0.45)
                 ),
                 provenance=(
                     "source.packaging_measurement"
                     if in_packaging
-                    else (
-                        "source.order_marker"
-                        if explicit_order or local_order_marker
-                        else "source.measurement"
-                    )
+                    else ("source.order_marker" if explicit_order else "source.measurement")
                 ),
             )
         )
@@ -236,6 +228,20 @@ def is_catalog_tail_text(fragment: str, source_text: str) -> bool:
     if not value or start < 0:
         return False
     facts = extract_semantic_facts(source_text)
+    fragment_end = start + len(value)
+    first_order_start = min(
+        (
+            fact.start
+            for fact in facts
+            if fact.kind is SemanticFactKind.ORDER_QUANTITY and fact.start >= start
+        ),
+        default=len(source),
+    )
+    if any(
+        fact.provenance == "source.packaging_relation" and fact.start <= start < fact.end
+        for fact in facts
+    ):
+        return fragment_end <= first_order_start
     packaging_ends = [
         fact.end
         for fact in facts
@@ -245,7 +251,7 @@ def is_catalog_tail_text(fragment: str, source_text: str) -> bool:
     ]
     if not packaging_ends:
         return False
-    return "," in source[max(packaging_ends) : start]
+    return fragment_end <= first_order_start and "," in source[max(packaging_ends) : start]
 
 
 def catalog_attribute_text(source_text: str) -> str:

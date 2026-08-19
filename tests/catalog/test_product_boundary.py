@@ -96,6 +96,29 @@ def test_long_catalog_title_creates_one_cart_item(settings: Settings) -> None:
     assert result.state.cart[0].status is ItemStatus.MATCHED
 
 
+def test_explicit_order_quantity_reaches_cart_after_catalog_packaging(settings: Settings) -> None:
+    """Проводит 22 штуки через парсер и добавление товара в корзину."""
+    source = (
+        "\u0413\u043e\u0440\u0447\u0438\u0446\u0430 \u0437\u0435\u0440\u043d\u0438\u0441\u0442\u0430\u044f Chatel \u0432\u0435\u0434\u0440\u043e 1 \u043a\u0433, "
+        "6 \u0448\u0442\u0443\u043a \u0432 \u043a\u043e\u0440\u043e\u0431\u043a\u0435, \u0424\u0440\u0430\u043d\u0446\u0438\u044f, \u043c\u043d\u0435 \u043d\u0443\u0436\u043d\u043e 22 \u0448\u0442\u0443\u043a\u0438."
+    )
+    command = ParsedCommand(intent=Intent.ADD_ITEMS, items=parse_product_lines(source))
+    result = ConversationEngine(settings).handle(
+        TelegramEvent(
+            update_id=2,
+            chat_id="quantity-provenance-test",
+            input_type=InputKind.TEXT,
+            text=source,
+        ),
+        command,
+        ConversationState(),
+        [CatalogProduct(product_id="mustard", name=source.split(",")[0], unit="\u0448\u0442")],
+    )
+
+    assert len(result.state.cart) == 1
+    assert (result.state.cart[0].quantity, result.state.cart[0].unit) == (22.0, "\u0448\u0442")
+
+
 def test_text_and_voice_transcripts_share_product_boundary_result() -> None:
     """Сводит текстовый ввод и транскрипцию голоса к одной позиции заказа."""
     text_items = parse_product_lines(_COCONUT_SOURCE)
