@@ -255,6 +255,8 @@ class ExtractedItem(BaseModel):
     ] = "none"
     packaging_confidence: float = Field(default=0, ge=0, le=1)
     catalog_identity_provenance: Literal["", "venue_table_exact_candidate"] = ""
+    photo_sheet_row_number: int | None = Field(default=None, ge=1)
+    photo_sheet_row_number_confidence: float = Field(default=0, ge=0, le=1)
 
     @field_validator(
         "product_query",
@@ -313,6 +315,9 @@ class ParsedCommand(BaseModel):
     comment_scope_action: str = ""
     comment_target_indexes: list[int] = Field(default_factory=list)
     confidence: float | None = None
+    photo_outcome: Literal[
+        "", "no_order_quantities", "incomplete_photo_read", "unsupported_photo"
+    ] = ""
     callback_revision: int | None = None
     callback_target: str = ""
     order_status_detail_page: int = 0
@@ -368,6 +373,8 @@ class CartItem(BaseModel):
     ] = "none"
     packaging_confidence: float = Field(default=0, ge=0, le=1)
     catalog_identity_provenance: Literal["", "venue_table_exact_candidate"] = ""
+    photo_sheet_row_number: int | None = Field(default=None, ge=1)
+    photo_sheet_row_number_confidence: float = Field(default=0, ge=0, le=1)
     quantity: float | None = None
     unit: str = ""
     department: str = "Кухня"

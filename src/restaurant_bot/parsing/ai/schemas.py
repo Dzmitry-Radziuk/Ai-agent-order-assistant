@@ -45,6 +45,9 @@ class PhotoRowObservation(BaseModel):
     """Описывает только наблюдение одной визуальной строки фотографии."""
 
     row_index: int = Field(default=0, ge=0)
+    visual_row_index: int | None = Field(default=None, ge=0)
+    sheet_row_number: int | None = Field(default=None, ge=1)
+    sheet_row_number_confidence: float = Field(default=0, ge=0, le=1)
     row_text: str = ""
     product_text: str = ""
     supplier_hint: str = ""
@@ -80,6 +83,9 @@ class PhotoDocumentObservation(BaseModel):
     detected_columns: list[str] = Field(default_factory=list)
     has_table_structure: bool = False
     rows: list[PhotoRowObservation] = Field(default_factory=list)
+    visible_product_row_count: int | None = Field(default=None, ge=0)
+    scan_complete: bool = True
+    scan_warning: str = ""
     document_comment: str = ""
     document_comment_scope: Literal["", "order", "item", "unknown"] = ""
     extraction_confidence: float = Field(default=1, ge=0, le=1)

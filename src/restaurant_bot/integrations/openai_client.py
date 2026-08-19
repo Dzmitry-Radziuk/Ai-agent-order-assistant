@@ -672,7 +672,7 @@ class OpenAIService:
                     ],
                 ),
                 text_format=PhotoDocumentObservation,
-                max_output_tokens=5000,
+                max_output_tokens=8000,
             )
             parsed_output = response.output_parsed
             parsed_observation = (
@@ -684,23 +684,31 @@ class OpenAIService:
                 output={
                     "parsed": parsed_output is not None,
                     "row_count": len(parsed_observation.rows) if parsed_observation else 0,
+                    "visible_product_row_count": (
+                        parsed_observation.visible_product_row_count if parsed_observation else None
+                    ),
+                    "scan_complete": parsed_observation.scan_complete
+                    if parsed_observation
+                    else False,
                 },
                 usage_details=self._usage_details(response),
             )
         parsed = response.output_parsed
         if parsed is None:
             logger.warning("photo_ai_empty_result", mime_type=mime_type)
-            return ParsedCommand(intent=Intent.UNKNOWN)
+            return ParsedCommand(intent=Intent.ADD_ITEMS, photo_outcome="incomplete_photo_read")
         if getattr(response, "status", "") == "incomplete" or getattr(
             response, "incomplete_details", None
         ):
             logger.warning("photo_ai_incomplete_result", mime_type=mime_type)
-            return ParsedCommand(intent=Intent.UNKNOWN)
+            return ParsedCommand(intent=Intent.ADD_ITEMS, photo_outcome="incomplete_photo_read")
         observation = PhotoDocumentObservation.model_validate(parsed.model_dump())
         logger.info(
             "photo_ai_parsed",
             proposed_document_type=observation.document_type_proposal,
-            row_count=len(observation.rows),
+            visible_product_row_count=observation.visible_product_row_count,
+            returned_row_count=len(observation.rows),
+            scan_complete=observation.scan_complete,
         )
         normalization = normalize_photo_observation(observation, self.settings)
         normalized = normalization.command
@@ -710,6 +718,7 @@ class OpenAIService:
             input_row_count=len(observation.rows),
             output_item_count=len(normalized.items),
             dropped_row_count=normalization.dropped_rows,
+            reason=normalization.reason,
         )
         return normalized
 

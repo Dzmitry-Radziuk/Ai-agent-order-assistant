@@ -280,6 +280,18 @@ def photo_without_quantities_reply(state: ConversationState) -> BotReply:
     )
 
 
+def photo_incomplete_read_reply(state: ConversationState) -> BotReply:
+    """Объясняет, что таблицу на фотографии не удалось надёжно прочитать."""
+    rows = [[Button(text="Черновик", callback_data="v2:cart")]] if _has_draft_content(state) else []
+    return BotReply(
+        text=(
+            f"📷 {heading('Не удалось надёжно прочитать фото')}\n\n"
+            "Попробуйте отправить изображение крупнее или без сильного сжатия."
+        ),
+        rows=rows,
+    )
+
+
 def empty_draft_reply() -> BotReply:
     """Формирует ответ для пустого черновика."""
     return BotReply(

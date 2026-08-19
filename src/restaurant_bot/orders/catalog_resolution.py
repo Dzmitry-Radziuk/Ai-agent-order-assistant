@@ -145,6 +145,30 @@ def _looks_like_unanchored_gibberish(query: str) -> bool:
     return len(tokens(query)) >= 3
 
 
+def _photo_identity_anchors(value: str) -> set[str]:
+    """Выделяет устойчивые нечисловые якоря товара для trusted photo identity."""
+    return {
+        token
+        for token in tokens(value)
+        if token not in UNIT_ALIASES and not any(char.isdigit() for char in token)
+    }
+
+
+def _photo_matching_anchors(query: str, product_name: str) -> set[str]:
+    """Возвращает якоря OCR-строки, подтверждённые именем каталога."""
+    return _photo_identity_anchors(query) & query_evidence_tokens(query, product_name)
+
+
+def _photo_identity_is_sufficient(query: str, product_name: str) -> bool:
+    """Проверяет достаточность нечисловых якорей для venue-photo identity."""
+    observed = _photo_identity_anchors(query)
+    matched = _photo_matching_anchors(query, product_name)
+    if len(observed) < 2 or len(matched) < 2:
+        return False
+    required = max(2, (len(observed) * 3 + 4) // 5)
+    return len(matched) >= required
+
+
 class CatalogResolutionService:
     """Применяет найденный каталог к позициям черновика заказа."""
 
@@ -254,45 +278,101 @@ class CatalogResolutionService:
         item: CartItem,
         catalog: list[CatalogProduct] | None,
     ) -> bool:
-        """Выбирает единственную точную строку venue-каталога до fuzzy-поиска."""
+        """Разрешает proven venue-table identity до обычного fuzzy-поиска."""
         if item.catalog_identity_provenance != "venue_table_exact_candidate" or catalog is None:
             return False
-        identity = canonical_photo_identity(item.source_query)
-        if not identity:
-            return False
-        matches = [
-            product for product in catalog if canonical_photo_identity(product.name) == identity
-        ]
-        if len(matches) != 1:
+        products_by_row: dict[int, list[CatalogProduct]] = {}
+        for product in catalog:
+            if product.row_number is not None:
+                products_by_row.setdefault(product.row_number, []).append(product)
+
+        row_number = item.photo_sheet_row_number
+        if row_number is not None and item.photo_sheet_row_number_confidence >= 0.9:
+            row_matches = products_by_row.get(row_number, [])
+            if len(row_matches) == 1 and _photo_identity_is_sufficient(
+                item.source_query, row_matches[0].name
+            ):
+                return self._select_photo_identity_product(
+                    item,
+                    row_matches[0],
+                    method="row_number",
+                    reason="row_number_and_lexical_sanity",
+                )
             logger.info(
-                "photo_exact_catalog_identity",
-                exact_match_count=len(matches),
-                decision="duplicate" if len(matches) > 1 else "fallback",
-                reason="duplicate_exact_identity"
-                if len(matches) > 1
-                else "exact_identity_not_proven",
+                "photo_venue_catalog_identity",
+                resolution_method="unsafe",
+                sheet_row_number=row_number,
+                candidate_count=len(row_matches),
+                reason="row_number_lexical_mismatch_or_duplicate",
             )
-            return False
-        product = matches[0]
+
+        identity = canonical_photo_identity(item.source_query)
+        if identity:
+            exact_matches = [
+                product for product in catalog if canonical_photo_identity(product.name) == identity
+            ]
+            if len(exact_matches) == 1:
+                return self._select_photo_identity_product(
+                    item,
+                    exact_matches[0],
+                    method="canonical_exact",
+                    reason="unique_normalized_full_identity",
+                )
+            if len(exact_matches) > 1:
+                logger.info(
+                    "photo_venue_catalog_identity",
+                    resolution_method="duplicate",
+                    candidate_count=len(exact_matches),
+                    reason="duplicate_exact_identity",
+                )
+
+        ocr_matches = [
+            product
+            for product in catalog
+            if _photo_identity_is_sufficient(item.source_query, product.name)
+        ]
+        if len(ocr_matches) == 1:
+            return self._select_photo_identity_product(
+                item,
+                ocr_matches[0],
+                method="ocr_tolerant_unique",
+                reason="unique_non_measurement_identity",
+            )
+        logger.info(
+            "photo_venue_catalog_identity",
+            resolution_method="fallback",
+            sheet_row_number=row_number,
+            candidate_count=len(ocr_matches),
+            reason="identity_not_proven",
+        )
+        return False
+
+    def _select_photo_identity_product(
+        self,
+        item: CartItem,
+        product: CatalogProduct,
+        *,
+        method: str,
+        reason: str,
+    ) -> bool:
+        """Применяет proven product без generic candidate или AI resolution."""
         candidate = Candidate(
             product_id=product.product_id,
             name=product.name,
             supplier=product.supplier,
             unit=product.unit,
-            reason="venue_table_exact_identity",
+            reason=f"venue_table_{method}",
         )
         item.candidates = [candidate]
         logger.info(
-            "photo_exact_catalog_identity",
-            exact_match_count=1,
-            decision="exact_selected",
-            reason="unique_normalized_full_identity",
+            "photo_venue_catalog_identity",
+            resolution_method=method,
+            sheet_row_number=item.photo_sheet_row_number,
+            candidate_count=1,
+            reason=reason,
+            ignored_ocr_measurement_conflict=method == "ocr_tolerant_unique",
         )
-        self.apply_catalog(
-            item,
-            candidate,
-            catalog,
-        )
+        self.apply_catalog(item, candidate, [product])
         return True
 
     def apply_catalog(

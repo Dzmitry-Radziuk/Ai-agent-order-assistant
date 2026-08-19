@@ -143,6 +143,25 @@ def normalize_photo_observation(
     settings: Settings,
 ) -> PhotoNormalizationResult:
     """Проверяет строки фотографии и превращает только разрешённые строки в ParsedCommand."""
+    integrity_reason = _photo_scan_integrity_reason(observation)
+    if integrity_reason:
+        logger.warning(
+            "photo_scan_integrity_failed",
+            visible_product_row_count=observation.visible_product_row_count,
+            returned_row_count=len(observation.rows),
+            scan_complete=observation.scan_complete,
+            reason=integrity_reason,
+        )
+        return PhotoNormalizationResult(
+            command=ParsedCommand(
+                intent=Intent.ADD_ITEMS,
+                photo_outcome="incomplete_photo_read",
+            ),
+            document_type="incomplete",
+            admitted_rows=0,
+            dropped_rows=len(observation.rows),
+            reason=integrity_reason,
+        )
     document_type = classify_photo_document(observation)
     logger.info(
         "photo_document_classified",
@@ -160,6 +179,9 @@ def normalize_photo_observation(
         return PhotoNormalizationResult(
             command=ParsedCommand(
                 intent=Intent.ADD_ITEMS,
+                photo_outcome=(
+                    "unsupported_photo" if document_type in {"unknown", "product_card"} else ""
+                ),
                 global_comment=_authorized_document_comment(observation),
             ),
             document_type=document_type,
@@ -170,12 +192,16 @@ def normalize_photo_observation(
 
     items: list[ExtractedItem] = []
     dropped = 0
-    for row in sorted(observation.rows, key=lambda candidate: candidate.row_index):
+    for row in sorted(observation.rows, key=_visual_row_sort_key):
         item = _authorize_row(row, document_type, settings.default_department)
         decision = "admitted" if item is not None else "dropped"
         logger.info(
             "photo_row_admission_decision",
             row_index=row.row_index,
+            visual_row_index=row.visual_row_index,
+            sheet_row_number=row.sheet_row_number
+            if row.sheet_row_number_confidence >= 0.9
+            else None,
             document_type=document_type,
             has_product=bool(clean_text(row.product_text)),
             hall=row.hall_quantity,
@@ -200,12 +226,33 @@ def normalize_photo_observation(
         command=ParsedCommand(
             intent=Intent.ADD_ITEMS,
             items=items,
+            photo_outcome="no_order_quantities" if not items else "",
             global_comment=global_comment,
         ),
         document_type=document_type,
         admitted_rows=len(items),
         dropped_rows=dropped,
         reason="rows_authorized" if items else "no_filled_quantities_found",
+    )
+
+
+def _photo_scan_integrity_reason(observation: PhotoDocumentObservation) -> str:
+    """Возвращает причину, по которой наблюдение нельзя считать полным сканом."""
+    if not observation.scan_complete:
+        return "vision_marked_scan_incomplete"
+    if (
+        observation.visible_product_row_count is not None
+        and len(observation.rows) != observation.visible_product_row_count
+    ):
+        return "visible_row_count_mismatch"
+    return ""
+
+
+def _visual_row_sort_key(row: PhotoRowObservation) -> tuple[int, int]:
+    """Сортирует строки по локальному visual index с совместимостью старого row_index."""
+    return (
+        row.visual_row_index if row.visual_row_index is not None else row.row_index,
+        row.row_index,
     )
 
 
@@ -273,6 +320,10 @@ def _authorize_row(
         packaging_text=clean_text(row.printed_reference_text),
         packaging_role="catalog_attribute" if row.printed_reference_text else "none",
         catalog_identity_provenance=exact_provenance,
+        photo_sheet_row_number=(
+            row.sheet_row_number if row.sheet_row_number_confidence >= 0.9 else None
+        ),
+        photo_sheet_row_number_confidence=row.sheet_row_number_confidence,
     )
 
 

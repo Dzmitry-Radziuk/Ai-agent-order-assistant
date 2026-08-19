@@ -154,12 +154,14 @@ class InputRecognitionService:
             duration_ms=round((perf_counter() - stage_started) * 1000),
             item_count=len(parsed.items),
         )
-        self.update_processing(
-            event.chat_id,
-            processing_message_id,
-            "📋 <b>Фото распознано</b>\n\n"
-            f"Найдено позиций: {len(parsed.items)}. Сверяю товары с каталогом…",
+        progress_text = (
+            "📋 <b>Фото прочитано частично</b>\n\n"
+            "Проверяю, можно ли надёжно использовать распознанные строки…"
+            if parsed.photo_outcome == "incomplete_photo_read"
+            else "📋 <b>Фото распознано</b>\n\n"
+            f"Найдено позиций: {len(parsed.items)}. Сверяю товары с каталогом…"
         )
+        self.update_processing(event.chat_id, processing_message_id, progress_text)
         return parsed
 
     def update_processing(self, chat_id: str, message_id: int | None, text: str) -> None:

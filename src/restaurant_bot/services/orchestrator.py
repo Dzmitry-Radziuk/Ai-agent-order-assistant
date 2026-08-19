@@ -1153,6 +1153,7 @@ class UpdateOrchestrator:
             "comment_action": command.comment_action,
             "comment_scope": command.comment_scope,
             "global_comment": command.global_comment,
+            "photo_outcome": command.photo_outcome,
             "item_count": len(command.items),
             "items": [
                 {

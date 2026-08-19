@@ -125,6 +125,7 @@ from restaurant_bot.presentation.telegram.replies import (
     new_order_confirmation_reply,
     new_order_started_reply,
     no_current_manual_reply,
+    photo_incomplete_read_reply,
     photo_without_quantities_reply,
     product_add_requests_reply,
     product_add_sending_reply,
@@ -848,6 +849,8 @@ class ConversationEngine:
             if event.kind == InputKind.VOICE and not command.items:
                 return EngineResult(state=state, reply=unrecognized_voice_reply(state))
             if event.kind == InputKind.PHOTO and not command.items:
+                if command.photo_outcome == "incomplete_photo_read":
+                    return EngineResult(state=state, reply=photo_incomplete_read_reply(state))
                 return EngineResult(state=state, reply=photo_without_quantities_reply(state))
             if (
                 modal_decision.manual_details.action is CompatibilityAction.CONTINUE

@@ -27,3 +27,5 @@ def test_photo_prompt_forbids_moving_quantity_between_neighboring_rows() -> None
     assert "такую строку полностью пропусти" in prompt
     assert "строка ниже" in prompt
     assert "оно относится только к строке ниже" in prompt
+    assert "включая пустые поля заказа" in _PHOTO_SYSTEM
+    assert "не отбрасывай её" in _PHOTO_SYSTEM

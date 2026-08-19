@@ -1,5 +1,28 @@
 # PROJECT HANDOFF
 
+## PHOTO-RUNTIME-CORRECTIVE-10 - current corrective pass
+
+### Confirmed root cause and ownership
+
+The photo vision contract previously encouraged the model to omit rows with empty order quantities. That made an incomplete or truncated table look like a valid no-quantity photo, and left no deterministic signal for a distinct user response. The runtime now keeps observation separate from admission: vision returns every reliably visible product row, while `input/photo_ingestion.py` authorizes only same-row positive department quantities and preserves existing comment, correction, packaging, and quantity-provenance rules.
+
+`PhotoDocumentObservation` now carries `visible_product_row_count`, `scan_complete`, and `scan_warning`. A row-count mismatch or an explicit incomplete scan fails closed as `photo_outcome=incomplete_photo_read`; an unsupported/product-card or genuinely empty order remains a safe no-quantity outcome. The Telegram reply asks the user to resend an image that can be read clearly instead of claiming that no quantities were found.
+
+For an already authorized `client_order_sheet`, catalog identity resolution has a PHOTO-only trusted priority: reliable visible `sheet_row_number`, unique canonical identity, then a unique OCR-tolerant identity with measurement noise ignored only when strong non-measurement anchors are sufficient. Ambiguous or unsafe matches return to the existing catalog pipeline; text and voice do not receive this privilege. Current venue catalog scope, fuzzy scoring, retrieval, thresholds, supplier matching, and submission behavior remain unchanged. Hall/Bar/Kitchen department quantities still round-trip into submission rows independently.
+
+### Verification
+
+- Full pytest: `1603 passed`.
+- Targeted PHOTO, worker, media, engine, and submission tests: passed.
+- `mypy src`: `Success: no issues found in 165 source files`.
+- `ruff check src tests`, changed-file `ruff format --check`, `compileall`, and `git diff --check`: passed.
+- Scenario catalog check: 41 scenarios; Markdown links check: 38 files.
+- Added regressions cover incomplete row counts, explicit incomplete vision output, distinct user reply, OCR-tolerant horseradish identity, live four-row admission, duplicate size variants, row-number lexical sanity, and department round-trip.
+
+### Operational boundary
+
+No real Telegram photo, external order submission, webhook, tunnel, production deployment, or secret was used. The requested final action is a local Docker Compose rebuild after the commit is pushed. A real-image Telegram smoke test remains an external manual check.
+
 ## PHOTO-PROD-HARDENING-09 — текущий corrective pass
 
 ### Корневая причина

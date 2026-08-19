@@ -1738,10 +1738,11 @@ _PHOTO_SYSTEM = """
 1. Определи document_type.
 2. Определи геометрию таблицы или списка: строки, колонки, границы ячеек.
 3. Для каждой строки независимо определи товар.
-4. Для этой же строки найди именно фактическое поле заказа.
+4. Для этой же строки зафиксируй все видимые поля, включая пустые поля заказа.
 5. Отдели заказ от печатной фасовки, справочного значения и других чисел.
-6. Пропусти строки без положительного фактического количества.
-7. Перед ответом повторно проверь каждую возвращённую позицию по её строке.
+6. Для таблицы верни каждую надёжно видимую товарную строку сверху вниз; не отбрасывай её
+   только потому, что все поля количества пустые. Финальный admission выполняет backend.
+7. Перед ответом повторно проверь каждую возвращённую строку по её геометрии.
 
 DOCUMENT_TYPE
 
@@ -1803,9 +1804,9 @@ DOCUMENT_TYPE
 телефоны, номера строк, артикулы и заголовки
 не превращай в количество фактического заказа.
 
-Добавляй item только при наличии положительного фактического количества заказа,
-кроме тех полей client_order_sheet, где количество определяется
-положительными значениями подразделений.
+Для таблицы возвращай наблюдаемую строку даже при пустых полях количества.
+Не принимай решение о добавлении позиции: положительное количество и финальный
+admission определяются детерминированным backend по evidence этой же строки.
 
 Если число неразборчиво или непонятно, относится ли оно к строке:
 - не угадывай;
@@ -1995,9 +1996,19 @@ Do not return intent, items, ParsedCommand or CartItem fields in place of the ob
 
 The structured response is an observation, not a ParsedCommand and not a CartItem.
 Return document_type_proposal, detected_columns, has_table_structure, rows,
-document_comment, document_comment_scope and extraction_confidence.
+visible_product_row_count, scan_complete, scan_warning, document_comment,
+document_comment_scope and extraction_confidence.
+For a table, scan the photographed product region from top to bottom and return every
+reliably visible product row, including rows whose Hall, Bar and Kitchen cells are blank.
+Do not pre-filter rows by quantity; the backend performs final row admission.
+Set visible_product_row_count to the number of visible product rows when known, and set
+scan_complete=false when any part of the photographed table cannot be read reliably.
+row_index or visual_row_index is only the local top-to-bottom position. Set
+sheet_row_number only when the actual visible spreadsheet gutter number is readable;
+never derive it from array position and never invent it.
 Each row must contain only evidence from the same visual row:
-row_index, row_text, product_text, supplier_hint, hall_quantity, bar_quantity, kitchen_quantity,
+row_index, visual_row_index, sheet_row_number, sheet_row_number_confidence, row_text,
+product_text, supplier_hint, hall_quantity, bar_quantity, kitchen_quantity,
 explicit_order_quantity, explicit_order_unit, order_entry_text, order_entry_type,
 printed_reference_text, handwritten_quantity_text, crossed_out_quantity_text,
 corrected_quantity_text, active_quantity_texts, comment_text, comment_source and
