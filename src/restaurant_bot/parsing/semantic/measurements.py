@@ -114,7 +114,9 @@ def extract_semantic_facts(source_text: str) -> tuple[SemanticFact, ...]:
             re.search(r"\b(?:нужно|надо|закаж\w*|добав\w*|постав\w*)\b", marker_prefix, re.I)
         )
         terminal_order_quantity = not source[match.end() :].strip(" \t\r\n.,;:!?()[]{}")
-        explicit_order = (local_order_marker or terminal_order_quantity) and not global_quantity_scope
+        explicit_order = (
+            local_order_marker or terminal_order_quantity
+        ) and not global_quantity_scope
         kind = (
             SemanticFactKind.CATALOG_ATTRIBUTE
             if in_packaging or in_range
@@ -230,7 +232,11 @@ def strip_order_quantity_from_query(query: str, source_text: str) -> str:
         if (
             fact.kind is SemanticFactKind.ORDER_QUANTITY
             and not re.search(r"\s", fact.original_text)
-            and not re.search(r"\b(?:\u043d\u0443\u0436\u043d\u043e|\u043d\u0430\u0434\u043e)\b", source_text, re.I)
+            and not re.search(
+                r"\b(?:\u043d\u0443\u0436\u043d\u043e|\u043d\u0430\u0434\u043e)\b",
+                source_text,
+                re.I,
+            )
         ):
             continue
         term = normalize_text(fact.original_text)

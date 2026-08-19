@@ -40,8 +40,11 @@ def _token_matches(left: str, right: str) -> bool:
     """Проверяет точное или безопасное лексическое совпадение якоря."""
     if left == right:
         return True
-    return len(left) >= 4 and len(right) >= 4 and left[0] == right[0] and (
-        SequenceMatcher(None, left, right).ratio() >= 0.78
+    return (
+        len(left) >= 4
+        and len(right) >= 4
+        and left[0] == right[0]
+        and (SequenceMatcher(None, left, right).ratio() >= 0.78)
     )
 
 
@@ -65,7 +68,9 @@ def _anchor_start(
         query_index = 0
         for candidate_index in range(source_index, min(len(source_tokens), source_index + 32)):
             candidate_token = source_tokens[candidate_index][0]
-            while query_index < len(query_tokens) and query_tokens[query_index] not in anchor_tokens:
+            while (
+                query_index < len(query_tokens) and query_tokens[query_index] not in anchor_tokens
+            ):
                 query_index += 1
             if query_index >= len(query_tokens):
                 break
@@ -94,7 +99,9 @@ def derive_item_source_spans(
     starts: list[int] = []
     minimum_index = 0
     for item in items:
-        query = item.product_query if hasattr(item, "product_query") else item.get("product_query", "")
+        query = (
+            item.product_query if hasattr(item, "product_query") else item.get("product_query", "")
+        )
         start_index = _anchor_start(clean_text(query), tokens, minimum_index)
         if start_index is None:
             return tuple(None for _ in items)
@@ -133,12 +140,10 @@ def _trim_conflicting_detached_quantity(source: str, start: int, end: int) -> in
 
     for marker in marker_re.finditer(source, start, end):
         prefix = source[start : marker.start()].rstrip(" .!?;,")
-        if any(
-            fact.kind.value == "order_quantity"
-            for fact in extract_semantic_facts(prefix)
-        ):
+        if any(fact.kind.value == "order_quantity" for fact in extract_semantic_facts(prefix)):
             return marker.start()
     return end
+
 
 _NON_ANCHOR_WORDS = (
     set(UNIT_ALIASES)

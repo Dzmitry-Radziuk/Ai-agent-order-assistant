@@ -713,3 +713,29 @@ AI-вызовов, изменений callback, базы данных, Alembic, 
 Mypy, Ruff check/format, Markdown links, каталог сценариев, compileall и
 `git diff --check` прошли. База данных, Alembic, Docker, History, callback
 protocol и дополнительные AI-вызовы не менялись.
+
+## PREPROD-RELEASE-GATE-2026-08-19
+
+### Подтверждено
+
+- Предрелизный аудит выполнялся на ветке `develop`, HEAD `9fa7235`.
+- Исправлены четыре файла, которые не проходили `ruff format --check`.
+- `scripts/build_agent_context.py` получил явные типовые границы для вывода
+  `subprocess.run` и `ast.literal_eval`; `mypy src scripts` теперь проходит.
+- Production compose больше не требует отсутствующий `docker/.env-proxy` для worker.
+  Это соответствует двум уже существующим коммитам `proxy disabled` в GitLab `develop`.
+- Полные pytest, Ruff check/format, mypy, Markdown links, сценарии, compileall и
+  `git diff --check` проходят.
+- Production image успешно собирается через `docker/Dockerfile`.
+
+### Не выполнено намеренно
+
+- Commit, merge и push не выполнялись; рабочее дерево содержит подготовленные
+  housekeeping-изменения архива документации.
+- Локальная `develop` и `orders-asistant-2/develop` имеют расходящуюся историю;
+  перед push нужен отдельный безопасный merge без force-push.
+- `uv.lock` отсутствует по прежнему решению проекта, поэтому pip-зависимости
+  production image не зафиксированы lock-файлом.
+- Hosted GitLab pipeline и серверный deploy не подтверждались: protected variables,
+  runner, registry, сеть `auto-snab`, database backup и health-check требуют проверки
+  в самом окружении.

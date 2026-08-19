@@ -93,7 +93,7 @@ current state. Remove-кандидатов и настоящих дублей н
 | `tests/README.md` | CURRENT_SPECIALIZED | структура и назначение test suite |
 | `docs/CHANNEL_EXTENSION_GUIDE.md` | CURRENT_SPECIALIZED | расширение каналов без заявления об их реализации |
 | `docs/ci/README.md` | CURRENT_SPECIALIZED | CI-контекст; hosted run здесь не подтверждён |
-| `REFACTORING_CONTEXT_HANDOFF.md` | HISTORICAL_ARCHIVE | handoff завершённой декомпозиции |
+| `docs/archive/architecture/REFACTORING_CONTEXT_HANDOFF.md` | HISTORICAL_ARCHIVE | handoff завершённой декомпозиции |
 | `docs/archive/architecture/ARCHITECTURE_DECOMPOSITION.md` | HISTORICAL_ARCHIVE | история structural campaign |
 | `docs/archive/data-integrity/DATA_INTEGRITY_ANALYSIS.md` | HISTORICAL_ARCHIVE | исходный data-integrity audit |
 | `docs/archive/data-integrity/DATA_INTEGRITY_BLOCK_A_PLAN.md` | HISTORICAL_ARCHIVE | план завершённого блока |

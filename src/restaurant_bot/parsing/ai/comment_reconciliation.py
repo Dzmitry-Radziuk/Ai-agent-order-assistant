@@ -46,8 +46,7 @@ def _comment_source_is_authorized(comment: str, source_text: str) -> bool:
         return False
     facts = extract_semantic_facts(source_text)
     if any(
-        fact.kind is SemanticFactKind.ORDER_QUANTITY
-        and normalize_text(fact.original_text) in value
+        fact.kind is SemanticFactKind.ORDER_QUANTITY and normalize_text(fact.original_text) in value
         for fact in facts
     ):
         return False

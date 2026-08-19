@@ -11,6 +11,7 @@ import sys
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import cast
 
 OUTPUT_PATH = Path(".agents/runtime/CURRENT_CONTEXT.md")
 FINGERPRINT_PATTERN = re.compile(r"<!-- context-fingerprint: ([0-9a-f]{64}) -->")
@@ -60,7 +61,7 @@ def run_git(root: Path, *args: str, binary: bool = False) -> str | bytes:
         text=not binary,
         encoding=None if binary else "utf-8",
     )
-    return result.stdout
+    return cast(str | bytes, result.stdout)
 
 
 def repository_root(start: Path) -> Path:
@@ -211,7 +212,7 @@ def assigned_literal(tree: ast.Module, name: str) -> object | None:
         if value is None:
             return None
         try:
-            return ast.literal_eval(value)
+            return cast(object, ast.literal_eval(value))
         except (ValueError, TypeError):
             return "<dynamic>"
     return None

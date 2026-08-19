@@ -62,7 +62,11 @@ def _clear_catalog_comments(items: list[dict[str, Any]], source_text: str) -> No
     """Удаляет комментарии, совпадающие только с фактами каталога."""
     for item in items:
         comment = clean_text(item.get("comment") or item.get("user_comment_to_supplier"))
-        context = clean_text(item.get("source_span")) or clean_text(item.get("source_line")) or source_text
+        context = (
+            clean_text(item.get("source_span"))
+            or clean_text(item.get("source_line"))
+            or source_text
+        )
         if comment and not _source_supports_comment(comment, context):
             item["comment"] = ""
             item["user_comment_to_supplier"] = ""
