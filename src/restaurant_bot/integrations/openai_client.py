@@ -687,6 +687,12 @@ class OpenAIService:
                     "visible_product_row_count": (
                         parsed_observation.visible_product_row_count if parsed_observation else None
                     ),
+                    "order_area_complete": (
+                        parsed_observation.order_area_complete if parsed_observation else False
+                    ),
+                    "uncertain_order_row_count": (
+                        parsed_observation.uncertain_order_row_count if parsed_observation else 0
+                    ),
                     "scan_complete": parsed_observation.scan_complete
                     if parsed_observation
                     else False,
@@ -708,6 +714,8 @@ class OpenAIService:
             proposed_document_type=observation.document_type_proposal,
             visible_product_row_count=observation.visible_product_row_count,
             returned_row_count=len(observation.rows),
+            order_area_complete=observation.order_area_complete,
+            uncertain_order_row_count=observation.uncertain_order_row_count,
             scan_complete=observation.scan_complete,
         )
         normalization = normalize_photo_observation(observation, self.settings)

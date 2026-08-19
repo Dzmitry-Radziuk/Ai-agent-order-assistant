@@ -50,6 +50,8 @@ def test_photo_uses_observation_schema_without_cart_item_shape() -> None:
     assert "rows" in schema["properties"]
     assert "product_text" in schema["$defs"]["PhotoRowObservation"]["properties"]
     assert "visible_product_row_count" in schema["properties"]
+    assert "order_area_complete" in schema["properties"]
+    assert "uncertain_order_row_count" in schema["properties"]
     assert "scan_complete" in schema["properties"]
     assert "sheet_row_number" in schema["$defs"]["PhotoRowObservation"]["properties"]
     assert "items" not in schema["properties"]
@@ -116,8 +118,8 @@ def test_client_sheet_drops_blank_row_without_transferring_neighbor_quantity(set
     assert [item.quantity for item in result.command.items] == [3, 10]
 
 
-def test_incomplete_row_integrity_is_not_reported_as_no_quantities(settings) -> None:  # type: ignore[no-untyped-def]
-    """Отличает частичный scan от корректной таблицы без заполненных количеств."""
+def test_row_count_mismatch_keeps_reliable_filled_rows(settings) -> None:  # type: ignore[no-untyped-def]
+    """Не отклоняет заполненные строки из-за пропущенной пустой строки каталога."""
     result = normalize_photo_observation(
         PhotoDocumentObservation(
             document_type_proposal="client_order_sheet",
@@ -125,25 +127,91 @@ def test_incomplete_row_integrity_is_not_reported_as_no_quantities(settings) -> 
             has_table_structure=True,
             visible_product_row_count=20,
             scan_complete=True,
-            rows=[_row("Васаби", kitchen_quantity=3)] * 18,
+            order_area_complete=True,
+            rows=[
+                _row("Васаби", kitchen_quantity=3),
+                _row("Лук", kitchen_quantity=10),
+                _row("Хрен", kitchen_quantity=2),
+                *[_row("") for _ in range(14)],
+            ],
         ),
         settings,
     )
 
-    assert result.command.items == []
-    assert result.command.photo_outcome == "incomplete_photo_read"
-    assert result.reason == "visible_row_count_mismatch"
+    assert [item.quantity for item in result.command.items] == [3, 10, 2]
+    assert result.command.photo_outcome == ""
+    assert result.reason == "rows_authorized"
 
 
-def test_scan_complete_false_has_separate_photo_outcome(settings) -> None:  # type: ignore[no-untyped-def]
-    """Не сообщает об отсутствии количеств, если vision признал изображение неполным."""
+def test_scan_complete_false_does_not_override_complete_order_area(settings) -> None:  # type: ignore[no-untyped-def]
+    """Не отклоняет заказ, если неполна транскрипция, но order-area evidence полна."""
     result = normalize_photo_observation(
-        PhotoDocumentObservation(scan_complete=False, scan_warning="нижняя часть размыта"),
+        PhotoDocumentObservation(
+            document_type_proposal="client_order_sheet",
+            detected_columns=["Товар", "Зал", "Бар", "Кухня"],
+            has_table_structure=True,
+            scan_complete=False,
+            order_area_complete=True,
+            scan_warning="неразборчива справочная колонка",
+            rows=[_row("Васаби", kitchen_quantity=3)],
+        ),
+        settings,
+    )
+
+    assert result.command.photo_outcome == ""
+    assert [item.quantity for item in result.command.items] == [3]
+
+
+def test_uncertain_order_row_is_incomplete_photo(settings) -> None:  # type: ignore[no-untyped-def]
+    """Отклоняет фото, если vision сообщает о потенциально пропущенной строке заказа."""
+    result = normalize_photo_observation(
+        PhotoDocumentObservation(
+            document_type_proposal="client_order_sheet",
+            detected_columns=["Товар", "Зал", "Бар", "Кухня"],
+            has_table_structure=True,
+            order_area_complete=True,
+            uncertain_order_row_count=1,
+            rows=[_row("Васаби", kitchen_quantity=3)],
+        ),
         settings,
     )
 
     assert result.command.photo_outcome == "incomplete_photo_read"
-    assert result.command.items == []
+    assert result.reason == "uncertain_potential_order_row"
+
+
+def test_cropped_order_area_is_incomplete_photo(settings) -> None:  # type: ignore[no-untyped-def]
+    """Отклоняет фото при явном сообщении о нечитабельной order-area области."""
+    result = normalize_photo_observation(
+        PhotoDocumentObservation(
+            document_type_proposal="client_order_sheet",
+            detected_columns=["Товар", "Зал", "Бар", "Кухня"],
+            has_table_structure=True,
+            order_area_complete=False,
+            rows=[_row("Васаби", kitchen_quantity=3)],
+        ),
+        settings,
+    )
+
+    assert result.command.photo_outcome == "incomplete_photo_read"
+    assert result.reason == "potential_order_row_unreadable"
+
+
+def test_empty_complete_order_area_keeps_no_quantity_outcome(settings) -> None:  # type: ignore[no-untyped-def]
+    """Показывает отсутствие количеств для полностью просмотренной пустой таблицы."""
+    result = normalize_photo_observation(
+        PhotoDocumentObservation(
+            document_type_proposal="client_order_sheet",
+            detected_columns=["Товар", "Зал", "Бар", "Кухня"],
+            has_table_structure=True,
+            order_area_complete=True,
+            rows=[_row("Пустая строка")],
+        ),
+        settings,
+    )
+
+    assert result.command.photo_outcome == "no_order_quantities"
+    assert result.document_type == "client_order_sheet"
 
 
 def test_incomplete_photo_has_distinct_user_reply(settings) -> None:  # type: ignore[no-untyped-def]
@@ -374,7 +442,8 @@ def test_live_four_product_photo_case_matches_all_rows(settings) -> None:  # typ
         document_type_proposal="client_order_sheet",
         detected_columns=["Наименование", "Зал", "Бар", "Кухня", "Комментарий"],
         has_table_structure=True,
-        visible_product_row_count=4,
+        visible_product_row_count=5,
+        order_area_complete=True,
         rows=[
             _row("Васаби TM Sango, 1кг, 10 шт/кор, Китай", kitchen_quantity=3),
             _row("Лук жареный Metro Chef, 600 г", kitchen_quantity=10),
@@ -515,3 +584,45 @@ def test_photo_department_quantities_survive_submission_mapping(settings) -> Non
         ("Бар", 3),
         ("Кухня", 5),
     ]
+
+
+def test_photo_single_department_quantities_keep_their_department(settings) -> None:  # type: ignore[no-untyped-def]
+    """Проверяет отдельное сохранение Hall, Bar и Kitchen до submission mapping."""
+    cases = [
+        ("Зал", DepartmentQuantities(hall=4), 4),
+        ("Бар", DepartmentQuantities(bar=7), 7),
+        ("Кухня", DepartmentQuantities(kitchen=3), 3),
+    ]
+    event = ConversationInput(
+        1,
+        "photo-department-test",
+        actor_id="cook",
+        channel="telegram",
+        kind=InputKind.PHOTO,
+    )
+
+    for department, quantities, expected in cases:
+        state = ConversationState(
+            restaurant="Тест",
+            spreadsheet_id="venue-sheet",
+            cart=[
+                CartItem(
+                    id="item-1",
+                    source_query="Васаби",
+                    quantity=sum(value or 0 for value in quantities.model_dump().values()),
+                    unit="шт",
+                    department_quantities=quantities,
+                    status=ItemStatus.MATCHED,
+                    catalog_product_id="wasabi",
+                    catalog_name="Васаби",
+                    catalog_unit="шт",
+                    supplier="Поставщик",
+                    price=10,
+                )
+            ],
+        )
+
+        result = ConversationEngine(settings)._prepare_submission(event, state)
+        rows = result.state.pending_submission.rows  # type: ignore[union-attr]
+
+        assert [(row["_department"], row["Кол-во"]) for row in rows] == [(department, expected)]

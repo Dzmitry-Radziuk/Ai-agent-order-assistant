@@ -72,6 +72,15 @@ class PhotoNormalizationResult:
     reason: str = ""
 
 
+@dataclass(frozen=True, slots=True)
+class PhotoOrderAreaIntegrity:
+    """Описывает полноту именно значимых для заказа данных фотографии."""
+
+    decision: str
+    reason: str
+    row_count_mismatch: bool
+
+
 def canonical_photo_identity(value: str) -> str:
     """Канонизирует только безопасные пробелы, кавычки, пунктуацию и единицы."""
     text = unicodedata.normalize("NFKC", clean_text(value)).casefold().replace("ё", "е")
@@ -143,14 +152,22 @@ def normalize_photo_observation(
     settings: Settings,
 ) -> PhotoNormalizationResult:
     """Проверяет строки фотографии и превращает только разрешённые строки в ParsedCommand."""
-    integrity_reason = _photo_scan_integrity_reason(observation)
-    if integrity_reason:
+    document_type = classify_photo_document(observation)
+    integrity = photo_order_area_integrity(observation, document_type)
+    logger.info(
+        "photo_scan_integrity",
+        visible_product_row_count=observation.visible_product_row_count,
+        returned_row_count=len(observation.rows),
+        row_count_mismatch=integrity.row_count_mismatch,
+        order_area_complete=observation.order_area_complete,
+        uncertain_order_row_count=observation.uncertain_order_row_count,
+        decision=integrity.decision,
+        reason=integrity.reason,
+    )
+    if integrity.decision == "incomplete_order_evidence":
         logger.warning(
-            "photo_scan_integrity_failed",
-            visible_product_row_count=observation.visible_product_row_count,
-            returned_row_count=len(observation.rows),
-            scan_complete=observation.scan_complete,
-            reason=integrity_reason,
+            "photo_scan_integrity_rejected",
+            reason=integrity.reason,
         )
         return PhotoNormalizationResult(
             command=ParsedCommand(
@@ -160,9 +177,8 @@ def normalize_photo_observation(
             document_type="incomplete",
             admitted_rows=0,
             dropped_rows=len(observation.rows),
-            reason=integrity_reason,
+            reason=integrity.reason,
         )
-    document_type = classify_photo_document(observation)
     logger.info(
         "photo_document_classified",
         proposed_type=canonical_photo_identity(observation.document_type_proposal),
@@ -236,16 +252,45 @@ def normalize_photo_observation(
     )
 
 
-def _photo_scan_integrity_reason(observation: PhotoDocumentObservation) -> str:
-    """Возвращает причину, по которой наблюдение нельзя считать полным сканом."""
-    if not observation.scan_complete:
-        return "vision_marked_scan_incomplete"
-    if (
+def photo_order_area_integrity(
+    observation: PhotoDocumentObservation,
+    document_type: str,
+) -> PhotoOrderAreaIntegrity:
+    """Определяет, есть ли риск пропуска значимой строки заказа."""
+    row_count_mismatch = (
         observation.visible_product_row_count is not None
         and len(observation.rows) != observation.visible_product_row_count
-    ):
-        return "visible_row_count_mismatch"
-    return ""
+    )
+    if document_type in {"unknown", "product_card"}:
+        return PhotoOrderAreaIntegrity(
+            decision="no_order_evidence",
+            reason="order_area_not_applicable",
+            row_count_mismatch=row_count_mismatch,
+        )
+    if not observation.order_area_complete:
+        return PhotoOrderAreaIntegrity(
+            decision="incomplete_order_evidence",
+            reason="potential_order_row_unreadable",
+            row_count_mismatch=row_count_mismatch,
+        )
+    if observation.uncertain_order_row_count:
+        return PhotoOrderAreaIntegrity(
+            decision="incomplete_order_evidence",
+            reason="uncertain_potential_order_row",
+            row_count_mismatch=row_count_mismatch,
+        )
+    has_order_evidence = any(_row_has_potential_order_evidence(row) for row in observation.rows)
+    return PhotoOrderAreaIntegrity(
+        decision="complete" if has_order_evidence else "no_order_evidence",
+        reason=(
+            "blank_row_count_mismatch_irrelevant"
+            if row_count_mismatch
+            else "order_area_evidence_complete"
+            if has_order_evidence
+            else "no_order_evidence"
+        ),
+        row_count_mismatch=row_count_mismatch,
+    )
 
 
 def _visual_row_sort_key(row: PhotoRowObservation) -> tuple[int, int]:
@@ -364,6 +409,14 @@ def _row_has_order_evidence(row: PhotoRowObservation) -> bool:
         or bool(clean_text(row.handwritten_quantity_text))
         or bool(clean_text(row.corrected_quantity_text))
     )
+
+
+def _row_has_potential_order_evidence(row: PhotoRowObservation) -> bool:
+    """Проверяет department и обычные order evidence одной визуальной строки."""
+    return any(
+        _positive_or_none(value) is not None
+        for value in (row.hall_quantity, row.bar_quantity, row.kitchen_quantity)
+    ) or _row_has_order_evidence(row)
 
 
 def _authorized_document_comment(observation: PhotoDocumentObservation) -> str:

@@ -1996,13 +1996,22 @@ Do not return intent, items, ParsedCommand or CartItem fields in place of the ob
 
 The structured response is an observation, not a ParsedCommand and not a CartItem.
 Return document_type_proposal, detected_columns, has_table_structure, rows,
-visible_product_row_count, scan_complete, scan_warning, document_comment,
-document_comment_scope and extraction_confidence.
+visible_product_row_count, order_area_complete, uncertain_order_row_count,
+scan_complete, scan_warning, document_comment, document_comment_scope and
+extraction_confidence.
 For a table, scan the photographed product region from top to bottom and return every
-reliably visible product row, including rows whose Hall, Bar and Kitchen cells are blank.
+reliably visible product row when useful for geometry, including rows whose Hall, Bar and
+Kitchen cells are blank. Perfect enumeration of blank catalog rows is not required.
 Do not pre-filter rows by quantity; the backend performs final row admission.
 Set visible_product_row_count to the number of visible product rows when known, and set
-scan_complete=false when any part of the photographed table cannot be read reliably.
+order_area_complete=true when every potentially filled Hall, Bar or Kitchen cell is
+confidently bound to the correct product row. Set order_area_complete=false only when a
+potentially filled order cell cannot be bound to its product row, the product row for a
+filled quantity is unreadable, or the order-entry area is materially cropped or unreadable.
+Set uncertain_order_row_count to the number of such potentially ordered rows. The legacy
+scan_complete field describes overall transcription quality and does not make a photo
+fatal by itself; blank-row omissions and unreadable non-order columns are not order-area
+failures.
 row_index or visual_row_index is only the local top-to-bottom position. Set
 sheet_row_number only when the actual visible spreadsheet gutter number is readable;
 never derive it from array position and never invent it.

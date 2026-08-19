@@ -1,6 +1,7 @@
 """Проверяет поведение, связанное с модулем «test photo prompt contract»."""
 
 from restaurant_bot.integrations.openai_client import _PHOTO_SYSTEM
+from restaurant_bot.integrations.openai_prompts import _PHOTO_OBSERVATION_CONTRACT
 
 
 def test_photo_prompt_excludes_packaging_and_stock_from_order_quantity() -> None:
@@ -18,6 +19,13 @@ def test_photo_prompt_excludes_packaging_and_stock_from_order_quantity() -> None
     assert "зачёркнутое" in _PHOTO_SYSTEM
     assert "крайней правой ячейке" in _PHOTO_SYSTEM
     assert "hall, bar, kitchen" in _PHOTO_SYSTEM
+
+
+def test_photo_observation_contract_prioritizes_order_area_integrity() -> None:
+    """Проверяет, что prompt отличает полноту order-area от пустых строк."""
+    assert "order_area_complete" in _PHOTO_OBSERVATION_CONTRACT
+    assert "uncertain_order_row_count" in _PHOTO_OBSERVATION_CONTRACT
+    assert "blank-row omissions" in _PHOTO_OBSERVATION_CONTRACT
 
 
 def test_photo_prompt_forbids_moving_quantity_between_neighboring_rows() -> None:

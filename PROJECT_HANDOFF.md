@@ -1,5 +1,39 @@
 # PROJECT HANDOFF
 
+## PHOTO-COMPLETENESS-CORRECTIVE-11 - current corrective pass
+
+### Root cause
+
+The previous gate in `input/photo_ingestion.py` rejected the entire observation when `scan_complete` was false or when `visible_product_row_count != len(rows)`. That conflated imperfect transcription of blank/reference rows with loss of order information and produced false `incomplete_photo_read` replies for dense venue-sheet screenshots.
+
+### New integrity rule
+
+`photo_order_area_integrity()` is now the single deterministic completeness decision. A count mismatch is diagnostic only and is accepted with `blank_row_count_mismatch_irrelevant` when order-area evidence is complete. The legacy `scan_complete` field remains compatible but is not fatal by itself. Fatal `incomplete_photo_read` is reserved for `order_area_complete=false`, a positive `uncertain_order_row_count`, or an actually truncated/incomplete structured OpenAI response. This preserves same-row ownership, department-column ownership, and fail-closed handling of potentially missed filled rows.
+
+The prompt now asks vision to prioritize Hall/Bar/Kitchen cells and their product-row alignment. It may omit blank rows; it must mark the order area incomplete when a potentially filled quantity cannot be trusted or bound to a product row. The backend still performs final row admission and does not let vision create order items directly.
+
+### Preserved contracts
+
+- The trusted venue identity priority remains row number plus lexical sanity, canonical exact identity, conservative OCR-tolerant unique identity, then the existing catalog fallback. The horseradish OCR case remains covered.
+- Hall/Bar/Kitchen quantities remain separate through `PhotoObservation -> ExtractedItem -> CartItem -> submission mapping`; single-department and combined-department regressions are covered.
+- Generic catalog scoring, retrieval, safety, thresholds, text parsing, voice parsing, comments, handwriting/corrections, and supplier behavior were not changed.
+- Vision calls remain one per photo before and after this pass; no retry or OCR call was added. `OPENAI_VISION_MODEL` was not changed.
+
+### Verification
+
+- Full pytest: `1608 passed`.
+- Targeted photo integrity, prompt, worker-flow, and submission mapping tests: passed.
+- `mypy src`: `Success: no issues found in 165 source files`.
+- Ruff check, changed-file Ruff format check, compileall, and `git diff --check`: passed.
+- Scenario catalog: 41 scenarios; Markdown links: 38 files.
+- New regressions cover dense count mismatch with filled rows, omitted blank rows, imperfect non-order transcription, uncertain filled row, cropped order area, empty complete table, four-row mismatch, and Hall/Bar/Kitchen department round-trip.
+
+### Files changed
+
+`src/restaurant_bot/parsing/ai/schemas.py`, `src/restaurant_bot/input/photo_ingestion.py`, `src/restaurant_bot/integrations/openai_prompts.py`, `src/restaurant_bot/integrations/openai_client.py`, `tests/ai/test_photo_ingestion.py`, `tests/ai/test_photo_prompt_contract.py`, and this handoff.
+
+No real Telegram photo, external order submission, webhook, tunnel, production deployment, or secret was used. The requested final action is a local Docker Compose rebuild after the commit is pushed.
+
 ## PHOTO-RUNTIME-CORRECTIVE-10 - current corrective pass
 
 ### Confirmed root cause and ownership
