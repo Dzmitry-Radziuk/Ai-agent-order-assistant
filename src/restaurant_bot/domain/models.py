@@ -481,6 +481,7 @@ class ConversationState(BaseModel):
     issue_context_stack: list[list[str]] = Field(default_factory=list)
     pending_comment_items: list[ExtractedItem] = Field(default_factory=list)
     pending_comment_existing_item_ids: list[str] = Field(default_factory=list)
+    pending_comment_target_item_ids: list[str] = Field(default_factory=list)
     pending_comment_text: str = ""
     pending_comment_global_comment: str = ""
     pending_new_order_confirmation: bool = False

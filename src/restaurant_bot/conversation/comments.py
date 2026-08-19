@@ -19,8 +19,22 @@ from restaurant_bot.domain.models import (
 from restaurant_bot.domain.text import clean_text, normalize_text
 from restaurant_bot.domain.units import UNIT_ALIASES, normalize_unit
 from restaurant_bot.parsing.comment_policy import comment_semantic_key
-from restaurant_bot.parsing.comment_scope import parse_comment_scope_text
+from restaurant_bot.parsing.comment_scope import (
+    has_explicit_global_comment_scope,
+    has_explicit_group_comment_scope,
+    has_explicit_order_comment_scope,
+    parse_comment_scope_text,
+    strip_explicit_comment_scope_prefix,
+)
 from restaurant_bot.parsing.number_words import NUMBER_WORDS
+from restaurant_bot.parsing.semantic.measurements import extract_semantic_facts
+from restaurant_bot.parsing.semantic.models import SemanticFactKind
+
+_COMMENT_ACTION_RE = re.compile(
+    r"\b(?:привез\w*|достав\w*|постав\w*|упаков\w*|полож\w*|выбер\w*|"
+    r"желательн\w*|обязательн\w*|позвон\w*|смешив\w*)\b",
+    flags=re.I,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -31,6 +45,118 @@ class CommentTargetResolution:
     target_query: str
     comment_text: str
     ambiguous: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class CommentOwnershipResolution:
+    """Хранит детерминированного владельца комментария по стабильным ID."""
+
+    scope: str
+    item_ids: tuple[str, ...] = ()
+    comment_text: str = ""
+
+
+def resolve_comment_ownership(
+    state: ConversationState,
+    source_text: str,
+    comment_text: str,
+    candidate_item_ids: Sequence[str],
+) -> CommentOwnershipResolution:
+    """Разрешает владельца комментария после создания стабильных позиций."""
+    comment = clean_text(comment_text).strip(" .,;:-—–")
+    source = clean_text(source_text)
+    if not comment or normalize_text(comment) not in normalize_text(source):
+        return CommentOwnershipResolution("rejected", comment_text=comment)
+    if any(
+        fact.kind
+        in {
+            SemanticFactKind.ORDER_QUANTITY,
+            SemanticFactKind.MEASUREMENT,
+            SemanticFactKind.CATALOG_ATTRIBUTE,
+        }
+        for fact in extract_semantic_facts(comment)
+    ):
+        return CommentOwnershipResolution("rejected", comment_text=comment)
+
+    active_by_id = {item.id: item for item in state.cart if item.status is not ItemStatus.SKIPPED}
+    candidates = [
+        active_by_id[item_id]
+        for item_id in dict.fromkeys(candidate_item_ids)
+        if item_id in active_by_id
+    ]
+    if not candidates:
+        return CommentOwnershipResolution("rejected", comment_text=comment)
+
+    context = _comment_sentence_context(source, comment)
+    if has_explicit_global_comment_scope(context) or has_explicit_order_comment_scope(context):
+        return CommentOwnershipResolution(
+            "order",
+            comment_text=strip_explicit_comment_scope_prefix(comment) or comment,
+        )
+
+    matched = [
+        item
+        for item in candidates
+        if max(
+            contains_score(normalize_text(item.source_query), normalize_text(context)),
+            contains_score(normalize_text(item.catalog_name), normalize_text(context)),
+        )
+        > 0
+    ]
+    if len(matched) == 1:
+        owner = matched[0]
+        if _comment_is_catalog_fact(comment, owner):
+            return CommentOwnershipResolution("rejected", comment_text=comment)
+        return CommentOwnershipResolution("item", (owner.id,), comment)
+    if len(matched) >= 2:
+        if has_explicit_group_comment_scope(context) or len(matched) < len(candidates):
+            return CommentOwnershipResolution(
+                "group",
+                tuple(item.id for item in matched),
+                comment,
+            )
+        return CommentOwnershipResolution(
+            "ambiguous",
+            tuple(item.id for item in matched),
+            comment,
+        )
+    if len(candidates) == 1:
+        owner = candidates[0]
+        if _comment_is_catalog_fact(comment, owner):
+            return CommentOwnershipResolution("rejected", comment_text=comment)
+        return CommentOwnershipResolution("item", (owner.id,), comment)
+    return CommentOwnershipResolution(
+        "ambiguous",
+        tuple(item.id for item in candidates),
+        comment,
+    )
+
+
+def _comment_sentence_context(source_text: str, comment_text: str) -> str:
+    """Возвращает предложение комментария вместе с его локальным target."""
+    source = normalize_text(source_text)
+    comment = normalize_text(comment_text)
+    start = source.rfind(comment)
+    if start < 0:
+        return source
+    sentence_start = max(source.rfind(mark, 0, start) for mark in (".", "!", "?", ";", "\n"))
+    sentence_end_candidates = [source.find(mark, start + len(comment)) for mark in ".!?;\n"]
+    sentence_end = min(
+        (value for value in sentence_end_candidates if value >= 0), default=len(source)
+    )
+    return source[sentence_start + 1 : sentence_end].strip()
+
+
+def _comment_is_catalog_fact(comment: str, item: CartItem) -> bool:
+    """Проверяет, не является ли комментарий фактом каталога позиции."""
+    cleaned = remove_catalog_fact_comments(
+        comment,
+        item.source_query,
+        item.catalog_name,
+        source_line=item.source_line,
+        include_source_query=True,
+    )
+    return not cleaned and not re.search(_COMMENT_ACTION_RE, normalize_text(comment), re.I)
 
 
 def reconcile_comment_target(
@@ -559,8 +685,21 @@ def clear_pending_comment(state: ConversationState) -> None:
     """Удаляет временные данные выбора области комментария."""
     state.pending_comment_items = []
     state.pending_comment_existing_item_ids = []
+    state.pending_comment_target_item_ids = []
     state.pending_comment_text = ""
     state.pending_comment_global_comment = ""
+
+
+def has_pending_comment_data(state: ConversationState) -> bool:
+    """Проверяет сохранённый комментарий до завершения товарных вопросов."""
+    return bool(
+        clean_text(state.pending_comment_text).strip()
+        and (
+            state.pending_comment_target_item_ids
+            or state.pending_comment_existing_item_ids
+            or state.pending_comment_items
+        )
+    )
 
 
 def has_pending_comment_scope(state: ConversationState) -> bool:
@@ -579,19 +718,31 @@ def has_pending_comment_scope(state: ConversationState) -> bool:
 
 def prune_pending_comment_item_ids(state: ConversationState) -> None:
     """Удаляет из pending scope идентификаторы пропущенных позиций."""
-    if not state.pending_comment_existing_item_ids:
+    if not state.pending_comment_existing_item_ids and not state.pending_comment_target_item_ids:
         return
     active_ids = {item.id for item in state.cart if item.status is not ItemStatus.SKIPPED}
     state.pending_comment_existing_item_ids = [
         item_id for item_id in state.pending_comment_existing_item_ids if item_id in active_ids
+    ]
+    state.pending_comment_target_item_ids = [
+        item_id for item_id in state.pending_comment_target_item_ids if item_id in active_ids
     ]
 
 
 def comment_scope_existing_items(state: ConversationState) -> list[CartItem]:
     """Возвращает сохранённые позиции черновика в порядке показа уточнения."""
     by_id = {item.id: item for item in state.cart if item.status is not ItemStatus.SKIPPED}
+    target_ids = state.pending_comment_target_item_ids or state.pending_comment_existing_item_ids
+    return [by_id[item_id] for item_id in dict.fromkeys(target_ids) if item_id in by_id]
+
+
+def pending_comment_target_items(state: ConversationState) -> list[CartItem]:
+    """Возвращает стабильные позиции, которым разрешено назначить комментарий."""
+    by_id = {item.id: item for item in state.cart if item.status is not ItemStatus.SKIPPED}
     return [
-        by_id[item_id] for item_id in state.pending_comment_existing_item_ids if item_id in by_id
+        by_id[item_id]
+        for item_id in dict.fromkeys(state.pending_comment_target_item_ids)
+        if item_id in by_id
     ]
 
 
@@ -606,6 +757,7 @@ def comment_scope_items(state: ConversationState) -> list[ExtractedItem]:
             user_comment_to_supplier=item.comment,
             comment_source=item.comment_source,
             source_line=item.source_line,
+            source_span=item.source_span,
         )
         for item in comment_scope_existing_items(state)
     ]

@@ -10,6 +10,7 @@ from restaurant_bot.conversation.comments import (
     comment_scope_existing_items,
     comment_scope_items,
     merge_scope_comments,
+    pending_comment_target_items,
 )
 from restaurant_bot.conversation.state.transitions import normalize_cart_page
 from restaurant_bot.domain.models import (
@@ -52,6 +53,18 @@ class CommentScopeHandler:
             command.intent in {Intent.BACK, Intent.CANCEL}
             or command.comment_scope_action == "cancel"
         ):
+            if state.pending_comment_target_item_ids:
+                clear_pending_comment(state)
+                state.stage = SessionStage.REVIEW if state.cart else SessionStage.COLLECTING
+                state.status = state.stage.value
+                normalize_cart_page(state, page_size=CART_PAGE_SIZE)
+                return CommentScopeOutcome(
+                    result=EngineResult(
+                        state=state,
+                        reply=cart_reply(state, notice="Комментарий не добавлен"),
+                    ),
+                    clear_event_text=True,
+                )
             pending_items = [item.model_copy(deep=True) for item in state.pending_comment_items]
             clear_pending_comment(state)
             state.stage = SessionStage.COLLECTING if pending_items else SessionStage.REVIEW
@@ -109,6 +122,32 @@ class CommentScopeHandler:
                         state.pending_comment_text,
                     ),
                 )
+            )
+
+        if state.pending_comment_target_item_ids:
+            target_items = pending_comment_target_items(state)
+            comment = state.pending_comment_text
+            if action == "order":
+                apply_global_comment(
+                    state, merge_scope_comments(state.pending_comment_global_comment, comment)
+                )
+            else:
+                for index in valid_indexes:
+                    if index >= len(target_items):
+                        continue
+                    target = target_items[index]
+                    target.comment = merge_scope_comments(target.comment, comment)
+                    target.comment_source = CommentSource.SEMANTIC
+            clear_pending_comment(state)
+            state.stage = SessionStage.REVIEW if state.cart else SessionStage.COLLECTING
+            state.status = state.stage.value
+            normalize_cart_page(state, page_size=CART_PAGE_SIZE)
+            return CommentScopeOutcome(
+                result=EngineResult(
+                    state=state,
+                    reply=cart_reply(state, notice="Комментарий добавлен"),
+                ),
+                clear_event_text=True,
             )
 
         pending_items = [item.model_copy(deep=True) for item in state.pending_comment_items]

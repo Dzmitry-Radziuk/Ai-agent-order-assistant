@@ -763,9 +763,9 @@ stateDiagram-v2
 
 **Действие пользователя:** Сообщает сорт, качество, упаковку, дату доставки или другое пожелание.
 
-**Ответ бота:** Определяет, относится комментарий к одному товару, явно названной группе или всей заявке. Пожелание после последнего товара не расширяет на соседние позиции. Если фраза двусмысленна, временно сохраняет распознанные позиции вне черновика и просит уточнить область комментария.
+**Ответ бота:** Сначала добавляет и разрешает товары, затем определяет владельца комментария: одну позицию, названную группу или всю заявку. Пожелание после единственного нового товара связывается с ним автоматически; при нескольких реальных кандидатах бот просит уточнить область, не удаляя уже созданные позиции.
 
-**Результат:** Пользователь может ответить названием, номером или обычной фразой — например, «для всех товаров», «только для огурцов» или «для всей заявки». Только после уверенного ответа товары и комментарий попадают в нужные строки; ответ не превращается в новый товар.
+**Результат:** Пользователь может ответить названием, номером или обычной фразой — например, «для всех товаров», «только для огурцов» или «для всей заявки». Уточнение применяется к стабильным позициям без повторного добавления товаров; ответ не превращается в новый товар.
 
 **Статус проверки:** `AUTOMATED_PASS` — Контракт полностью подтверждён локальными автоматическими тестами
 
@@ -777,7 +777,7 @@ stateDiagram-v2
 - **Доступ:** Пользователь подключён к заведению и работает со своим черновиком.
 - **Распознаваем:** товар, вариант товара, количество, единица, комментарий
 - **Подтверждение:** Нужно при выборе похожего товара, смене единицы и объединении повторной позиции.
-- **Изменение состояния:** Пользователь может ответить названием, номером или обычной фразой — например, «для всех товаров», «только для огурцов» или «для всей заявки». Только после уверенного ответа товары и комментарий попадают в нужные строки; ответ не превращается в новый товар.
+- **Изменение состояния:** Пользователь может ответить названием, номером или обычной фразой — например, «для всех товаров», «только для огурцов» или «для всей заявки». Уточнение применяется к стабильным позициям без повторного добавления товаров; ответ не превращается в новый товар.
 - **Восстановление:** Не подставлять похожий товар автоматически; показать варианты или разрешить ввести другое название.
 
 </details>
@@ -802,7 +802,8 @@ stateDiagram-v2
 - [`tests/input/test_voice_input_contract.py`](../tests/input/test_voice_input_contract.py) → `test_ai_cannot_expand_trailing_quality_comment_to_all_items`
 - [`tests/input/test_voice_input_contract.py`](../tests/input/test_voice_input_contract.py) → `test_ai_cannot_guess_detached_relational_comment_scope`
 - [`tests/input/test_voice_input_contract.py`](../tests/input/test_voice_input_contract.py) → `test_uncertain_comment_scope_requests_clarification_without_changing_draft`
-- [`tests/conversation/test_comment_scope_clarification.py`](../tests/conversation/test_comment_scope_clarification.py) → `test_ambiguous_comment_items_are_held_outside_the_draft`
+- [`tests/conversation/test_comment_scope_clarification.py`](../tests/conversation/test_comment_scope_clarification.py) → `test_ambiguous_comment_items_are_admitted_before_scope_question`
+- [`tests/conversation/test_comment_ownership.py`](../tests/conversation/test_comment_ownership.py) → `test_live_mustard_case_binds_delivery_comment_to_new_item`
 - [`tests/conversation/test_comment_scope_clarification.py`](../tests/conversation/test_comment_scope_clarification.py) → `test_natural_all_items_answer_applies_comment_to_every_pending_item`
 - [`tests/conversation/test_comment_scope_clarification.py`](../tests/conversation/test_comment_scope_clarification.py) → `test_named_item_answer_changes_only_selected_pending_item`
 - [`tests/conversation/test_comment_scope_clarification.py`](../tests/conversation/test_comment_scope_clarification.py) → `test_low_confidence_scope_keeps_pending_items_and_draft_unchanged`

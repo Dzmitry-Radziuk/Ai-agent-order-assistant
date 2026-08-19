@@ -16,10 +16,12 @@ from restaurant_bot.conversation.comments import (
     clear_all_active_comments,
     clear_item_comment,
     comment_scope_items,
+    has_pending_comment_data,
     has_pending_comment_scope,
     reconcile_comment_target,
     remove_cart_comment_shadows,
     remove_order_comments,
+    resolve_comment_ownership,
 )
 from restaurant_bot.conversation.draft import (
     find_duplicate,
@@ -708,7 +710,9 @@ class ConversationEngine:
             state.supplier_search_locked = True
             return EngineResult(state=state, reply=start_adding_supplier_reply(supplier))
 
-        if command.comment_clarification:
+        if command.comment_clarification and not (
+            command.intent is Intent.ADD_ITEMS and command.items
+        ):
             state.pending_comment_items = [item.model_copy(deep=True) for item in command.items]
             state.pending_comment_existing_item_ids = [
                 item.id for item in state.cart if item.status != ItemStatus.SKIPPED
@@ -834,7 +838,7 @@ class ConversationEngine:
                 return EngineResult(state=state, reply=BotReply(text=product_add_prompt(item)))
 
         if command.intent == Intent.ADD_ITEMS:
-            if command.global_comment:
+            if command.global_comment and not command.items:
                 apply_global_comment(state, command.global_comment)
             if command.global_comment and not command.items:
                 return EngineResult(
@@ -863,6 +867,7 @@ class ConversationEngine:
                     return self._advance(state)
             selected_supplier = state.supplier_hint_context
             newly_unresolved_ids: list[str] = []
+            added_item_ids: list[str] = []
             for extracted in command.items:
                 if selected_supplier:
                     extracted = extracted.model_copy(update={"supplier_hint": selected_supplier})
@@ -892,6 +897,7 @@ class ConversationEngine:
                         )
                         same_missing.status = ItemStatus.MATCHED
                     state.current_issue_item_id = same_missing.id
+                    added_item_ids.append(same_missing.id)
                     continue
                 duplicate = find_duplicate(state, item)
                 if duplicate and item.status in {
@@ -904,6 +910,7 @@ class ConversationEngine:
                     item.duplicate_existing_quantity = duplicate.quantity or 0
                     item.duplicate_existing_unit = duplicate.unit or duplicate.catalog_unit
                 state.cart.append(item)
+                added_item_ids.append(item.id)
                 if item.status in {
                     ItemStatus.DUPLICATE_PENDING,
                     ItemStatus.UNIT_MISMATCH,
@@ -916,6 +923,16 @@ class ConversationEngine:
                     newly_unresolved_ids.append(item.id)
             if selected_supplier:
                 state.supplier_hint_context = ""
+            if command.global_comment:
+                apply_global_comment(state, command.global_comment)
+            if command.comment_clarification:
+                self._resolve_comment_after_intake(
+                    state,
+                    event.text or command.text,
+                    command.comment_clarification,
+                    added_item_ids,
+                    command.global_comment,
+                )
             preferred_issue_item_id = next(iter(newly_unresolved_ids), "")
             issue_context_ids = (
                 newly_unresolved_ids
@@ -947,6 +964,37 @@ class ConversationEngine:
         assert outcome.reprocess_command is not None
         safe_event = event.model_copy(update={"text": ""}) if outcome.clear_event_text else event
         return self.handle(safe_event, outcome.reprocess_command, state, catalog)
+
+    def _resolve_comment_after_intake(
+        self,
+        state: ConversationState,
+        source_text: str,
+        comment_text: str,
+        candidate_item_ids: list[str],
+        global_comment: str = "",
+    ) -> None:
+        """Разрешает комментарий только после создания стабильных CartItem ID."""
+        resolution = resolve_comment_ownership(
+            state,
+            source_text,
+            comment_text,
+            candidate_item_ids,
+        )
+        if resolution.scope == "order":
+            apply_global_comment(state, resolution.comment_text or global_comment)
+            return
+        if resolution.scope in {"item", "group"}:
+            by_id = {item.id: item for item in state.cart}
+            for item_id in resolution.item_ids:
+                item = by_id.get(item_id)
+                if item is not None:
+                    append_item_comment(item, resolution.comment_text)
+            return
+        if resolution.scope != "ambiguous":
+            return
+        state.pending_comment_target_item_ids = list(resolution.item_ids)
+        state.pending_comment_text = resolution.comment_text
+        state.pending_comment_global_comment = global_comment
 
     @staticmethod
     def _remove_navigation_command_items(state: ConversationState) -> None:
@@ -1143,6 +1191,16 @@ class ConversationEngine:
             preferred_issue_item_id=preferred_issue_item_id,
             issue_context_item_ids=issue_context_item_ids,
         )
+        if progression.kind is not ProgressionKind.ISSUE and has_pending_comment_data(state):
+            state.stage = SessionStage.AWAIT_COMMENT_SCOPE
+            state.status = "await_comment_scope"
+            return EngineResult(
+                state=state,
+                reply=comment_scope_clarification_reply(
+                    comment_scope_items(state),
+                    state.pending_comment_text,
+                ),
+            )
         if progression.kind is ProgressionKind.DRAFT:
             normalize_cart_page(state, page_size=CART_PAGE_SIZE)
         return EngineResult(state=state, reply=render_progression(state, progression))

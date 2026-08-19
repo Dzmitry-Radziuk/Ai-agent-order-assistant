@@ -8,6 +8,7 @@ from restaurant_bot.domain.models import (
     Intent,
     ItemStatus,
     ParsedCommand,
+    SessionStage,
     TelegramEvent,
 )
 from restaurant_bot.integrations.openai_client import (
@@ -958,9 +959,13 @@ def test_uncertain_comment_scope_requests_clarification_without_changing_draft(
     )
 
     assert command.comment_clarification == "положить отдельно"
-    assert result.state.cart == []
-    assert "Уточните комментарий" in result.reply.text
-    assert "положить отдельно" in result.reply.text
+    assert len(result.state.cart) == 2
+    assert result.state.pending_comment_items == []
+    assert result.state.pending_comment_target_item_ids == [item.id for item in result.state.cart]
+    assert result.state.stage is SessionStage.COLLECTING
+    assert result.state.current_issue_item_id == result.state.cart[0].id
+    assert result.state.pending_comment_target_item_ids == [item.id for item in result.state.cart]
+    assert "Товар не найден" in result.reply.text
 
 
 def test_voice_beef_cannot_gain_an_unspoken_qualifier_or_auto_select(settings) -> None:  # type: ignore[no-untyped-def]

@@ -55,16 +55,17 @@ def _start_clarification(settings, state: ConversationState | None = None):  # t
     )
 
 
-def test_ambiguous_comment_items_are_held_outside_the_draft(settings) -> None:  # type: ignore[no-untyped-def]
-    """Не изменяет черновик до ответа об области комментария."""
+def test_ambiguous_comment_items_are_admitted_before_scope_question(settings) -> None:  # type: ignore[no-untyped-def]
+    """Сначала добавляет товары, а затем сохраняет только область комментария."""
     result = _start_clarification(settings)
 
     assert result.state.stage is SessionStage.AWAIT_COMMENT_SCOPE
-    assert result.state.cart == []
-    assert [item.product_query for item in result.state.pending_comment_items] == [
+    assert [item.source_query for item in result.state.cart] == [
         "Помидоры",
         "Огурцы",
     ]
+    assert result.state.pending_comment_items == []
+    assert result.state.pending_comment_target_item_ids == [item.id for item in result.state.cart]
     assert "К каким товарам относится" in result.reply.text
 
 
@@ -154,8 +155,8 @@ def test_low_confidence_scope_keeps_pending_items_and_draft_unchanged(settings) 
         _catalog(),
     )
 
-    assert result.state.cart == []
-    assert len(result.state.pending_comment_items) == 2
+    assert len(result.state.cart) == 2
+    assert result.state.pending_comment_target_item_ids
     assert result.state.stage is SessionStage.AWAIT_COMMENT_SCOPE
 
 
@@ -176,8 +177,8 @@ def test_scope_with_any_out_of_range_index_is_rejected_as_a_whole(settings) -> N
         _catalog(),
     )
 
-    assert result.state.cart == []
-    assert len(result.state.pending_comment_items) == 2
+    assert len(result.state.cart) == 2
+    assert result.state.pending_comment_target_item_ids
     assert "Уточните комментарий" in result.reply.text
 
 
@@ -195,7 +196,7 @@ def test_cancelled_comment_continues_pending_items_without_touching_draft(settin
 
     assert result.state.pending_comment_items == []
     assert [item.source_query for item in result.state.cart] == ["Молоко", "Помидоры", "Огурцы"]
-    assert "Комментарий не добавлен" not in result.reply.text
+    assert "Комментарий не добавлен" in result.reply.text
 
 
 def test_skipping_the_only_unresolved_item_does_not_claim_it_was_added(settings) -> None:  # type: ignore[no-untyped-def]
