@@ -1989,6 +1989,30 @@ ambiguous:
 """.strip()
 
 
+_PHOTO_OBSERVATION_CONTRACT = """
+This contract supersedes any earlier generic ParsedInputSchema or ready-item output instructions.
+Do not return intent, items, ParsedCommand or CartItem fields in place of the observation.
+
+The structured response is an observation, not a ParsedCommand and not a CartItem.
+Return document_type_proposal, detected_columns, has_table_structure, rows,
+document_comment, document_comment_scope and extraction_confidence.
+Each row must contain only evidence from the same visual row:
+row_index, row_text, product_text, supplier_hint, hall_quantity, bar_quantity, kitchen_quantity,
+explicit_order_quantity, explicit_order_unit, order_entry_text, order_entry_type,
+printed_reference_text, handwritten_quantity_text, crossed_out_quantity_text,
+corrected_quantity_text, active_quantity_texts, comment_text, comment_source and
+the three confidence fields.
+Never move a value or comment between row_index values. Never put packaging,
+stock, price, article or printed reference values into explicit_order_quantity.
+For a crossed-out value, fill crossed_out_quantity_text and only the replacement
+in corrected_quantity_text. If there is no reliable replacement, leave the row
+evidence unresolved. If two active values have no correction relationship, put
+both in active_quantity_texts. Use comment_source=explicit_marker or user_note
+only when the note is visibly local to that row. Use document_comment_scope=order
+only when the document visibly labels the note as applying to the whole order.
+""".strip()
+
+
 _MATCH_SYSTEM = """
 Ты проверяешь сопоставление пользовательского товара
 с переданными кандидатами живого каталога.

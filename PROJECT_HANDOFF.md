@@ -1,6 +1,41 @@
 # PROJECT HANDOFF
 
-## COMMENT-OWNERSHIP-06 — текущий corrective pass
+## PHOTO-PROD-HARDENING-09 — текущий corrective pass
+
+### Корневая причина
+
+До этого этапа один vision-вызов заполнял generic `ParsedInputSchema` доменными `ExtractedItem`, а `_normalise_photo_command` уже после ответа пытался определить тип документа, разрешить quantity и отделить фасовку от заказа. Поэтому наблюдение модели смешивалось с авторизацией домена: quantity мог быть перенесён из соседней строки, proposal `document_type` мог применяться без структурного подтверждения, а reference/packaging числа могли попасть в заказ.
+
+### Новый ownership
+
+- `OpenAIService.parse_photo` получает один `PhotoDocumentObservation` и не создаёт готовые позиции из ответа vision.
+- `input/photo_ingestion.py` владеет классификацией документа, row alignment, quantity authorization, correction policy и row-local comments.
+- `CatalogResolutionService` владеет только unique exact venue-table identity fast path и затем использует прежний fuzzy/catalog pipeline.
+- `ConversationEngine` и `build_cart_item` остаются владельцами мутации корзины и доменного draft.
+
+Для `client_order_sheet` строка допускается только при положительном `hall`/`bar`/`kitchen` в той же строке; department values сохраняются в `DepartmentQuantities`. Для обычной таблицы и free-list используется только same-row explicit order evidence, а отдел берётся из `default_department`.
+
+Correction policy: `corrected_quantity_text` заменяет crossed-out value; crossed-out без замены и два active values без correction relationship отклоняются. Reference, price, stock и packaging не являются order quantity.
+
+Row comments принимаются только из row-local `explicit_marker`/`user_note`. Document comment становится global только при `document_comment_scope=order` и явной фразе общего охвата; detached note не broadcast-ится.
+
+### Exact venue fast path
+
+Для уже authorized `client_order_sheet` строки сохраняется typed `catalog_identity_provenance=venue_table_exact_candidate`. В текущем venue catalog строится безопасное canonical identity сравнение: case-fold, `ё/е`, кавычки, пробелы вокруг безопасной пунктуации и canonical unit spelling. Значимые слова, brand, country, packaging и числа не удаляются и не исправляются эвристически.
+
+Ровно одна canonical full-identity строка выбирается напрямую через существующий `apply_catalog`; duplicate exact identity и не доказанное совпадение возвращаются в существующий catalog search/resolution без изменения его ranking или thresholds. Blank rows отбрасываются до catalog search. Cross-venue search не добавлялся: используется только catalog текущего `state.spreadsheet_id`.
+
+### AI и production safety
+
+До и после остаётся один vision request на фото, без OCR, второго vision запроса и внешнего OCR-сервиса. Structured response truncation/empty output закрывается fail-closed. Добавлены компактные события `photo_document_classified`, `photo_row_admission_decision` и `photo_exact_catalog_identity`; image bytes и base64 не логируются.
+
+Изменения не затрагивают text/voice parsing, quantity architecture, supplier matching, catalog scoring/retrieval/safety, thresholds, duplicate logic, submission, persistence, callbacks, Docker или secrets.
+
+### Проверки на текущем этапе
+
+Добавлены schema, classification, row ownership, handwritten/correction, comments, product-card, exact identity и mocked one-call end-to-end regressions в `tests/ai/test_photo_ingestion.py`; существующие photo tests сохранены. Точечный тест новых правил: 9 passed; полный suite: 1594 passed. `ruff check`, `mypy src` (165 файлов), `compileall`, сценарный каталог и markdown links проходят. Реальные фотографии Telegram не запускались; требуется manual runtime checklist из задания PHOTO-PROD-HARDENING-09.
+
+## COMMENT-OWNERSHIP-06 — исторический corrective pass
 
 Подтверждённые изменения ограничены семантическим admission и маршрутизацией.
 Детерминированный product parser сохраняет один товарный anchor для длинных
@@ -20,14 +55,14 @@ Alembic или transport.
 Проверено: комментарий разрешается после intake по стабильным `CartItem.id`, а
 неоднозначное ownership сохраняется отдельно от товарных позиций. Полный suite,
 mypy, Ruff, compileall, сценарный каталог и `git diff --check` проходят.
-Изменения ещё не закоммичены; `.env` не отслеживается и не читался.
+Исторический этап COMMENT-OWNERSHIP-06 находится в коммите `4c65f4c`; `.env` не отслеживается и не читался.
 
 Актуально для ветки `decompose_bot` после исправления границы канонического
 поискового запроса, source evidence и product-line boundary 2026-08-17. Git SHA
 текущей версии документа
 нужно получать командой `git rev-parse HEAD`.
 
-## Текущая задача
+## Предыдущая задача
 
 COMMENT-OWNERSHIP-06 завершена в текущем checkout.
 

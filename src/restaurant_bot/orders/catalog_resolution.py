@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import re
 
+import structlog
+
 from restaurant_bot.catalog.evidence import (
     has_complete_query_evidence,
     numeric_evidence,
@@ -31,6 +33,7 @@ from restaurant_bot.domain.models import (
 )
 from restaurant_bot.domain.text import clean_text, normalize_text
 from restaurant_bot.domain.units import UNIT_ALIASES, normalize_unit
+from restaurant_bot.input.photo_ingestion import canonical_photo_identity
 from restaurant_bot.orders.quantity_provenance import (
     QuantityProvenance,
     reconcile_order_quantity_evidence,
@@ -38,6 +41,8 @@ from restaurant_bot.orders.quantity_provenance import (
 from restaurant_bot.parsing.numeric_ranges import numeric_range_spans
 from restaurant_bot.parsing.products import parse_product_lines
 from restaurant_bot.parsing.quantities import has_explicit_order_marker
+
+logger = structlog.get_logger(__name__)
 
 
 def _semantic_source(item: CartItem) -> str:
@@ -158,6 +163,8 @@ class CatalogResolutionService:
         """Ищет кандидатов и применяет безопасное решение к позиции."""
         search_backend = catalog_search or ListCatalogSearch(self.catalog_resolver, catalog or ())
         self._remove_unanchored_supplier_hint(item)
+        if self._apply_unique_photo_identity(item, catalog):
+            return
         search_query = _catalog_search_query(item)
         evidence_query = _catalog_evidence_query(item)
         search = search_backend.search(
@@ -241,6 +248,52 @@ class CatalogResolutionService:
             item.status = ItemStatus.AMBIGUOUS
             return
         self.apply_catalog(item, candidates[0], catalog, catalog_search=search_backend)
+
+    def _apply_unique_photo_identity(
+        self,
+        item: CartItem,
+        catalog: list[CatalogProduct] | None,
+    ) -> bool:
+        """Выбирает единственную точную строку venue-каталога до fuzzy-поиска."""
+        if item.catalog_identity_provenance != "venue_table_exact_candidate" or catalog is None:
+            return False
+        identity = canonical_photo_identity(item.source_query)
+        if not identity:
+            return False
+        matches = [
+            product for product in catalog if canonical_photo_identity(product.name) == identity
+        ]
+        if len(matches) != 1:
+            logger.info(
+                "photo_exact_catalog_identity",
+                exact_match_count=len(matches),
+                decision="duplicate" if len(matches) > 1 else "fallback",
+                reason="duplicate_exact_identity"
+                if len(matches) > 1
+                else "exact_identity_not_proven",
+            )
+            return False
+        product = matches[0]
+        candidate = Candidate(
+            product_id=product.product_id,
+            name=product.name,
+            supplier=product.supplier,
+            unit=product.unit,
+            reason="venue_table_exact_identity",
+        )
+        item.candidates = [candidate]
+        logger.info(
+            "photo_exact_catalog_identity",
+            exact_match_count=1,
+            decision="exact_selected",
+            reason="unique_normalized_full_identity",
+        )
+        self.apply_catalog(
+            item,
+            candidate,
+            catalog,
+        )
+        return True
 
     def apply_catalog(
         self,

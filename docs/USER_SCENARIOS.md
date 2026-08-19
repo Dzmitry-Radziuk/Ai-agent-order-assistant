@@ -466,6 +466,8 @@ stateDiagram-v2
 
 **Автоматическая проверка:**
 
+- [`tests/ai/test_photo_ingestion.py`](../tests/ai/test_photo_ingestion.py) → `test_client_sheet_drops_blank_row_without_transferring_neighbor_quantity`
+- [`tests/ai/test_photo_ingestion.py`](../tests/ai/test_photo_ingestion.py) → `test_mocked_photo_pipeline_converges_into_existing_cart_pipeline`
 - [`tests/ai/test_ai_media.py`](../tests/ai/test_ai_media.py) → `test_client_order_sheet_uses_the_selected_department_quantity`
 - [`tests/ai/test_ai_media.py`](../tests/ai/test_ai_media.py) → `test_client_order_sheet_sums_only_filled_department_order_cells`
 - [`tests/ai/test_ai_media.py`](../tests/ai/test_ai_media.py) → `test_client_order_sheet_ignores_supplier_recognized_from_a_neighbouring_row`

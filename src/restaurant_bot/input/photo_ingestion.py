@@ -1,0 +1,361 @@
+"""Нормализует наблюдение фотографии в авторизованные строки заказа."""
+
+from __future__ import annotations
+
+import math
+import re
+import unicodedata
+from dataclasses import dataclass
+
+import structlog
+
+from restaurant_bot.config import Settings
+from restaurant_bot.domain.models import (
+    CommentSource,
+    DepartmentQuantities,
+    ExtractedItem,
+    Intent,
+    ParsedCommand,
+)
+from restaurant_bot.domain.text import clean_text
+from restaurant_bot.domain.units import UNIT_ALIASES, normalize_unit
+from restaurant_bot.parsing.ai.schemas import PhotoDocumentObservation, PhotoRowObservation
+
+logger = structlog.get_logger(__name__)
+
+_DEPARTMENT_HEADERS = {
+    "hall": {"зал", "hall"},
+    "bar": {"бар", "bar"},
+    "kitchen": {"кухня", "kitchen"},
+}
+_ORDER_HEADERS = {
+    "количество",
+    "заказ",
+    "заказано",
+    "фактический заказ",
+    "количество заказа",
+    "actual order quantity",
+    "order quantity",
+}
+_COMMENT_HEADERS = {"комментарий", "комментарии", "comment", "comments", "примечание"}
+_REFERENCE_HEADERS = {
+    "фасовка",
+    "упаковка",
+    "характеристики",
+    "артикул",
+    "reference",
+    "package",
+    "packaging",
+}
+_CARD_HEADERS = {"цена", "остаток", "price", "stock", "фасовка", "упаковка", "package", "packaging"}
+_NUMBER_RE = re.compile(r"(?<![\w-])\d+(?:[,.]\d+)?(?![\w-])")
+_UNIT_RE = re.compile(
+    r"(?P<unit>"
+    + "|".join(re.escape(alias) for alias in sorted(UNIT_ALIASES, key=len, reverse=True))
+    + r")\b",
+    flags=re.IGNORECASE,
+)
+_GLOBAL_COMMENT_RE = re.compile(
+    r"(?:комментар\w*\s+(?:ко\s+всей\s+заявк\w*|для\s+всех\s+позиц\w*)|для\s+всех\s+позиц\w*)",
+    flags=re.IGNORECASE,
+)
+
+
+@dataclass(frozen=True, slots=True)
+class PhotoNormalizationResult:
+    """Возвращает авторизованные строки и детерминированную диагностику фото."""
+
+    command: ParsedCommand
+    document_type: str
+    admitted_rows: int
+    dropped_rows: int
+    reason: str = ""
+
+
+def canonical_photo_identity(value: str) -> str:
+    """Канонизирует только безопасные пробелы, кавычки, пунктуацию и единицы."""
+    text = unicodedata.normalize("NFKC", clean_text(value)).casefold().replace("ё", "е")
+    text = (
+        text.replace("«", "")
+        .replace("»", "")
+        .replace("“", "")
+        .replace("”", "")
+        .replace('"', "")
+        .replace("'", "")
+    )
+    text = re.sub(r"\s*([,;:/()\-])\s*", r"\1", text)
+
+    def replace_unit(match: re.Match[str]) -> str:
+        """Канонизирует единицу измерения внутри полного product identity."""
+        return f" {normalize_unit(match.group('unit'))}"
+
+    text = re.sub(r"(?<=\d)\s*" + _UNIT_RE.pattern, replace_unit, text, flags=re.IGNORECASE)
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def classify_photo_document(observation: PhotoDocumentObservation) -> str:
+    """Классифицирует документ по структурным признакам, а не только по proposal модели."""
+    if observation.extraction_confidence < 0.5:
+        return "unknown"
+    columns = {
+        canonical_photo_identity(column)
+        for column in observation.detected_columns
+        if clean_text(column)
+    }
+    has_departments = all(
+        any(header in columns for header in aliases) for aliases in _DEPARTMENT_HEADERS.values()
+    )
+    has_order_column = any(column in _ORDER_HEADERS for column in columns)
+    has_comment_column = bool(columns & _COMMENT_HEADERS)
+    has_reference_column = bool(columns & _REFERENCE_HEADERS)
+    has_card_evidence = bool(columns & _CARD_HEADERS)
+    rows = [row for row in observation.rows if clean_text(row.product_text)]
+
+    if observation.has_table_structure and has_departments and rows:
+        return "client_order_sheet"
+    if observation.has_table_structure and has_order_column and rows:
+        if has_reference_column and any(_row_has_order_evidence(row) for row in rows):
+            return "printed_order_form"
+        return "order_table"
+    if (
+        observation.has_table_structure
+        and has_comment_column
+        and any(_row_has_order_evidence(row) for row in rows)
+    ):
+        return "order_table"
+    if has_card_evidence and not has_order_column and not has_departments:
+        return "product_card"
+    if (
+        canonical_photo_identity(observation.document_type_proposal) == "product_card"
+        and not has_order_column
+        and not has_departments
+    ):
+        return "product_card"
+    if not observation.has_table_structure and any(_row_has_order_evidence(row) for row in rows):
+        return "free_list"
+    if canonical_photo_identity(observation.document_type_proposal) == "product_card":
+        return "product_card"
+    return "unknown"
+
+
+def normalize_photo_observation(
+    observation: PhotoDocumentObservation,
+    settings: Settings,
+) -> PhotoNormalizationResult:
+    """Проверяет строки фотографии и превращает только разрешённые строки в ParsedCommand."""
+    document_type = classify_photo_document(observation)
+    logger.info(
+        "photo_document_classified",
+        proposed_type=canonical_photo_identity(observation.document_type_proposal),
+        final_type=document_type,
+        detected_columns=[
+            canonical_photo_identity(column) for column in observation.detected_columns[:20]
+        ],
+        row_count=len(observation.rows),
+        reason="structural_evidence"
+        if document_type != "unknown"
+        else "insufficient_structural_evidence",
+    )
+    if document_type in {"unknown", "product_card"}:
+        return PhotoNormalizationResult(
+            command=ParsedCommand(
+                intent=Intent.ADD_ITEMS,
+                global_comment=_authorized_document_comment(observation),
+            ),
+            document_type=document_type,
+            admitted_rows=0,
+            dropped_rows=len(observation.rows),
+            reason="no_authorized_order_contract",
+        )
+
+    items: list[ExtractedItem] = []
+    dropped = 0
+    for row in sorted(observation.rows, key=lambda candidate: candidate.row_index):
+        item = _authorize_row(row, document_type, settings.default_department)
+        decision = "admitted" if item is not None else "dropped"
+        logger.info(
+            "photo_row_admission_decision",
+            row_index=row.row_index,
+            document_type=document_type,
+            has_product=bool(clean_text(row.product_text)),
+            hall=row.hall_quantity,
+            bar=row.bar_quantity,
+            kitchen=row.kitchen_quantity,
+            order_entry_present=bool(
+                clean_text(row.order_entry_text) or row.explicit_order_quantity is not None
+            ),
+            quantity_source=item.quantity_source if item is not None else "",
+            decision=decision,
+            reason="same_row_positive_quantity"
+            if item is not None
+            else "missing_or_uncertain_same_row_quantity",
+        )
+        if item is None:
+            dropped += 1
+        else:
+            items.append(item)
+
+    global_comment = _authorized_document_comment(observation)
+    return PhotoNormalizationResult(
+        command=ParsedCommand(
+            intent=Intent.ADD_ITEMS,
+            items=items,
+            global_comment=global_comment,
+        ),
+        document_type=document_type,
+        admitted_rows=len(items),
+        dropped_rows=dropped,
+        reason="rows_authorized" if items else "no_filled_quantities_found",
+    )
+
+
+def _authorize_row(
+    row: PhotoRowObservation,
+    document_type: str,
+    default_department: str,
+) -> ExtractedItem | None:
+    """Авторизует одну строку без использования соседних строк или fuzzy-данных."""
+    product_text = clean_text(row.product_text)
+    if not product_text or row.product_confidence < 0.5 or row.row_alignment_confidence < 0.5:
+        return None
+
+    if document_type == "client_order_sheet":
+        quantities = DepartmentQuantities(
+            hall=_positive_or_none(row.hall_quantity),
+            bar=_positive_or_none(row.bar_quantity),
+            kitchen=_positive_or_none(row.kitchen_quantity),
+        )
+        positive = [
+            value for value in (quantities.hall, quantities.bar, quantities.kitchen) if value
+        ]
+        if not positive or row.quantity_confidence < 0.5:
+            return None
+        quantity = sum(positive)
+        quantity_source = (
+            "handwritten_correction"
+            if row.order_entry_type == "handwritten_correction"
+            else "department_columns"
+        )
+        unit = _row_unit(row)
+        exact_provenance = "venue_table_exact_candidate"
+    else:
+        if row.quantity_confidence < 0.5:
+            return None
+        resolved = _resolve_row_quantity(row)
+        if resolved is None:
+            return None
+        quantity, unit, quantity_source = resolved
+        quantities = DepartmentQuantities()
+        exact_provenance = ""
+
+    comment = (
+        clean_text(row.comment_text)
+        if row.comment_source in {"explicit_marker", "user_note"}
+        else ""
+    )
+    return ExtractedItem(
+        product_query=product_text,
+        quantity=quantity,
+        unit=unit,
+        department=default_department,
+        supplier_hint=""
+        if document_type == "client_order_sheet"
+        else clean_text(row.supplier_hint),
+        comment=comment,
+        comment_source=CommentSource.EXPLICIT_MARKER if comment else CommentSource.NONE,
+        source_line=clean_text(row.row_text) or product_text,
+        source_span=clean_text(row.row_text) or product_text,
+        department_quantities=quantities,
+        quantity_source=quantity_source,
+        printed_reference_text=clean_text(row.printed_reference_text),
+        order_entry_text=clean_text(row.order_entry_text),
+        order_entry_type=row.order_entry_type,
+        packaging_text=clean_text(row.printed_reference_text),
+        packaging_role="catalog_attribute" if row.printed_reference_text else "none",
+        catalog_identity_provenance=exact_provenance,
+    )
+
+
+def _resolve_row_quantity(row: PhotoRowObservation) -> tuple[float, str, str] | None:
+    """Разрешает quantity только из текущей строки и применяет правило исправления."""
+    crossed = _single_number(row.crossed_out_quantity_text)
+    corrected = _single_number(row.corrected_quantity_text)
+    if crossed is not None:
+        if corrected is None:
+            return None
+        return corrected, _row_unit(row), "handwritten_correction"
+    if corrected is not None:
+        return corrected, _row_unit(row), "handwritten_correction"
+    if len(row.active_quantity_texts) > 1:
+        return None
+    if len(_numbers(row.order_entry_text)) > 1:
+        return None
+    if len(_numbers(row.handwritten_quantity_text)) > 1:
+        return None
+    quantity = row.explicit_order_quantity
+    if quantity is None:
+        quantity = _single_number(row.order_entry_text) or _single_number(
+            row.handwritten_quantity_text
+        )
+    if quantity is None or not math.isfinite(quantity) or quantity <= 0:
+        return None
+    source = row.order_entry_type or (
+        "handwritten" if row.handwritten_quantity_text else "photo_order_entry"
+    )
+    return quantity, _row_unit(row), source
+
+
+def _row_has_order_evidence(row: PhotoRowObservation) -> bool:
+    """Проверяет положительное evidence заказа в самой строке."""
+    return (
+        row.explicit_order_quantity is not None
+        or bool(clean_text(row.order_entry_text))
+        or bool(clean_text(row.handwritten_quantity_text))
+        or bool(clean_text(row.corrected_quantity_text))
+    )
+
+
+def _authorized_document_comment(observation: PhotoDocumentObservation) -> str:
+    """Возвращает только явно обозначенный комментарий ко всему документу."""
+    comment = clean_text(observation.document_comment)
+    if observation.document_comment_scope != "order" or not comment:
+        return ""
+    marker = _GLOBAL_COMMENT_RE.search(comment)
+    if marker is None:
+        return ""
+    return clean_text(comment[marker.end() :].lstrip(" :-—–")) or comment
+
+
+def _positive_or_none(value: float | None) -> float | None:
+    """Оставляет только конечное положительное число из ячейки отдела."""
+    return value if value is not None and math.isfinite(value) and value > 0 else None
+
+
+def _numbers(value: str) -> list[float]:
+    """Извлекает числа только для проверки неоднозначности одной ячейки."""
+    result: list[float] = []
+    for raw in _NUMBER_RE.findall(value):
+        try:
+            number = float(raw.replace(",", "."))
+        except ValueError:
+            continue
+        if math.isfinite(number):
+            result.append(number)
+    return result
+
+
+def _single_number(value: str) -> float | None:
+    """Возвращает число только из однозначного текстового evidence."""
+    numbers = _numbers(value)
+    return numbers[0] if len(numbers) == 1 else None
+
+
+def _row_unit(row: PhotoRowObservation) -> str:
+    """Канонизирует единицу из той же order-ячейки или handwritten evidence."""
+    if clean_text(row.explicit_order_unit):
+        return normalize_unit(row.explicit_order_unit)
+    for text in (row.corrected_quantity_text, row.order_entry_text, row.handwritten_quantity_text):
+        match = _UNIT_RE.search(text)
+        if match:
+            return normalize_unit(match.group("unit"))
+    return ""

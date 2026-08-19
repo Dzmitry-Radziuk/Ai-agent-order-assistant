@@ -15,9 +15,11 @@ from restaurant_bot.config import Settings
 from restaurant_bot.domain.models import ExtractedItem, Intent, ParsedCommand
 from restaurant_bot.domain.text import clean_text, normalize_text
 from restaurant_bot.domain.units import UNIT_ALIASES, normalize_unit
+from restaurant_bot.input.photo_ingestion import normalize_photo_observation
 from restaurant_bot.integrations.openai_prompts import (
     _COMMENT_SCOPE_SYSTEM,
     _MATCH_SYSTEM,
+    _PHOTO_OBSERVATION_CONTRACT,
     _PHOTO_SYSTEM,
     _TEXT_SYSTEM,
     _VISIBLE_ACTION_SYSTEM,
@@ -37,6 +39,8 @@ from restaurant_bot.parsing.ai.schemas import (
     CommentBindingSchema,
     CommentScopeDecision,
     ParsedInputSchema,
+    PhotoDocumentObservation,
+    PhotoRowObservation,
     ProductMatchDecision,
     VisibleActionDecision,
 )
@@ -647,7 +651,7 @@ class OpenAIService:
         ) as generation:
             response = self.vision_client.responses.parse(
                 model=self.settings.openai_vision_model,
-                instructions=_PHOTO_SYSTEM,
+                instructions=f"{_PHOTO_SYSTEM}\n\n{_PHOTO_OBSERVATION_CONTRACT}",
                 input=cast(
                     Any,
                     [
@@ -667,14 +671,19 @@ class OpenAIService:
                         }
                     ],
                 ),
-                text_format=ParsedInputSchema,
+                text_format=PhotoDocumentObservation,
                 max_output_tokens=5000,
             )
             parsed_output = response.output_parsed
+            parsed_observation = (
+                PhotoDocumentObservation.model_validate(parsed_output.model_dump())
+                if parsed_output is not None
+                else None
+            )
             generation.update(
                 output={
                     "parsed": parsed_output is not None,
-                    "item_count": len(parsed_output.items) if parsed_output else 0,
+                    "row_count": len(parsed_observation.rows) if parsed_observation else 0,
                 },
                 usage_details=self._usage_details(response),
             )
@@ -682,84 +691,93 @@ class OpenAIService:
         if parsed is None:
             logger.warning("photo_ai_empty_result", mime_type=mime_type)
             return ParsedCommand(intent=Intent.UNKNOWN)
+        if getattr(response, "status", "") == "incomplete" or getattr(
+            response, "incomplete_details", None
+        ):
+            logger.warning("photo_ai_incomplete_result", mime_type=mime_type)
+            return ParsedCommand(intent=Intent.UNKNOWN)
+        observation = PhotoDocumentObservation.model_validate(parsed.model_dump())
         logger.info(
             "photo_ai_parsed",
-            document_type=parsed.document_type,
-            global_comment=parsed.global_comment,
-            item_count=len(parsed.items),
-            items=[self._item_log(item) for item in parsed.items],
+            proposed_document_type=observation.document_type_proposal,
+            row_count=len(observation.rows),
         )
-        command = ParsedCommand.model_validate(parsed.model_dump()).model_copy(
-            update={"explicit_add_items": False}
-        )
-        document_type = clean_text(parsed.document_type).lower()
-        normalized = self._normalise_photo_command(command, document_type)
+        normalization = normalize_photo_observation(observation, self.settings)
+        normalized = normalization.command
         logger.info(
             "photo_command_normalized",
-            document_type=document_type,
-            input_item_count=len(command.items),
+            document_type=normalization.document_type,
+            input_row_count=len(observation.rows),
             output_item_count=len(normalized.items),
-            dropped_item_count=len(command.items) - len(normalized.items),
-            items=[self._item_log(item) for item in normalized.items],
+            dropped_row_count=normalization.dropped_rows,
         )
         return normalized
 
     def _normalise_photo_command(self, command: ParsedCommand, document_type: str) -> ParsedCommand:
-        """Применяет защитные правила к результату OCR."""
-        items: list[ExtractedItem] = []
-        for item in command.items:
-            copy = item.model_copy(deep=True)
-            if document_type == "client_order_sheet":
-                # Исходная таблица уже содержит справочное поле поставщика из каталога.
-                # Распознавание может перенести значение из соседней строки, поэтому оно не
-                # должно ограничивать поиск товара по актуальному каталогу.
-                copy.supplier_hint = ""
-                department_values = (
-                    copy.department_quantities.hall,
-                    copy.department_quantities.bar,
-                    copy.department_quantities.kitchen,
-                )
-                positive_values = [
-                    value for value in department_values if value is not None and value > 0
-                ]
-                if not positive_values:
-                    continue
-                copy.quantity = sum(positive_values)
-                copy.department = self.settings.default_department
-                if copy.quantity_source not in {"handwritten", "handwritten_correction"}:
-                    copy.quantity_source = "department_columns"
-            if document_type in {"printed_order_form", "supplier_form", "order_table"}:
-                entry_quantity = to_float(copy.order_entry_text)
-                if entry_quantity is not None and copy.order_entry_type in {
-                    "typed",
-                    "typed_order_entry",
-                    "handwritten",
-                    "handwritten_correction",
-                }:
-                    copy.quantity = entry_quantity
-                else:
-                    # Фасовка в бланке поставщика может выглядеть как количество.
-                    # Пустая отдельная ячейка заказа означает, что товар не заказывают.
-                    continue
-            if (
-                document_type in {"unknown", "unknown_document", "product_card"}
-                and copy.quantity_source == "printed_order_column"
-                and to_float(copy.order_entry_text) is None
-            ):
-                continue
-            if copy.quantity_source in {
-                "printed_reference",
+        """Адаптирует старый тестовый контракт к единому photo observation normalizer."""
+        columns: list[str]
+        has_table = document_type not in {
+            "free_list",
+            "unknown",
+            "unknown_document",
+            "product_card",
+        }
+        if document_type == "client_order_sheet":
+            columns = ["Зал", "Бар", "Кухня"]
+        elif document_type == "printed_order_form":
+            columns = ["Товар", "Фасовка", "Заказ"]
+        elif document_type == "order_table":
+            columns = ["Товар", "Количество"]
+        else:
+            columns = []
+        rows: list[PhotoRowObservation] = []
+        for index, item in enumerate(command.items):
+            explicit_quantity = None
+            handwritten_text = ""
+            if document_type == "free_list" and item.quantity_source not in {
                 "packaging",
+                "printed_reference",
                 "unit_weight",
                 "price",
             }:
-                continue
-            if copy.quantity is None or copy.quantity <= 0:
-                continue
-            if not copy.quantity_source:
-                copy.quantity_source = copy.order_entry_type or "photo_order_entry"
-            items.append(copy)
-        return command.model_copy(update={"items": items})
+                explicit_quantity = item.quantity
+                handwritten_text = item.source_line if item.quantity_source == "handwritten" else ""
+            elif document_type == "unknown" and item.quantity_source not in {
+                "packaging",
+                "printed_reference",
+                "unit_weight",
+                "price",
+            }:
+                explicit_quantity = None
+            elif document_type not in {"client_order_sheet", "product_card"}:
+                explicit_quantity = to_float(item.order_entry_text)
+            rows.append(
+                PhotoRowObservation(
+                    row_index=index,
+                    row_text=item.source_line,
+                    product_text=item.product_query,
+                    supplier_hint=item.supplier_hint,
+                    hall_quantity=item.department_quantities.hall,
+                    bar_quantity=item.department_quantities.bar,
+                    kitchen_quantity=item.department_quantities.kitchen,
+                    explicit_order_quantity=explicit_quantity,
+                    explicit_order_unit=item.unit,
+                    order_entry_text=item.order_entry_text,
+                    order_entry_type=item.order_entry_type,
+                    printed_reference_text=item.printed_reference_text or item.packaging_text,
+                    handwritten_quantity_text=handwritten_text,
+                    comment_text=item.comment or item.user_comment_to_supplier,
+                    comment_source="explicit_marker" if item.comment else "",
+                )
+            )
+        proposal = "unknown" if document_type == "unknown_document" else document_type
+        observation = PhotoDocumentObservation(
+            document_type_proposal=proposal,
+            detected_columns=columns,
+            has_table_structure=has_table,
+            rows=rows,
+        )
+        return normalize_photo_observation(observation, self.settings).command
 
     @staticmethod
     def _item_log(item: ExtractedItem) -> dict[str, Any]:

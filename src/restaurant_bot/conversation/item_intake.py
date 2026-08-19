@@ -50,6 +50,7 @@ def build_cart_item(
         packaging_text=extracted.packaging_text,
         packaging_role=extracted.packaging_role,
         packaging_confidence=extracted.packaging_confidence,
+        catalog_identity_provenance=extracted.catalog_identity_provenance,
         quantity=quantity,
         unit=unit,
         department=normalize_department(extracted.department) or default_department,

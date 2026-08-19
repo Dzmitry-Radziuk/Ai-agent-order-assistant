@@ -41,6 +41,50 @@ class ParsedInputSchema(BaseModel):
     history_query: HistoryQuery | None = None
 
 
+class PhotoRowObservation(BaseModel):
+    """Описывает только наблюдение одной визуальной строки фотографии."""
+
+    row_index: int = Field(default=0, ge=0)
+    row_text: str = ""
+    product_text: str = ""
+    supplier_hint: str = ""
+    hall_quantity: float | None = None
+    bar_quantity: float | None = None
+    kitchen_quantity: float | None = None
+    explicit_order_quantity: float | None = None
+    explicit_order_unit: str = ""
+    order_entry_text: str = ""
+    order_entry_type: Literal[
+        "",
+        "typed",
+        "typed_order_entry",
+        "handwritten",
+        "handwritten_correction",
+    ] = ""
+    printed_reference_text: str = ""
+    handwritten_quantity_text: str = ""
+    crossed_out_quantity_text: str = ""
+    corrected_quantity_text: str = ""
+    active_quantity_texts: list[str] = Field(default_factory=list)
+    comment_text: str = ""
+    comment_source: Literal["", "explicit_marker", "user_note", "ambiguous"] = ""
+    product_confidence: float = Field(default=1, ge=0, le=1)
+    quantity_confidence: float = Field(default=1, ge=0, le=1)
+    row_alignment_confidence: float = Field(default=1, ge=0, le=1)
+
+
+class PhotoDocumentObservation(BaseModel):
+    """Описывает структурированное визуальное наблюдение без мутации домена."""
+
+    document_type_proposal: str = ""
+    detected_columns: list[str] = Field(default_factory=list)
+    has_table_structure: bool = False
+    rows: list[PhotoRowObservation] = Field(default_factory=list)
+    document_comment: str = ""
+    document_comment_scope: Literal["", "order", "item", "unknown"] = ""
+    extraction_confidence: float = Field(default=1, ge=0, le=1)
+
+
 class ProductMatchDecision(BaseModel):
     """Проверяет решение ИИ о сопоставлении товара."""
 

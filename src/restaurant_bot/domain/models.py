@@ -254,6 +254,7 @@ class ExtractedItem(BaseModel):
         "ambiguous",
     ] = "none"
     packaging_confidence: float = Field(default=0, ge=0, le=1)
+    catalog_identity_provenance: Literal["", "venue_table_exact_candidate"] = ""
 
     @field_validator(
         "product_query",
@@ -366,6 +367,7 @@ class CartItem(BaseModel):
         "ambiguous",
     ] = "none"
     packaging_confidence: float = Field(default=0, ge=0, le=1)
+    catalog_identity_provenance: Literal["", "venue_table_exact_candidate"] = ""
     quantity: float | None = None
     unit: str = ""
     department: str = "Кухня"
