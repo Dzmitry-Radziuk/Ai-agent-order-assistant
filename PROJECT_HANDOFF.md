@@ -1,5 +1,43 @@
 # PROJECT HANDOFF
 
+## PHOTO-PROMPT-RESET-13 - current corrective pass
+
+### Что изменено
+
+Активный photo prompt и observation contract переведены на единый русский контракт
+`PhotoDocumentObservation`. Vision теперь сначала ищет заполненные ячейки «Зал» / «Бар» /
+«Кухня», привязывает их горизонтально к товару в той же строке и возвращает evidence,
+а не готовую доменную заявку. Пустые строки каталога можно не перечислять; потенциально
+заполненная, но непривязанная ячейка должна отмечаться через
+`order_area_complete=false` и `uncertain_order_row_count`.
+
+Убраны из активного prompt противоречивые требования одновременно перечислять все пустые
+строки и пропускать строки без количества, а также устаревшее требование выводить
+`intent=add_items` и `items`. Сохранены same-row ownership, раздельные Hall/Bar/Kitchen,
+печатная фасовка как reference, рукописные исправления и row-local comments.
+
+Добавлена узкая backend-защита для валидной структуры client sheet без возвращённых строк:
+если есть заголовки подразделений, виден регион товаров, `rows=[]` и
+`order_area_complete=false`, результат становится `incomplete_photo_read`, а не
+`unsupported_photo`.
+
+### Границы
+
+- `OPENAI_VISION_MODEL` не менялся; используется прежняя модель `gpt-5-mini`.
+- Vision-вызов остаётся один на фотографию.
+- Text, voice, generic catalog matching, submission и Docker/DevOps-контракт не менялись.
+- Реальные Telegram-фото, внешняя отправка, webhook, tunnel и production deploy не
+  выполнялись.
+
+### Проверка текущего прохода
+
+- Full pytest: `1611 passed`.
+- Targeted prompt и photo-ingestion tests: `28 passed`.
+- Ruff check, changed-file Ruff format check, mypy, compileall и `git diff --check`:
+  проходят.
+- Добавлен регресс пустого observation при нечитаемой order-area.
+- Локальная Compose-пересборка выполняется после commit и push.
+
 ## PHOTO-COMPLETENESS-CORRECTIVE-11 - current corrective pass
 
 ### Root cause

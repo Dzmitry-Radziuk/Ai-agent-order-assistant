@@ -120,7 +120,18 @@ def classify_photo_document(observation: PhotoDocumentObservation) -> str:
     has_card_evidence = bool(columns & _CARD_HEADERS)
     rows = [row for row in observation.rows if clean_text(row.product_text)]
 
-    if observation.has_table_structure and has_departments and rows:
+    if (
+        observation.has_table_structure
+        and has_departments
+        and (
+            rows
+            or (
+                not observation.rows
+                and observation.visible_product_row_count
+                and not observation.order_area_complete
+            )
+        )
+    ):
         return "client_order_sheet"
     if observation.has_table_structure and has_order_column and rows:
         if has_reference_column and any(_row_has_order_evidence(row) for row in rows):

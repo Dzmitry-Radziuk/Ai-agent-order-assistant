@@ -95,6 +95,25 @@ def test_photo_classification_uses_department_structure_over_model_proposal() ->
     assert classify_photo_document(observation) == "client_order_sheet"
 
 
+def test_empty_client_sheet_with_unreadable_order_area_is_incomplete(settings) -> None:  # type: ignore[no-untyped-def]
+    """Сохраняет неполный результат vision как нечитаемую область заказа."""
+    result = normalize_photo_observation(
+        PhotoDocumentObservation(
+            document_type_proposal="client_order_sheet",
+            detected_columns=["Товар", "Зал", "Бар", "Кухня"],
+            has_table_structure=True,
+            visible_product_row_count=12,
+            order_area_complete=False,
+            rows=[],
+        ),
+        settings,
+    )
+
+    assert result.command.photo_outcome == "incomplete_photo_read"
+    assert result.document_type == "incomplete"
+    assert result.reason == "potential_order_row_unreadable"
+
+
 def test_client_sheet_drops_blank_row_without_transferring_neighbor_quantity(settings) -> None:  # type: ignore[no-untyped-def]
     """Не переносит quantity из следующей строки в пустую строку таблицы."""
     result = normalize_photo_observation(
