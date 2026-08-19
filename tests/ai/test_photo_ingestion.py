@@ -327,6 +327,22 @@ def test_ordinary_table_and_inline_comment_default_to_kitchen(settings) -> None:
     assert item.comment == "привезти завтра"
 
 
+def test_free_list_without_department_columns_defaults_to_kitchen(settings) -> None:  # type: ignore[no-untyped-def]
+    """Обрабатывает фото списка без колонок Hall/Bar/Kitchen через отдел по умолчанию."""
+    result = normalize_photo_observation(
+        PhotoDocumentObservation(
+            document_type_proposal="free_list",
+            has_table_structure=False,
+            rows=[_row("Картофель", explicit_order_quantity=3, explicit_order_unit="кг")],
+        ),
+        settings,
+    )
+
+    assert len(result.command.items) == 1
+    assert result.command.items[0].department == settings.default_department
+    assert result.command.items[0].quantity == 3
+
+
 def test_product_card_and_reference_numbers_create_no_order(settings) -> None:  # type: ignore[no-untyped-def]
     """Не превращает карточку товара и печатную фасовку в заказ."""
     result = normalize_photo_observation(

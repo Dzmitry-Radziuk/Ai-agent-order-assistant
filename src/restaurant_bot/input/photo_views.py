@@ -8,9 +8,10 @@ from pathlib import Path
 
 from PIL import Image, UnidentifiedImageError
 
-_DENSE_TABLE_MIN_WIDTH = 1200
-_DENSE_TABLE_MIN_HEIGHT = 600
+_DENSE_TABLE_MIN_WIDTH = 900
+_DENSE_TABLE_MIN_HEIGHT = 200
 _DENSE_TABLE_MIN_ASPECT_RATIO = 1.25
+_TABLE_FOCUS_VERTICAL_CROP_MIN_HEIGHT = 600
 _TABLE_FOCUS_TOP_MARGIN = 0.18
 _TABLE_FOCUS_BOTTOM_MARGIN = 0.98
 _CROP_UPSCALE_FACTOR = 2
@@ -91,8 +92,11 @@ def _is_dense_table(width: int, height: int) -> bool:
 
 def _build_table_focus_view(image: Image.Image) -> PhotoImageView:
     """Вырезает таблицу по вертикали, сохраняя всю ширину строки."""
-    start = max(0, min(image.height - 1, round(image.height * _TABLE_FOCUS_TOP_MARGIN)))
-    end = max(start + 1, min(image.height, round(image.height * _TABLE_FOCUS_BOTTOM_MARGIN)))
+    if image.height < _TABLE_FOCUS_VERTICAL_CROP_MIN_HEIGHT:
+        start, end = 0, image.height
+    else:
+        start = max(0, min(image.height - 1, round(image.height * _TABLE_FOCUS_TOP_MARGIN)))
+        end = max(start + 1, min(image.height, round(image.height * _TABLE_FOCUS_BOTTOM_MARGIN)))
     crop = image.crop((0, start, image.width, end))
     enlarged = crop.resize(
         (crop.width * _CROP_UPSCALE_FACTOR, crop.height * _CROP_UPSCALE_FACTOR),

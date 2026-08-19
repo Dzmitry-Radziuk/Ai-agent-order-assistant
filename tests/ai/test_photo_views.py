@@ -55,6 +55,17 @@ def test_wide_screenshot_at_680px_height_uses_table_focus(tmp_path: Path) -> Non
     assert [view.name for view in preparation.views] == ["original", "table_focus"]
 
 
+def test_short_wide_screenshot_keeps_full_height_in_table_focus(tmp_path: Path) -> None:
+    """Не обрезает верхние строки уже обрезанного широкого скриншота."""
+    photo = tmp_path / "short-screenshot.png"
+    _save_image(photo, (1280, 350))
+
+    preparation = prepare_photo_views(photo, "image/png")
+
+    assert preparation.dense_table_views_used is True
+    assert preparation.table_focus_view_size == (2560, 700)
+
+
 def test_small_ordinary_photo_keeps_original_only(tmp_path: Path) -> None:
     """Не применяет table crops к обычному небольшому изображению."""
     photo = tmp_path / "small.png"

@@ -11,13 +11,14 @@ pixels and the model could incorrectly report `order_area_complete=true`.
 
 ### Image preparation
 
-For dense wide images (`width >= 1200`, `height >= 600`, aspect ratio `>= 1.25`) the
+For dense wide images (`width >= 900`, `height >= 200`, aspect ratio `>= 1.25`) the
 runtime now sends two representations of the same document in one user message: the
-untouched original and one full-width table-focus crop from approximately 18%-98% of
-the image height. The crop keeps product, supplier, Hall/Bar/Kitchen and Comment in the
-same horizontal row, is enlarged 2x with Pillow/LANCZOS, and encoded as PNG. Ordinary
-smaller or non-wide photos keep the original-only path. No perspective correction, OCR
-or second AI pass was added.
+untouched original and one full-width table-focus crop. Large screenshots use
+approximately 18%-98% of the image height to remove browser UI; already short wide
+screenshots keep their full height so the first product row is not cut off. The crop
+keeps product, supplier, Hall/Bar/Kitchen and Comment in the same horizontal row, is
+enlarged 2x with Pillow/LANCZOS, and encoded as PNG. Smaller or non-wide photos keep
+the original-only path. No perspective correction, OCR or second AI pass was added.
 
 ### Contracts and boundaries
 
@@ -44,6 +45,9 @@ or second AI pass was added.
   below the old dense-height threshold, so it used original-only input and returned the
   right quantities but misidentified the first product. The dense threshold is now 600px
   so this screenshot class receives table-focus; the required acceptance rerun is pending.
+- The next Telegram check (`update_id=247308072`) arrived as a short `1280x350` table
+  crop; it still used original-only input and returned row numbers `6,8,9,10` instead
+  of the filled rows `3,7,9,11`. Short wide screenshots now use full-height table-focus.
 - One live Telegram run after the first build (`update_id=247308058`) prepared all three
   views and vision returned four rows, but put their quantities into generic order-entry
   fields instead of `kitchen_quantity`; the backend correctly dropped those rows rather
