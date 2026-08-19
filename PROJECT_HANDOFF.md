@@ -11,7 +11,7 @@ pixels and the model could incorrectly report `order_area_complete=true`.
 
 ### Image preparation
 
-For dense wide images (`width >= 1200`, `height >= 700`, aspect ratio `>= 1.25`) the
+For dense wide images (`width >= 1200`, `height >= 600`, aspect ratio `>= 1.25`) the
 runtime now sends two representations of the same document in one user message: the
 untouched original and one full-width table-focus crop from approximately 18%-98% of
 the image height. The crop keeps product, supplier, Hall/Bar/Kitchen and Comment in the
@@ -40,6 +40,10 @@ or second AI pass was added.
 - Manual real-image acceptance: `NOT VERIFIED` here — five clean-screenshot runs and
   three monitor-photo runs still need to be performed in Telegram. Unit tests prove only
   deterministic view preparation and one-call request composition, not vision accuracy.
+- The first post-rebuild Telegram check (`update_id=247308064`) arrived as `1280x680`,
+  below the old dense-height threshold, so it used original-only input and returned the
+  right quantities but misidentified the first product. The dense threshold is now 600px
+  so this screenshot class receives table-focus; the required acceptance rerun is pending.
 - One live Telegram run after the first build (`update_id=247308058`) prepared all three
   views and vision returned four rows, but put their quantities into generic order-entry
   fields instead of `kitchen_quantity`; the backend correctly dropped those rows rather

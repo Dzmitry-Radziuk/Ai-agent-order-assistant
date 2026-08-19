@@ -44,6 +44,17 @@ def test_table_focus_preserves_full_width_and_reduces_vertical_margins(tmp_path:
     assert table_focus.height < 900 * preparation.upscale_factor
 
 
+def test_wide_screenshot_at_680px_height_uses_table_focus(tmp_path: Path) -> None:
+    """Считает широкое Telegram-изображение 1280x680 плотным скриншотом таблицы."""
+    photo = tmp_path / "screenshot.png"
+    _save_image(photo, (1280, 680))
+
+    preparation = prepare_photo_views(photo, "image/png")
+
+    assert preparation.dense_table_views_used is True
+    assert [view.name for view in preparation.views] == ["original", "table_focus"]
+
+
 def test_small_ordinary_photo_keeps_original_only(tmp_path: Path) -> None:
     """Не применяет table crops к обычному небольшому изображению."""
     photo = tmp_path / "small.png"
