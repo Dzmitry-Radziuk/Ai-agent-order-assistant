@@ -27,6 +27,22 @@ _COMMENT_POLITENESS_PREFIX_RE = re.compile(
     r"^(?:желательно|обязательно|пожалуйста|просьба|главное)\s+",
     flags=re.I,
 )
+_COMMENT_ACTION_RE = re.compile(
+    r"\b(?:добав\w*|покаж\w*|откр\w*|убер\w*|удал\w*|измен\w*|"
+    r"исправ\w*|выбер\w*|перей\w*|сброс\w*|отправ\w*|проверь\w*|"
+    r"сдела\w*|созда\w*|оформ\w*|начн\w*)\b",
+    flags=re.I,
+)
+_COMMENT_OBJECT_RE = re.compile(
+    r"\b(?:комментар\w*|пожелан\w*|товар\w*|заявк\w*|заказ\w*|"
+    r"черновик\w*|корзин\w*|итог\w*|количеств\w*|единиц\w*)\b",
+    flags=re.I,
+)
+_COMMENT_STANDALONE_ACTION_RE = re.compile(
+    r"^(?:пожалуйста\s+)?(?:добав\w*|покаж\w*|откр\w*|убер\w*|удал\w*|"
+    r"измен\w*|исправ\w*|выбер\w*|перей\w*|сброс\w*|отправ\w*|проверь\w*)$",
+    flags=re.I,
+)
 
 
 def explicit_supplier_comment(value: str) -> str:
@@ -40,6 +56,15 @@ def explicit_supplier_comment(value: str) -> str:
     if _STRONG_COMMENT_START_RE.search(comment):
         return comment
     return ""
+
+
+def strip_comment_label(value: str) -> str:
+    """Удаляет только служебную метку комментария, сохраняя текст пожелания."""
+    edge_punctuation = r"^[\s.,;:!?—–-]+|[\s.,;:!?—–-]+$"
+    comment = re.sub(edge_punctuation, "", clean_text(value))
+    if not comment:
+        return ""
+    return re.sub(edge_punctuation, "", _COMMENT_LABEL_RE.sub("", comment, count=1))
 
 
 def supplier_comment_start(words: list[str]) -> int | None:
@@ -59,3 +84,16 @@ def comment_semantic_key(value: str) -> str:
         if stripped == normalized:
             return normalized
         normalized = stripped
+
+
+def is_comment_control_text(value: str) -> bool:
+    """Проверяет, является ли текст командой, а не пожеланием поставщику."""
+    comment = clean_text(value).strip(" .,;:-—–")
+    if not comment:
+        return False
+    normalized = normalize_text(comment)
+    if re.fullmatch(r"(?:комментар\w*|пожелан\w*)", normalized):
+        return True
+    if _COMMENT_STANDALONE_ACTION_RE.fullmatch(normalized):
+        return True
+    return bool(_COMMENT_ACTION_RE.search(comment) and _COMMENT_OBJECT_RE.search(comment))

@@ -7,6 +7,7 @@ from restaurant_bot.presentation.telegram.replies import (
     final_review_reply,
     help_reply,
     issue_reply,
+    small_talk_reply,
 )
 
 
@@ -27,6 +28,16 @@ def test_help_explains_how_to_include_product_and_order_comments() -> None:
     assert "желательно на завтра" in text
 
 
+def test_small_talk_reply_uses_neutral_action_free_wording() -> None:
+    """Не описывает действие, которое бот ещё не определил, и не использует точку с запятой."""
+    reply = small_talk_reply(ConversationState())
+
+    assert "Сообщение не распознано как действие с заявкой." in reply.text
+    assert "Заявка не изменена, товар не добавлен." in reply.text
+    assert "открыть инструкцию — команда /help." in reply.text
+    assert ";" not in reply.text
+
+
 def test_not_found_card_has_only_source_recovery_actions() -> None:
     """Проверяет, что не found карточка имеет только исходный восстановление действия."""
     item = CartItem(id="missing", source_query="Креветки королевские", status=ItemStatus.NOT_FOUND)
@@ -35,7 +46,7 @@ def test_not_found_card_has_only_source_recovery_actions() -> None:
 
     assert reply.text == (
         "🔸 <b><u>Товар не найден</u></b>\n\n"
-        "По вашему запросу «<b>Креветки королевские</b>» ничего не найдено.\n\n"
+        "По запросу «<b>Креветки королевские</b>» ничего не найдено.\n\n"
         "Вы можете изменить название, отправить запрос менеджеру по снабжению "
         "или не добавлять товар."
     )
@@ -62,7 +73,7 @@ def test_ambiguous_card_shows_only_catalog_choices_and_safe_recovery() -> None:
     labels = [button.text for row in reply.rows for button in row]
 
     assert reply.text == (
-        "По запросу «<b>сироп роза</b>» найдено несколько вариантов.\n\n"
+        "Найдено несколько вариантов товара.\n\n"
         "Уточните, какой товар вы имели в виду:\n\n"
         "1. <b>Сироп Роза, 1л</b>\n\n"
         "2. <b>Сироп Фейхоа, 1л</b>\n\n"
@@ -96,8 +107,7 @@ def test_single_ambiguous_candidate_is_presented_only_as_a_similar_product() -> 
 
     assert reply.text == (
         "🔎 <b><u>Точного совпадения не найдено</u></b>\n\n"
-        "По запросу «<b>кукуруза спелая</b>» найден похожий товар.\n\n"
-        "Возможно, вы имели в виду:\n\n"
+        "Есть похожий вариант товара. Проверьте его:\n\n"
         "1. <b>Крупа кукурузная Алина 700г 1/7, шт</b>\n\n"
         "Не нашли нужный вариант? Отправьте запрос менеджеру по снабжению."
     )
@@ -147,8 +157,10 @@ def test_product_issue_cards_escape_user_and_catalog_text() -> None:
         3,
     )
 
-    assert "Соус &lt;острый&gt; &amp; сладкий" in not_found.text
-    assert "Сироп &lt;роза&gt;" in ambiguous.text
+    assert (
+        "По запросу «<b>Соус &lt;острый&gt; &amp; сладкий</b>» ничего не найдено." in not_found.text
+    )
+    assert "Сироп &lt;роза&gt;" not in ambiguous.text
     assert "Сироп Роза &amp; Мята" in ambiguous.text
     assert [row[0].callback_data for row in not_found.rows] == [
         "v2:addreq:2",
@@ -181,10 +193,10 @@ def test_draft_uses_source_button_names() -> None:
     reply = cart_reply(state)
 
     assert [[button.text for button in row] for row in reply.rows] == [
-        ["Отправить в корзину"],
-        ["Добавить ещё товары"],
+        ["Добавить в корзину и проверить"],
         ["Сбросить и начать заново"],
     ]
+    assert "Добавляйте товары текстом, голосом или фотографией списка" in reply.text
 
 
 def test_item_comment_is_italic_and_rendered_under_product_in_draft_and_final_review() -> None:

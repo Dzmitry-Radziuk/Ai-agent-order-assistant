@@ -1,5 +1,6 @@
 """Проверяет поведение, связанное с модулем «test input routing»."""
 
+from collections.abc import Callable
 from unittest.mock import MagicMock
 
 from restaurant_bot.application.order_review.contracts import ReviewSnapshot
@@ -48,6 +49,53 @@ def test_product_typo_is_never_interpreted_as_skip_command() -> None:
     assert command.intent is Intent.ADD_ITEMS
     assert command.items[0].product_query == "гонядина"
     assert command.items[0].quantity == 5
+
+
+def test_standalone_final_review_word_is_state_aware_for_text_and_voice() -> None:
+    """Маршрутизирует «итог» в финальную проверку для текста и голоса."""
+    provider = MagicMock()
+    provider.parse_text.return_value = ParsedCommand(
+        intent=Intent.ADD_ITEMS,
+        items=[ExtractedItem(product_query="Итог")],
+    )
+    state = ConversationState(
+        stage=SessionStage.REVIEW,
+        cart=[CartItem(id="item", source_query="Курица", status=ItemStatus.MATCHED)],
+    )
+
+    class TranscriptRecognizer:
+        """Передаёт расшифрованный голосовой текст в общий интерпретатор."""
+
+        def recognize_media(
+            self,
+            event: TelegramEvent,
+            current_state: ConversationState,
+            parse_text: Callable[[str, ConversationState], ParsedCommand],
+            processing_message_id: int | None = None,
+        ) -> ParsedCommand:
+            """Использует тот же текстовый путь, что и рабочий voice adapter."""
+            return parse_text(event.text, current_state)
+
+    interpreter = TelegramInputInterpreter(
+        provider,
+        lambda: TranscriptRecognizer(),
+        StateCompatibilityPolicy(),
+    )
+
+    text_command = interpreter.interpret(
+        TelegramEvent(update_id=1, chat_id="chat", input_type=InputKind.TEXT, text="Итог."),
+        state,
+    )
+    voice_command = interpreter.interpret(
+        TelegramEvent(update_id=2, chat_id="chat", input_type=InputKind.VOICE, text="Итог."),
+        state,
+    )
+
+    assert text_command.intent is Intent.SHOW_FINAL_REVIEW
+    assert voice_command.intent is Intent.SHOW_FINAL_REVIEW
+    assert text_command.items == []
+    assert voice_command.items == []
+    provider.parse_text.assert_not_called()
 
 
 def test_direct_commands_bypass_catalog_but_product_operations_read_it() -> None:

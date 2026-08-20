@@ -75,7 +75,12 @@ def preview_reply(
             "Все товары повторно проверяются перед отправкой."
         )
     rows = [
-        [Button(text="Отправить заявку", callback_data=f"v2:review_submit:{token}")],
+        [
+            Button(
+                text="Отправить заявку",
+                callback_data=f"v2:review_submit:{token}",
+            )
+        ],
         [Button(text="Отмена", callback_data=f"v2:review_cancel:{token}")],
     ]
     return BotReply(text="\n".join(lines), rows=rows, edit_message_id=edit_message_id)

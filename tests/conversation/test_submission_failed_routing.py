@@ -23,6 +23,7 @@ from restaurant_bot.domain.models import (
     SessionStage,
     TelegramEvent,
 )
+from restaurant_bot.input.telegram_callbacks import parse_callback
 from restaurant_bot.parsing.commands.api import infer_intent
 from restaurant_bot.services.engine import ConversationEngine
 
@@ -187,3 +188,26 @@ def test_missing_pending_submission_has_safe_broken_state_fallback(settings: Set
     assert result.state.stage is SessionStage.SUBMISSION_FAILED
     assert result.state.pending_submission is None
     assert "Снимок заявки не найден" in result.reply.text
+
+
+def test_dispatch_uncertain_check_reads_status_without_submission_enqueue(
+    settings: Settings,
+) -> None:
+    """Кнопка проверки ставит только read-only чтение истории заявки."""
+    state = _state(uncertain=True)
+    command = parse_callback("v2:check_submission:r0")
+    result = ConversationEngine(settings).handle(
+        TelegramEvent(
+            update_id=2,
+            chat_id="failed",
+            input_type=InputKind.CALLBACK,
+            callback_data="v2:check_submission:r0",
+        ),
+        command,
+        state,
+        [],
+    )
+
+    assert result.enqueue_submission is False
+    assert result.enqueue_order_status is True
+    assert result.order_status_order_number == "ORDER-1"

@@ -57,8 +57,8 @@ def test_text_product_input_shows_catalog_search_card() -> None:
     assert UpdateOrchestrator._text_processing_reply().text == "🔎 Ищу товары в каталоге…"
 
 
-def test_text_processing_card_covers_quantity_and_navigation_commands() -> None:
-    """Показывает короткий статус для количества и навигационных команд."""
+def test_text_processing_card_is_neutral_before_semantic_parsing() -> None:
+    """Не обещает действие до завершения semantic-разбора текста."""
     quantity_event = TelegramEvent(
         update_id=1,
         chat_id="77",
@@ -76,7 +76,7 @@ def test_text_processing_card_covers_quantity_and_navigation_commands() -> None:
     )
     assert (
         UpdateOrchestrator._text_processing_reply_for_event(cart_event).text
-        == "⏳ Открываю черновик…"
+        == "⏳ Обрабатываю сообщение…"
     )
 
 

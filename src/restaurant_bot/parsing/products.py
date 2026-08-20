@@ -16,6 +16,7 @@ from restaurant_bot.parsing.packaging import (
     _packaging_paraphrase_item,
     _single_product_packaging_item,
     _spoken_measurement_pair,
+    explicit_packaging_preference,
 )
 from restaurant_bot.parsing.quantities import (
     _is_standalone_quantity,
@@ -64,10 +65,39 @@ _COUNTRY_WORDS = {
     "корея",
 }
 
+_QUALIFIER_FRAGMENT_RE = re.compile(
+    r"^(?:(?:и\s+)?чтобы\b|"
+    r"(?:желательно|обязательно|пожалуйста|просьб\w*|главное|только|срочно)\b|"
+    r"(?:сорт|размер|цвет|марка|бренд|вид|тип|вес)\b)",
+    flags=re.I,
+)
+_QUALIFIER_IDENTITY_RE = re.compile(
+    r"^(?P<label>сорт|размер|цвет|марка|бренд|вид|тип)\b\s*"
+    r"(?:(?:желательно|обязательно|нужн\w*|требу\w*|лучше|предпочт\w*)\s+)?",
+    flags=re.I,
+)
+_QUALIFIER_COMMENT_RE = re.compile(
+    r"^(?:(?:и\s+)?чтобы\b|(?:желательно|обязательно|пожалуйста|просьб\w*|"
+    r"главное|только|срочно)\b)",
+    flags=re.I,
+)
+_UNMARKED_WEIGHT_WORDS = {"вес", "весовой", "весовая", "весовое"}
+
 
 def _query_with_unmarked_tail(name: str, tail: str) -> str:
     """Возвращает неподтверждённый хвост в возможное название товара."""
     return clean_text(f"{name} {tail}").strip(" .,;:!?-—–")
+
+
+def _tail_comment(tail: str) -> tuple[str, CommentSource, str]:
+    """Разделяет пожелание поставщику и хвост, который относится к названию товара."""
+    explicit = explicit_supplier_comment(tail)
+    if explicit:
+        return explicit, CommentSource.EXPLICIT_MARKER, "none"
+    packaging = explicit_packaging_preference(tail)
+    if packaging:
+        return packaging, CommentSource.SEMANTIC, "user_preference"
+    return "", CommentSource.NONE, "none"
 
 
 _ProductLinePatterns = tuple[
@@ -101,7 +131,11 @@ def _prepare_product_lines(text: str, unit_pattern: str) -> tuple[str, list[str]
 def _has_independent_product_evidence(value: str, unit_pattern: str) -> bool:
     """Проверяет, содержит ли фрагмент самостоятельное описание товара."""
     fragment = clean_text(value).strip(" .,;:!?-—–")
-    if not fragment or explicit_supplier_comment(fragment):
+    if (
+        not fragment
+        or explicit_supplier_comment(fragment)
+        or _is_non_product_qualifier_fragment(fragment)
+    ):
         return False
     normalized = normalize_text(fragment)
     has_compact_abbreviation = bool(re.search(r"[a-zа-яё]\.[a-zа-яё]", normalized, flags=re.I))
@@ -137,6 +171,48 @@ def _has_independent_product_evidence(value: str, unit_pattern: str) -> bool:
     if has_numeric_range and not product_words:
         return False
     return bool(product_words)
+
+
+def _is_non_product_qualifier_fragment(value: str) -> bool:
+    """Проверяет, является ли фрагмент уточнением уже названного товара."""
+    normalized = normalize_text(value).strip(" .,;:!?-—–")
+    return bool(normalized and _QUALIFIER_FRAGMENT_RE.match(normalized))
+
+
+def _normalize_unmarked_qualifiers(value: str) -> tuple[str, str]:
+    """Отделяет признаки товара и пожелание из строки без явного количества."""
+    parts = [clean_text(part).strip(" .,;:!?-—–") for part in re.split(r"(?<!\d),(?!\d)", value)]
+    if len(parts) < 2 or not all(parts):
+        return value, ""
+
+    head_words = parts[0].split()
+    while head_words and normalize_text(head_words[-1]) in _UNMARKED_WEIGHT_WORDS:
+        head_words.pop()
+    head = " ".join(head_words).strip()
+    if not head:
+        return value, ""
+
+    identity_parts: list[str] = []
+    comments: list[str] = []
+    for part in parts[1:]:
+        normalized = normalize_text(part)
+        if _QUALIFIER_IDENTITY_RE.match(normalized):
+            identity = _QUALIFIER_IDENTITY_RE.sub("\\g<label> ", part, count=1).strip()
+            if identity:
+                identity_parts.append(identity)
+                continue
+        if _QUALIFIER_COMMENT_RE.match(normalized):
+            comments.append(re.sub(r"^(?:и\s+)?чтобы\s+", "чтобы ", part, flags=re.I))
+            continue
+        if normalize_text(part) in _UNMARKED_WEIGHT_WORDS:
+            continue
+        return value, ""
+
+    query = clean_text(" ".join([head, *identity_parts])).strip(" .,;:!?-—–")
+    comment = clean_text(", ".join(comments)).strip(" .,;:!?-—–")
+    if not query or query == clean_text(value).strip(" .,;:!?-—–"):
+        return value, comment
+    return query, comment
 
 
 def _split_comma_product_list(line: str, unit_pattern: str) -> list[str]:
@@ -363,7 +439,7 @@ def _multiple_quantity_items(
                 start = mark.end()
         else:
             tail = clean_text(stripped[mark.end() :]).strip(" .,;:!?-—–")
-        comment = explicit_supplier_comment(tail)
+        comment, comment_source, packaging_role = _tail_comment(tail)
         if tail and not comment:
             name = _query_with_unmarked_tail(name, tail)
         recovered.append(
@@ -373,8 +449,10 @@ def _multiple_quantity_items(
                 unit=normalize_unit(mark.group("unit") or ""),
                 comment=comment,
                 user_comment_to_supplier=comment,
-                comment_source=(CommentSource.EXPLICIT_MARKER if comment else CommentSource.NONE),
+                comment_source=comment_source,
                 source_line=source_line,
+                packaging_role=packaging_role,
+                packaging_text=comment if packaging_role == "user_preference" else "",
             )
         )
     if len(recovered) == len(quantity_marks):
@@ -434,7 +512,7 @@ def _single_quantity_items(
         ]
     # Число после пунктуации оставляем для последующего разбора хвостового количества.
     if name and tail and not re.match(r"^\s*[,;:\-—–]*\s*\d", stripped[mark.end() :]):
-        comment = explicit_supplier_comment(tail)
+        comment, comment_source, packaging_role = _tail_comment(tail)
         return [
             ExtractedItem(
                 product_query=(name if comment else _query_with_unmarked_tail(name, tail)),
@@ -442,8 +520,10 @@ def _single_quantity_items(
                 unit=normalize_unit(mark.group("unit") or ""),
                 comment=comment,
                 user_comment_to_supplier=comment,
-                comment_source=(CommentSource.EXPLICIT_MARKER if comment else CommentSource.NONE),
+                comment_source=comment_source,
                 source_line=source_line,
+                packaging_role=packaging_role,
+                packaging_text=comment if packaging_role == "user_preference" else "",
             )
         ]
     return None
@@ -545,17 +625,17 @@ def _word_quantity_item(
             name = " ".join(tokens[:index])
             tail = " ".join(tokens[end:])
             if name:
-                comment = explicit_supplier_comment(tail)
+                comment, comment_source, packaging_role = _tail_comment(tail)
                 return ExtractedItem(
                     product_query=(name if comment else _query_with_unmarked_tail(name, tail)),
                     quantity=quantity,
                     unit=unit,
                     comment=comment,
                     user_comment_to_supplier=comment,
-                    comment_source=(
-                        CommentSource.EXPLICIT_MARKER if comment else CommentSource.NONE
-                    ),
+                    comment_source=comment_source,
                     source_line=source_line,
+                    packaging_role=packaging_role,
+                    packaging_text=comment if packaging_role == "user_preference" else "",
                 )
             continue
         if name:
@@ -662,12 +742,21 @@ def _parse_product_line(
     )
     if word_item is not None:
         return [word_item]
+    product_query, comment = _normalize_unmarked_qualifiers(stripped)
     if (
-        (lines_count > 1 or len(stripped.split()) <= 8)
+        (lines_count > 1 or len(stripped.split()) <= 8 or product_query != stripped)
         and re.search(r"[a-zа-яё]", stripped, re.I)
         and _has_independent_product_evidence(stripped, unit_pattern)
     ):
-        return [ExtractedItem(product_query=stripped, source_line=line)]
+        return [
+            ExtractedItem(
+                product_query=product_query,
+                comment=comment,
+                user_comment_to_supplier=comment,
+                comment_source=CommentSource.SEMANTIC if comment else CommentSource.NONE,
+                source_line=line,
+            )
+        ]
     return []
 
 

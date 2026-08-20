@@ -86,8 +86,7 @@ def submission_failure_reply(state: Any, order_no: str) -> BotReply:
 
 
 def submission_dispatch_uncertain_reply(state: Any, order_no: str) -> BotReply:
-    """Формирует предупреждение без опасной кнопки повторной отправки."""
-    del state
+    """Формирует предупреждение с безопасной проверкой без повторной отправки."""
     return BotReply(
         text=(
             f"🔸 {heading('Нужно проверить отправку')}\n\n"
@@ -95,7 +94,38 @@ def submission_dispatch_uncertain_reply(state: Any, order_no: str) -> BotReply:
             "<b>Не отправляйте её повторно:</b> поставщики могли уже получить заказ.\n"
             "Сообщите менеджеру по снабжению этот код:\n"
             f"<code>{escape(order_no)}</code>"
-        )
+        ),
+        rows=[
+            [
+                Button(
+                    text="Проверить отправку",
+                    callback_data=_callback_with_revision(state, "v2:check_submission"),
+                )
+            ],
+            [Button(text="К черновику", callback_data=_callback_with_revision(state, "v2:back"))],
+        ],
+    )
+
+
+def submission_dispatch_still_uncertain_reply(state: Any, order_no: str) -> BotReply:
+    """Сообщает, что подтверждение не найдено и повторять отправку нельзя."""
+    return BotReply(
+        text=(
+            f"🔸 {heading('Подтверждение пока не найдено')}\n\n"
+            f"Заявка <code>{escape(order_no)}</code> ещё не появилась в «Истории».\n"
+            "Это не означает, что она не была получена поставщиками.\n\n"
+            "Не отправляйте заявку повторно. Попробуйте проверить позже или сообщите код "
+            "ответственному сотруднику."
+        ),
+        rows=[
+            [
+                Button(
+                    text="Проверить отправку",
+                    callback_data=_callback_with_revision(state, "v2:check_submission"),
+                )
+            ],
+            [Button(text="К черновику", callback_data=_callback_with_revision(state, "v2:back"))],
+        ],
     )
 
 

@@ -28,6 +28,7 @@ from restaurant_bot.domain.models import (
     CatalogProduct,
     CommentSource,
     ConversationState,
+    ExtractedItem,
     ItemStatus,
     SearchScope,
 )
@@ -48,6 +49,28 @@ logger = structlog.get_logger(__name__)
 def _semantic_source(item: CartItem) -> str:
     """Возвращает локальный span для semantic-проверок товара."""
     return item.source_span.strip() or item.source_line.strip()
+
+
+def _has_multiple_source_items(item: CartItem) -> bool:
+    """Проверяет, содержит ли исходная строка несколько товарных позиций."""
+    full_source = item.source_line.strip()
+    local_source = _semantic_source(item)
+    if (
+        not full_source
+        or not local_source
+        or normalize_text(full_source) == normalize_text(local_source)
+    ):
+        return False
+    return len(parse_product_lines(full_source)) > 1
+
+
+def _quantity_authorization_source(item: CartItem) -> str:
+    """Выбирает полный источник количества только для одной товарной позиции."""
+    full_source = item.source_line.strip()
+    local_source = _semantic_source(item)
+    if full_source and not _has_multiple_source_items(item):
+        return full_source
+    return local_source or full_source
 
 
 def _catalog_search_query(item: CartItem) -> str:
@@ -175,6 +198,199 @@ class CatalogResolutionService:
     def __init__(self, catalog_resolver: CatalogResolver) -> None:
         """Сохраняет чистый resolver поиска и решений каталога."""
         self.catalog_resolver = catalog_resolver
+
+    def merge_catalog_qualified_items(
+        self,
+        items: list[ExtractedItem],
+        catalog: list[CatalogProduct],
+        search_scope: SearchScope | None = None,
+        *,
+        supplier_hint: str = "",
+    ) -> list[ExtractedItem]:
+        """Объединяет хвост позиции с предыдущим товаром только по доказательству каталога."""
+        if len(items) < 2 or not catalog:
+            return items
+
+        merged = list(items)
+        index = 1
+        while index < len(merged):
+            previous = merged[index - 1]
+            fragment = merged[index]
+            candidate = self._qualified_fragment_candidate(
+                previous,
+                fragment,
+                catalog,
+                search_scope,
+                supplier_hint=supplier_hint,
+            )
+            if candidate is None:
+                index += 1
+                continue
+            merged[index - 1] = self._merge_qualified_fragment(previous, fragment, candidate)
+            logger.info(
+                "catalog_identity_fragment_merged",
+                base_query=previous.product_query,
+                fragment_query=fragment.product_query,
+                selected_product_id=candidate.product_id,
+            )
+            del merged[index]
+        return merged
+
+    def _qualified_fragment_candidate(
+        self,
+        previous: ExtractedItem,
+        fragment: ExtractedItem,
+        catalog: list[CatalogProduct],
+        search_scope: SearchScope | None,
+        *,
+        supplier_hint: str,
+    ) -> CatalogProduct | None:
+        """Находит товар, для которого два соседних запроса являются одной идентичностью."""
+        previous_source = normalize_text(previous.source_line or previous.source_span)
+        fragment_source = normalize_text(fragment.source_line or fragment.source_span)
+        fragment_query = clean_text(fragment.product_query)
+        previous_query = clean_text(previous.product_query)
+        if (
+            not previous_source
+            or not fragment_source
+            or not previous_query
+            or not fragment_query
+            or fragment.comment
+            or fragment.user_comment_to_supplier
+        ):
+            return None
+
+        hint = fragment.supplier_hint or previous.supplier_hint or supplier_hint
+        base_result = self.catalog_resolver.search(
+            previous_query,
+            catalog,
+            hint,
+            search_scope,
+        )
+        fragment_result = self.catalog_resolver.search(
+            fragment_query,
+            catalog,
+            hint,
+            search_scope,
+        )
+        if (
+            not base_result.found_in_scope
+            or not fragment_result.found_in_scope
+            or not base_result.candidates
+            or not fragment_result.candidates
+        ):
+            return None
+        combined_query = clean_text(f"{previous_query} {fragment_query}")
+        combined_result = self.catalog_resolver.search(
+            combined_query,
+            catalog,
+            hint,
+            search_scope,
+        )
+        base_ids = {candidate.product_id for candidate in base_result.candidates}
+        shared_ids = base_ids & {candidate.product_id for candidate in fragment_result.candidates}
+        for candidate in combined_result.candidates:
+            if candidate.product_id not in shared_ids:
+                continue
+            base_evidence = query_evidence_tokens(previous_query, candidate.name)
+            fragment_evidence = query_evidence_tokens(fragment_query, candidate.name)
+            combined_evidence = query_evidence_tokens(combined_query, candidate.name)
+            if (
+                fragment_evidence
+                and fragment_evidence.isdisjoint(base_evidence)
+                and len(combined_evidence) > len(base_evidence)
+            ):
+                if self._is_independent_quantity_item(fragment, fragment_query, candidate):
+                    continue
+                return next(
+                    product for product in catalog if product.product_id == candidate.product_id
+                )
+        return None
+
+    @staticmethod
+    def _is_independent_quantity_item(
+        fragment: ExtractedItem,
+        fragment_query: str,
+        candidate: Candidate,
+    ) -> bool:
+        """Не объединяет самостоятельную многословную позицию с предыдущим товаром."""
+        if fragment.quantity is None or not fragment.unit:
+            return False
+        if not has_complete_query_evidence(fragment_query, candidate.name):
+            return False
+        fragment_tokens = tokens(fragment_query)
+        if len(fragment_tokens) <= 1:
+            return False
+        supplier_tokens = tokens(candidate.supplier)
+        supplier_overlap = len(fragment_tokens & supplier_tokens)
+        return not supplier_tokens or supplier_overlap * 2 < len(fragment_tokens)
+
+    @staticmethod
+    def _merge_qualified_fragment(
+        previous: ExtractedItem,
+        fragment: ExtractedItem,
+        product: CatalogProduct,
+    ) -> ExtractedItem:
+        """Сохраняет одну позицию и переносит в неё подтверждённое количество хвоста."""
+        source_values = [
+            value.strip()
+            for value in (previous.source_line, fragment.source_line)
+            if value and value.strip()
+        ]
+        source = clean_text(" ".join(dict.fromkeys(source_values)))
+        span_values = [
+            value.strip()
+            for value in (previous.source_span, fragment.source_span)
+            if value and value.strip()
+        ]
+        source_span = clean_text(" ".join(dict.fromkeys(span_values)))
+        source_for_quantity = source or source_span
+        fragment_authorization = reconcile_order_quantity_evidence(
+            source_for_quantity,
+            fragment.quantity,
+            fragment.unit,
+            quantity_source=fragment.quantity_source,
+            order_entry_text=fragment.order_entry_text,
+            order_entry_type=fragment.order_entry_type,
+            catalog_name=product.name,
+            packaging_role=fragment.packaging_role,
+        )
+        previous_authorization = reconcile_order_quantity_evidence(
+            source_for_quantity,
+            previous.quantity,
+            previous.unit,
+            quantity_source=previous.quantity_source,
+            order_entry_text=previous.order_entry_text,
+            order_entry_type=previous.order_entry_type,
+            catalog_name=product.name,
+            packaging_role=previous.packaging_role,
+        )
+        quantity = previous.quantity
+        unit = previous.unit
+        quantity_source = previous.quantity_source
+        order_entry_text = previous.order_entry_text
+        order_entry_type = previous.order_entry_type
+        if previous_authorization.provenance is QuantityProvenance.ORDER:
+            quantity = previous_authorization.quantity
+            unit = previous_authorization.unit
+        elif fragment_authorization.provenance is QuantityProvenance.ORDER:
+            quantity = fragment_authorization.quantity
+            unit = fragment_authorization.unit
+            quantity_source = fragment.quantity_source
+            order_entry_text = fragment.order_entry_text
+            order_entry_type = fragment.order_entry_type
+        return previous.model_copy(
+            update={
+                "product_query": clean_text(f"{previous.product_query} {fragment.product_query}"),
+                "quantity": quantity,
+                "unit": unit,
+                "quantity_source": quantity_source,
+                "order_entry_text": order_entry_text,
+                "order_entry_type": order_entry_type,
+                "source_line": source,
+                "source_span": source_span,
+            }
+        )
 
     def match_item(
         self,
@@ -478,7 +694,9 @@ class CatalogResolutionService:
         """Находит фасовку, распознанную голосом как количество заказа."""
         if item.quantity is None or not item.unit or item.quantity_source:
             return None
-        source = normalize_text(_semantic_source(item))
+        if _has_multiple_source_items(item) and item.packaging_role == "none":
+            return None
+        source = normalize_text(_quantity_authorization_source(item))
         if not source:
             source = normalize_text(item.source_query)
         if not source or has_explicit_order_marker(source) or numeric_range_spans(source):
@@ -514,6 +732,17 @@ class CatalogResolutionService:
         ]
         if not packaging_candidates:
             return None
+        authorization = reconcile_order_quantity_evidence(
+            source,
+            item.quantity,
+            item.unit,
+            quantity_source=item.quantity_source,
+            order_entry_type=item.order_entry_type,
+            catalog_name=packaging_candidates[0].name,
+            packaging_role=item.packaging_role,
+        )
+        if authorization.provenance is QuantityProvenance.ORDER:
+            return None
         return spoken_value, spoken_unit
 
     @staticmethod
@@ -546,14 +775,18 @@ class CatalogResolutionService:
             and not item.quantity_source
             and has_complete_query_evidence(item.source_query, product_name)
         )
+        preserve_multi_item_quantity = (
+            _has_multiple_source_items(item) and item.packaging_role == "none"
+        )
         if (
             item.quantity is not None
             and item.unit
             and candidate is not None
             and not preserve_source_free_quantity
+            and not preserve_multi_item_quantity
         ):
             authorization = reconcile_order_quantity_evidence(
-                _semantic_source(item) or item.source_query,
+                _quantity_authorization_source(item) or item.source_query,
                 item.quantity,
                 item.unit,
                 quantity_source=item.quantity_source,
@@ -571,7 +804,7 @@ class CatalogResolutionService:
             item.comment,
             item.source_query,
             product_name,
-            source_line=_semantic_source(item),
+            source_line=_quantity_authorization_source(item),
             include_source_query=False,
         )
         if not item.comment:
@@ -580,15 +813,17 @@ class CatalogResolutionService:
     @staticmethod
     def _reconcile_quantity_with_catalog_name(item: CartItem, product_name: str) -> None:
         """Отделяет количество заказа от фасовки в имени каталога."""
+        if _has_multiple_source_items(item) and item.packaging_role == "none":
+            return
         if (
-            not _semantic_source(item)
+            not _quantity_authorization_source(item)
             and not item.quantity_source
             and item.quantity is not None
             and has_complete_query_evidence(item.source_query, product_name)
         ):
             return
         authorization = reconcile_order_quantity_evidence(
-            _semantic_source(item) or item.source_query,
+            _quantity_authorization_source(item) or item.source_query,
             item.quantity,
             item.unit,
             quantity_source=item.quantity_source,

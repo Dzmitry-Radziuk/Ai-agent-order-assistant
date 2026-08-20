@@ -117,11 +117,12 @@ def test_final_review_explains_batch_without_internal_terms(settings) -> None:  
 
     reply = final_review_reply(ConversationState(cart=[item]))
 
-    assert "Этот товар заказывают партиями по <b>20 кг</b>" in reply.text
+    assert "Минимальное количество заказа — <b>20 кг</b>" in reply.text
+    assert "Можно заказать 20 кг, 40 кг, 60 кг и так далее." in reply.text
     assert "Вы указали: <b>10 кг</b>" in reply.text
     assert "Ближайший подходящий вариант: <b>20 кг</b>" in reply.text
     assert "нужно" not in reply.text.casefold()
-    assert "кратност" not in reply.text.casefold()
+    assert "партия" not in reply.text.casefold()
     assert reply.rows[0][0].text == "Выбрать количество"
 
 

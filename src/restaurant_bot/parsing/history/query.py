@@ -16,6 +16,7 @@ from restaurant_bot.domain.text import normalize_text
 from restaurant_bot.parsing.delivery_language import has_delivery_wish_shape
 from restaurant_bot.parsing.history.dates import business_today, date_reference_for
 from restaurant_bot.parsing.history.normalization import history_stem, history_tokens
+from restaurant_bot.parsing.semantic_routing import classify_bot_conversation
 
 _QUESTION_MARKERS = (
     "когда",
@@ -23,7 +24,6 @@ _QUESTION_MARKERS = (
     "поставк",
     "приезж",
     "привез",
-    "достав",
     "ждат",
     "будет",
     "задерж",
@@ -145,7 +145,15 @@ _STOP_STEMS = {
     "минималк",
 }
 _PAST_MARKERS = ("последн", "раньше", "был", "приезжал", "привозил")
-_ARRIVAL_MARKERS = ("уже приех", "уже привез", "достав", "приехал", "отмен", "задерж", "опаздыва")
+_ARRIVAL_MARKERS = (
+    "уже приех",
+    "уже привез",
+    "доставлен",
+    "приехал",
+    "отмен",
+    "задерж",
+    "опаздыва",
+)
 _DELIVERY_MARKERS = (
     "когда",
     "поставк",
@@ -189,7 +197,7 @@ _SERVICE_PREFIXES = (
 )
 _CONTEXT_PRONOUNS = ("он", "она", "оно", "они")
 _HISTORY_VERB_RE = re.compile(
-    r"\b(?:приед\w*|приех\w*|привез\w*|достав\w*|ожида\w*|"
+    r"\b(?:приед\w*|приех\w*|привез\w*|достав(?!к)\w*|ожида\w*|"
     r"задерж\w*|опаздыва\w*|буд(?:ет|ут|у|ем|ешь|ете)|ждат\w*)\b"
 )
 _HISTORY_PHRASE_PATTERNS = (
@@ -201,7 +209,7 @@ _HISTORY_PHRASE_PATTERNS = (
 )
 _INDEFINITE_OBJECT_RE = re.compile(r"\b(?:что|чего)(?:[-\s](?:нибудь|то))\b")
 _GENERAL_DELIVERY_RE = re.compile(
-    r"\b(?:приед\w*|приех\w*|привез\w*|достав\w*|ожида\w*|"
+    r"\b(?:приед\w*|приех\w*|привез\w*|достав(?!к)\w*|ожида\w*|"
     r"буд(?:ет|ут|у|ем|ешь|ете)|ждат\w*)\b"
 )
 
@@ -290,6 +298,20 @@ def _has_history_signal(normalized: str, *, raw_text: str = "") -> bool:
     )
 
 
+def _is_conversational_question(normalized: str) -> bool:
+    """Отсекает вопрос к боту, в котором нет признака поставки или истории."""
+    if _HISTORY_VERB_RE.search(normalized) or any(
+        marker in normalized for marker in _QUESTION_MARKERS
+    ):
+        return False
+    has_bot_reference = re.search(r"\b(?:ты|тебе|тебя|тобой|вы|вам)\b", normalized)
+    has_question_shape = re.search(
+        r"\b(?:что|как|кто|почему|зачем|можешь|уме\w*|работа\w*)\b",
+        normalized,
+    )
+    return bool(has_bot_reference and has_question_shape)
+
+
 def _venue_delivery_shape(normalized: str, products: Sequence[str]) -> tuple[bool, bool]:
     """Распознаёт общий вопрос о поставках и возможную ссылку на человека."""
     indefinite = _INDEFINITE_OBJECT_RE.search(normalized)
@@ -345,6 +367,8 @@ def parse_history_query(
 ) -> HistoryQuery | None:
     """Распознаёт общий смысл естественного вопроса о товарной поставке."""
     normalized = normalize_text(text)
+    if _is_conversational_question(normalized) or classify_bot_conversation(text) is not None:
+        return None
     if _is_global_order_status_request(normalized):
         return None
     if re.fullmatch(

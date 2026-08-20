@@ -106,11 +106,23 @@ def clean_command_target(value: str) -> str:
 
 def _is_whole_draft_target(value: str) -> bool:
     """Отличает название всего черновика от названия отдельного товара."""
+    target = normalize_command_text(value)
+    if re.fullmatch(rf"(?:{_DRAFT_MODIFIER_RE}\s+)?{_DRAFT_LOCATION_RE}", target, re.I):
+        return True
+
+    all_quantifier = r"(?:все|всё|всю|весь|полностью|целиком)"
+    item_word = r"(?:товар\w*|позици\w*|продукт\w*)"
+    draft_location = rf"(?:{_DRAFT_MODIFIER_RE}\s+)?{_DRAFT_LOCATION_RE}"
     return bool(
         re.fullmatch(
-            rf"(?:{_DRAFT_MODIFIER_RE}\s+)?{_DRAFT_LOCATION_RE}",
-            clean_text(value),
-            flags=re.I,
+            rf"{all_quantifier}(?:\s+{item_word})?\s+(?:из|с|в|на)\s+{draft_location}",
+            target,
+            re.I,
+        )
+        or re.fullmatch(
+            rf"{item_word}\s+(?:из|с|в|на)\s+{draft_location}\s+{all_quantifier}",
+            target,
+            re.I,
         )
     )
 

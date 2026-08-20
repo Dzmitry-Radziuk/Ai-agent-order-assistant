@@ -141,6 +141,34 @@ def test_parses_single_product_removal_phrasings(phrase: str, target: str) -> No
 
 
 @pytest.mark.parametrize(
+    "phrase",
+    [
+        "Удали все товары из черновика.",
+        "Удали товары из черновика все.",
+        "Удалив все товары из черновика.",
+        "Удали всё из черновика.",
+    ],
+)
+def test_parses_whole_draft_removal_as_clear_cart(phrase: str) -> None:
+    """Распознаёт удаление всех позиций черновика как его полную очистку."""
+    command = infer_intent(phrase)
+
+    assert command.intent is Intent.CLEAR_CART
+    assert command.items == []
+
+
+def test_comment_label_is_not_saved_as_part_of_supplier_wish() -> None:
+    """Удаляет служебную метку комментария и сохраняет предлог в пожелании."""
+    command = infer_intent(
+        "Добавь к тестовому товару комментарий: комментарий: в упаковках по 10 штук."
+    )
+
+    assert command.intent is Intent.EDIT_COMMENT
+    assert command.comment_target_query == "тестовому товару"
+    assert command.comment_text == "в упаковках по 10 штук"
+
+
+@pytest.mark.parametrize(
     ("phrase", "expected"),
     [
         ("пожалуйста, не отправляй эту заявку", Intent.CANCEL),

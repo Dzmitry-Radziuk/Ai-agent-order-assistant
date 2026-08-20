@@ -46,9 +46,12 @@ from restaurant_bot.parsing.delivery_language import has_delivery_wish_shape
 from restaurant_bot.parsing.history import parse_history_query, requires_history_context
 from restaurant_bot.parsing.products import has_multiple_explicit_order_items
 from restaurant_bot.parsing.semantic_routing import (
+    classify_bot_conversation,
     normalize_comment_proposal,
+    protect_bot_conversation,
     protect_confirmed_command,
 )
+from restaurant_bot.parsing.venue_query import is_venue_status_query
 from restaurant_bot.services.conversation_handlers.pending_quantity import (
     PendingQuantityHandler,
 )
@@ -156,6 +159,9 @@ class TelegramInputInterpreter:
             text, comment_scope_items(state)
         ):
             return self._parse_pending_comment_scope(text, state)
+        final_review_command = self._standalone_final_review_command(text, state)
+        if final_review_command is not None:
+            return final_review_command
         if not has_pending_comment_scope(state):
             callback_data = self._match_visible_action(text, state)
             if callback_data:
@@ -164,11 +170,19 @@ class TelegramInputInterpreter:
                 )
                 if self._candidate_command_is_authorized(visible_command, state):
                     return visible_command
-        history_query = parse_history_query(
-            text,
-            context_product_queries=self._history_context_products(state),
-            today=self.today,
-            timezone_name=self.timezone_name,
+        conversation_intent = classify_bot_conversation(text)
+        if is_venue_status_query(text):
+            logger.info("venue_status_query_parsed")
+            return ParsedCommand(intent=Intent.VENUE_STATUS, text=text)
+        history_query = (
+            None
+            if conversation_intent is not None
+            else parse_history_query(
+                text,
+                context_product_queries=self._history_context_products(state),
+                today=self.today,
+                timezone_name=self.timezone_name,
+            )
         )
         if history_query is not None and not has_multiple_explicit_order_items(text):
             logger.info(
@@ -182,7 +196,7 @@ class TelegramInputInterpreter:
                 text=text,
                 history_query=history_query,
             )
-        if requires_history_context(text):
+        if conversation_intent is None and requires_history_context(text):
             return ParsedCommand(intent=Intent.UNKNOWN, text=text)
         if has_explicit_global_comment_scope(text) and has_delivery_wish_shape(text):
             comment_text = strip_explicit_comment_scope_prefix(text)
@@ -212,10 +226,11 @@ class TelegramInputInterpreter:
         if deterministic.intent is Intent.EDIT_COMMENT and proven_mutation:
             return deterministic
         parsed = self.provider.parse_text(text)
+        parsed = protect_bot_conversation(text, parsed)
         parsed = normalize_comment_proposal(text, parsed)
         parsed = self._normalize_explicit_comment(text, parsed, state)
         parsed = self._authorize_candidate_command(parsed, state, text)
-        if proven_mutation:
+        if proven_mutation and conversation_intent is None:
             protected = protect_confirmed_command(deterministic, parsed)
             if protected is not parsed:
                 return protected
@@ -276,6 +291,18 @@ class TelegramInputInterpreter:
             update={"text": text}
         )
         return self._authorize_candidate_command(selected_command, state, text)
+
+    @staticmethod
+    def _standalone_final_review_command(
+        text: str,
+        state: ConversationState,
+    ) -> ParsedCommand | None:
+        """Распознаёт короткое слово «итог» только в заполненном черновике."""
+        if state.stage is not SessionStage.REVIEW or not state.cart:
+            return None
+        if normalize_text(text).strip(" .!?…") not in {"итог", "итоги"}:
+            return None
+        return ParsedCommand(intent=Intent.SHOW_FINAL_REVIEW, text=text)
 
     @staticmethod
     def _history_context_products(state: ConversationState) -> list[str]:

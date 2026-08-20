@@ -46,6 +46,7 @@ from restaurant_bot.presentation.telegram.submission import (
     order_status_detail_page_count,
     submission_catalog_conflict_reply,
     submission_catalog_uncertain_reply,
+    submission_dispatch_still_uncertain_reply,
     submission_dispatch_uncertain_reply,
     submission_failure_reply,
     submission_local_saved_reply,
@@ -715,6 +716,18 @@ class SubmissionService:
             state.venue_name or state.restaurant,
         )
         if not rows:
+            if (
+                state.status == "dispatch_uncertain"
+                and state.pending_submission is not None
+                and state.pending_submission.order_no == target
+            ):
+                self._send_status_reply(
+                    chat_id,
+                    state,
+                    submission_dispatch_still_uncertain_reply(state, target),
+                    lease=lease,
+                )
+                return
             self._send_status_reply(
                 chat_id,
                 state,

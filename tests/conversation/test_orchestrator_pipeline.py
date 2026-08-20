@@ -453,7 +453,7 @@ def test_product_text_pipeline_shows_progress_and_edits_it_with_result(mocker) -
     assert service.telegram.send_reply.call_count == 2
     progress = service.telegram.send_reply.call_args_list[0].args[1]
     final = service.telegram.send_reply.call_args_list[1].args[1]
-    assert progress.text == "🔎 Ищу товары в каталоге…"
+    assert progress.text == "⏳ Обрабатываю сообщение…"
     assert final.edit_message_id == 55
     service.telegram.disable_keyboard.assert_called_once_with("7", None)
     service.catalog.get.assert_called_once_with("")

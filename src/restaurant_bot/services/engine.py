@@ -804,6 +804,17 @@ class ConversationEngine:
         if command.intent == Intent.MERGE_DUPLICATE:
             return self._confirm_current(state)
         if command.intent in {Intent.CONTINUE_CURRENT, Intent.CLARIFY_CURRENT}:
+            current = state.current_item()
+            if (
+                command.intent is Intent.CONTINUE_CURRENT
+                and state.stage is SessionStage.AWAIT_UNIT_QUANTITY
+                and current is not None
+                and current.status is ItemStatus.UNIT_MISMATCH
+            ):
+                return EngineResult(
+                    state=state,
+                    reply=issue_reply(current, state_item_index(state, current)),
+                )
             return self._advance(state)
         final_review_outcome = self.final_review_handler.handle(command, state)
         if final_review_outcome is not None:
@@ -871,7 +882,13 @@ class ConversationEngine:
             selected_supplier = state.supplier_hint_context
             newly_unresolved_ids: list[str] = []
             added_item_ids: list[str] = []
-            for extracted in command.items:
+            items_to_add = self.catalog_resolution.merge_catalog_qualified_items(
+                command.items,
+                catalog,
+                state.search_scope,
+                supplier_hint=selected_supplier,
+            )
+            for extracted in items_to_add:
                 if selected_supplier:
                     extracted = extracted.model_copy(update={"supplier_hint": selected_supplier})
                 else:

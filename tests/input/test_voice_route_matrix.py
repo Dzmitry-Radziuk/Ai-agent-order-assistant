@@ -15,6 +15,22 @@ def test_voice_add_more_command_with_transcriber_terminal_punctuation() -> None:
 
 
 @pytest.mark.parametrize(
+    "phrase",
+    [
+        "Удали все товары из черновика.",
+        "Удали товары из черновика все.",
+        "Удалив все товары из черновика.",
+    ],
+)
+def test_voice_clear_draft_phrasings_use_the_same_command_route(phrase: str) -> None:
+    """Проводит голосовые формулировки очистки черновика через общий разбор команд."""
+    command = infer_intent(phrase)
+
+    assert command.intent is Intent.CLEAR_CART
+    assert command.items == []
+
+
+@pytest.mark.parametrize(
     ("phrase", "intent"),
     [
         ("старт", Intent.GREETING),

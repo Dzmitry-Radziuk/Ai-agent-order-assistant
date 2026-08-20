@@ -112,7 +112,10 @@ def test_submission_retry_is_blocked_after_uncertain_dispatch(settings) -> None:
     assert guarded.state.pending_submission is not None
     assert guarded.state.pending_submission.order_no == "20260722-0002"
     assert "не отправляйте её повторно" in guarded.reply.text.lower()
-    assert guarded.reply.rows == []
+    assert [button.text for row in guarded.reply.rows for button in row] == [
+        "Проверить отправку",
+        "К черновику",
+    ]
 
 
 def test_disabled_external_dispatch_still_enqueues_local_table_write(settings) -> None:  # type: ignore[no-untyped-def]

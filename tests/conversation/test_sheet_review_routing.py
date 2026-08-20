@@ -33,7 +33,10 @@ def _state(**kwargs: object) -> ConversationState:
         "review_venue_code": "VENUE",
         "ui_message_text": "Проверьте текущую заявку",
         "visible_actions": [
-            {"label": "Отправить заявку", "action_id": "v2:review_submit:token123:r4"},
+            {
+                "label": "Отправить заявку",
+                "action_id": "v2:review_submit:token123:r4",
+            },
             {"label": "Отменить", "action_id": "v2:review_cancel:token123:r4"},
         ],
     }

@@ -37,7 +37,7 @@ def test_convertible_units_require_explicit_catalog_unit_confirmation(settings) 
     item = result.state.cart[0]
     assert item.status is ItemStatus.UNIT_MISMATCH
     assert (item.quantity, item.unit, item.catalog_unit) == (1000, "мл", "л")
-    assert "Этот товар заказывается" in result.reply.text
+    assert "Количество этого товара указывают <b>в л</b>." in result.reply.text
 
 
 def test_incompatible_unit_requires_confirmation_instead_of_silent_change(settings) -> None:  # type: ignore[no-untyped-def]
@@ -54,7 +54,7 @@ def test_incompatible_unit_requires_confirmation_instead_of_silent_change(settin
     )
 
     assert added.state.cart[0].status is ItemStatus.UNIT_MISMATCH
-    assert "этот товар заказывается" in added.reply.text.lower()
+    assert "количество этого товара указывают <b>в л</b>." in added.reply.text.lower()
 
     accepted = engine.handle(
         _event(),
@@ -215,6 +215,23 @@ def test_manual_unit_correction_uses_catalog_unit_and_rejects_repeated_weight(
     assert corrected.unit == "г"
     assert "500 <b>шт" not in repeated_weight.reply.text
     assert "сколько шт нужно" in repeated_weight.reply.text
+
+    variants = engine.handle(
+        TelegramEvent(
+            update_id=3,
+            chat_id="123456",
+            input_type=InputKind.CALLBACK,
+            callback_data="v2:resolve",
+        ),
+        parse_callback("v2:resolve"),
+        prompt.state,
+        [],
+    )
+
+    assert variants.state.stage is SessionStage.AWAIT_UNIT_QUANTITY
+    assert variants.state.current_issue_item_id == "cheese"
+    assert "Уточните количество" in variants.reply.text
+    assert "Черновик заявки" not in variants.reply.text
 
 
 def test_package_suggestion_button_applies_selected_piece_count(settings) -> None:  # type: ignore[no-untyped-def]

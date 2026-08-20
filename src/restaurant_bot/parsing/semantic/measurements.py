@@ -111,7 +111,11 @@ def extract_semantic_facts(source_text: str) -> tuple[SemanticFact, ...]:
         marker_prefix = source[max(0, match.start() - 24) : match.start()]
         global_quantity_scope = bool(_GLOBAL_QUANTITY_SCOPE_RE.search(marker_prefix))
         local_order_marker = bool(
-            re.search(r"\b(?:нужно|надо|закаж\w*|добав\w*|постав\w*)\b", marker_prefix, re.I)
+            re.search(
+                r"\b(?:нужно|надо|закаж\w*|заказ\w*|добав\w*|постав\w*)\b",
+                marker_prefix,
+                re.I,
+            )
         )
         terminal_order_quantity = not source[match.end() :].strip(" \t\r\n.,;:!?()[]{}")
         explicit_order = (

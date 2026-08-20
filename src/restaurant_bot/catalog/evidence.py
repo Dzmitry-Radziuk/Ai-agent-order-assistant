@@ -347,7 +347,7 @@ def numeric_evidence(value: str) -> list[NumericEvidence]:
         )
 
     compact_pattern = re.compile(
-        rf"(?<!\w)(?P<value>\d+(?:[.,]\d+)?)(?P<unit>{unit_pattern})\b",
+        rf"(?<!\w)(?P<value>\d+(?:[.,]\d+)?)(?:\s*)(?P<unit>{unit_pattern})\b",
         flags=re.IGNORECASE,
     )
     for match in compact_pattern.finditer(normalized):
@@ -386,7 +386,7 @@ def numeric_evidence(value: str) -> list[NumericEvidence]:
             if not re.fullmatch(r"\d+(?:\.\d+)?", token):
                 continue
             raw_unit = ""
-            span_end_index = end_index - 1
+            span_end_index = end_index
         else:
             span_end_index = end_index
         start = token_matches[index].start()
@@ -480,6 +480,43 @@ def _token_matches(query_token: str, product_token: str) -> bool:
     return similarity >= threshold
 
 
+def _has_strong_token_match(query_token: str, product_token: str) -> bool:
+    """Проверяет точное или морфологически расширенное совпадение слова."""
+    query_token = _canonical_token(query_token)
+    product_token = _canonical_token(product_token)
+    if query_token == product_token:
+        return True
+    short = min(query_token, product_token, key=len)
+    common_prefix = 0
+    for left, right in zip(query_token, product_token, strict=False):
+        if left != right:
+            break
+        common_prefix += 1
+    return len(short) >= 4 and common_prefix >= 4 and common_prefix / len(short) >= 0.6
+
+
+def _compound_query_matches(
+    query_tokens_in_order: list[str],
+    product_tokens_in_order: list[str],
+) -> set[str]:
+    """Находит слова запроса, объединённые в одно слово в названии каталога."""
+    canonical_query = [_canonical_token(token) for token in query_tokens_in_order]
+    canonical_product = [_canonical_token(token) for token in product_tokens_in_order]
+    matched: set[str] = set()
+    for start in range(len(canonical_query)):
+        for end in range(start + 2, len(canonical_query) + 1):
+            joined = "".join(canonical_query[start:end])
+            if any(
+                (joined == product_token or joined in product_token or product_token in joined)
+                and min(len(joined), len(product_token)) / max(len(joined), len(product_token))
+                >= 0.8
+                and _token_matches(joined, product_token)
+                for product_token in canonical_product
+            ):
+                matched.update(query_tokens_in_order[start:end])
+    return matched
+
+
 def has_catalog_search_evidence(query: str, product: CatalogProduct) -> bool:
     """Проверяет наличие достаточных оснований для показа кандидата."""
     normalized_query = normalize_text(query)
@@ -501,22 +538,24 @@ def has_catalog_search_evidence(query: str, product: CatalogProduct) -> bool:
         if _token_matches(query_token, product_token)
     ]
     matched_query_tokens = {query_token for query_token, _ in matched_pairs}
+    matched_query_tokens.update(_compound_query_matches(query_ordered, product_ordered))
     if len(query_ordered) == 1 and matched_query_tokens:
         return True
     if len(matched_query_tokens) >= 2:
         return True
+
     if (
         len(matched_query_tokens) == 1
         and query_ordered
         and query_ordered[0] in matched_query_tokens
         and product_ordered
         and any(
-            _token_matches(query_ordered[0], product_token) for product_token in product_ordered
+            _has_strong_token_match(query_ordered[0], product_token)
+            for product_token in product_ordered
         )
     ):
-        # Одно неподтверждённое слово в хвосте может быть неизвестным вариантом.
-        # Базового товара в начале достаточно для кандидата уточнения; общий
-        # признак в середине или конце сам по себе недостаточен.  # noqa: RUF003
+        # Для неизвестного хвоста достаточно точного базового слова товара.
+        # Нечёткое совпадение базового слова не должно создавать кандидата.
         return True
 
     # Голосовое распознавание Telegram иногда сливает соседние слова:

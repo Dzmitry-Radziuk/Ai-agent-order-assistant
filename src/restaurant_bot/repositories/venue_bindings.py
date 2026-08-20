@@ -18,12 +18,29 @@ class VenueBindingRepository:
     def get_active(self, user_id: str, chat_id: str) -> VenueBinding | None:
         """Возвращает активную привязку пользователя и чата."""
         return self.db.scalar(
-            select(VenueBinding).where(
+            select(VenueBinding)
+            .where(
                 VenueBinding.channel == "telegram",
                 VenueBinding.telegram_user_id == user_id,
                 VenueBinding.telegram_chat_id == chat_id,
                 VenueBinding.is_active.is_(True),
                 VenueBinding.sync_status == "synced",
+            )
+            .order_by(VenueBinding.updated_at.desc(), VenueBinding.id.desc())
+            .limit(1)
+        )
+
+    def list_for_identity(self, user_id: str, chat_id: str) -> list[VenueBinding]:
+        """Возвращает все локальные привязки пользователя в порядке обновления."""
+        return list(
+            self.db.scalars(
+                select(VenueBinding)
+                .where(
+                    VenueBinding.channel == "telegram",
+                    VenueBinding.telegram_user_id == user_id,
+                    VenueBinding.telegram_chat_id == chat_id,
+                )
+                .order_by(VenueBinding.updated_at.desc(), VenueBinding.id.desc())
             )
         )
 
@@ -75,6 +92,7 @@ class VenueBindingRepository:
         legal_name: str,
         spreadsheet_id: str,
         spreadsheet_url: str,
+        preserve_existing: bool = False,
     ) -> tuple[VenueBinding, list[VenueBinding], bool]:
         """Создаёт активную привязку пользователя к заведению."""
         rows = list(
@@ -117,7 +135,7 @@ class VenueBindingRepository:
 
         deactivated = []
         for row in rows:
-            if row is not current and row.is_active:
+            if not preserve_existing and row is not current and row.is_active:
                 row.is_active = False
                 deactivated.append(row)
         self.db.flush()

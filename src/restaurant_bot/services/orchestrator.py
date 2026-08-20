@@ -74,7 +74,7 @@ from restaurant_bot.integrations.openai_client import OpenAIService
 from restaurant_bot.integrations.openai_transcription_policy import has_distinct_models
 from restaurant_bot.integrations.telegram import TELEGRAM_TRANSIENT_ERRORS, TelegramClient
 from restaurant_bot.observability import sanitize_log_value
-from restaurant_bot.parsing.commands.api import infer_intent
+from restaurant_bot.parsing.venue_query import is_venue_status_query
 from restaurant_bot.persistence.database import SessionLocal
 from restaurant_bot.presentation.telegram.conversation import (
     render_conversation_view,
@@ -258,6 +258,15 @@ class UpdateOrchestrator:
                     )
 
                 registration = self.registration.handle(event)
+                if (
+                    not registration.handled
+                    and event.input_type is InputKind.TEXT
+                    and is_venue_status_query(event.text)
+                ):
+                    registration = RegistrationResult(
+                        handled=True,
+                        reply=self.registration.current_venue_reply(event),
+                    )
                 if registration.handled:
                     registration_kwargs = _lease_kwargs(lease)
                     if processing_message_id is not None:
@@ -398,6 +407,7 @@ class UpdateOrchestrator:
                     history_command = (
                         command.intent is Intent.HISTORY_QUERY and command.history_query
                     )
+                    venue_status_command = command.intent is Intent.VENUE_STATUS
                     sheet_review_decision = (
                         self.engine.state_compatibility_policy.evaluate(
                             command,
@@ -450,6 +460,8 @@ class UpdateOrchestrator:
                             reply=self._sheet_review_ambiguous_reply(state),
                         )
                         if sheet_review_ambiguous
+                        else self._process_venue_status_query(event, state, venue_context)
+                        if venue_status_command
                         else self._process_history_query(command, state)
                         if history_command
                         else (
@@ -461,7 +473,7 @@ class UpdateOrchestrator:
                     _ensure_lease(lease)
 
                     # AI работает за пределами DB-транзакции. Он может выбрать только ID из shortlist.
-                    if not review_command and not history_command:
+                    if not review_command and not history_command and not venue_status_command:
                         if not sheet_review_ambiguous:
                             result = self._resolve_ai_pending(event, result, catalog)
                         self._leave_sheet_review_on_regular_command(command, result.state)
@@ -889,6 +901,8 @@ class UpdateOrchestrator:
             return "order_status"
         if intent is Intent.HISTORY_QUERY:
             return "history_query"
+        if intent is Intent.VENUE_STATUS:
+            return "venue_status"
         if intent in {
             Intent.REVIEW_ORDER,
             Intent.REVIEW_REFRESH,
@@ -1414,6 +1428,18 @@ class UpdateOrchestrator:
         )
         return EngineResult(state=state, reply=history_reply(answer))
 
+    def _process_venue_status_query(
+        self,
+        event: TelegramEvent,
+        state: ConversationState,
+        venue_context: VenueContext,
+    ) -> EngineResult:
+        """Возвращает актуальный ответ о заведении без изменения черновика."""
+        return EngineResult(
+            state=state,
+            reply=self.registration.current_venue_reply(event, venue_context),
+        )
+
     @staticmethod
     def _empty_history_answer(command: ParsedCommand) -> HistoryAnswer:
         """Создаёт безопасный пустой ответ для повреждённой команды."""
@@ -1509,7 +1535,6 @@ class UpdateOrchestrator:
             Intent.SHOW_CART,
             Intent.BACK,
             Intent.CONTINUE_CURRENT,
-            Intent.HELP,
         }:
             return BotReply(text="⏳ Открываю черновик…")
         if intent in {
@@ -1550,8 +1575,9 @@ class UpdateOrchestrator:
 
     @classmethod
     def _text_processing_reply_for_event(cls, event: TelegramEvent) -> BotReply:
-        """Формирует статус обработки текста до медленного разбора."""
-        return cls._processing_reply_for_intent(infer_intent(event.text).intent)
+        """Формирует нейтральный статус до полного разбора текста."""
+        del event
+        return cls._generic_processing_reply()
 
     def _update_processing(
         self,
@@ -1601,6 +1627,11 @@ class UpdateOrchestrator:
         catalog: list[CatalogProduct],
     ) -> EngineResult:
         """Разрешает спорные позиции по безопасному списку кандидатов."""
+        if result.state.stage in {
+            SessionStage.AWAIT_MANUAL_DETAILS,
+            SessionStage.AWAIT_PRODUCT_ADD_DETAILS,
+        }:
+            return result
         safely_resolved = False
         for item in result.state.cart:
             if item.status != ItemStatus.AMBIGUOUS or not item.candidates:

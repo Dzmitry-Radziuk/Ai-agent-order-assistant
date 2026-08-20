@@ -33,6 +33,8 @@ from restaurant_bot.parsing.commands.patterns import _COMMANDS, _NATURAL_COMMAND
 from restaurant_bot.parsing.comment_scope import _extract_global_comment
 from restaurant_bot.parsing.history import parse_history_query, requires_history_context
 from restaurant_bot.parsing.products import has_multiple_explicit_order_items, parse_product_lines
+from restaurant_bot.parsing.semantic_routing import classify_bot_conversation
+from restaurant_bot.parsing.venue_query import is_venue_status_query
 
 
 def _infer_negated_command(normalized: str) -> Intent | None:
@@ -108,6 +110,11 @@ def parse_text_command(text: str) -> ParsedCommand:
     # законченной фразой, поэтому точка не должна превращать «Добавить еще
     # товары» в товар под названием «товары».
     normalized = normalize_command_text(text)
+    conversation_intent = classify_bot_conversation(text)
+    if conversation_intent is not None:
+        return ParsedCommand(intent=conversation_intent, text=text)
+    if is_venue_status_query(text):
+        return ParsedCommand(intent=Intent.VENUE_STATUS, text=text)
     history_query = parse_history_query(text)
     if history_query is not None and not has_multiple_explicit_order_items(text):
         return ParsedCommand(intent=Intent.HISTORY_QUERY, text=text, history_query=history_query)
@@ -137,8 +144,9 @@ def parse_text_command(text: str) -> ParsedCommand:
         return comment_command
 
     if match := _REMOVE_RE.match(normalized):
-        target = clean_command_target(match.group(1))
-        if target and _is_whole_draft_target(target):
+        raw_target = match.group(1)
+        target = clean_command_target(raw_target)
+        if raw_target and _is_whole_draft_target(raw_target):
             return ParsedCommand(intent=Intent.CLEAR_CART, text=text)
         if target:
             return ParsedCommand(

@@ -1432,15 +1432,18 @@ def test_notification_failure_after_finalize_never_rolls_back_order(
     service._fail.assert_not_called()
 
 
-def test_dispatch_uncertain_reply_has_no_repeat_button() -> None:
-    """Не предлагает пользователю опасный повтор заявки."""
+def test_dispatch_uncertain_reply_offers_read_only_check() -> None:
+    """Предлагает проверить результат без опасного повтора заявки."""
     state = ConversationState(ui_revision=7)
 
     reply = submission_dispatch_uncertain_reply(state, "ORDER-6")
 
     assert "не отправляйте её повторно" in reply.text.lower()
     assert "ORDER-6" in reply.text
-    assert reply.rows == []
+    assert [(button.text, button.callback_data) for row in reply.rows for button in row] == [
+        ("Проверить отправку", "v2:check_submission:r7"),
+        ("К черновику", "v2:back:r7"),
+    ]
 
 
 def test_local_saved_reply_is_explicit_and_has_only_new_order_button() -> None:

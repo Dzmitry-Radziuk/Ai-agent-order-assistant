@@ -104,7 +104,7 @@ def test_common_candidate_word_does_not_silently_choose_a_product(settings) -> N
 
     assert result.state.cart[0].status is ItemStatus.AMBIGUOUS
     assert "Нашлось несколько похожих товаров" not in result.reply.text
-    assert "По запросу «<b>сироп</b>» найдено несколько вариантов." in result.reply.text
+    assert "Найдено несколько вариантов товара." in result.reply.text
 
 
 def test_unrecognized_voice_on_candidate_card_cannot_create_a_new_product(settings) -> None:  # type: ignore[no-untyped-def]
@@ -244,17 +244,17 @@ def test_selecting_typo_candidate_finishes_two_item_list_and_drops_numeric_garba
         catalog,
     )
 
-    assert selected.state.stage is SessionStage.AWAIT_ADD_MORE_CONFIRM
+    assert selected.state.stage is SessionStage.REVIEW
     assert [
         (item.catalog_product_id, item.quantity, item.status) for item in selected.state.cart
     ] == [
         ("sangria", 2, ItemStatus.MATCHED),
         ("cordial", 3, ItemStatus.MATCHED),
     ]
-    assert "Товары добавлены в черновик заказа" in selected.reply.text
-    assert "Сироп Сангрия" not in selected.reply.text
-    assert "Кордиал Апельсин" not in selected.reply.text
-    assert "Добавить ещё товары?" in selected.reply.text
+    assert "<i>Товары добавлены</i>" in selected.reply.text
+    assert "Сироп Сангрия" in selected.reply.text
+    assert "Кордиал Апельсин" in selected.reply.text
+    assert "Добавляйте товары текстом, голосом или фотографией списка" in selected.reply.text
 
 
 @pytest.mark.parametrize("input_type", [InputKind.TEXT, InputKind.VOICE])
@@ -277,7 +277,7 @@ def test_ambiguous_product_uses_human_copy_for_text_and_voice(
     )
 
     assert "Нашлось несколько похожих товаров" not in result.reply.text
-    assert "По запросу «<b>сироп</b>» найдено несколько вариантов." in result.reply.text
+    assert "Найдено несколько вариантов товара." in result.reply.text
     assert "Уточните, какой товар вы имели в виду:" in result.reply.text
 
 
@@ -310,7 +310,7 @@ def test_not_found_product_uses_human_copy_for_text_and_voice(
 
     assert result.reply.text == (
         "🔸 <b><u>Товар не найден</u></b>\n\n"
-        "По вашему запросу «<b>креветки королевские</b>» ничего не найдено.\n\n"
+        "По запросу «<b>креветки королевские</b>» ничего не найдено.\n\n"
         "Вы можете изменить название, отправить запрос менеджеру по снабжению "
         "или не добавлять товар."
     )

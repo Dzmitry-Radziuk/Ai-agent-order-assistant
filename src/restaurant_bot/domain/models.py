@@ -61,6 +61,7 @@ class Intent(StrEnum):
     REVIEW_CANCEL = "review_cancel"
     ORDER_STATUS = "order_status"
     HISTORY_QUERY = "history_query"
+    VENUE_STATUS = "venue_status"
     PRODUCT_ADD = "product_add"
     PRODUCT_ADD_RETRY = "product_add_retry"
     PRODUCT_ADD_SKIP = "product_add_skip"

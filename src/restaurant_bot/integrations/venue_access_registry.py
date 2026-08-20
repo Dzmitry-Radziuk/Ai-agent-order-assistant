@@ -27,6 +27,9 @@ class VenueAccessEntry:
     chat_id: str
     venue_code: str
     active: bool
+    venue_name: str = ""
+    spreadsheet_id: str = ""
+    spreadsheet_url: str = ""
 
 
 class VenueAccessRegistry:
@@ -64,22 +67,10 @@ class VenueAccessRegistry:
         force_refresh: bool = False,
     ) -> bool | None:
         """Возвращает решение реестра или None при недоступности Google."""
-        try:
-            entries = self._entries(force_refresh=force_refresh)
-        except Exception as exc:
-            logger.warning("venue_access_registry_unavailable", error_type=type(exc).__name__)
+        identity = self._identity(user_id, chat_id, venue_code)
+        matches = self._matches(identity, force_refresh=force_refresh)
+        if matches is None:
             return None
-        identity = (
-            "telegram",
-            clean_text(user_id),
-            clean_text(chat_id),
-            normalize_code(venue_code),
-        )
-        matches = [
-            entry
-            for entry in entries
-            if (entry.channel, entry.user_id, entry.chat_id, entry.venue_code) == identity
-        ]
         if not matches:
             return False
         if len({entry.active for entry in matches}) > 1:
@@ -90,6 +81,52 @@ class VenueAccessRegistry:
             )
             return False
         return all(entry.active for entry in matches)
+
+    def entries_for_identity(
+        self,
+        user_id: str,
+        chat_id: str,
+        *,
+        force_refresh: bool = False,
+    ) -> list[VenueAccessEntry] | None:
+        """Возвращает все строки доступа текущего пользователя из свежего снимка."""
+        try:
+            entries = self._entries(force_refresh=force_refresh)
+        except Exception as exc:
+            logger.warning("venue_access_registry_unavailable", error_type=type(exc).__name__)
+            return None
+        identity = ("telegram", clean_text(user_id), clean_text(chat_id))
+        return [
+            entry for entry in entries if (entry.channel, entry.user_id, entry.chat_id) == identity
+        ]
+
+    def _matches(
+        self,
+        identity: tuple[str, str, str, str],
+        *,
+        force_refresh: bool,
+    ) -> list[VenueAccessEntry] | None:
+        """Находит строки доступа для одного пользователя и кода."""
+        try:
+            entries = self._entries(force_refresh=force_refresh)
+        except Exception as exc:
+            logger.warning("venue_access_registry_unavailable", error_type=type(exc).__name__)
+            return None
+        return [
+            entry
+            for entry in entries
+            if (entry.channel, entry.user_id, entry.chat_id, entry.venue_code) == identity
+        ]
+
+    @staticmethod
+    def _identity(user_id: str, chat_id: str, venue_code: str) -> tuple[str, str, str, str]:
+        """Строит нормализованный ключ пользователя, чата и заведения."""
+        return (
+            "telegram",
+            clean_text(user_id),
+            clean_text(chat_id),
+            normalize_code(venue_code),
+        )
 
     def invalidate(self) -> None:
         """Удаляет кэш после изменения регистрационного листа."""
@@ -179,4 +216,7 @@ class VenueAccessRegistry:
             chat_id=chat_id,
             venue_code=venue_code,
             active=active,
+            venue_name=first("Название заведения", "venue_name"),
+            spreadsheet_id=first("Spreadsheet ID", "spreadsheet_id"),
+            spreadsheet_url=first("Spreadsheet URL", "spreadsheet_url"),
         )

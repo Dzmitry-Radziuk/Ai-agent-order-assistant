@@ -314,3 +314,43 @@ def test_voice_delivery_wish_and_history_share_text_route() -> None:
         )
         assert voice_command == text_command
         assert voice_command.intent is expected
+
+
+def test_order_delivery_attribute_is_not_history_for_text_or_voice() -> None:
+    """Сохраняет заказ, если слово «доставка» является характеристикой товара."""
+    provider = MagicMock()
+    provider.parse_text.return_value = ParsedCommand(intent=Intent.HISTORY_QUERY)
+
+    class TranscriptRecognizer:
+        """Передаёт расшифрованную голосовую фразу в текстовый маршрут."""
+
+        def recognize_media(self, event, state, parse_text, processing_message_id=None):
+            """Использует общий разбор текста после распознавания речи."""
+            del processing_message_id
+            return parse_text(event.text, state)
+
+    interpreter = TelegramInputInterpreter(
+        provider, lambda: TranscriptRecognizer(), StateCompatibilityPolicy()
+    )
+    state = ConversationState()
+    transcript = (
+        "Мне нужен лук зеленый, 5 килограмм, срез корня от 5 сантиметров, "
+        "также нужно, чтобы он был пучками и доставка в коробках."
+    )
+
+    text_command = interpreter.interpret_text(transcript, state)
+    voice_command = interpreter.interpret(
+        TelegramEvent(
+            update_id=2,
+            chat_id="chat",
+            input_type=InputKind.VOICE,
+            text=transcript,
+        ),
+        state,
+    )
+
+    assert text_command.intent is Intent.ADD_ITEMS
+    assert text_command.history_query is None
+    assert text_command.items[0].quantity == 5
+    assert text_command.items[0].unit == "кг"
+    assert voice_command == text_command

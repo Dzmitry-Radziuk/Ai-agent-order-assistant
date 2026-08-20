@@ -156,7 +156,7 @@ def _comment_is_catalog_fact(comment: str, item: CartItem) -> bool:
         source_line=item.source_line,
         include_source_query=True,
     )
-    return not cleaned and not re.search(_COMMENT_ACTION_RE, normalize_text(comment), re.I)
+    return not cleaned and not _COMMENT_ACTION_RE.search(normalize_text(comment))
 
 
 def reconcile_comment_target(

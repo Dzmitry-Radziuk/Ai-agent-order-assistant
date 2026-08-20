@@ -38,9 +38,10 @@ def test_unit_mismatch_card_requests_quantity_in_catalog_unit() -> None:
     )
 
     assert [row[0].callback_data for row in reply.rows] == [
-        "v2:unitedit:0",
         "v2:skip:0",
     ]
+    assert "Ввести количество" not in reply.text
+    assert "Количество этого товара указывают <b>в л</b>." in reply.text
     assert "Добавить 10 л" not in reply.text
 
 
@@ -61,5 +62,5 @@ def test_unit_mismatch_card_suggests_package_count_without_auto_applying() -> No
 
     assert reply.rows[0][0].text == "Заказать 3 шт (≈ 540 г)"
     assert reply.rows[0][0].callback_data == "v2:qty:cheese:3"
-    assert reply.rows[1][0].text == "Ввести количество в шт"
-    assert reply.rows[2][0].text == "Не добавлять"
+    assert reply.rows[1][0].text == "Не добавлять"
+    assert all("Ввести количество" not in row[0].text for row in reply.rows)

@@ -111,14 +111,11 @@ def advance(
     state.current_issue_item_id = ""
     state.current_issue_kind = None
     if state.pending_added_items_count:
-        prompt_count = state.pending_added_items_count
+        added_items_count = state.pending_added_items_count
         state.pending_added_items_count = 0
-        state.stage = SessionStage.AWAIT_ADD_MORE_CONFIRM
-        state.status = "await_add_more_confirm"
-        return ProgressionResult(
-            kind=ProgressionKind.ADD_MORE_CONFIRM,
-            prompt_count=prompt_count,
-        )
+        state.stage = SessionStage.REVIEW
+        state.status = "review"
+        return ProgressionResult(kind=ProgressionKind.DRAFT, added_count=added_items_count)
 
     state.stage = SessionStage.REVIEW if state.cart else SessionStage.COLLECTING
     return ProgressionResult(kind=ProgressionKind.DRAFT, added_count=added_count)

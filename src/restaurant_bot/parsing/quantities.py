@@ -6,6 +6,7 @@ import re
 
 from restaurant_bot.domain.text import normalize_text
 from restaurant_bot.domain.units import UNIT_ALIASES, normalize_unit
+from restaurant_bot.parsing.comment_policy import explicit_supplier_comment
 from restaurant_bot.parsing.number_words import NUMBER_WORDS, parse_number_words
 from restaurant_bot.parsing.numeric_ranges import numeric_range_spans
 
@@ -36,7 +37,7 @@ def shared_quantity_phrase(text: str) -> tuple[list[str], float, str, str] | Non
 
 
 _EXPLICIT_ORDER_QUANTITY_RE = re.compile(
-    r"(?:мне\s+)?(?:нужн(?:о|а|ы)|надо|закаж(?:и|ем|у)|добав(?:ь|ить)|"
+    r"(?:мне\s+)?(?:нужн(?:о|а|ы)|надо|закаж(?:и|ем|у)|заказ\w*|добав(?:ь|ить)|"
     r"постав(?:ь|ить)|возьм(?:и|ем)|количеств(?:о|ом)?|вес)\b",
     flags=re.I,
 )
@@ -67,6 +68,7 @@ def has_explicit_order_quantity(source_line: str, quantity: float | None) -> boo
         flags=re.I,
     )
     values: list[float] = []
+    value_matches: list[tuple[float, re.Match[str]]] = []
     for match in value_pattern.finditer(masked_source):
         raw_value = match.group("value").casefold()
         try:
@@ -77,6 +79,7 @@ def has_explicit_order_quantity(source_line: str, quantity: float | None) -> boo
             value = parsed[0] if parsed and parsed[1] == len(tokens) else -1
         if value >= 0:
             values.append(value)
+            value_matches.append((value, match))
     if not values or not any(abs(value - quantity) <= 1e-9 for value in values):
         return False
     if has_explicit_order_marker(masked_source):
@@ -89,6 +92,12 @@ def has_explicit_order_quantity(source_line: str, quantity: float | None) -> boo
         # Число внутри диапазона уже удалено из остатка. Сам факт наличия
         # диапазона не подтверждает заказанное количество.
         return False
+    matching_matches = [match for value, match in value_matches if abs(value - quantity) <= 1e-9]
+    if matching_matches:
+        # Явное пожелание после количества отделяет заказ от числа в названии.
+        suffix = source[matching_matches[-1].end() :]
+        if explicit_supplier_comment(suffix):
+            return True
     return bool(
         re.search(
             rf"(?:^|[-—–:])\s*\d+(?:[,.]\d+)?\s*(?:{unit_pattern})?\s*$",

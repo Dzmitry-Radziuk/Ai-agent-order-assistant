@@ -367,8 +367,7 @@ def test_global_comment_removal_returns_draft_with_buttons(settings) -> None:  #
     assert "Черновик заявки" in result.reply.text
     assert "Общие комментарии удалены" in result.reply.text
     assert [button.text for row in result.reply.rows for button in row] == [
-        "Отправить в корзину",
-        "Добавить ещё товары",
+        "Добавить в корзину и проверить",
         "Сбросить и начать заново",
     ]
     assert result.state.cart[0].comment == "только в железных банках"

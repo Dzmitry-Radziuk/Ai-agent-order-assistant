@@ -9,7 +9,11 @@ from restaurant_bot.conversation.comments import remove_global_comment_overlap
 from restaurant_bot.domain.models import CommentSource
 from restaurant_bot.domain.text import clean_text, normalize_text
 from restaurant_bot.parsing.ai.quantity_reconciliation import _remove_matching_quantity
-from restaurant_bot.parsing.comment_policy import explicit_supplier_comment, supplier_comment_start
+from restaurant_bot.parsing.comment_policy import (
+    explicit_supplier_comment,
+    is_comment_control_text,
+    supplier_comment_start,
+)
 from restaurant_bot.parsing.comment_scope import (
     has_explicit_global_comment_scope,
     has_explicit_group_comment_scope,
@@ -39,6 +43,8 @@ def _comment_source_is_authorized(comment: str, source_text: str) -> bool:
     value = normalize_text(comment).strip(" .,;:-—–")
     source = normalize_text(source_text)
     if not value or value not in source:
+        return False
+    if is_comment_control_text(comment):
         return False
     if re.search(r"\b(?:примерно|приблизительно|около)\s+\d", value, flags=re.I):
         return False
@@ -91,6 +97,8 @@ _CONVERSATIONAL_PRODUCT_LEADIN_RE = re.compile(
         (?:\s+(?:мне|нам))?
       | (?:надо|нужно|требуется|хотелось\s+бы)
         (?:\s+(?:добавить|заказать|внести|записать|включить|положить|оформить))?
+      | (?:нужен|нужна|нужны)
+      | (?:в|к)\s+(?:заказ\w*|заявк\w*|черновик\w*)
     )\b
     (?:\s+(?:в|к)\s+(?:заказ\w*|заявк\w*|черновик\w*))?
     (?:\s*[,;:]?\s*(?:пожалуйста|прошу)\b)?
@@ -292,6 +300,8 @@ def _strip_product_facts_from_item_binding(
     query = clean_text(item.get("product_query")).strip(" .,;:-—–")
     if not value or not query:
         return value
+    if normalize_text(value) == normalize_text(query):
+        return ""
 
     query_match = re.search(
         rf"(?<![a-zа-яё0-9]){re.escape(query)}(?![a-zа-яё0-9])",
@@ -325,6 +335,15 @@ def _strip_product_facts_from_item_binding(
     remainder = re.sub(r"^(?:и|а также|а)\s+", "", remainder, flags=re.I)
     remainder = re.sub(r"\s+(?:и|а также|а)$", "", remainder, flags=re.I)
     return _strip_conversational_product_leadin(remainder).strip(" .,;:-—–")
+
+
+def _is_product_name_fragment(comment: str, query: str) -> bool:
+    """Проверяет, является ли комментарий началом названия товара."""
+    comment_tokens = re.findall(r"[a-zа-яё0-9]+", normalize_text(comment), flags=re.I)
+    query_tokens = re.findall(r"[a-zа-яё0-9]+", normalize_text(query), flags=re.I)
+    if not comment_tokens or len(comment_tokens) > len(query_tokens):
+        return False
+    return query_tokens[: len(comment_tokens)] == comment_tokens
 
 
 def _comment_scope_has_explicit_anchor(text: str, item_names: list[str]) -> bool:
@@ -438,6 +457,8 @@ def _discard_unverified_item_comments(
         for fragment in (part.strip(" .,;:-—–") for part in existing.split(";")):
             if not fragment:
                 continue
+            if is_comment_control_text(fragment):
+                continue
             fragment = remove_global_comment_overlap(fragment, global_comment)
             if not fragment:
                 continue
@@ -448,6 +469,12 @@ def _discard_unverified_item_comments(
                 continue
             source_supported = normalized_fragment in normalized_context
             semantic_source_supported = _comment_source_is_authorized(fragment, context)
+            if source_supported and normalized_fragment == normalized_query:
+                product_facts.append(fragment)
+                continue
+            if _is_product_name_fragment(fragment, query):
+                product_facts.append(fragment)
+                continue
             if source_supported and normalized_fragment in normalized_query:
                 kept.append(fragment)
                 semantic_found = True

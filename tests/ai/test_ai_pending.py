@@ -1,5 +1,7 @@
 """Проверяет поведение, связанное с модулем «test ai pending»."""
 
+import pytest
+
 from restaurant_bot.catalog.retrieval import rank_candidates
 from restaurant_bot.domain.models import (
     Candidate,
@@ -9,6 +11,7 @@ from restaurant_bot.domain.models import (
     EngineResult,
     InputKind,
     ItemStatus,
+    SessionStage,
     TelegramEvent,
 )
 from restaurant_bot.integrations.openai_client import ProductMatchDecision
@@ -103,6 +106,33 @@ def test_low_confidence_ai_not_found_keeps_candidate_choice_for_user(settings) -
 
     assert resolved.state.cart[0].status is ItemStatus.AMBIGUOUS
     assert resolved.state.cart[0].candidates[0].product_id == "rose"
+
+
+@pytest.mark.parametrize(
+    "stage",
+    [SessionStage.AWAIT_MANUAL_DETAILS, SessionStage.AWAIT_PRODUCT_ADD_DETAILS],
+)
+def test_ai_pending_does_not_replace_manual_modal_reply(settings, stage: SessionStage) -> None:  # type: ignore[no-untyped-def]
+    """Не перерисовывает ручную модалку старым списком кандидатов."""
+    candidate = Candidate(product_id="rose", name="Сироп Роза", unit="шт")
+    item = CartItem(
+        id="voice",
+        source_query="сироп",
+        status=ItemStatus.AMBIGUOUS,
+        candidates=[candidate],
+    )
+    state = ConversationState(stage=stage, cart=[item])
+    result = EngineResult(state=state, reply=issue_reply(item, 0))
+    matcher = _Matcher(ProductMatchDecision(action="select", selected_product_id="rose"))
+
+    resolved = _orchestrator(settings, matcher)._resolve_ai_pending(
+        TelegramEvent(update_id=11, chat_id="123456", input_type=InputKind.VOICE),
+        result,
+        [CatalogProduct(product_id="rose", name="Сироп Роза", unit="шт")],
+    )
+
+    assert resolved is result
+    assert matcher.calls == []
 
 
 def test_safe_inflected_catalog_name_is_selected_without_ai_guess(settings) -> None:  # type: ignore[no-untyped-def]

@@ -24,6 +24,15 @@ def test_packaging_and_trailing_order_quantity_are_not_split() -> None:
     assert (item.product_query, item.quantity, item.unit) == ("Сироп Роза 1 л", 12, "")
 
 
+def test_word_quantity_with_comma_stays_with_the_product() -> None:
+    """Не превращает словесное количество после запятой во вторую позицию."""
+    items = parse_product_lines("Яйцо куриное цветное, три короба.")
+
+    assert len(items) == 1
+    assert items[0].product_query == "яйцо куриное цветное"
+    assert (items[0].quantity, items[0].unit) == (3, "кор")
+
+
 def test_bare_number_is_not_created_as_a_product() -> None:
     """Не превращает случайное число в товарную позицию."""
     assert parse_product_lines("12345") == []

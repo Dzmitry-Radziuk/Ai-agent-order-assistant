@@ -20,7 +20,8 @@ def test_progression_renderer_does_not_mutate_state() -> None:
 
     reply = render_progression(state, result)
 
-    assert "Добавлено позиций: 1" in reply.text
+    assert "<i>Товар добавлен</i>" in reply.text
+    assert "Добавляйте товары текстом, голосом или фотографией списка" in reply.text
     assert state.model_dump() == before
 
 

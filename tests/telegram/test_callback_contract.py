@@ -38,6 +38,15 @@ def test_pagination_callbacks_have_explicit_targets() -> None:
     assert detail.callback_target == "detail:4"
 
 
+def test_submission_check_callback_uses_read_only_status_route() -> None:
+    """Проверка отправки использует read-only маршрут статуса заявки."""
+    detail = parse_callback("v2:check_submission:r4")
+
+    assert detail.intent is Intent.ORDER_STATUS
+    assert detail.callback_target == "submission_check"
+    assert detail.callback_revision == 4
+
+
 def test_candidate_callbacks_use_human_numbering_and_keep_revision() -> None:
     """Проверяет, что callback кандидата использует нумерацию для человека и сохраняет ревизию."""
     command = parse_callback("v2:sel:4:0:r7")

@@ -74,6 +74,75 @@ def access_disabled_reply() -> BotReply:
     )
 
 
+def multiple_venues_reply() -> BotReply:
+    """Объясняет, почему нужно выбрать одно из нескольких заведений."""
+    return BotReply(
+        text=(
+            "У вас есть доступ к нескольким заведениям, но текущее заведение не выбрано.\n\n"
+            "Откройте invite-ссылку нужного заведения или введите его код.\n"
+            "Если доступы указаны ошибочно, обратитесь к ответственному сотруднику."
+        )
+    )
+
+
+def venue_status_reply(
+    *,
+    current_name: str = "",
+    available_names: list[str] | None = None,
+    access_disabled: bool = False,
+) -> BotReply:
+    """Отвечает, к какому заведению привязан пользователь сейчас."""
+    names = [name for name in (available_names or []) if name]
+    if access_disabled:
+        return BotReply(
+            text=(
+                f"🏢 {heading('Подключение к заведению')}\n\n"
+                "Текущая привязка отключена. Обратитесь к ответственному сотруднику "
+                "заведения или откройте новую invite-ссылку."
+            )
+        )
+    if current_name and len(names) <= 1:
+        return BotReply(
+            text=(
+                f"🏢 {heading('Текущее заведение')}\n\n"
+                f"Вы подключены к заведению:\n<b>{escape(current_name)}</b>."
+            ),
+            rows=[
+                [Button(text="Показать черновик", callback_data="v2:cartpage:0")],
+                [Button(text="Посмотреть статусы заявок", callback_data="v2:orders")],
+                [Button(text="Новая заявка", callback_data="v2:new")],
+            ],
+        )
+    if current_name:
+        lines = [
+            f"🏢 {heading('Текущее заведение')}",
+            "",
+            f"Сейчас выбрано заведение:\n<b>{escape(current_name)}</b>.",
+            "",
+            "У вас также есть доступ к:",
+        ]
+        for name in names:
+            if name != current_name:
+                lines.append(f"• {escape(name)}")
+        lines += ["", "Чтобы переключиться, откройте invite-ссылку нужного заведения."]
+        return BotReply(text="\n".join(lines))
+    if names:
+        return BotReply(
+            text=(
+                f"🏢 {heading('Доступные заведения')}\n\n"
+                "Сейчас выбрано несколько заведений:\n"
+                + "\n".join(f"• {escape(name)}" for name in names)
+                + "\n\nОткройте invite-ссылку нужного заведения, чтобы выбрать его."
+            )
+        )
+    return BotReply(
+        text=(
+            f"🏢 {heading('Подключение к заведению')}\n\n"
+            "Вы пока не подключены ни к одному заведению."
+        )
+    )
+
+
 def confirmation(venue: Venue) -> BotReply:
     """Формирует карточку подтверждения заведения."""
     return BotReply(

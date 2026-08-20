@@ -36,11 +36,13 @@ from restaurant_bot.presentation.telegram.venue_registration import (
     code_not_found_reply,
     confirmation,
     directory_error_reply,
+    multiple_venues_reply,
     not_bound_reply,
     private_chat_required_reply,
     rejected_reply,
     switch_confirmation,
     sync_failure_reply,
+    venue_status_reply,
 )
 from restaurant_bot.repositories.venue_bindings import VenueBindingRepository
 from restaurant_bot.venues.codes import normalize_code, valid_code
@@ -72,7 +74,11 @@ class VenueRegistrationService:
         """Возвращает активный контекст заведения пользователя."""
         if event.chat_type != "private" or not event.telegram_user_id:
             return None
-        return self.context_for_identity(event.telegram_user_id, event.chat_id)
+        return self.context_for_identity(
+            event.telegram_user_id,
+            event.chat_id,
+            force_refresh=True,
+        )
 
     def context_for_identity(
         self,
@@ -89,7 +95,7 @@ class VenueRegistrationService:
                 chat_id,
             )
         if row is None:
-            return None
+            return self._recover_single_registry_venue(user_id, chat_id, force_refresh)
 
         decision = self.access_registry.decision(
             user_id,
@@ -119,7 +125,61 @@ class VenueRegistrationService:
                 telegram_user_id=user_id,
                 venue_code=row.venue_code,
             )
-        return None
+        return self._recover_single_registry_venue(user_id, chat_id, force_refresh)
+
+    def _recover_single_registry_venue(
+        self,
+        user_id: str,
+        chat_id: str,
+        force_refresh: bool,
+    ) -> VenueContext | None:
+        """Восстанавливает единственный актуальный доступ без переноса черновика."""
+        entries = self.access_registry.entries_for_identity(
+            user_id,
+            chat_id,
+            force_refresh=force_refresh,
+        )
+        if entries is None:
+            return None
+        active = self._active_registry_entries(entries)
+        if len(active) != 1:
+            return None
+        entry = active[0]
+        try:
+            matches = self.directory.find(entry.venue_code)
+        except _VenueDirectoryError:
+            logger.warning(
+                "venue_directory_recovery_failed",
+                telegram_user_id=user_id,
+                venue_code=entry.venue_code,
+            )
+            return None
+        if len(matches) != 1:
+            return None
+        venue = matches[0]
+        with SessionLocal.begin() as db:
+            repository = VenueBindingRepository(db)
+            binding, _, _ = repository.bind(
+                user_id=user_id,
+                chat_id=chat_id,
+                username="",
+                venue_code=venue.code,
+                venue_name=venue.name,
+                legal_name=venue.legal_name,
+                spreadsheet_id=venue.spreadsheet_id,
+                spreadsheet_url=venue.spreadsheet_url,
+                preserve_existing=True,
+            )
+            repository.mark_sync(binding.id, "synced")
+        return self._context(binding)
+
+    @staticmethod
+    def _active_registry_entries(entries: list[Any]) -> list[Any]:
+        """Группирует активные строки реестра по коду заведения."""
+        by_code: dict[str, list[Any]] = {}
+        for entry in entries:
+            by_code.setdefault(entry.venue_code, []).append(entry)
+        return [rows[0] for rows in by_code.values() if all(entry.active for entry in rows)]
 
     def bootstrap_existing_bindings(self) -> int:
         """Импортирует действующие привязки из старого реестра."""
@@ -154,6 +214,7 @@ class VenueRegistrationService:
                     legal_name=venue.legal_name,
                     spreadsheet_id=venue.spreadsheet_id,
                     spreadsheet_url=venue.spreadsheet_url,
+                    preserve_existing=True,
                 )
                 repository.mark_sync(binding.id, "synced")
             imported += 1
@@ -301,6 +362,13 @@ class VenueRegistrationService:
     def denied_reply(self, event: TelegramEvent) -> BotReply:
         """Объясняет отзыв доступа либо предлагает первоначальное подключение."""
         if event.chat_type == "private" and event.telegram_user_id:
+            entries = self.access_registry.entries_for_identity(
+                event.telegram_user_id,
+                event.chat_id,
+                force_refresh=True,
+            )
+            if entries is not None and len(self._active_registry_entries(entries)) > 1:
+                return multiple_venues_reply()
             with SessionLocal.begin() as db:
                 revoked = VenueBindingRepository(db).get_revoked(
                     event.telegram_user_id,
@@ -309,6 +377,57 @@ class VenueRegistrationService:
             if revoked is not None:
                 return access_disabled_reply()
         return not_bound_reply()
+
+    def current_venue_reply(
+        self,
+        event: TelegramEvent,
+        current: VenueContext | None = None,
+    ) -> BotReply:
+        """Возвращает ответ о текущей привязке по свежему центральному реестру."""
+        if event.chat_type != "private" or not event.telegram_user_id:
+            return private_chat_required_reply()
+        entries = self.access_registry.entries_for_identity(
+            event.telegram_user_id,
+            event.chat_id,
+            force_refresh=True,
+        )
+        if entries is None:
+            if current is not None:
+                return venue_status_reply(current_name=current.venue_name)
+            return directory_error_reply()
+        active = self._active_registry_entries(entries)
+        names = self._venue_names(active, current)
+        current_name = (
+            current.venue_name
+            if current is not None
+            and any(entry.venue_code == current.venue_code for entry in active)
+            else ""
+        )
+        if active:
+            return venue_status_reply(current_name=current_name, available_names=names)
+        return venue_status_reply(access_disabled=bool(entries))
+
+    def _venue_names(
+        self,
+        entries: list[Any],
+        current: VenueContext | None,
+    ) -> list[str]:
+        """Дополняет названия заведений из справочника, если их нет в реестре."""
+        names: list[str] = []
+        for entry in entries:
+            name = clean_text(getattr(entry, "venue_name", ""))
+            if not name and current is not None and entry.venue_code == current.venue_code:
+                name = current.venue_name
+            if not name:
+                try:
+                    matches = self.directory.find(entry.venue_code)
+                except _VenueDirectoryError:
+                    matches = []
+                if len(matches) == 1:
+                    name = matches[0].name
+            if name and name not in names:
+                names.append(name)
+        return names
 
     @staticmethod
     def _revoked_for_venue(event: TelegramEvent, venue_code: str) -> bool:

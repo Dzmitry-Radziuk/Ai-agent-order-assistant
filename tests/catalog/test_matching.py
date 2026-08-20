@@ -1,6 +1,7 @@
 """Проверяет поведение, связанное с модулем «test matching»."""
 
 from restaurant_bot.catalog.evidence import has_catalog_search_evidence, remove_phrase_overlap
+from restaurant_bot.catalog.resolver import CatalogDecision, CatalogResolver
 from restaurant_bot.catalog.retrieval import rank_candidates
 from restaurant_bot.catalog.safety import can_auto_select
 from restaurant_bot.domain.models import CatalogProduct
@@ -24,6 +25,62 @@ def test_close_product_typo_keeps_only_relevant_candidate() -> None:
 def test_unrelated_words_do_not_create_false_candidate() -> None:
     """Проверяет, что несвязанные слова не создают ложного кандидата."""
     assert rank_candidates("пару яблок", _catalog()) == []
+
+
+def test_multitoken_query_needs_evidence_for_each_product_word() -> None:
+    """Не показывает кандидатов по одному нечёткому слову многословного запроса."""
+    catalog = [
+        CatalogProduct(product_id="test", name="Тестовый товар"),
+        CatalogProduct(product_id="toast", name="Хлеб Тостовый Нарезной"),
+    ]
+
+    assert rank_candidates("текстовый маркер", catalog) == []
+
+
+def test_separated_compound_product_name_keeps_safe_candidates() -> None:
+    """Находит составное название при раздельном написании слов в запросе."""
+    catalog = [
+        CatalogProduct(
+            product_id="staff-orange",
+            name="Текстмаркер STAFF оранжевый 150730",
+            unit="шт",
+        )
+    ]
+
+    candidates = rank_candidates("Текст-маркер став оранжевый", catalog)
+
+    assert [candidate.product_id for candidate in candidates] == ["staff-orange"]
+
+
+def test_inflected_separated_compound_product_name_keeps_candidate() -> None:
+    """Находит слитное название после изменения окончания в голосовой фразе."""
+    catalog = [
+        CatalogProduct(
+            product_id="staff-orange",
+            name="Текстмаркер STAFF оранжевый 150730",
+            unit="шт",
+        )
+    ]
+
+    candidates = rank_candidates("Текст маркера оранжевый", catalog)
+
+    assert [candidate.product_id for candidate in candidates] == ["staff-orange"]
+
+
+def test_unverified_compound_variant_stays_clarification() -> None:
+    """Не выбирает автоматически вариант с неподтверждённой ошибкой распознавания."""
+    catalog = [
+        CatalogProduct(
+            product_id="staff-orange",
+            name="Текстмаркер STAFF оранжевый 150730",
+            unit="шт",
+        )
+    ]
+    query = "Текст маркер став оранжевый"
+    resolver = CatalogResolver()
+    candidates = rank_candidates(query, catalog)
+
+    assert resolver.decide(query, candidates) is CatalogDecision.CLARIFY
 
 
 def test_beef_typo_keeps_only_beef_candidates() -> None:

@@ -54,22 +54,21 @@ def _add_syrup(settings):  # type: ignore[no-untyped-def]
     )
 
 
-def test_successful_addition_asks_whether_to_add_more(settings) -> None:  # type: ignore[no-untyped-def]
-    """Спрашивает о продолжении после успешного добавления."""
+def test_successful_addition_returns_to_draft(settings) -> None:  # type: ignore[no-untyped-def]
+    """Сразу возвращает пользователя в черновик после успешного добавления."""
     result = _add_syrup(settings)
 
-    assert result.state.stage is SessionStage.AWAIT_ADD_MORE_CONFIRM
-    assert result.reply.text == (
-        "<b><u>Товар добавлен в черновик заказа</u></b>\n\nДобавить ещё товары?"
-    )
+    assert result.state.stage is SessionStage.REVIEW
+    assert "<i>Товар добавлен</i>" in result.reply.text
+    assert "Добавляйте товары текстом, голосом или фотографией списка" in result.reply.text
     assert [[button.text, button.callback_data] for row in result.reply.rows for button in row] == [
-        ["Да, добавить товары", "v2:add"],
-        ["Нет, к черновику", "v2:back"],
+        ["Добавить в корзину и проверить", "v2:cart"],
+        ["Сбросить и начать заново", "v2:clear"],
     ]
 
 
 def test_voice_yes_continues_product_collection(settings) -> None:  # type: ignore[no-untyped-def]
-    """Продолжает добавление после голосового согласия."""
+    """Не требует промежуточного согласия после голосового добавления."""
     added = _add_syrup(settings)
 
     result = ConversationEngine(settings).handle(
@@ -79,15 +78,13 @@ def test_voice_yes_continues_product_collection(settings) -> None:  # type: igno
         [],
     )
 
-    assert result.state.stage is SessionStage.COLLECTING
-    assert (
-        result.reply.text == "Отправьте товары текстом, голосом или фото — я добавлю их в текущий "
-        "черновик заказа."
-    )
+    assert result.state.stage is SessionStage.REVIEW
+    assert result.state.cart[0].status is ItemStatus.MATCHED
+    assert "Добавить ещё товары?" not in result.reply.text
 
 
 def test_text_yes_continues_product_collection(settings) -> None:  # type: ignore[no-untyped-def]
-    """Текстовый ответ использует ту же семантическую маршрутизацию, что и голосовой."""
+    """Текстовый ответ не открывает удалённый промежуточный вопрос."""
     added = _add_syrup(settings)
     phrase = "Да, давай добавим ещё"
     result = ConversationEngine(settings).handle(
@@ -102,35 +99,25 @@ def test_text_yes_continues_product_collection(settings) -> None:  # type: ignor
         [],
     )
 
-    assert result.state.stage is SessionStage.COLLECTING
-    assert result.state.pending_added_items_count == 0
+    assert result.state.stage is SessionStage.REVIEW
+    assert "Добавить ещё товары?" not in result.reply.text
 
 
 def test_voice_no_returns_to_draft(settings) -> None:  # type: ignore[no-untyped-def]
-    """Возвращает черновик после голосового отказа."""
+    """Успешное добавление сразу показывает черновик без отказа от продолжения."""
     added = _add_syrup(settings)
-    phrase = "Нет, больше не надо"
-
-    result = ConversationEngine(settings).handle(
-        _voice(phrase, update_id=3),
-        infer_intent(phrase),
-        added.state,
-        [],
-    )
-
-    assert result.state.stage is SessionStage.REVIEW
-    assert "Черновик заявки" in result.reply.text
-    assert "<b>Сироп Роза, 1л</b> — 10 шт" in result.reply.text
+    assert added.state.stage is SessionStage.REVIEW
+    assert "<b>Сироп Роза, 1л</b> — 10 шт" in added.reply.text
 
 
 def test_voice_submit_wins_over_wrong_add_more_intent(settings) -> None:  # type: ignore[no-untyped-def]
-    """Открывает проверку заявки, даже если ИИ ошибочно вернул добавление товаров."""
+    """Открывает проверку заявки из черновика по явной команде пользователя."""
     added = _add_syrup(settings)
-    phrase = "Да, отправляй"
+    phrase = "Покажи итог"
 
     result = ConversationEngine(settings).handle(
         _voice(phrase, update_id=4),
-        ParsedCommand(intent=Intent.ADD_MORE, text=phrase),
+        ParsedCommand(intent=Intent.SHOW_FINAL_REVIEW, text=phrase),
         added.state,
         [],
     )
@@ -171,7 +158,7 @@ def test_product_sent_from_add_more_prompt_opens_duplicate_in_collecting_stage(
         ],
     )
 
-    assert duplicate.state.stage is SessionStage.COLLECTING
+    assert duplicate.state.stage is SessionStage.REVIEW
     assert duplicate.state.current_item() is not None
     assert duplicate.state.current_item().status is ItemStatus.DUPLICATE_PENDING
     assert "Товар уже есть в черновике" in duplicate.reply.text
@@ -185,7 +172,8 @@ def test_product_sent_from_add_more_prompt_opens_duplicate_in_collecting_stage(
 
     assert merged.state.cart[0].quantity == 20
     assert merged.state.cart[1].status is ItemStatus.SKIPPED
-    assert "Добавить ещё товары?" in merged.reply.text
+    assert merged.state.stage is SessionStage.REVIEW
+    assert "Добавить ещё товары?" not in merged.reply.text
 
 
 def test_add_more_dialogue_responses_are_normalized_before_state_policy() -> None:
@@ -225,10 +213,7 @@ def test_new_product_preempts_add_more_prompt_without_reusing_old_context(settin
         ],
     )
 
-    assert result.state.stage in {
-        SessionStage.COLLECTING,
-        SessionStage.AWAIT_ADD_MORE_CONFIRM,
-    }
+    assert result.state.stage is SessionStage.REVIEW
     assert len(result.state.cart) == 2
     parmesan = result.state.cart[-1]
     assert parmesan.source_query == "Пармезан"
@@ -237,21 +222,21 @@ def test_new_product_preempts_add_more_prompt_without_reusing_old_context(settin
     assert result.state.pending_added_items_count == 0
 
 
-def test_uncertain_add_more_answer_repeats_prompt_without_mutation(settings) -> None:
-    """Неуверенный ответ не выбирает действие и не меняет черновик."""
+def test_uncertain_phrase_does_not_reopen_removed_prompt(settings) -> None:
+    """Неуверенная фраза не возвращает удалённый промежуточный вопрос."""
     added = _add_syrup(settings)
     before = added.state.model_copy(deep=True)
     result = ConversationEngine(settings).handle(
-        _voice("ну", update_id=11),
-        infer_intent("ну"),
+        _voice("Спасибо", update_id=11),
+        infer_intent("Спасибо"),
         added.state,
         [],
     )
 
-    assert result.state.stage is SessionStage.AWAIT_ADD_MORE_CONFIRM
+    assert result.state.stage is SessionStage.REVIEW
     assert result.state.cart == before.cart
     assert result.state.pending_added_items_count == before.pending_added_items_count
-    assert "Добавить ещё товары?" in result.reply.text
+    assert "Добавить ещё товары?" not in result.reply.text
 
 
 def test_thanks_interrupts_add_more_prompt_without_adding_item(settings) -> None:
@@ -290,7 +275,7 @@ def test_add_more_callbacks_respect_revision(settings) -> None:
         added.state,
         [],
     )
-    assert stale.state.stage is SessionStage.AWAIT_ADD_MORE_CONFIRM
+    assert stale.state.stage is SessionStage.REVIEW
 
     fresh = ConversationEngine(settings).handle(
         TelegramEvent(

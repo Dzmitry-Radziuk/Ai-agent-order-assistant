@@ -54,7 +54,12 @@ from restaurant_bot.parsing.commands.item_commands import has_explicit_add_items
 from restaurant_bot.parsing.comment_scope import has_explicit_global_comment_scope
 from restaurant_bot.parsing.numeric import to_float
 from restaurant_bot.parsing.numeric_ranges import numeric_range_spans
-from restaurant_bot.parsing.semantic_routing import normalize_comment_proposal
+from restaurant_bot.parsing.semantic_routing import (
+    classify_bot_conversation,
+    normalize_comment_proposal,
+    protect_bot_conversation,
+    protect_confirmed_command,
+)
 
 __all__ = [
     "CommentBindingSchema",
@@ -209,10 +214,15 @@ class OpenAIService:
     def _parse_text_once(self, text: str, *, force_ai: bool = False) -> ParsedCommand:
         """Извлекает структурированную команду из текста."""
         deterministic = infer_intent(text)
+        conversation_intent = classify_bot_conversation(text)
         if not force_ai and self._looks_like_support_message(text):
             logger.info("text_support_message_detected", text=text)
             return ParsedCommand(intent=Intent.SMALL_TALK, text=text)
-        if not force_ai and deterministic.intent not in {Intent.UNKNOWN, Intent.ADD_ITEMS}:
+        if (
+            not force_ai
+            and conversation_intent is None
+            and deterministic.intent not in {Intent.UNKNOWN, Intent.ADD_ITEMS}
+        ):
             logger.info(
                 "text_command_deterministic",
                 text=text,
@@ -220,7 +230,11 @@ class OpenAIService:
                 item_count=len(deterministic.items),
             )
             return _repair_command_mixed_script_queries(deterministic)
-        if not force_ai and self._can_use_deterministic_product_list(text, deterministic):
+        if (
+            not force_ai
+            and conversation_intent is None
+            and self._can_use_deterministic_product_list(text, deterministic)
+        ):
             logger.info(
                 "text_product_list_deterministic",
                 text=text,
@@ -228,8 +242,10 @@ class OpenAIService:
                 items=[self._item_log(item) for item in deterministic.items],
             )
             return _repair_command_mixed_script_queries(deterministic)
-        if not force_ai and self._can_use_deterministic_single_product_with_quantity(
-            text, deterministic
+        if (
+            not force_ai
+            and conversation_intent is None
+            and self._can_use_deterministic_single_product_with_quantity(text, deterministic)
         ):
             logger.info(
                 "text_single_product_deterministic",
@@ -238,7 +254,11 @@ class OpenAIService:
                 items=[self._item_log(item) for item in deterministic.items],
             )
             return _repair_command_mixed_script_queries(deterministic)
-        if not force_ai and self._can_use_deterministic_short_product(text, deterministic):
+        if (
+            not force_ai
+            and conversation_intent is None
+            and self._can_use_deterministic_short_product(text, deterministic)
+        ):
             logger.info(
                 "text_short_product_deterministic",
                 text=text,
@@ -246,7 +266,11 @@ class OpenAIService:
                 items=[self._item_log(item) for item in deterministic.items],
             )
             return _repair_command_mixed_script_queries(deterministic)
-        if not force_ai and self._can_use_deterministic_packaged_product(text, deterministic):
+        if (
+            not force_ai
+            and conversation_intent is None
+            and self._can_use_deterministic_packaged_product(text, deterministic)
+        ):
             logger.info(
                 "text_packaged_product_deterministic",
                 text=text,
@@ -254,7 +278,7 @@ class OpenAIService:
                 items=[self._item_log(item) for item in deterministic.items],
             )
             return _repair_command_mixed_script_queries(deterministic)
-        if not force_ai and self._should_skip_ai(text):
+        if not force_ai and conversation_intent is None and self._should_skip_ai(text):
             logger.info(
                 "text_ai_skipped",
                 text=text,
@@ -292,6 +316,8 @@ class OpenAIService:
         parsed = response.output_parsed
         if parsed is None:
             logger.warning("text_ai_empty_result", text=text)
+            if conversation_intent is not None:
+                return ParsedCommand(intent=conversation_intent, text=text)
             if force_ai:
                 return ParsedCommand(intent=Intent.UNKNOWN, text=text)
             return _repair_command_mixed_script_queries(deterministic)
@@ -329,11 +355,34 @@ class OpenAIService:
             }
         )
         command = normalize_comment_proposal(text, command)
+        command = protect_bot_conversation(text, command)
+        proven_deterministic_items = (
+            deterministic.intent is Intent.ADD_ITEMS
+            and deterministic.items
+            and (
+                deterministic.explicit_add_items
+                or any(
+                    item.quantity is not None and bool(item.unit) for item in deterministic.items
+                )
+            )
+        )
+        if proven_deterministic_items and conversation_intent is None:
+            protected = protect_confirmed_command(deterministic, command)
+            if protected is not command:
+                logger.warning(
+                    "text_ai_semantic_route_rejected",
+                    text=text,
+                    ai_intent=command.intent.value,
+                    fallback_intent=deterministic.intent.value,
+                    fallback_items=[self._item_log(item) for item in deterministic.items],
+                )
+                command = protected
         if (
             command.intent == Intent.ADD_MORE
             and deterministic.intent == Intent.ADD_ITEMS
             and deterministic.items
             and not force_ai
+            and conversation_intent is None
         ):
             logger.warning(
                 "text_ai_navigation_rejected",
@@ -467,6 +516,8 @@ class OpenAIService:
             return False
         if OpenAIService._has_conversational_product_leadin(text):
             return False
+        if OpenAIService._looks_like_semantic_sentence(text):
+            return False
         item = command.items[0]
         query = clean_text(item.product_query)
         has_global_scope = bool(
@@ -486,6 +537,25 @@ class OpenAIService:
             and not command.global_comment
             and normalize_text(query) == normalize_text(text)
             and not has_product_variant_qualifier(query)
+        )
+
+    @staticmethod
+    def _looks_like_semantic_sentence(text: str) -> bool:
+        """Отправляет вопросительные и разговорные фразы на семантический разбор."""
+        value = clean_text(text)
+        normalized = normalize_text(value)
+        if not normalized:
+            return False
+        if value.endswith(("?", "!")) or any(mark in value for mark in ",;:"):
+            return True
+        if re.search(r"\b(?:ты|тебе|тебя|тобой|вы|вам|мне|я|мы)\b", normalized):
+            return True
+        return bool(
+            re.match(
+                r"^(?:как|что|кто|где|когда|почему|зачем|можешь|можно|подскажи|"
+                r"объясни|расскажи|помоги|скажи)\b",
+                normalized,
+            )
         )
 
     @staticmethod

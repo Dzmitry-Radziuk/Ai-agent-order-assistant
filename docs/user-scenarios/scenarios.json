@@ -844,25 +844,25 @@
     {
       "id": "DRF-02",
       "category": "draft",
-      "title": "Продолжить добавление товаров",
+      "title": "Продолжить добавление товаров из черновика",
       "priority": "important",
       "channels": [
         "Текст",
         "Голос",
-        "Кнопка"
+        "Фото"
       ],
       "precondition": "В черновике уже есть обработанные позиции.",
-      "user_action": "Просит добавить ещё товары и отправляет следующий список.",
-      "bot_response": "Переходит в режим добавления, сохраняя существующий черновик.",
-      "result": "Новые позиции добавляются к текущей заявке.",
+      "user_action": "Отправляет следующий товар текстом, голосом или фотографией списка.",
+      "bot_response": "Добавляет позиции и сразу возвращает обновлённый черновик с понятной подсказкой.",
+      "result": "Новые позиции добавляются к текущей заявке без промежуточного вопроса.",
       "examples": [
-        "Добавить ещё товары",
-        "Давай внесём ещё что-нибудь",
-        "Хочу еще позиции"
+        "Добавь ещё курицу 5 кг",
+        "Давай внесём молоко 10 штук",
+        "Хочу добавить ещё позиции"
       ],
       "test_refs": [
         "tests/input/test_voice_route_matrix.py::test_live_voice_wording_routes_before_product_parsing",
-        "tests/conversation/test_add_more_prompt.py::test_successful_addition_asks_whether_to_add_more"
+        "tests/conversation/test_add_more_prompt.py::test_successful_addition_returns_to_draft"
       ],
       "automation_status": "AUTOMATED_PASS",
       "manual_live_requirement": "Не требуется для подтверждения локального контракта; общий Telegram smoke выполняется перед пилотом."

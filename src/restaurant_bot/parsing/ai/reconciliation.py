@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 import structlog
@@ -12,6 +13,7 @@ from restaurant_bot.parsing.ai.comment_reconciliation import (
     _append_local_item_comment,
     _apply_semantic_comment_bindings,
     _discard_unverified_item_comments,
+    _strip_conversational_product_leadin,
     _strip_global_comment_scope,
 )
 from restaurant_bot.parsing.ai.item_reconciliation import (
@@ -26,6 +28,8 @@ from restaurant_bot.parsing.ai.quantity_reconciliation import (
     restore_explicit_order_terms,
 )
 from restaurant_bot.parsing.ai.shadow_items import _collapse_shadow_item_projections
+from restaurant_bot.parsing.commands.item_commands import has_explicit_add_items
+from restaurant_bot.parsing.comment_policy import is_comment_control_text
 from restaurant_bot.parsing.comment_scope import has_explicit_global_comment_scope
 from restaurant_bot.parsing.products import parse_product_lines
 from restaurant_bot.parsing.quantities import parse_quantity_unit
@@ -37,6 +41,7 @@ from restaurant_bot.parsing.semantic.measurements import (
     strip_order_quantity_from_query,
 )
 from restaurant_bot.parsing.semantic.models import SemanticFactKind
+from restaurant_bot.parsing.semantic_routing import classify_bot_conversation
 
 logger = structlog.get_logger(__name__)
 
@@ -244,9 +249,23 @@ def recover_omitted_explicit_items(payload: dict[str, Any], source_text: str) ->
         return payload
 
     deterministic = parse_product_lines(source_text)
+    if (
+        intent is Intent.UNKNOWN
+        and items
+        and not _has_safe_item_recovery_evidence(source_text, deterministic)
+    ):
+        logger.info(
+            "unknown_item_payload_rejected",
+            text=source_text,
+            item_count=len(items),
+        )
+        items = []
+        payload["items"] = []
     spans = _resolve_item_source_spans(items, source_text)
     remove_unsupported_query_qualifiers(items, source_text)
     global_comment = _strip_global_comment_scope(clean_text(payload.get("global_comment")))
+    if is_comment_control_text(global_comment):
+        global_comment = ""
     global_comment, quantity_clarification = _reconcile_global_order_comment(
         global_comment,
         source_text,
@@ -262,6 +281,8 @@ def recover_omitted_explicit_items(payload: dict[str, Any], source_text: str) ->
         source_text,
         spans,
     )
+    if is_comment_control_text(global_comment):
+        global_comment = ""
     if quantity_clarification and not payload.get("comment_clarification"):
         payload["comment_clarification"] = quantity_clarification
 
@@ -284,9 +305,20 @@ def recover_omitted_explicit_items(payload: dict[str, Any], source_text: str) ->
     # Запасной путь нужен только когда ИИ действительно не вернул ни одной позиции.
     # Нельзя повторно разбирать исходную фразу поверх уже распознанных товаров:
     # это создаёт дубликаты и затирает комментарии.
-    if not items and deterministic:
+    if not items and deterministic and _has_safe_item_recovery_evidence(source_text, deterministic):
         payload["intent"] = Intent.ADD_ITEMS
         payload["items"] = [item.model_dump() for item in deterministic]
+        payload["global_comment"] = global_comment
+        return payload
+
+    if not items and deterministic:
+        logger.info(
+            "deterministic_item_fallback_rejected",
+            text=source_text,
+            ai_intent=intent.value,
+            deterministic_item_count=len(deterministic),
+        )
+        payload["items"] = []
         payload["global_comment"] = global_comment
         return payload
 
@@ -307,10 +339,17 @@ def recover_omitted_explicit_items(payload: dict[str, Any], source_text: str) ->
     _restore_unordered_measurement_pair(items, deterministic)
     _restore_reference_ranges_in_queries(items, source_text, deterministic)
     for item in items:
-        item["product_query"] = strip_order_quantity_from_query(
-            item.get("product_query") or "",
+        product_query = _strip_conversational_product_leadin(item.get("product_query") or "")
+        product_query = strip_order_quantity_from_query(
+            product_query,
             clean_text(item.get("source_span")) or source_text,
         )
+        item["product_query"] = re.sub(
+            r"\s+\b(?:вес|количество)\b\s*$",
+            "",
+            product_query,
+            flags=re.I,
+        ).strip(" .,;:-—–")
     items = apply_semantic_gate(items, deterministic, source_text)
     for item in items:
         if item.get("comment") and not item.get("user_comment_to_supplier"):
@@ -321,3 +360,22 @@ def recover_omitted_explicit_items(payload: dict[str, Any], source_text: str) ->
     payload["global_comment"] = global_comment
     payload["items"] = items
     return payload
+
+
+def _has_safe_item_recovery_evidence(
+    source_text: str,
+    deterministic: list[Any],
+) -> bool:
+    """Проверяет, подтверждает ли исходная фраза восстановление товарных позиций."""
+    if has_explicit_add_items(source_text, deterministic):
+        return True
+    if any(
+        getattr(item, "quantity", None) is not None and bool(getattr(item, "unit", ""))
+        for item in deterministic
+    ):
+        return True
+    if len(deterministic) != 1 or classify_bot_conversation(source_text) is not None:
+        return False
+    query = clean_text(getattr(deterministic[0], "product_query", ""))
+    words = [word for word in normalize_text(query).split() if len(word) > 1]
+    return len(words) >= 2

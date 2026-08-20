@@ -956,7 +956,7 @@
 
       <article id="scenario-DRF-02" class="scenario-card"
         data-category="draft"
-        data-priority="important" data-search="drf-02 продолжить добавление товаров работа с черновиком просит добавить ещё товары и отправляет следующий список. переходит в режим добавления, сохраняя существующий черновик. пользователь подключён к заведению; доступен только черновик текущего чата. черновик позиция номер варианта команда управления добавить ещё товары давай внесём ещё что-нибудь хочу еще позиции">
+        data-priority="important" data-search="drf-02 продолжить добавление товаров из черновика работа с черновиком отправляет следующий товар текстом, голосом или фотографией списка. добавляет позиции и сразу возвращает обновлённый черновик с понятной подсказкой. пользователь подключён к заведению; доступен только черновик текущего чата. черновик позиция номер варианта команда управления добавь ещё курицу 5 кг давай внесём молоко 10 штук хочу добавить ещё позиции">
         <div class="card-top">
           <span class="scenario-id">DRF-02</span>
           <span class="badges">
@@ -964,14 +964,14 @@
             <span class="priority priority-important">Важный</span>
           </span>
         </div>
-        <h3>Продолжить добавление товаров</h3>
+        <h3>Продолжить добавление товаров из черновика</h3>
         <p class="category-label">Работа с черновиком</p>
-        <div class="channels"><span>Текст</span><span>Голос</span><span>Кнопка</span></div>
+        <div class="channels"><span>Текст</span><span>Голос</span><span>Фото</span></div>
         <dl>
           <div><dt>Перед началом</dt><dd>В черновике уже есть обработанные позиции.</dd></div>
-          <div><dt>Пользователь</dt><dd>Просит добавить ещё товары и отправляет следующий список.</dd></div>
-          <div><dt>Бот</dt><dd>Переходит в режим добавления, сохраняя существующий черновик.</dd></div>
-          <div class="result"><dt>Итог</dt><dd>Новые позиции добавляются к текущей заявке.</dd></div>
+          <div><dt>Пользователь</dt><dd>Отправляет следующий товар текстом, голосом или фотографией списка.</dd></div>
+          <div><dt>Бот</dt><dd>Добавляет позиции и сразу возвращает обновлённый черновик с понятной подсказкой.</dd></div>
+          <div class="result"><dt>Итог</dt><dd>Новые позиции добавляются к текущей заявке без промежуточного вопроса.</dd></div>
           <div><dt>Статус проверки</dt><dd><code>AUTOMATED_PASS</code> — Контракт полностью подтверждён локальными автоматическими тестами</dd></div>
           <div><dt>Ручная проверка</dt><dd>Не требуется для подтверждения локального контракта; общий Telegram smoke выполняется перед пилотом.</dd></div>
         </dl>
@@ -981,17 +981,17 @@
             <div><dt>Доступ</dt><dd>Пользователь подключён к заведению; доступен только черновик текущего чата.</dd></div>
             <div><dt>Распознаём</dt><dd>черновик, позиция, номер варианта, команда управления</dd></div>
             <div><dt>Подтверждение</dt><dd>Нужно перед очисткой непустого черновика или началом новой заявки вместо него.</dd></div>
-            <div><dt>Что изменится</dt><dd>Новые позиции добавляются к текущей заявке.</dd></div>
+            <div><dt>Что изменится</dt><dd>Новые позиции добавляются к текущей заявке без промежуточного вопроса.</dd></div>
             <div><dt>Если произошла ошибка</dt><dd>При отказе и непонятной команде оставить черновик без изменений.</dd></div>
           </dl>
         </details>
         <details>
           <summary>Примеры фраз</summary>
-          <ul><li>«Добавить ещё товары»</li><li>«Давай внесём ещё что-нибудь»</li><li>«Хочу еще позиции»</li></ul>
+          <ul><li>«Добавь ещё курицу 5 кг»</li><li>«Давай внесём молоко 10 штук»</li><li>«Хочу добавить ещё позиции»</li></ul>
         </details>
         <details>
           <summary>Связанные pytest-тесты · 2</summary>
-          <ul class="tests"><li><a href="../../tests/input/test_voice_route_matrix.py">tests/input/test_voice_route_matrix.py</a><span>test_live_voice_wording_routes_before_product_parsing</span></li><li><a href="../../tests/conversation/test_add_more_prompt.py">tests/conversation/test_add_more_prompt.py</a><span>test_successful_addition_asks_whether_to_add_more</span></li></ul>
+          <ul class="tests"><li><a href="../../tests/input/test_voice_route_matrix.py">tests/input/test_voice_route_matrix.py</a><span>test_live_voice_wording_routes_before_product_parsing</span></li><li><a href="../../tests/conversation/test_add_more_prompt.py">tests/conversation/test_add_more_prompt.py</a><span>test_successful_addition_returns_to_draft</span></li></ul>
         </details>
       </article>
 

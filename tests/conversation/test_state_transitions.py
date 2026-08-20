@@ -40,7 +40,7 @@ def test_submit_request_opens_final_review_without_enqueuing(settings) -> None: 
     assert review.enqueue_submission is False
     assert "Финальная проверка" in review.reply.text
     assert [(button.text, button.callback_data) for row in review.reply.rows for button in row] == [
-        ("Отправить в таблицу заказа", "v2:submit"),
+        ("Отправить заявку", "v2:submit"),
         ("К черновику", "v2:back"),
     ]
 

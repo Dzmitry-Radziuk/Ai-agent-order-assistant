@@ -20,6 +20,34 @@ _PACKAGING_REFERENCE_PREFIX_RE = re.compile(
     flags=re.I,
 )
 
+_PACKAGING_PREFERENCE_WORD_RE = re.compile(
+    r"\b(?:упаковк\w*|фасовк\w*|пакет\w*|контейнер\w*|коробк\w*)\b",
+    flags=re.I,
+)
+_PACKAGING_PREFERENCE_SIGNAL_RE = re.compile(
+    r"\b(?:желательн\w*|нужн\w*|предпочт\w*|хоч\w*|только|или|пластик\w*|"
+    r"контейнер\w*)\b",
+    flags=re.I,
+)
+_EXPLICIT_PREFERENCE_RE = re.compile(
+    r"\b(?:желательн\w*|нужн\w*|предпочт\w*|только)\b",
+    flags=re.I,
+)
+
+
+def explicit_packaging_preference(value: str) -> str:
+    """Возвращает пожелание к виду упаковки, если оно явно указано пользователем."""
+    preference = clean_text(value).strip(" .,;:-—–")
+    if not preference or not _PACKAGING_PREFERENCE_WORD_RE.search(preference):
+        return ""
+    if not _PACKAGING_PREFERENCE_SIGNAL_RE.search(preference):
+        return ""
+    if catalog_packaging_span(preference) is not None and not _EXPLICIT_PREFERENCE_RE.search(
+        preference
+    ):
+        return ""
+    return preference
+
 
 def _spoken_measurement_pair(
     value: str,

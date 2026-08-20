@@ -8,6 +8,7 @@ from restaurant_bot.domain.models import Intent, ParsedCommand
 from restaurant_bot.domain.text import clean_text
 from restaurant_bot.parsing.commands.item_commands import clean_command_target
 from restaurant_bot.parsing.commands.normalization import normalize_command_text
+from restaurant_bot.parsing.comment_policy import strip_comment_label
 from restaurant_bot.parsing.comment_scope import (
     has_explicit_group_comment_scope,
     has_explicit_order_comment_scope,
@@ -45,7 +46,7 @@ def _build_edit_comment(
 ) -> ParsedCommand | None:
     """Создаёт команду изменения комментария только с явным товаром и пожеланием."""
     target = clean_command_target(target)
-    comment = clean_text(comment).strip(" ,;:-—–.!?")
+    comment = strip_comment_label(comment)
     if action == "add" and scope_action in {"items", "order"}:
         comment = strip_comment_scope_suffix(comment, scope_action)
     if action == "add" and scope == "order":

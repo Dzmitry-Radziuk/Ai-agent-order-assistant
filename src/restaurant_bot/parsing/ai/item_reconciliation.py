@@ -282,6 +282,22 @@ def _restore_dropped_unclassified_terms(
     normalized_global = normalize_text(global_comment).strip(" .,;:-—–")
     for item, recovered in pairs:
         source_line = clean_text(item.get("source_span")) or clean_text(item.get("source_line"))
+        if recovered.packaging_role == "user_preference":
+            recovered_query = _strip_conversational_product_leadin(recovered.product_query)
+            if recovered_query and _query_is_already_represented(
+                recovered_query, item.get("product_query") or ""
+            ):
+                item["product_query"] = recovered_query
+            if not clean_text(item.get("comment") or item.get("user_comment_to_supplier")):
+                item["comment"] = recovered.comment
+                item["user_comment_to_supplier"] = recovered.user_comment_to_supplier
+                item["comment_source"] = recovered.comment_source.value
+            item["packaging_text"] = recovered.packaging_text
+            item["packaging_role"] = recovered.packaging_role
+            item["packaging_confidence"] = recovered.packaging_confidence
+            if not clean_text(item.get("source_line")):
+                item["source_line"] = recovered.source_line or ""
+            continue
         if (
             clean_text(item.get("comment") or item.get("user_comment_to_supplier"))
             or clean_text(item.get("supplier_hint"))

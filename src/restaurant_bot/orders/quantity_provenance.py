@@ -8,6 +8,7 @@ from enum import StrEnum
 
 from restaurant_bot.catalog.evidence import NumericEvidence, numeric_evidence
 from restaurant_bot.domain.units import normalize_unit
+from restaurant_bot.parsing.comment_policy import explicit_supplier_comment
 from restaurant_bot.parsing.quantities import has_explicit_order_marker
 
 
@@ -95,11 +96,25 @@ def _has_local_order_marker(source: str, evidence: NumericEvidence) -> bool:
     prefix = source[max(0, evidence.start - 32) : evidence.start]
     return bool(
         re.search(
-            r"\b(?:\u043d\u0443\u0436\u043d\u043e|\u043d\u0430\u0434\u043e|\u0437\u0430\u043a\u0430\u0436\w*|\u0434\u043e\u0431\u0430\u0432\w*)\b",
+            r"\b(?:\u043d\u0443\u0436\u043d\u043e|\u043d\u0430\u0434\u043e|\u0437\u0430\u043a\u0430\u0436\w*|\u0437\u0430\u043a\u0430\u0437\w*|\u0434\u043e\u0431\u0430\u0432\w*)\b",
             prefix,
             flags=re.I,
         )
     )
+
+
+def _has_explicit_comment_after_quantity(
+    source: str,
+    evidences: list[NumericEvidence],
+) -> bool:
+    """Проверяет явное пожелание сразу после указанного количества заказа."""
+    for evidence in evidences:
+        suffix = source[evidence.end :]
+        if evidence.unit:
+            suffix = re.sub(r"^\s*[\wё]+", "", suffix, count=1, flags=re.I)
+        if explicit_supplier_comment(suffix):
+            return True
+    return False
 
 
 def _catalog_identity_indexes(
@@ -206,6 +221,9 @@ def reconcile_order_quantity_evidence(
         )
 
     if any(_has_local_order_marker(source, entry) for entry in proposed_source):
+        return QuantityAuthorization(proposed_quantity, normalized_unit, QuantityProvenance.ORDER)
+
+    if _has_explicit_comment_after_quantity(source, proposed_source):
         return QuantityAuthorization(proposed_quantity, normalized_unit, QuantityProvenance.ORDER)
 
     if proposed_source:

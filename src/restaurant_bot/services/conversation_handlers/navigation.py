@@ -65,6 +65,22 @@ class OrderStatusHandler:
         """Сохраняет выбранную страницу и возвращает флаг фонового чтения."""
         if command.intent != Intent.ORDER_STATUS:
             return None
+        if command.callback_target == "submission_check":
+            pending = state.pending_submission
+            if pending is None:
+                return EngineResult(
+                    state=state,
+                    reply=BotReply(text="Не удалось найти заявку для проверки."),
+                )
+            state.order_status_view_active = True
+            state.order_status_detail_active = True
+            state.order_status_selected_order_number = pending.order_no
+            return EngineResult(
+                state=state,
+                reply=BotReply(text="Проверяю, приняла ли система закупок заявку..."),
+                enqueue_order_status=True,
+                order_status_order_number=pending.order_no,
+            )
         page = self._page(command, state)
         detail_page = self._detail_page(command, state)
         detail_requested = bool(

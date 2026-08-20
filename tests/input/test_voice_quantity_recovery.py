@@ -187,6 +187,29 @@ def test_voice_recovery_restores_quantity_and_unit_from_shared_source_line() -> 
     assert [(item["quantity"], item["unit"]) for item in restored] == [(10.0, "шт"), (5.0, "кг")]
 
 
+def test_voice_ai_item_with_word_quantity_is_not_split_by_recovery() -> None:
+    """Сохраняет одну AI-позицию, если хвост исходной фразы содержит её количество."""
+    source = "Яйцо куриное цветное, три короба."
+    restored = recover_omitted_explicit_items(
+        {
+            "intent": Intent.ADD_ITEMS,
+            "items": [
+                {
+                    "product_query": "Яйцо куриное цветное",
+                    "quantity": 3,
+                    "unit": "короб",
+                    "source_line": source,
+                }
+            ],
+        },
+        source,
+    )
+
+    assert len(restored["items"]) == 1
+    assert restored["items"][0]["product_query"] == "Яйцо куриное цветное"
+    assert (restored["items"][0]["quantity"], restored["items"][0]["unit"]) == (3, "кор")
+
+
 def test_packaging_and_order_sentence_collapses_ai_shadow_items() -> None:
     """Схлопывает фасовку и заказное количество одной голосовой позиции."""
     source = (

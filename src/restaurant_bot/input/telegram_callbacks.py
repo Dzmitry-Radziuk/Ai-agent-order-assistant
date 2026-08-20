@@ -28,6 +28,7 @@ def parse_callback(data: str) -> ParsedCommand:
         "rename": Intent.MANUAL_CURRENT,
         "manual": Intent.MANUAL_CURRENT,
         "orders": Intent.ORDER_STATUS,
+        "check_submission": Intent.ORDER_STATUS,
         "help": Intent.HELP,
         "check_min": Intent.CHECK_MIN_SUM,
         "resolve": Intent.CONTINUE_CURRENT,
@@ -162,5 +163,7 @@ def parse_callback(data: str) -> ParsedCommand:
         intent=mapping.get(action, Intent.UNKNOWN),
         text=data,
         callback_revision=revision,
-        callback_target=rest[0] if rest else "",
+        callback_target=(
+            "submission_check" if action == "check_submission" else rest[0] if rest else ""
+        ),
     )

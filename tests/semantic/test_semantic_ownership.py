@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from restaurant_bot.domain.models import Intent
 from restaurant_bot.parsing.ai.comment_reconciliation import _apply_semantic_comment_bindings
 from restaurant_bot.parsing.ai.reconciliation import recover_omitted_explicit_items
 from restaurant_bot.parsing.products import parse_product_lines
@@ -80,6 +81,58 @@ def test_product_anchor_evidence_keeps_real_list_boundaries() -> None:
     ] == [("лук", 5, "кг"), ("картошка", 10, "кг")]
 
 
+def test_unmarked_qualifier_tail_stays_with_one_product() -> None:
+    """Сохраняет уточнения картофеля у одной товарной позиции."""
+    source = "Картофель молодой вес, сорт желательно Агретто, и чтобы крупные были картошинки."
+
+    items = parse_product_lines(source)
+
+    assert len(items) == 1
+    assert items[0].product_query == "Картофель молодой сорт Агретто"
+    assert items[0].comment == "чтобы крупные были картошинки"
+
+
+def test_unknown_ai_payload_recovers_one_qualifier_product() -> None:
+    """Восстанавливает одну товарную позицию, если ИИ не распознал структуру."""
+    source = "Картофель молодой вес, сорт желательно Агретто."
+
+    result = recover_omitted_explicit_items({"intent": Intent.UNKNOWN, "items": []}, source)
+
+    assert result["intent"] is Intent.ADD_ITEMS
+    assert len(result["items"]) == 1
+    assert result["items"][0]["product_query"] == "Картофель молодой сорт Агретто"
+
+
+def test_ai_qualifier_item_is_not_reparsed_as_extra_positions() -> None:
+    """Не добавляет вторые позиции поверх уже распознанного товара."""
+    source = "Картофель молодой вес, сорт желательно Агретто, и чтобы крупные были картошинки."
+    result = recover_omitted_explicit_items(
+        {
+            "intent": "add_items",
+            "items": [
+                {
+                    "product_query": "картофель молодой сорт Агретто",
+                    "quantity": None,
+                    "unit": "",
+                    "source_line": source,
+                }
+            ],
+            "comment_bindings": [
+                {
+                    "text": "чтобы крупные были картошинки",
+                    "scope": "item",
+                    "target_item_indexes": [0],
+                    "confidence": 0.99,
+                }
+            ],
+        },
+        source,
+    )
+
+    assert len(result["items"]) == 1
+    assert result["items"][0]["comment"] == "чтобы крупные были картошинки"
+
+
 def test_catalog_country_does_not_become_comment() -> None:
     """Не принимает страну из названия каталога за пожелание поставщику."""
     source = "Макароны CASA MILO, пакет, 500 гр, Италия"
@@ -99,6 +152,136 @@ def test_catalog_country_does_not_become_comment() -> None:
     result = recover_omitted_explicit_items(payload, source)
 
     assert result["items"][0].get("comment", "") == ""
+
+
+def test_product_name_binding_does_not_become_supplier_comment() -> None:
+    """Не записывает полное название товара как комментарий поставщику."""
+    source = "горчица дежонская — 1 штук"
+    result = recover_omitted_explicit_items(
+        {
+            "intent": "add_items",
+            "items": [
+                {
+                    "product_query": "горчица дежонская",
+                    "quantity": 1,
+                    "unit": "шт",
+                    "source_line": source,
+                }
+            ],
+            "comment_bindings": [
+                {
+                    "text": "горчица дежонская",
+                    "scope": "item",
+                    "target_item_indexes": [0],
+                    "confidence": 0.99,
+                }
+            ],
+        },
+        source,
+    )
+
+    item = result["items"][0]
+    assert item["product_query"] == "горчица дежонская"
+    assert item["comment"] == ""
+    assert item["user_comment_to_supplier"] == ""
+
+
+def test_product_name_prefix_does_not_become_supplier_comment() -> None:
+    """Не сохраняет начальную часть названия товара как комментарий."""
+    source = "горчица дежонская — 1 штук"
+    result = recover_omitted_explicit_items(
+        {
+            "intent": "add_items",
+            "items": [
+                {
+                    "product_query": "горчица дежонская",
+                    "quantity": 1,
+                    "unit": "шт",
+                    "source_line": source,
+                    "comment": "горчица",
+                    "user_comment_to_supplier": "горчица",
+                }
+            ],
+            "comment_bindings": [
+                {
+                    "text": "горчица",
+                    "scope": "item",
+                    "target_item_indexes": [0],
+                    "confidence": 0.99,
+                }
+            ],
+        },
+        source,
+    )
+
+    assert result["items"][0]["comment"] == ""
+
+
+def test_comment_action_words_do_not_reach_supplier_comment() -> None:
+    """Не записывает служебную команду добавления комментария в заявку."""
+    for action in ("добавь комментарий", "покажи итог", "изменить количество"):
+        source = f"Курица — 5 кг. {action}."
+        result = recover_omitted_explicit_items(
+            {
+                "intent": "add_items",
+                "items": [
+                    {
+                        "product_query": "Курица",
+                        "quantity": 5,
+                        "unit": "кг",
+                        "source_line": source,
+                        "comment": action,
+                        "user_comment_to_supplier": action,
+                    }
+                ],
+                "global_comment": action,
+                "comment_bindings": [
+                    {
+                        "text": action,
+                        "scope": "item",
+                        "target_item_indexes": [0],
+                        "confidence": 0.99,
+                    }
+                ],
+            },
+            source,
+        )
+
+        item = result["items"][0]
+        assert result["global_comment"] == ""
+        assert item["comment"] == ""
+        assert item["user_comment_to_supplier"] == ""
+
+
+def test_order_comment_action_words_do_not_reach_global_comment() -> None:
+    """Не сохраняет служебную команду в общем комментарии заявки."""
+    source = "Всем товарам добавь комментарий"
+    result = recover_omitted_explicit_items(
+        {
+            "intent": "add_items",
+            "items": [
+                {
+                    "product_query": "Курица",
+                    "quantity": 5,
+                    "unit": "кг",
+                    "source_line": source,
+                }
+            ],
+            "global_comment": "добавь комментарий",
+            "comment_bindings": [
+                {
+                    "text": "добавь комментарий",
+                    "scope": "order",
+                    "target_item_indexes": [],
+                    "confidence": 0.99,
+                }
+            ],
+        },
+        source,
+    )
+
+    assert result["global_comment"] == ""
+    assert result["items"][0]["comment"] == ""
 
 
 def test_voice_quantity_phrase_is_shared_with_text_parser() -> None:

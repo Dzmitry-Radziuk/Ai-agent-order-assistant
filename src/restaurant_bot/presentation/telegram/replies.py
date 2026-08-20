@@ -36,6 +36,16 @@ ISSUE_STATUSES = {
     ItemStatus.NOT_FOUND,
 }
 
+_DRAFT_CONTINUATION_HINT = (
+    "Добавляйте товары текстом, голосом или фотографией списка с названиями и количеством. "
+    "Когда список будет готов, нажмите «Добавить в корзину и проверить» — товары добавятся в корзину, "
+    "и откроется финальная проверка заказа."
+)
+_DRAFT_ISSUE_HINT = (
+    "Можно продолжить добавлять товары текстом, голосом или фотографией списка. "
+    "Сначала уточните позиции, отмеченные выше."
+)
+
 _NEW_ORDER_MESSAGE = (
     f"🧾 {heading('Новая заявка')}\n\n"
     "Отправьте товары текстом, голосом или фото — я добавлю их в текущий черновик заказа.\n\n"
@@ -85,6 +95,19 @@ def _item_name(item: CartItem) -> str:
 def _item_unit(item: CartItem) -> str:
     """Возвращает отображаемую единицу измерения."""
     return item.unit or item.catalog_unit or ""
+
+
+def _multiple_quantity_explanation(item: CartItem, unit: str) -> str:
+    """Объясняет пользователю допустимые шаги количества без внутреннего термина."""
+    if not item.minimum_multiple:
+        return "Для этого товара доступны определённые варианты количества."
+    batch = format_number(item.minimum_multiple)
+    next_batch = format_number(item.minimum_multiple * 2)
+    third_batch = format_number(item.minimum_multiple * 3)
+    return (
+        f"Минимальное количество заказа — <b>{batch} {unit}</b>. "
+        f"Можно заказать {batch} {unit}, {next_batch} {unit}, {third_batch} {unit} и так далее."
+    )
 
 
 def format_item_comment(comment: str) -> str:
@@ -206,34 +229,28 @@ def thanks_reply(state: ConversationState) -> BotReply:
 
 def small_talk_reply(state: ConversationState) -> BotReply:
     """Формирует ответ на бытовую реплику."""
-    rows = (
-        [
-            [
-                Button(text="Добавить товары", callback_data="v2:add"),
-                Button(text="Показать черновик", callback_data="v2:back"),
-            ]
-        ]
-        if _has_draft_content(state)
-        else []
-    )
+    rows = [[Button(text="Добавить товары", callback_data="v2:add")]]
+    if _has_draft_content(state):
+        rows[0].append(Button(text="Показать черновик", callback_data="v2:back"))
     return BotReply(
-        text=f"ℹ️ {heading('Работа с заявкой')}\n\nДобавьте товары, откройте черновик или продолжите текущий шаг.",
+        text=(
+            f"ℹ️ {heading('Работа с заявкой')}\n\n"
+            "Сообщение не распознано как действие с заявкой.\n"
+            "Заявка не изменена, товар не добавлен.\n\n"
+            "Доступные действия:\n"
+            "• добавить товар — указать название и количество.\n"
+            "• открыть черновик — нажать «Показать черновик».\n"
+            "• открыть инструкцию — команда /help."
+        ),
         rows=rows,
     )
 
 
 def unknown_intent_reply(state: ConversationState) -> BotReply:
     """Формирует ответ на неизвестную команду."""
-    rows = (
-        [
-            [
-                Button(text="Добавить товары", callback_data="v2:add"),
-                Button(text="Показать черновик", callback_data="v2:back"),
-            ]
-        ]
-        if _has_draft_content(state)
-        else []
-    )
+    rows = [[Button(text="Добавить товары", callback_data="v2:add")]]
+    if _has_draft_content(state):
+        rows[0].append(Button(text="Показать черновик", callback_data="v2:back"))
     return BotReply(
         text=f"""🔸 {heading("К сожалению, мне не удалось распознать сообщение")}
 
@@ -241,7 +258,9 @@ def unknown_intent_reply(state: ConversationState) -> BotReply:
 • <code>добавь курицу 5 кг</code>;
 • <code>убери курицу</code>;
 • <code>покажи черновик</code>;
-• <code>добавить ещё товары</code>.""",
+• <code>добавить ещё товары</code>.
+
+Если не понимаете, что делать дальше, напишите: <code>Как с тобой работать?</code>""",
         rows=rows,
     )
 
@@ -301,20 +320,9 @@ def empty_draft_reply() -> BotReply:
 
 
 def added_items_question_reply(_state: ConversationState, added_count: int) -> BotReply:
-    """Подтверждает добавление без привязки к асинхронно обработанной позиции."""
-    title = (
-        "Товар добавлен в черновик заказа"
-        if added_count == 1
-        else "Товары добавлены в черновик заказа"
-    )
-    lines = [heading(title), "", "Добавить ещё товары?"]
-    return BotReply(
-        text="\n".join(lines),
-        rows=[
-            [Button(text="Да, добавить товары", callback_data="v2:add")],
-            [Button(text="Нет, к черновику", callback_data="v2:back")],
-        ],
-    )
+    """Показывает черновик для старой сессии без промежуточного вопроса."""
+    notice = "Товар добавлен" if added_count == 1 else "Товары добавлены"
+    return cart_reply(_state, notice=notice)
 
 
 def comment_scope_clarification_reply(
@@ -484,6 +492,9 @@ def cart_reply(
                 lines.append(format_item_comment(item.comment))
         if not paginated and len(issues) > 25:
             lines.append(f"…и ещё {len(issues) - 25} поз.")
+    if lines and lines[-1] != "":
+        lines.append("")
+    lines.append(_DRAFT_ISSUE_HINT if issues else _DRAFT_CONTINUATION_HINT)
     request_count = _request_count(state)
     if request_count:
         if lines[-1] != "":
@@ -513,8 +524,14 @@ def cart_reply(
         )
         rows.append([Button(text=f"Уточнить {count} {word}", callback_data="v2:resolve")])
     else:
-        rows.append([Button(text="Отправить в корзину", callback_data="v2:cart")])
-    rows.append([Button(text="Добавить ещё товары", callback_data="v2:add")])
+        rows.append(
+            [
+                Button(
+                    text="Добавить в корзину и проверить",
+                    callback_data="v2:cart",
+                )
+            ]
+        )
     if request_count:
         rows.append(
             [Button(text=f"Запросы снабженцу · {request_count}", callback_data="v2:addreqlist")]
@@ -582,12 +599,6 @@ def _issue_reply_body(item: CartItem, item_index: int | None = None) -> BotReply
                     f"Чтобы объединить позиции, укажите количество в {escape(item.catalog_unit)}."
                 ),
                 rows=[
-                    [
-                        Button(
-                            text=f"Ввести количество в {item.catalog_unit}",
-                            callback_data=f"v2:unitedit:{index}",
-                        )
-                    ],
                     [Button(text="Не добавлять повторно", callback_data=f"v2:skip:{index}")],
                 ],
             )
@@ -606,23 +617,13 @@ def _issue_reply_body(item: CartItem, item_index: int | None = None) -> BotReply
                     )
                 ]
             )
-        unit_rows.extend(
-            [
-                [
-                    Button(
-                        text=f"Ввести количество в {item.catalog_unit}",
-                        callback_data=f"v2:unitedit:{index}",
-                    )
-                ],
-                [Button(text="Не добавлять", callback_data=f"v2:skip:{index}")],
-            ]
-        )
+        unit_rows.append([Button(text="Не добавлять", callback_data=f"v2:skip:{index}")])
         return BotReply(
             text=(
                 f"🔸 {heading('Уточните количество')}\n\n{name}\n\n"
                 f"Вы указали: <b>{format_number(item.quantity)} {escape(item.unit)}</b>.\n"
-                f"Этот товар заказывается <b>в {escape(item.catalog_unit)}</b>.\n\n"
-                f"Выберите вариант или напишите, сколько {escape(item.catalog_unit)} нужно."
+                f"Количество этого товара указывают <b>в {escape(item.catalog_unit)}</b>.\n\n"
+                f"Выберите вариант ниже или напишите/скажите, сколько {escape(item.catalog_unit)} нужно заказать."
             ),
             rows=unit_rows,
         )
@@ -646,12 +647,6 @@ def _issue_reply_body(item: CartItem, item_index: int | None = None) -> BotReply
                     f"Чтобы объединить позиции, укажите количество в {escape(item.catalog_unit)}."
                 ),
                 rows=[
-                    [
-                        Button(
-                            text=f"Ввести количество в {item.catalog_unit}",
-                            callback_data=f"v2:unitedit:{index}",
-                        )
-                    ],
                     [Button(text="Не добавлять повторно", callback_data=f"v2:skip:{index}")],
                 ],
             )
@@ -687,14 +682,12 @@ def _issue_reply_body(item: CartItem, item_index: int | None = None) -> BotReply
             lines = [
                 f"🔎 {heading('Точного совпадения не найдено')}",
                 "",
-                f"По запросу «{product_name(item.source_query)}» найден похожий товар.",
-                "",
-                "Возможно, вы имели в виду:",
+                "Есть похожий вариант товара. Проверьте его:",
                 "",
             ]
         else:
             lines = [
-                f"По запросу «{product_name(item.source_query)}» найдено несколько вариантов.",
+                "Найдено несколько вариантов товара.",
                 "",
                 "Уточните, какой товар вы имели в виду:",
                 "",
@@ -769,10 +762,15 @@ def _issue_reply_body(item: CartItem, item_index: int | None = None) -> BotReply
                 [Button(text="Нет", callback_data=f"v2:addreqskip:{index}")],
             ],
         )
+    query_line = (
+        f"По запросу «{product_name(item.source_query)}» ничего не найдено."
+        if item.source_query.strip()
+        else "По этому запросу ничего не найдено."
+    )
     return BotReply(
         text=(
             f"🔸 {heading('Товар не найден')}\n\n"
-            f"По вашему запросу «{product_name(item.source_query)}» ничего не найдено.\n\n"
+            f"{query_line}\n\n"
             "Вы можете изменить название, отправить запрос менеджеру по снабжению "
             "или не добавлять товар."
         ),
@@ -803,6 +801,12 @@ def final_review_reply(state: ConversationState) -> BotReply:
         )
         if item.comment:
             lines.append(format_item_comment(item.comment))
+    lines += [
+        "",
+        "Проверьте товары и количество перед отправкой.",
+        "После нажатия «Отправить заявку» заявка будет передана в обработку.",
+        "Если требуется что-то изменить, нажмите «К черновику»: там можно добавить товар, изменить количество или удалить позицию.",
+    ]
     multiple = multiple_warnings(state)
     warnings = supplier_minimum_warnings(state)
     rows: list[list[Button]] = []
@@ -817,18 +821,13 @@ def final_review_reply(state: ConversationState) -> BotReply:
     if len(multiple) == 1:
         item = multiple[0]
         unit = escape(_item_unit(item) or "шт")
-        batch = format_number(item.minimum_multiple)
         current = format_number(item.quantity)
         suggested = format_number(item.suggested_quantity)
         lines += [
             "",
             f"🔸 {heading('Проверьте количество')}",
             product_name(_item_name(item)),
-            (
-                f"Этот товар заказывают партиями по <b>{batch} {unit}</b>."
-                if item.minimum_multiple
-                else "Для этого товара доступны определённые варианты количества."
-            ),
+            _multiple_quantity_explanation(item, unit),
             f"Вы указали: <b>{current} {unit}</b>.",
             f"Ближайший подходящий вариант: <b>{suggested} {unit}</b>.",
         ]
@@ -839,9 +838,8 @@ def final_review_reply(state: ConversationState) -> BotReply:
     elif len(multiple) > 1:
         lines += [
             "",
-            f"🔸 {heading(f'Проверьте количество у {len(multiple)} товаров')}",
-            "Эти товары заказывают партиями определённого размера.",
-            "Выберите количество для каждого товара.",
+            f"🔸 {heading(f'Уточните количество для {len(multiple)} товаров')}",
+            "У этих товаров есть минимальное количество заказа. Выберите подходящее количество для каждого товара.",
         ]
         rows += [
             [Button(text="Выбрать количество", callback_data="v2:mulone")],
@@ -863,7 +861,14 @@ def final_review_reply(state: ConversationState) -> BotReply:
                     )
                 ]
             )
-        rows.append([Button(text="Отправить в таблицу заказа", callback_data="v2:submit")])
+        rows.append(
+            [
+                Button(
+                    text="Отправить заявку",
+                    callback_data="v2:submit",
+                )
+            ]
+        )
     rows.append([Button(text="К черновику", callback_data="v2:back")])
     return BotReply(text="\n".join(lines), rows=rows)
 
@@ -873,16 +878,11 @@ def multiple_quantity_choice_reply(item: CartItem) -> BotReply:
     unit = escape(_item_unit(item) or "шт")
     current = format_number(item.quantity)
     suggested = format_number(item.suggested_quantity)
-    batch = format_number(item.minimum_multiple)
     lines = [
         f"⚖️ {heading('Выберите количество')}",
         "",
         product_name(_item_name(item)),
-        (
-            f"Этот товар заказывают партиями по <b>{batch} {unit}</b>."
-            if item.minimum_multiple
-            else "Для этого товара доступны определённые варианты количества."
-        ),
+        _multiple_quantity_explanation(item, unit),
         f"Вы указали: <b>{current} {unit}</b>.",
         f"Ближайший подходящий вариант: <b>{suggested} {unit}</b>.",
         "",
