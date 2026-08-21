@@ -258,6 +258,7 @@ class ExtractedItem(BaseModel):
     catalog_identity_provenance: Literal["", "venue_table_exact_candidate"] = ""
     photo_sheet_row_number: int | None = Field(default=None, ge=1)
     photo_sheet_row_number_confidence: float = Field(default=0, ge=0, le=1)
+    photo_sheet_row_number_authoritative: bool = False
 
     @field_validator(
         "product_query",
@@ -376,6 +377,7 @@ class CartItem(BaseModel):
     catalog_identity_provenance: Literal["", "venue_table_exact_candidate"] = ""
     photo_sheet_row_number: int | None = Field(default=None, ge=1)
     photo_sheet_row_number_confidence: float = Field(default=0, ge=0, le=1)
+    photo_sheet_row_number_authoritative: bool = False
     quantity: float | None = None
     unit: str = ""
     department: str = "Кухня"

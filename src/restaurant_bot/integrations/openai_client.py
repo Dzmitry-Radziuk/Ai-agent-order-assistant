@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import re
+import time
 from pathlib import Path
 from typing import Any, cast
 
@@ -15,8 +16,11 @@ from restaurant_bot.config import Settings
 from restaurant_bot.domain.models import ExtractedItem, Intent, ParsedCommand
 from restaurant_bot.domain.text import clean_text, normalize_text
 from restaurant_bot.domain.units import UNIT_ALIASES, normalize_unit
-from restaurant_bot.input.photo_ingestion import normalize_photo_observation
-from restaurant_bot.input.photo_views import prepare_photo_views
+from restaurant_bot.input.photo_ingestion import (
+    normalize_photo_observation,
+    photo_sheet_row_mapping_is_authoritative,
+)
+from restaurant_bot.input.photo_views import PhotoImagePreparation, prepare_photo_views
 from restaurant_bot.integrations.openai_prompts import (
     _COMMENT_SCOPE_SYSTEM,
     _MATCH_SYSTEM,
@@ -76,6 +80,48 @@ _LARGE_ORDER_LIST_MIN_LINES = 10
 _LARGE_ORDER_LIST_CHUNK_SIZE = 8
 
 logger = structlog.get_logger(__name__)
+
+
+def _photo_observation_needs_second_pass(
+    observation: PhotoDocumentObservation,
+    *,
+    require_sheet_row_numbers: bool = False,
+) -> bool:
+    """Определяет, нужен ли повторный vision-проход для неполной привязки заказа."""
+    sheet_rows_incomplete = (
+        require_sheet_row_numbers
+        and not photo_sheet_row_mapping_is_authoritative(
+            observation,
+            require_sheet_row_numbers=require_sheet_row_numbers,
+        )
+    )
+    return (
+        observation.document_type_proposal
+        in {"client_order_sheet", "order_table", "printed_order_form"}
+        and bool(observation.rows)
+        and (
+            not observation.order_area_complete
+            or observation.uncertain_order_row_count > 0
+            or sheet_rows_incomplete
+        )
+    )
+
+
+def _photo_observation_is_complete(
+    observation: PhotoDocumentObservation,
+    *,
+    require_sheet_row_numbers: bool = False,
+) -> bool:
+    """Проверяет, что повторное наблюдение не содержит неопределённых строк заказа."""
+    sheet_rows_complete = not require_sheet_row_numbers or photo_sheet_row_mapping_is_authoritative(
+        observation,
+        require_sheet_row_numbers=require_sheet_row_numbers,
+    )
+    return (
+        observation.order_area_complete
+        and observation.uncertain_order_row_count == 0
+        and sheet_rows_complete
+    )
 
 
 class OpenAIService:
@@ -704,10 +750,13 @@ class OpenAIService:
         )
         return fallback_text
 
-    def parse_photo(self, path: Path, mime_type: str, caption: str = "") -> ParsedCommand:
+    def parse_photo(
+        self,
+        path: Path,
+        mime_type: str,
+        caption: str = "",
+    ) -> ParsedCommand:
         """Извлекает товары из фотографии."""
-        import base64
-
         preparation = prepare_photo_views(path, mime_type)
         table_focus_view_size = preparation.table_focus_view_size
         logger.info(
@@ -718,6 +767,7 @@ class OpenAIService:
             table_focus_view_size=(list(table_focus_view_size) if table_focus_view_size else None),
             upscale_factor=preparation.upscale_factor,
             dense_table_views_used=preparation.dense_table_views_used,
+            spreadsheet_layout_detected=preparation.spreadsheet_layout_detected,
         )
         input_text = caption or "Распознай заявку на фото"
         if preparation.dense_table_views_used:
@@ -735,6 +785,114 @@ class OpenAIService:
                 "Сопоставляй товар, количество и комментарий только внутри одной визуальной строки "
                 "и соблюдай контракт PhotoDocumentObservation."
             )
+        if preparation.spreadsheet_layout_detected:
+            input_text = (
+                f"{input_text}\n\n"
+                "Детерминированная подготовка изображения обнаружила структуру электронной "
+                "таблицы. Верни только строки с заполненным количеством заказа. Номера строк "
+                "могут отсутствовать из-за обрезки изображения и не являются обязательными: "
+                "связывай товар, количество и комментарий по одной визуальной строке."
+            )
+        observation, response_complete = self._request_photo_observation(
+            path,
+            mime_type,
+            caption,
+            preparation,
+            input_text,
+            pass_number=1,
+        )
+        if observation is None:
+            logger.warning("photo_ai_empty_result", mime_type=mime_type)
+            return ParsedCommand(intent=Intent.ADD_ITEMS, photo_outcome="incomplete_photo_read")
+        if not response_complete:
+            logger.warning("photo_ai_incomplete_result", mime_type=mime_type)
+            return ParsedCommand(intent=Intent.ADD_ITEMS, photo_outcome="incomplete_photo_read")
+
+        if _photo_observation_needs_second_pass(observation):
+            logger.info(
+                "photo_ai_second_pass_started",
+                reason="order_area_uncertain",
+                row_count=len(observation.rows),
+                uncertain_order_row_count=observation.uncertain_order_row_count,
+                require_sheet_row_numbers=False,
+            )
+            retry_preparation = prepare_photo_views(
+                path,
+                mime_type,
+                include_original=not preparation.spreadsheet_layout_detected,
+            )
+            retry_text = (
+                f"{input_text}\n\n"
+                "Повтори проверку по оригиналу и увеличенному виду. "
+                "Считай неопределённость только для видимой заполненной ячейки, "
+                "которую нельзя привязать к строке товара. Пустые ячейки не являются "
+                "ошибкой и не требуют пометки неполной области. Если слева видны номера "
+                "строк таблицы, прочитай номер каждой возвращаемой строки по изображению; "
+                "не вычисляй его из позиции строки в массиве. Если номер строки и прочитанное "
+                "название могли попасть из разных горизонтальных полос, заново прочитай всю "
+                "строку слева направо и не переноси количество или комментарий между строками."
+            )
+            retry_observation, retry_complete = self._request_photo_observation(
+                path,
+                mime_type,
+                caption,
+                retry_preparation,
+                retry_text,
+                pass_number=2,
+            )
+            if (
+                retry_complete
+                and retry_observation is not None
+                and _photo_observation_is_complete(retry_observation)
+            ):
+                observation = retry_observation
+                logger.info(
+                    "photo_ai_second_pass_selected",
+                    row_count=len(observation.rows),
+                    uncertain_order_row_count=observation.uncertain_order_row_count,
+                    order_area_complete=observation.order_area_complete,
+                    sheet_row_numbers_visible=observation.sheet_row_numbers_visible,
+                )
+            else:
+                logger.warning("photo_ai_second_pass_not_selected")
+
+        logger.info(
+            "photo_ai_parsed",
+            proposed_document_type=observation.document_type_proposal,
+            visible_product_row_count=observation.visible_product_row_count,
+            returned_row_count=len(observation.rows),
+            order_area_complete=observation.order_area_complete,
+            uncertain_order_row_count=observation.uncertain_order_row_count,
+            scan_complete=observation.scan_complete,
+            sheet_row_numbers_visible=observation.sheet_row_numbers_visible,
+            require_sheet_row_numbers=False,
+        )
+        normalization = normalize_photo_observation(observation, self.settings)
+        normalized = normalization.command
+        logger.info(
+            "photo_command_normalized",
+            document_type=normalization.document_type,
+            input_row_count=len(observation.rows),
+            output_item_count=len(normalized.items),
+            dropped_row_count=normalization.dropped_rows,
+            reason=normalization.reason,
+        )
+        return normalized
+
+    def _request_photo_observation(
+        self,
+        path: Path,
+        mime_type: str,
+        caption: str,
+        preparation: PhotoImagePreparation,
+        input_text: str,
+        *,
+        pass_number: int,
+    ) -> tuple[PhotoDocumentObservation | None, bool]:
+        """Выполняет один structured vision-запрос и возвращает его полноту."""
+        import base64
+
+        started_at = time.perf_counter()
         content: list[dict[str, Any]] = [{"type": "input_text", "text": input_text}]
         for view in preparation.views:
             encoded = base64.b64encode(view.data).decode("ascii")
@@ -753,13 +911,14 @@ class OpenAIService:
                 "caption_characters": len(caption),
                 "mime_type": mime_type,
                 "kind": "photo",
+                "pass_number": pass_number,
             },
-            metadata={"feature": "photo_order_parser"},
+            metadata={"feature": "photo_order_parser", "pass_number": pass_number},
         ) as generation:
-            response = self.vision_client.responses.parse(
-                model=self.settings.openai_vision_model,
-                instructions=f"{_PHOTO_SYSTEM}\n\n{_PHOTO_OBSERVATION_CONTRACT}",
-                input=cast(
+            request: dict[str, Any] = {
+                "model": self.settings.openai_vision_model,
+                "instructions": f"{_PHOTO_SYSTEM}\n\n{_PHOTO_OBSERVATION_CONTRACT}",
+                "input": cast(
                     Any,
                     [
                         {
@@ -768,64 +927,54 @@ class OpenAIService:
                         }
                     ],
                 ),
-                text_format=PhotoDocumentObservation,
-                max_output_tokens=8000,
+                "text_format": PhotoDocumentObservation,
+                "max_output_tokens": (6000 if preparation.spreadsheet_layout_detected else 8000),
+            }
+            if self.settings.openai_vision_model.casefold().startswith("gpt-5"):
+                request["reasoning"] = {"effort": "minimal"}
+                request["text"] = {"verbosity": "low"}
+            response = self.vision_client.responses.parse(
+                **cast(Any, request),
             )
             parsed_output = response.output_parsed
-            parsed_observation = (
+            observation = (
                 PhotoDocumentObservation.model_validate(parsed_output.model_dump())
                 if parsed_output is not None
                 else None
             )
             generation.update(
                 output={
-                    "parsed": parsed_output is not None,
-                    "row_count": len(parsed_observation.rows) if parsed_observation else 0,
+                    "parsed": observation is not None,
+                    "row_count": len(observation.rows) if observation else 0,
                     "visible_product_row_count": (
-                        parsed_observation.visible_product_row_count if parsed_observation else None
+                        observation.visible_product_row_count if observation else None
                     ),
-                    "order_area_complete": (
-                        parsed_observation.order_area_complete if parsed_observation else False
-                    ),
+                    "order_area_complete": observation.order_area_complete
+                    if observation
+                    else False,
                     "uncertain_order_row_count": (
-                        parsed_observation.uncertain_order_row_count if parsed_observation else 0
+                        observation.uncertain_order_row_count if observation else 0
                     ),
-                    "scan_complete": parsed_observation.scan_complete
-                    if parsed_observation
+                    "scan_complete": observation.scan_complete if observation else False,
+                    "sheet_row_numbers_visible": observation.sheet_row_numbers_visible
+                    if observation
                     else False,
                 },
                 usage_details=self._usage_details(response),
             )
-        parsed = response.output_parsed
-        if parsed is None:
-            logger.warning("photo_ai_empty_result", mime_type=mime_type)
-            return ParsedCommand(intent=Intent.ADD_ITEMS, photo_outcome="incomplete_photo_read")
-        if getattr(response, "status", "") == "incomplete" or getattr(
-            response, "incomplete_details", None
-        ):
-            logger.warning("photo_ai_incomplete_result", mime_type=mime_type)
-            return ParsedCommand(intent=Intent.ADD_ITEMS, photo_outcome="incomplete_photo_read")
-        observation = PhotoDocumentObservation.model_validate(parsed.model_dump())
-        logger.info(
-            "photo_ai_parsed",
-            proposed_document_type=observation.document_type_proposal,
-            visible_product_row_count=observation.visible_product_row_count,
-            returned_row_count=len(observation.rows),
-            order_area_complete=observation.order_area_complete,
-            uncertain_order_row_count=observation.uncertain_order_row_count,
-            scan_complete=observation.scan_complete,
+        complete = not (
+            getattr(response, "status", "") == "incomplete"
+            or getattr(response, "incomplete_details", None)
         )
-        normalization = normalize_photo_observation(observation, self.settings)
-        normalized = normalization.command
         logger.info(
-            "photo_command_normalized",
-            document_type=normalization.document_type,
-            input_row_count=len(observation.rows),
-            output_item_count=len(normalized.items),
-            dropped_row_count=normalization.dropped_rows,
-            reason=normalization.reason,
+            "photo_ai_pass_finished",
+            pass_number=pass_number,
+            duration_ms=round((time.perf_counter() - started_at) * 1000),
+            row_count=len(observation.rows) if observation else 0,
+            spreadsheet_layout_detected=preparation.spreadsheet_layout_detected,
+            complete=complete,
         )
-        return normalized
+        return observation, complete
 
     def _normalise_photo_command(self, command: ParsedCommand, document_type: str) -> ParsedCommand:
         """Адаптирует старый тестовый контракт к единому photo observation normalizer."""

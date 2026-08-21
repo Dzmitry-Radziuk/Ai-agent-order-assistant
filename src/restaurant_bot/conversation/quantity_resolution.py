@@ -8,7 +8,7 @@ from restaurant_bot.domain.models import CartItem, ConversationState, ItemStatus
 
 
 def nearest_valid_multiple(quantity: float, multiple: float | None) -> float | None:
-    """Возвращает ближайшее допустимое кратное без изменения исходного количества."""
+    """Возвращает ближайшее допустимое кратное для количества новой заявки."""
     if not multiple or multiple <= 0:
         return None
     ratio = quantity / multiple
@@ -19,16 +19,10 @@ def nearest_valid_multiple(quantity: float, multiple: float | None) -> float | N
 
 
 def suggested_quantity_for_multiple(item: CartItem) -> float | None:
-    """Рассчитывает рекомендуемое количество с учётом остатка и кратности."""
+    """Предлагает ближайшее кратное для количества новой заявки."""
     if item.quantity is None:
         return None
-    valid_total = nearest_valid_multiple(
-        item.existing_quantity + item.quantity,
-        item.minimum_multiple,
-    )
-    if valid_total is None:
-        return None
-    return round(valid_total - item.existing_quantity, 6)
+    return nearest_valid_multiple(item.quantity, item.minimum_multiple)
 
 
 def is_multiple_warning(item: CartItem) -> bool:

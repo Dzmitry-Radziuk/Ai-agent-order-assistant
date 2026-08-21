@@ -21,8 +21,8 @@ def _event() -> TelegramEvent:
     return TelegramEvent(update_id=1, chat_id="123456", input_type=InputKind.TEXT)
 
 
-def test_multiple_recommendation_accounts_for_existing_department_stock(settings) -> None:  # type: ignore[no-untyped-def]
-    """Проверяет, что рекомендация кратности учитывает остаток выбранного подразделения."""
+def test_multiple_recommendation_applies_to_requested_quantity_only(settings) -> None:  # type: ignore[no-untyped-def]
+    """Проверяет кратность количества заявки без прибавления значения из таблицы."""
     engine = ConversationEngine(settings)
     catalog = [
         CatalogProduct(
@@ -31,7 +31,7 @@ def test_multiple_recommendation_accounts_for_existing_department_stock(settings
             supplier="Мясо",
             unit="кг",
             minimum_multiple=20,
-            department_quantities=DepartmentQuantities(kitchen=20),
+            department_quantities=DepartmentQuantities(kitchen=1),
         )
     ]
     result = engine.handle(
@@ -46,7 +46,7 @@ def test_multiple_recommendation_accounts_for_existing_department_stock(settings
 
     item = result.state.cart[0]
     assert item.status is ItemStatus.MATCHED
-    assert item.existing_quantity == 20
+    assert item.existing_quantity == 1
     assert item.suggested_quantity == 20
 
 
@@ -117,13 +117,121 @@ def test_final_review_explains_batch_without_internal_terms(settings) -> None:  
 
     reply = final_review_reply(ConversationState(cart=[item]))
 
-    assert "Минимальное количество заказа — <b>20 кг</b>" in reply.text
-    assert "Можно заказать 20 кг, 40 кг, 60 кг и так далее." in reply.text
+    assert "Этот товар можно заказать по <b>20 кг</b>" in reply.text
+    assert "20 кг, 40 кг, 60 кг и так далее." in reply.text
     assert "Вы указали: <b>10 кг</b>" in reply.text
     assert "Ближайший подходящий вариант: <b>20 кг</b>" in reply.text
     assert "нужно" not in reply.text.casefold()
     assert "партия" not in reply.text.casefold()
     assert reply.rows[0][0].text == "Выбрать количество"
+
+
+def test_final_review_suggests_full_multiple_instead_of_missing_difference(settings) -> None:  # type: ignore[no-untyped-def]
+    """Предлагает три штуки при кратности три независимо от значения в таблице."""
+    engine = ConversationEngine(settings)
+    catalog = [
+        CatalogProduct(
+            product_id="mustard",
+            name="Горчица дижонская большое зерно",
+            supplier="МЕТРО",
+            unit="шт",
+            minimum_multiple=3,
+            department_quantities=DepartmentQuantities(kitchen=1),
+        )
+    ]
+    result = engine.handle(
+        _event(),
+        ParsedCommand(
+            intent=Intent.ADD_ITEMS,
+            items=[
+                ExtractedItem(
+                    product_query="Горчица дижонская большое зерно",
+                    quantity=1,
+                    unit="шт",
+                )
+            ],
+        ),
+        ConversationState(),
+        catalog,
+    )
+
+    reply = final_review_reply(result.state)
+
+    assert result.state.cart[0].suggested_quantity == 3
+    assert "Этот товар можно заказать по <b>3 шт</b>" in reply.text
+    assert "3 шт, 6 шт, 9 шт и так далее." in reply.text
+    assert "Ближайший подходящий вариант: <b>3 шт</b>" in reply.text
+    assert "Ближайший подходящий вариант: <b>2 шт</b>" not in reply.text
+
+
+def test_non_multiple_above_first_step_requires_correction(settings) -> None:  # type: ignore[no-untyped-def]
+    """Предлагает следующее кратное, если количество выше первого шага."""
+    engine = ConversationEngine(settings)
+    catalog = [
+        CatalogProduct(
+            product_id="mustard",
+            name="Горчица дижонская большое зерно",
+            supplier="МЕТРО",
+            unit="шт",
+            minimum_multiple=3,
+        )
+    ]
+    result = engine.handle(
+        _event(),
+        ParsedCommand(
+            intent=Intent.ADD_ITEMS,
+            items=[
+                ExtractedItem(
+                    product_query="Горчица дижонская большое зерно",
+                    quantity=4,
+                    unit="шт",
+                )
+            ],
+        ),
+        ConversationState(),
+        catalog,
+    )
+
+    item = result.state.cart[0]
+    assert item.quantity == 4
+    assert item.suggested_quantity == 6
+    assert item.status is ItemStatus.MATCHED
+
+
+def test_exact_multiple_does_not_require_correction(settings) -> None:  # type: ignore[no-untyped-def]
+    """Не предлагает замену для уже допустимого кратного количества."""
+    engine = ConversationEngine(settings)
+    catalog = [
+        CatalogProduct(
+            product_id="mustard",
+            name="Горчица дижонская большое зерно",
+            supplier="МЕТРО",
+            unit="шт",
+            minimum_multiple=3,
+            department_quantities=DepartmentQuantities(kitchen=1),
+        )
+    ]
+    result = engine.handle(
+        _event(),
+        ParsedCommand(
+            intent=Intent.ADD_ITEMS,
+            items=[
+                ExtractedItem(
+                    product_query="Горчица дижонская большое зерно",
+                    quantity=6,
+                    unit="шт",
+                )
+            ],
+        ),
+        ConversationState(),
+        catalog,
+    )
+
+    item = result.state.cart[0]
+    assert item.quantity == 6
+    assert item.existing_quantity == 1
+    assert item.suggested_quantity is None
+    assert item.status is ItemStatus.MATCHED
 
 
 def test_fix_multiple_button_opens_choice_without_changing_quantity(settings) -> None:  # type: ignore[no-untyped-def]

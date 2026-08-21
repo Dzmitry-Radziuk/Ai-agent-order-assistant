@@ -101,12 +101,12 @@ def _multiple_quantity_explanation(item: CartItem, unit: str) -> str:
     """Объясняет пользователю допустимые шаги количества без внутреннего термина."""
     if not item.minimum_multiple:
         return "Для этого товара доступны определённые варианты количества."
-    batch = format_number(item.minimum_multiple)
-    next_batch = format_number(item.minimum_multiple * 2)
-    third_batch = format_number(item.minimum_multiple * 3)
+    step = format_number(item.minimum_multiple)
+    second = format_number(item.minimum_multiple * 2)
+    third = format_number(item.minimum_multiple * 3)
     return (
-        f"Минимальное количество заказа — <b>{batch} {unit}</b>. "
-        f"Можно заказать {batch} {unit}, {next_batch} {unit}, {third_batch} {unit} и так далее."
+        f"Этот товар можно заказать по <b>{step} {unit}</b>: "
+        f"{step} {unit}, {second} {unit}, {third} {unit} и так далее."
     )
 
 

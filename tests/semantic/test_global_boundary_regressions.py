@@ -71,6 +71,56 @@ def test_catalog_identity_evidence_does_not_merge_independent_products() -> None
     assert len(result) == 2
 
 
+def test_complete_catalog_names_in_one_text_list_remain_separate() -> None:
+    """Не склеивает соседние полные названия разных товаров из текстового списка."""
+    items = [
+        ExtractedItem(
+            product_query="Хрен столовый 5кг",
+            source_line="Хрен столовый 5кг",
+            source_span="Хрен столовый 5кг",
+        ),
+        ExtractedItem(
+            product_query="Горчица Домашняя. Кал-я 170г,СтБ, Россия (1/12) Острая",
+            source_line="Горчица Домашняя. Кал-я 170г,СтБ, Россия (1/12) Острая",
+            source_span="Горчица Домашняя. Кал-я 170г,СтБ, Россия (1/12) Острая",
+        ),
+        ExtractedItem(
+            product_query="Свинина Окорок Пармский с/к",
+            source_line="Свинина Окорок Пармский с/к",
+            source_span="Свинина Окорок Пармский с/к",
+        ),
+    ]
+    catalog = [
+        CatalogProduct(product_id="horseradish-5kg", name="Хрен столовый 5кг", unit="шт"),
+        CatalogProduct(
+            product_id="horseradish-home",
+            name="Хрен столовый Домашний, Кал-й,160грт/Б, Россия (12/1)",
+            unit="шт",
+        ),
+        CatalogProduct(
+            product_id="mustard-home",
+            name="Горчица Домашняя. Кал-я 170г,СтБ, Россия (1/12) Острая",
+            unit="шт",
+        ),
+        CatalogProduct(
+            product_id="pork-ham",
+            name="Свинина Окорок Пармский с/к",
+            unit="кг",
+        ),
+    ]
+
+    result = CatalogResolutionService(CatalogResolver()).merge_catalog_qualified_items(
+        items,
+        catalog,
+    )
+
+    assert [item.product_query for item in result] == [
+        "Хрен столовый 5кг",
+        "Горчица Домашняя. Кал-я 170г,СтБ, Россия (1/12) Острая",
+        "Свинина Окорок Пармский с/к",
+    ]
+
+
 def test_multword_quantity_item_is_not_merged_into_catalog_identity_tail() -> None:
     """Не объединяет самостоятельный многословный товар с предыдущей позицией."""
     items = [

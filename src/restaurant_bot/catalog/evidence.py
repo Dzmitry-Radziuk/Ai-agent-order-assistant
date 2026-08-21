@@ -448,6 +448,18 @@ def _product_identity_tokens(value: str) -> set[str]:
     }
 
 
+def has_sufficient_photo_identity(query: str, product_name: str) -> bool:
+    """Проверяет совместимость прочитанного с фото названия со строкой каталога."""
+    observed = _product_identity_tokens(query)
+    if not observed:
+        return False
+    matched = observed & query_evidence_tokens(query, product_name)
+    if len(observed) == 1:
+        return matched == observed
+    required = max(2, (len(observed) * 3 + 4) // 5)
+    return len(matched) >= required
+
+
 def _product_identity_tokens_in_order(value: str) -> list[str]:
     """Возвращает значимые слова товара в исходном порядке."""
     return [

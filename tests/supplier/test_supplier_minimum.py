@@ -126,5 +126,5 @@ def test_final_review_refreshes_sum_and_quantity_from_exact_product_row(settings
     refreshed = result.state.cart[0]
     assert refreshed.supplier_current_sum == 1200
     assert refreshed.existing_quantity == 7
-    assert refreshed.suggested_quantity is None
-    assert "Раджабов: 1550 ₽ из 2000 ₽" in result.reply.text
+    assert refreshed.suggested_quantity == 8
+    assert "Ближайший подходящий вариант: <b>8 кг</b>" in result.reply.text

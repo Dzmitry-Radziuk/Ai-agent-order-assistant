@@ -271,6 +271,19 @@ def restore_explicit_order_terms(
                 item["quantity"] = None
                 item["unit"] = ""
                 continue
+        if len(items) == 1 and len(explicit_terms) == 1 and model_quantity is not None:
+            explicit_quantity, explicit_unit = explicit_terms[0]
+            normalized_model_unit = normalize_unit(model_unit)
+            normalized_explicit_unit = normalize_unit(explicit_unit)
+            if abs(model_quantity - explicit_quantity) <= 1e-9 and (
+                not normalized_model_unit
+                or not normalized_explicit_unit
+                or normalized_model_unit == normalized_explicit_unit
+            ):
+                _mark_item_source(item, original_line)
+                item["quantity"] = model_quantity
+                item["unit"] = model_unit or explicit_unit
+                continue
         if (
             len(items) == 1
             and len(explicit_terms) >= 2

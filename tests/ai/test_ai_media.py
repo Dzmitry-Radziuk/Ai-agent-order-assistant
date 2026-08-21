@@ -323,7 +323,9 @@ def test_dense_photo_parser_sends_one_canonical_view_in_one_vision_request(
     assert "не начинай с первой заполненной цифры" in content[0]["text"]
     assert "не переноси верхнюю заполненную ячейку на строку выше" in content[0]["text"]
     assert "PhotoDocumentObservation" in content[0]["text"]
-    assert "Возвращай только строки с фактическим количеством заказа" not in content[0]["text"]
+    assert call["reasoning"] == {"effort": "minimal"}
+    assert call["text"] == {"verbosity": "low"}
+    assert "verbosity" not in call
     assert call["text_format"] is PhotoDocumentObservation
 
 

@@ -18,6 +18,7 @@ from restaurant_bot.parsing.comment_scope import (
     has_explicit_global_comment_scope,
     has_explicit_group_comment_scope,
     has_explicit_order_comment_scope,
+    strip_explicit_comment_scope_prefix,
 )
 from restaurant_bot.parsing.numeric import to_float
 from restaurant_bot.parsing.semantic.boundaries import (
@@ -175,7 +176,7 @@ def _strip_global_comment_scope(value: str) -> str:
         flags=re.I,
     )
     comment = re.sub(r"^(?:нужно|надо|требуется|просьба)\s+", "", comment, flags=re.I)
-    return clean_text(comment).strip(" .,;:-—–")
+    return strip_explicit_comment_scope_prefix(comment)
 
 
 def _append_local_item_comment(

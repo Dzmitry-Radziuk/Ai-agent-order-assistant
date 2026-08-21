@@ -3,6 +3,8 @@
 from pathlib import Path
 from types import SimpleNamespace
 
+from PIL import Image
+
 from restaurant_bot.application.conversation.contracts import ConversationInput
 from restaurant_bot.domain.models import (
     CartItem,
@@ -20,6 +22,7 @@ from restaurant_bot.input.photo_ingestion import (
     canonical_photo_identity,
     classify_photo_document,
     normalize_photo_observation,
+    photo_sheet_row_mapping_is_authoritative,
 )
 from restaurant_bot.integrations.openai_client import OpenAIService
 from restaurant_bot.observability import Tracer
@@ -48,6 +51,7 @@ def test_photo_uses_observation_schema_without_cart_item_shape() -> None:
     schema = PhotoDocumentObservation.model_json_schema()
 
     assert "rows" in schema["properties"]
+    assert "sheet_row_numbers_visible" in schema["properties"]
     assert "product_text" in schema["$defs"]["PhotoRowObservation"]["properties"]
     assert "visible_product_row_count" in schema["properties"]
     assert "order_area_complete" in schema["properties"]
@@ -83,6 +87,24 @@ class _VisionResponses:
         )
 
 
+class _SequenceVisionResponses:
+    """Возвращает последовательные наблюдения для проверки повторного vision-прохода."""
+
+    def __init__(self, observations: list[PhotoDocumentObservation]) -> None:
+        """Сохраняет наблюдения и историю запросов."""
+        self.observations = observations
+        self.calls: list[dict[str, object]] = []
+
+    def parse(self, **kwargs: object) -> SimpleNamespace:
+        """Возвращает следующее наблюдение без скрытых повторных запросов."""
+        self.calls.append(kwargs)
+        return SimpleNamespace(
+            output_parsed=self.observations.pop(0),
+            status="",
+            incomplete_details=None,
+        )
+
+
 def test_photo_classification_uses_department_structure_over_model_proposal() -> None:
     """Классифицирует таблицу по колонкам даже при ошибочном proposal модели."""
     observation = PhotoDocumentObservation(
@@ -93,6 +115,30 @@ def test_photo_classification_uses_department_structure_over_model_proposal() ->
     )
 
     assert classify_photo_document(observation) == "client_order_sheet"
+
+
+def test_headerless_table_fragment_uses_aligned_explicit_quantity(settings) -> None:  # type: ignore[no-untyped-def]
+    """Разбирает фрагмент таблицы без заголовков по количеству в той же строке товара."""
+    observation = PhotoDocumentObservation(
+        document_type_proposal="order_table",
+        has_table_structure=True,
+        rows=[
+            _row(
+                "Горчица дижонская",
+                explicit_order_quantity=1,
+                explicit_order_unit="шт",
+                order_entry_text="1",
+                row_alignment_confidence=1,
+                quantity_confidence=1,
+            )
+        ],
+    )
+
+    result = normalize_photo_observation(observation, settings)
+
+    assert result.document_type == "order_table"
+    assert result.command.items[0].product_query == "Горчица дижонская"
+    assert result.command.items[0].quantity == 1
 
 
 def test_empty_client_sheet_with_unreadable_order_area_is_incomplete(settings) -> None:  # type: ignore[no-untyped-def]
@@ -428,6 +474,206 @@ def test_mocked_photo_pipeline_converges_into_existing_cart_pipeline(
     assert responses.calls[0]["text_format"] is PhotoDocumentObservation
 
 
+def test_uncertain_photo_observation_retries_with_original_and_focus_views(
+    settings, tmp_path: Path
+) -> None:  # type: ignore[no-untyped-def]
+    """Повторно проверяет неопределённую строку и принимает только полный результат."""
+    first = PhotoDocumentObservation(
+        document_type_proposal="client_order_sheet",
+        detected_columns=["Товар", "Зал", "Бар", "Кухня", "Комментарий"],
+        has_table_structure=True,
+        rows=[_row("Васаби", kitchen_quantity=3)],
+        visible_product_row_count=1,
+        order_area_complete=False,
+        uncertain_order_row_count=1,
+    )
+    second = PhotoDocumentObservation(
+        document_type_proposal="client_order_sheet",
+        detected_columns=["Товар", "Зал", "Бар", "Кухня", "Комментарий"],
+        has_table_structure=True,
+        rows=[_row("Васаби", kitchen_quantity=3)],
+        visible_product_row_count=1,
+        order_area_complete=True,
+        uncertain_order_row_count=0,
+    )
+    responses = _SequenceVisionResponses([first, second])
+    service = object.__new__(OpenAIService)
+    service.settings = settings
+    service.tracer = Tracer(settings)
+    service.vision_client = SimpleNamespace(responses=responses)
+    photo = tmp_path / "dense-table.png"
+    Image.new("RGB", (1600, 900), "white").save(photo, format="PNG")
+
+    result = service.parse_photo(photo, "image/png")
+
+    assert len(responses.calls) == 2
+    retry_content = responses.calls[1]["input"][0]["content"]  # type: ignore[index]
+    assert len([part for part in retry_content if part["type"] == "input_image"]) == 2
+    assert result.items[0].product_query == "Васаби"
+
+
+def test_ai_row_number_claim_does_not_make_numbers_mandatory(settings, tmp_path: Path) -> None:  # type: ignore[no-untyped-def]
+    """Не требует номера строк только на основании заявления vision-модели."""
+    observation = PhotoDocumentObservation(
+        document_type_proposal="client_order_sheet",
+        detected_columns=["Товар", "Зал", "Бар", "Кухня"],
+        has_table_structure=True,
+        sheet_row_numbers_visible=True,
+        rows=[_row("Горчица дижонская", kitchen_quantity=1)],
+    )
+    responses = _SequenceVisionResponses([observation])
+    service = object.__new__(OpenAIService)
+    service.settings = settings
+    service.tracer = Tracer(settings)
+    service.vision_client = SimpleNamespace(responses=responses)
+    photo = tmp_path / "fragment.png"
+    Image.new("RGB", (800, 500), "white").save(photo, format="PNG")
+
+    result = service.parse_photo(photo, "image/png")
+
+    assert len(responses.calls) == 1
+    assert result.items[0].product_query == "Горчица дижонская"
+    assert result.items[0].photo_sheet_row_number is None
+    assert result.items[0].photo_sheet_row_number_authoritative is False
+
+
+def test_unverified_sheet_row_conflict_does_not_override_product_identity(
+    settings, tmp_path: Path
+) -> None:  # type: ignore[no-untyped-def]
+    """Игнорирует неподтверждённый номер строки и сохраняет прочитанный товар."""
+    observation = PhotoDocumentObservation(
+        document_type_proposal="client_order_sheet",
+        detected_columns=["Товар", "Зал", "Бар", "Кухня", "Комментарий"],
+        has_table_structure=True,
+        sheet_row_numbers_visible=True,
+        rows=[
+            _row(
+                "Горчица дижонская большое зерно",
+                kitchen_quantity=1,
+                comment_text="комментарий",
+                comment_source="explicit_marker",
+                sheet_row_number=11,
+                sheet_row_number_confidence=1,
+            ),
+            _row(
+                "Хрен столовый Домашний, Кал-й,160гр/Б, Россия (12/1)",
+                kitchen_quantity=2,
+                sheet_row_number=14,
+                sheet_row_number_confidence=1,
+            ),
+        ],
+    )
+    responses = _SequenceVisionResponses([observation])
+    service = object.__new__(OpenAIService)
+    service.settings = settings
+    service.tracer = Tracer(settings)
+    service.vision_client = SimpleNamespace(responses=responses)
+    photo = tmp_path / "shifted-sheet.png"
+    Image.new("RGB", (1280, 332), "white").save(photo, format="PNG")
+
+    result = service.parse_photo(photo, "image/png")
+
+    assert len(responses.calls) == 1
+    assert [item.product_query for item in result.items] == [
+        "Горчица дижонская большое зерно",
+        "Хрен столовый Домашний, Кал-й,160гр/Б, Россия (12/1)",
+    ]
+    assert [item.photo_sheet_row_number for item in result.items] == [None, None]
+
+
+def test_headerless_table_with_catalog_rows_is_accepted_without_sheet_numbers(
+    settings, tmp_path: Path
+) -> None:  # type: ignore[no-untyped-def]
+    """Читает обрезанную таблицу без заголовков и номеров строк листа."""
+    observation = PhotoDocumentObservation(
+        document_type_proposal="order_table",
+        has_table_structure=True,
+        rows=[
+            _row(
+                "Паста соевая aka miso темная, Китай 1 кг, 10 шт/кор 202₽",
+                explicit_order_quantity=3,
+                explicit_order_unit="шт",
+                order_entry_text="3",
+                row_alignment_confidence=1,
+                quantity_confidence=1,
+            ),
+            _row(
+                "Хрен столовый Домашний, Кал-й,160гр/Б, Россия (12/1)",
+                explicit_order_quantity=2,
+                explicit_order_unit="шт",
+                order_entry_text="2",
+                row_alignment_confidence=1,
+                quantity_confidence=1,
+            ),
+        ],
+    )
+    responses = _SequenceVisionResponses([observation])
+    service = object.__new__(OpenAIService)
+    service.settings = settings
+    service.tracer = Tracer(settings)
+    service.vision_client = SimpleNamespace(responses=responses)
+    photo = tmp_path / "headerless-sheet.png"
+    Image.new("RGB", (1280, 332), "white").save(photo, format="PNG")
+
+    result = service.parse_photo(photo, "image/png")
+
+    assert len(responses.calls) == 1
+    assert [(item.product_query, item.quantity) for item in result.items] == [
+        ("Паста соевая aka miso темная, Китай 1 кг, 10 шт/кор 202₽", 3),
+        ("Хрен столовый Домашний, Кал-й,160гр/Б, Россия (12/1)", 2),
+    ]
+
+
+def test_explicitly_required_sheet_rows_without_numbers_fail_closed(settings) -> None:  # type: ignore[no-untyped-def]
+    """Не принимает номера строк только при явном доверенном требовании вызывающего слоя."""
+    result = normalize_photo_observation(
+        PhotoDocumentObservation(
+            document_type_proposal="client_order_sheet",
+            detected_columns=["Товар", "Зал", "Бар", "Кухня"],
+            has_table_structure=True,
+            sheet_row_numbers_visible=True,
+            rows=[_row("Горчица дижонская", kitchen_quantity=1)],
+        ),
+        settings,
+        require_sheet_row_numbers=True,
+    )
+
+    assert result.command.photo_outcome == "incomplete_photo_read"
+    assert result.reason == "sheet_row_identity_unreadable"
+
+
+def test_authoritative_order_rows_allow_gaps_between_sheet_numbers() -> None:
+    """Разрешает пропуски пустых строк между двумя заполненными строками заказа."""
+    observation = PhotoDocumentObservation(
+        document_type_proposal="client_order_sheet",
+        sheet_row_numbers_visible=True,
+        rows=[
+            _row(
+                "Горчица дижонская",
+                kitchen_quantity=1,
+                sheet_row_number=8,
+                sheet_row_number_confidence=1,
+            ),
+            _row(
+                "Хрен столовый",
+                kitchen_quantity=2,
+                sheet_row_number=12,
+                sheet_row_number_confidence=1,
+                row_index=1,
+            ),
+        ],
+    )
+
+    assert photo_sheet_row_mapping_is_authoritative(observation) is False
+    assert (
+        photo_sheet_row_mapping_is_authoritative(
+            observation,
+            require_sheet_row_numbers=True,
+        )
+        is True
+    )
+
+
 def test_incomplete_structured_vision_response_fails_closed_without_second_call(
     settings, tmp_path: Path
 ) -> None:  # type: ignore[no-untyped-def]
@@ -611,6 +857,51 @@ def test_sheet_row_number_requires_lexical_sanity(settings) -> None:  # type: ig
     )
 
     assert result.state.cart[0].catalog_product_id == "onion"
+
+
+def test_authoritative_sheet_row_does_not_override_conflicting_product(
+    settings,
+) -> None:  # type: ignore[no-untyped-def]
+    """Не подменяет прочитанный товар содержимым противоречащей строки листа."""
+    catalog = [
+        CatalogProduct(
+            product_id="mustard",
+            name="Горчица дижонская",
+            unit="шт",
+            row_number=7,
+        ),
+        CatalogProduct(
+            product_id="grain-mustard",
+            name="Горчица дижонская большое зерно",
+            unit="шт",
+            row_number=8,
+        ),
+    ]
+    result = ConversationEngine(settings).handle(
+        _photo_event(),
+        ParsedCommand(
+            intent=Intent.ADD_ITEMS,
+            items=[
+                ExtractedItem(
+                    product_query="Горчица дижонская большое зерно",
+                    quantity=1,
+                    unit="шт",
+                    quantity_source="department_columns",
+                    department_quantities=DepartmentQuantities(kitchen=1),
+                    catalog_identity_provenance="venue_table_exact_candidate",
+                    photo_sheet_row_number=7,
+                    photo_sheet_row_number_confidence=1,
+                    photo_sheet_row_number_authoritative=True,
+                )
+            ],
+        ),
+        ConversationState(),
+        catalog,
+    )
+
+    item = result.state.cart[0]
+    assert item.catalog_product_id == "grain-mustard"
+    assert item.catalog_name == "Горчица дижонская большое зерно"
 
 
 def test_photo_department_quantities_survive_submission_mapping(settings) -> None:  # type: ignore[no-untyped-def]

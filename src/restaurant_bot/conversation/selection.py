@@ -154,6 +154,28 @@ def tokens_share_stem(left: str, right: str) -> bool:
     return common_length >= 4
 
 
+def _has_same_lexical_identity(query: str, candidate: str) -> bool:
+    """Сравнивает полные словесные названия с учётом падежных окончаний."""
+    query_tokens = _lexical_reference_text(query).split()
+    candidate_tokens = _lexical_reference_text(candidate).split()
+    if not query_tokens or len(query_tokens) != len(candidate_tokens):
+        return False
+    unmatched_tokens = candidate_tokens.copy()
+    for query_token in query_tokens:
+        match_index = next(
+            (
+                index
+                for index, candidate_token in enumerate(unmatched_tokens)
+                if query_token == candidate_token or tokens_share_stem(query_token, candidate_token)
+            ),
+            None,
+        )
+        if match_index is None:
+            return False
+        unmatched_tokens.pop(match_index)
+    return True
+
+
 def find_cart_item(state: ConversationState, target_query: str) -> CartItem | None:
     """Находит только одну однозначно названную активную позицию черновика."""
     if not target_query:
@@ -164,6 +186,22 @@ def find_cart_item(state: ConversationState, target_query: str) -> CartItem | No
         return by_id
 
     target = normalize_text(target_query)
+    complete_matches = [
+        row
+        for row in active_rows
+        if any(
+            candidate and _has_same_lexical_identity(target, candidate)
+            for candidate in (
+                normalize_text(row.source_query),
+                normalize_text(row.catalog_name),
+            )
+        )
+    ]
+    if len(complete_matches) == 1:
+        return complete_matches[0]
+    if len(complete_matches) > 1:
+        return None
+
     scored = sorted(
         (
             (

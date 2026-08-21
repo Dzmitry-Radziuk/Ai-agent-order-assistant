@@ -172,6 +172,10 @@ def reconcile_comment_target(
         item = _unique_comment_item(active_items, target)
         return CommentTargetResolution(item, target, comment, item is None and bool(target))
 
+    explicit_item = _explicit_comment_item(active_items, target)
+    if explicit_item is not None:
+        return CommentTargetResolution(explicit_item, target, comment)
+
     token_matches = re.findall(r"[a-zа-яё0-9%]+", f"{target} {comment}", flags=re.I)
     words = [normalize_text(token) for token in token_matches]
     if len(words) < 2:
@@ -235,6 +239,37 @@ def _unique_comment_item(active_items: list[CartItem], target: str) -> CartItem 
     if len(scored) > 1 and scored[-1][0] == scored[-2][0]:
         return None
     return scored[-1][1]
+
+
+def _explicit_comment_item(active_items: list[CartItem], target: str) -> CartItem | None:
+    """Возвращает позицию только при точном совпадении целевой фразы с названием."""
+    target_tokens = _comment_tokens(target)
+    if not target_tokens:
+        return None
+    matches = [
+        item
+        for item in active_items
+        if any(
+            _contains_exact_token_phrase(target_tokens, _comment_tokens(candidate))
+            for candidate in (item.source_query, item.catalog_name)
+        )
+    ]
+    return matches[0] if len(matches) == 1 else None
+
+
+def _comment_tokens(value: str) -> list[str]:
+    """Разбивает название товара на нормализованные слова для точной проверки."""
+    return [normalize_text(token) for token in re.findall(r"[a-zа-яё0-9%]+", value, flags=re.I)]
+
+
+def _contains_exact_token_phrase(phrase: list[str], candidate: list[str]) -> bool:
+    """Проверяет наличие последовательности слов без морфологической подмены."""
+    if not phrase or len(phrase) > len(candidate):
+        return False
+    return any(
+        candidate[index : index + len(phrase)] == phrase
+        for index in range(len(candidate) - len(phrase) + 1)
+    )
 
 
 def merge_comments(*values: str) -> str:

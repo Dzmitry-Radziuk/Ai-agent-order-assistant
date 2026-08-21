@@ -76,6 +76,20 @@ def test_catalog_identity_numbers_are_not_order_quantity() -> None:
     assert authorization.quantity is None
 
 
+def test_dough_packaging_in_catalog_name_is_not_order_quantity() -> None:
+    """Не считает фасовку теста количеством заказа после проверки каталога."""
+    source = "\u0422\u0435\u0441\u0442\u043e \u0441\u043b\u043e\u0435\u043d\u043e\u0435 \u0434\u0440\u043e\u0436\u0436\u0435\u0432\u043e\u0435 10 \u043a\u0433"
+    authorization = reconcile_order_quantity_evidence(
+        source,
+        10,
+        "\u043a\u0433",
+        catalog_name=source,
+    )
+
+    assert authorization.provenance is QuantityProvenance.CATALOG_IDENTITY
+    assert authorization.quantity is None
+
+
 def test_residual_order_quantity_survives_catalog_identity() -> None:
     """Оставляет отдельное количество заказа после исключения фасовки каталога."""
     authorization = reconcile_order_quantity_evidence(

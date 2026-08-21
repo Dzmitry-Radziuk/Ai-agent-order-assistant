@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from io import BytesIO
 from pathlib import Path
@@ -12,16 +13,22 @@ from PIL import Image, UnidentifiedImageError
 _DENSE_TABLE_MIN_WIDTH = 900
 _DENSE_TABLE_MIN_HEIGHT = 200
 _DENSE_TABLE_MIN_ASPECT_RATIO = 1.25
+_COMPACT_TABLE_MIN_WIDTH = 320
+_COMPACT_TABLE_MIN_HEIGHT = 100
+_COMPACT_TABLE_MIN_ASPECT_RATIO = 1.8
 _CROP_UPSCALE_FACTOR = 2
-_VERY_SHORT_TABLE_FOCUS_MAX_HEIGHT = 320
-_SHORT_TABLE_FOCUS_MAX_HEIGHT = 700
-_VERY_SHORT_CROP_UPSCALE_FACTOR = 5
-_SHORT_CROP_UPSCALE_FACTOR = 3
 _SHEET_HEADER_SEARCH_MAX_RATIO = 0.45
 _SHEET_HEADER_MIN_WARM_RATIO = 0.08
 _SHEET_HEADER_MIN_GREEN_RATIO = 0.08
 _SHEET_HEADER_MIN_WARM_SPAN_RATIO = 0.08
 _SHEET_FOCUS_RIGHT_MARGIN_RATIO = 0.03
+_SHEET_LAYOUT_MIN_WIDTH = 80
+_SHEET_LAYOUT_MIN_HEIGHT = 60
+_ORDINARY_READING_TARGET_LONG_EDGE = 1600
+_MAX_READING_UPSCALE_FACTOR = 5
+_TABLE_READING_TARGET_WIDTH = 2400
+_TABLE_READING_TARGET_HEIGHT = 1000
+_MAX_TABLE_UPSCALE_FACTOR = 5
 
 
 @dataclass(frozen=True, slots=True)
@@ -44,6 +51,7 @@ class PhotoImagePreparation:
     original_height: int
     upscale_factor: int
     dense_table_views_used: bool
+    spreadsheet_layout_detected: bool
 
     @property
     def table_focus_view_size(self) -> tuple[int, int] | None:
@@ -51,22 +59,37 @@ class PhotoImagePreparation:
         return _view_size(self.views, "table_focus")
 
 
-def prepare_photo_views(path: Path, mime_type: str) -> PhotoImagePreparation:
-    """Готовит один полный увеличенный кадр плотной таблицы без потери строк."""
+def prepare_photo_views(
+    path: Path,
+    mime_type: str,
+    *,
+    include_original: bool = False,
+) -> PhotoImagePreparation:
+    """Готовит увеличенный вид таблицы и при необходимости добавляет оригинал для сверки."""
     original_data = path.read_bytes()
     try:
         with Image.open(BytesIO(original_data)) as image:
             width, height = image.size
-            if not _is_dense_table(width, height):
+            reading_box = _detect_spreadsheet_reading_box(image)
+            if reading_box is None and not _is_dense_table(width, height):
+                reading_view, upscale_factor = _build_ordinary_reading_view(
+                    image,
+                    original_data=original_data,
+                    mime_type=mime_type,
+                )
                 return PhotoImagePreparation(
-                    views=(PhotoImageView("original", original_data, mime_type, width, height),),
+                    views=(reading_view,),
                     original_width=width,
                     original_height=height,
-                    upscale_factor=1,
+                    upscale_factor=upscale_factor,
                     dense_table_views_used=False,
+                    spreadsheet_layout_detected=False,
                 )
 
-            table_focus_view, upscale_factor = _build_table_focus_view(image)
+            table_focus_view, upscale_factor = _build_table_focus_view(
+                image,
+                reading_box=reading_box,
+            )
     except (UnidentifiedImageError, OSError):
         return PhotoImagePreparation(
             views=(PhotoImageView("original", original_data, mime_type, 0, 0),),
@@ -74,30 +97,86 @@ def prepare_photo_views(path: Path, mime_type: str) -> PhotoImagePreparation:
             original_height=0,
             upscale_factor=1,
             dense_table_views_used=False,
+            spreadsheet_layout_detected=False,
         )
 
+    views: tuple[PhotoImageView, ...] = (table_focus_view,)
+    if include_original:
+        views += (PhotoImageView("original", original_data, mime_type, width, height),)
     return PhotoImagePreparation(
-        views=(table_focus_view,),
+        views=views,
         original_width=width,
         original_height=height,
         upscale_factor=upscale_factor,
         dense_table_views_used=True,
+        spreadsheet_layout_detected=reading_box is not None,
     )
 
 
 def _is_dense_table(width: int, height: int) -> bool:
     """Определяет широкое изображение с плотной табличной разметкой."""
-    return (
+    large_table = (
         width >= _DENSE_TABLE_MIN_WIDTH
         and height >= _DENSE_TABLE_MIN_HEIGHT
         and width / height >= _DENSE_TABLE_MIN_ASPECT_RATIO
     )
+    compact_wide_table = (
+        width >= _COMPACT_TABLE_MIN_WIDTH
+        and height >= _COMPACT_TABLE_MIN_HEIGHT
+        and width / height >= _COMPACT_TABLE_MIN_ASPECT_RATIO
+    )
+    return large_table or compact_wide_table
 
 
-def _build_table_focus_view(image: Image.Image) -> tuple[PhotoImageView, int]:
+def _build_ordinary_reading_view(
+    image: Image.Image,
+    *,
+    original_data: bytes,
+    mime_type: str,
+) -> tuple[PhotoImageView, int]:
+    """Увеличивает небольшой обычный список до читаемого размера без изменения пропорций."""
+    long_edge = max(image.width, image.height)
+    upscale_factor = min(
+        _MAX_READING_UPSCALE_FACTOR,
+        max(1, math.ceil(_ORDINARY_READING_TARGET_LONG_EDGE / max(1, long_edge))),
+    )
+    if upscale_factor == 1:
+        return (
+            PhotoImageView(
+                "original",
+                original_data,
+                mime_type,
+                image.width,
+                image.height,
+            ),
+            1,
+        )
+    enlarged = image.resize(
+        (image.width * upscale_factor, image.height * upscale_factor),
+        resample=Image.Resampling.LANCZOS,
+    )
+    output = BytesIO()
+    enlarged.save(output, format="PNG", optimize=False)
+    return (
+        PhotoImageView(
+            "reading_view",
+            output.getvalue(),
+            "image/png",
+            enlarged.width,
+            enlarged.height,
+        ),
+        upscale_factor,
+    )
+
+
+def _build_table_focus_view(
+    image: Image.Image,
+    *,
+    reading_box: tuple[int, int, int, int] | None,
+) -> tuple[PhotoImageView, int]:
     """Строит один reading view таблицы и увеличивает его без потери строк."""
-    crop = image.crop(_detect_spreadsheet_reading_box(image) or (0, 0, image.width, image.height))
-    upscale_factor = _table_focus_upscale_factor(crop.height)
+    crop = image.crop(reading_box or (0, 0, image.width, image.height))
+    upscale_factor = _table_focus_upscale_factor(crop.width, crop.height)
     enlarged = crop.resize(
         (crop.width * upscale_factor, crop.height * upscale_factor),
         resample=Image.Resampling.LANCZOS,
@@ -116,20 +195,20 @@ def _build_table_focus_view(image: Image.Image) -> tuple[PhotoImageView, int]:
     )
 
 
-def _table_focus_upscale_factor(height: int) -> int:
+def _table_focus_upscale_factor(width: int, height: int) -> int:
     """Выбирает увеличение, сохраняющее читаемость коротких широких скриншотов."""
-    if height < _VERY_SHORT_TABLE_FOCUS_MAX_HEIGHT:
-        return _VERY_SHORT_CROP_UPSCALE_FACTOR
-    if height < _SHORT_TABLE_FOCUS_MAX_HEIGHT:
-        return _SHORT_CROP_UPSCALE_FACTOR
-    return _CROP_UPSCALE_FACTOR
+    factor = max(
+        math.ceil(_TABLE_READING_TARGET_WIDTH / max(1, width)),
+        math.ceil(_TABLE_READING_TARGET_HEIGHT / max(1, height)),
+    )
+    return min(_MAX_TABLE_UPSCALE_FACTOR, max(_CROP_UPSCALE_FACTOR, factor))
 
 
 def _detect_spreadsheet_reading_box(image: Image.Image) -> tuple[int, int, int, int] | None:
     """Находит область Google Sheets по цветной строке заголовков, иначе возвращает None."""
     width = int(image.width)
     height = int(image.height)
-    if width < 1000 or height < 160:
+    if width < _SHEET_LAYOUT_MIN_WIDTH or height < _SHEET_LAYOUT_MIN_HEIGHT:
         return None
 
     rgb = image.convert("RGB")

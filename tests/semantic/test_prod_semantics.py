@@ -122,6 +122,48 @@ def test_explicit_global_comment_forms_are_order_edits(phrase: str) -> None:
     assert command.comment_text
 
 
+@pytest.mark.parametrize("input_type", [InputKind.TEXT, InputKind.VOICE])
+def test_order_comment_command_wrapper_is_removed_for_text_and_voice(
+    input_type: InputKind,
+) -> None:
+    """Сохраняет только пожелание в общем комментарии для текста и голоса."""
+    provider = Mock()
+    provider.parse_text.return_value = ParsedCommand(intent=Intent.ADD_ITEMS)
+    interpreter = TelegramInputInterpreter(
+        provider,
+        lambda: TranscriptRecognizer(),
+        StateCompatibilityPolicy(),
+    )
+    state = ConversationState(
+        stage=SessionStage.REVIEW,
+        status="review",
+        cart=[
+            CartItem(
+                id="onion",
+                source_query="Лук зеленый",
+                status=ItemStatus.MATCHED,
+                quantity=10,
+                unit="кг",
+            )
+        ],
+    )
+    phrase = "Добавь общий комментарий привезти завтра к восьми вечера"
+
+    command = interpreter.interpret(
+        TelegramEvent(
+            update_id=1,
+            chat_id="comment-wrapper",
+            input_type=input_type,
+            text=phrase,
+        ),
+        state,
+    )
+
+    assert command.intent is Intent.EDIT_COMMENT
+    assert command.comment_scope == "order"
+    assert command.comment_text == "привезти завтра к восьми вечера"
+
+
 def test_ai_product_placeholder_cannot_replace_deterministic_batch() -> None:
     """Сохраняет товары и общее количество при неполном ответе ИИ."""
     provider = Mock()

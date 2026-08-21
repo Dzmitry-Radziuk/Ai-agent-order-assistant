@@ -123,6 +123,13 @@ def classify_photo_document(observation: PhotoDocumentObservation) -> str:
     has_reference_column = bool(columns & _REFERENCE_HEADERS)
     has_card_evidence = bool(columns & _CARD_HEADERS)
     rows = [row for row in observation.rows if clean_text(row.product_text)]
+    proposal = canonical_photo_identity(observation.document_type_proposal)
+    has_aligned_explicit_order = any(
+        _row_has_order_evidence(row)
+        and row.row_alignment_confidence >= 0.9
+        and row.quantity_confidence >= 0.9
+        for row in rows
+    )
 
     if (
         observation.has_table_structure
@@ -147,6 +154,14 @@ def classify_photo_document(observation: PhotoDocumentObservation) -> str:
         and any(_row_has_order_evidence(row) for row in rows)
     ):
         return "order_table"
+    if (
+        observation.has_table_structure
+        and rows
+        and has_aligned_explicit_order
+        and proposal in {"client_order_sheet", "order_table", "printed_order_form"}
+        and not has_card_evidence
+    ):
+        return "order_table"
     if has_card_evidence and not has_order_column and not has_departments:
         return "product_card"
     if (
@@ -165,10 +180,20 @@ def classify_photo_document(observation: PhotoDocumentObservation) -> str:
 def normalize_photo_observation(
     observation: PhotoDocumentObservation,
     settings: Settings,
+    *,
+    require_sheet_row_numbers: bool = False,
 ) -> PhotoNormalizationResult:
     """Проверяет строки фотографии и превращает только разрешённые строки в ParsedCommand."""
     document_type = classify_photo_document(observation)
-    integrity = photo_order_area_integrity(observation, document_type)
+    integrity = photo_order_area_integrity(
+        observation,
+        document_type,
+        require_sheet_row_numbers=require_sheet_row_numbers,
+    )
+    authoritative_sheet_rows = photo_sheet_row_mapping_is_authoritative(
+        observation,
+        require_sheet_row_numbers=require_sheet_row_numbers,
+    )
     logger.info(
         "photo_scan_integrity",
         visible_product_row_count=observation.visible_product_row_count,
@@ -176,6 +201,9 @@ def normalize_photo_observation(
         row_count_mismatch=integrity.row_count_mismatch,
         order_area_complete=observation.order_area_complete,
         uncertain_order_row_count=observation.uncertain_order_row_count,
+        sheet_row_numbers_visible=observation.sheet_row_numbers_visible,
+        require_sheet_row_numbers=require_sheet_row_numbers,
+        authoritative_sheet_rows=authoritative_sheet_rows,
         decision=integrity.decision,
         reason=integrity.reason,
     )
@@ -244,7 +272,12 @@ def normalize_photo_observation(
     items: list[ExtractedItem] = []
     dropped = 0
     for row in sorted(observation.rows, key=_visual_row_sort_key):
-        item = _authorize_row(row, document_type, settings.default_department)
+        item = _authorize_row(
+            row,
+            document_type,
+            settings.default_department,
+            sheet_row_number_authoritative=authoritative_sheet_rows,
+        )
         decision = "admitted" if item is not None else "dropped"
         logger.info(
             "photo_row_admission_decision",
@@ -290,6 +323,8 @@ def normalize_photo_observation(
 def photo_order_area_integrity(
     observation: PhotoDocumentObservation,
     document_type: str,
+    *,
+    require_sheet_row_numbers: bool = False,
 ) -> PhotoOrderAreaIntegrity:
     """Определяет, есть ли риск пропуска значимой строки заказа."""
     row_count_mismatch = (
@@ -315,6 +350,20 @@ def photo_order_area_integrity(
             row_count_mismatch=row_count_mismatch,
         )
     has_order_evidence = any(_row_has_potential_order_evidence(row) for row in observation.rows)
+    sheet_rows_required = require_sheet_row_numbers
+    if (
+        sheet_rows_required
+        and has_order_evidence
+        and not photo_sheet_row_mapping_is_authoritative(
+            observation,
+            require_sheet_row_numbers=require_sheet_row_numbers,
+        )
+    ):
+        return PhotoOrderAreaIntegrity(
+            decision="incomplete_order_evidence",
+            reason="sheet_row_identity_unreadable",
+            row_count_mismatch=row_count_mismatch,
+        )
     return PhotoOrderAreaIntegrity(
         decision="complete" if has_order_evidence else "no_order_evidence",
         reason=(
@@ -326,6 +375,29 @@ def photo_order_area_integrity(
         ),
         row_count_mismatch=row_count_mismatch,
     )
+
+
+def photo_sheet_row_mapping_is_authoritative(
+    observation: PhotoDocumentObservation,
+    *,
+    require_sheet_row_numbers: bool = False,
+) -> bool:
+    """Подтверждает уникальные номера строк для всех фактически заполненных строк заказа."""
+    if not require_sheet_row_numbers:
+        return False
+    ordered_rows = [
+        row
+        for row in sorted(observation.rows, key=_visual_row_sort_key)
+        if _row_has_potential_order_evidence(row)
+    ]
+    if not ordered_rows:
+        return False
+    row_numbers: list[int] = []
+    for row in ordered_rows:
+        if row.sheet_row_number is None or row.sheet_row_number_confidence < 0.9:
+            return False
+        row_numbers.append(row.sheet_row_number)
+    return row_numbers == sorted(set(row_numbers))
 
 
 def _visual_row_sort_key(row: PhotoRowObservation) -> tuple[int, int]:
@@ -340,6 +412,8 @@ def _authorize_row(
     row: PhotoRowObservation,
     document_type: str,
     default_department: str,
+    *,
+    sheet_row_number_authoritative: bool = False,
 ) -> ExtractedItem | None:
     """Авторизует одну строку без использования соседних строк или fuzzy-данных."""
     product_text = clean_text(row.product_text)
@@ -400,10 +474,11 @@ def _authorize_row(
         packaging_text=clean_text(row.printed_reference_text),
         packaging_role="catalog_attribute" if row.printed_reference_text else "none",
         catalog_identity_provenance=exact_provenance,
-        photo_sheet_row_number=(
-            row.sheet_row_number if row.sheet_row_number_confidence >= 0.9 else None
+        photo_sheet_row_number=(row.sheet_row_number if sheet_row_number_authoritative else None),
+        photo_sheet_row_number_confidence=(
+            row.sheet_row_number_confidence if sheet_row_number_authoritative else 0
         ),
-        photo_sheet_row_number_confidence=row.sheet_row_number_confidence,
+        photo_sheet_row_number_authoritative=sheet_row_number_authoritative,
     )
 
 

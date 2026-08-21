@@ -292,3 +292,27 @@ def test_comment_target_reconciliation_rejects_ambiguous_cart_boundary() -> None
     removal = reconcile_comment_target(state, "огурцам", "")
     assert removal.ambiguous is True
     assert removal.item is None
+
+
+def test_comment_target_reconciliation_preserves_explicit_catalog_phrase() -> None:
+    """Сохраняет точную границу названия товара перед добавлением комментария."""
+    state = ConversationState(
+        cart=[
+            CartItem(
+                id="horseradish",
+                source_query="Хрен столовый",
+                catalog_name="Хрен столовый 5кг",
+                status=ItemStatus.MATCHED,
+            )
+        ]
+    )
+
+    resolution = reconcile_comment_target(
+        state,
+        "хрен столовый",
+        "нужно привезти завтра к восьми вечера",
+    )
+
+    assert resolution.item is state.cart[0]
+    assert resolution.target_query == "хрен столовый"
+    assert resolution.comment_text == "нужно привезти завтра к восьми вечера"

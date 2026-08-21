@@ -13,18 +13,31 @@ def _save_image(path: Path, size: tuple[int, int]) -> None:
     Image.new("RGB", size, "white").save(path, format="PNG")
 
 
-def _save_sheet_like_image(path: Path) -> None:
+def _save_sheet_like_image(path: Path, size: tuple[int, int] = (1400, 600)) -> None:
     """Создаёт минимальный скриншот с товарной, order и summary областями."""
-    image = Image.new("RGB", (1400, 600), "white")
+    width, height = size
+    header_y = round(height / 6)
+    header_bottom = header_y + max(20, round(height * 0.06))
+    product_end = round(width * 0.43)
+    order_end = round(width * 0.71)
+    image = Image.new("RGB", size, "white")
     draw = ImageDraw.Draw(image)
-    draw.rectangle((0, 100, 600, 135), fill=(45, 105, 78))
-    draw.rectangle((600, 100, 1000, 135), fill=(255, 220, 170))
-    draw.rectangle((1000, 100, 1399, 135), fill=(45, 105, 78))
-    for x in range(0, 1400, 100):
-        draw.line((x, 136, x, 599), fill=(190, 190, 190))
-    for y in range(136, 600, 25):
-        draw.line((0, y, 1399, y), fill=(220, 220, 220))
-    draw.text((760, 190), "3", fill=(20, 20, 20))
+    draw.rectangle((0, header_y, product_end, header_bottom), fill=(45, 105, 78))
+    draw.rectangle(
+        (product_end, header_y, order_end, header_bottom),
+        fill=(255, 220, 170),
+    )
+    draw.rectangle(
+        (order_end, header_y, width - 1, header_bottom),
+        fill=(45, 105, 78),
+    )
+    column_step = max(40, round(width / 14))
+    row_step = max(16, round(height / 24))
+    for x in range(0, width, column_step):
+        draw.line((x, header_bottom + 1, x, height - 1), fill=(190, 190, 190))
+    for y in range(header_bottom + 1, height, row_step):
+        draw.line((0, y, width - 1, y), fill=(220, 220, 220))
+    draw.text((round(width * 0.54), header_bottom + row_step * 2), "3", fill=(20, 20, 20))
     image.save(path, format="PNG")
 
 
@@ -68,7 +81,7 @@ def test_wide_screenshot_at_680px_height_uses_table_focus(tmp_path: Path) -> Non
 
     assert preparation.dense_table_views_used is True
     assert [view.name for view in preparation.views] == ["table_focus"]
-    assert preparation.upscale_factor == 3
+    assert preparation.upscale_factor == 2
 
 
 def test_short_wide_screenshot_keeps_full_height_in_table_focus(tmp_path: Path) -> None:
@@ -107,6 +120,25 @@ def test_sheet_screenshot_focus_excludes_summary_columns(tmp_path: Path) -> None
     assert preparation.table_focus_view_size is not None
     assert preparation.table_focus_view_size[0] < 1400 * preparation.upscale_factor
     assert preparation.table_focus_view_size[1] < 600 * preparation.upscale_factor
+    assert preparation.spreadsheet_layout_detected is True
+
+
+@pytest.mark.parametrize("size", [(971, 477), (480, 236)])
+def test_telegram_compressed_sheet_uses_same_adaptive_table_pipeline(
+    tmp_path: Path,
+    size: tuple[int, int],
+) -> None:
+    """Распознаёт сжатый Telegram-скриншот таблицы без абсолютного порога ширины."""
+    photo = tmp_path / "telegram-sheet.png"
+    _save_sheet_like_image(photo, size)
+
+    preparation = prepare_photo_views(photo, "image/png")
+
+    assert preparation.spreadsheet_layout_detected is True
+    assert preparation.dense_table_views_used is True
+    assert preparation.table_focus_view_size is not None
+    assert preparation.table_focus_view_size[0] < size[0] * preparation.upscale_factor
+    assert preparation.table_focus_view_size[1] < size[1] * preparation.upscale_factor
 
 
 def test_non_sheet_wide_photo_keeps_full_frame(tmp_path: Path) -> None:
@@ -116,17 +148,20 @@ def test_non_sheet_wide_photo_keeps_full_frame(tmp_path: Path) -> None:
 
     preparation = prepare_photo_views(photo, "image/png")
 
-    assert preparation.table_focus_view_size == (4200, 1800)
+    assert preparation.table_focus_view_size == (2800, 1200)
+    assert preparation.spreadsheet_layout_detected is False
 
 
-def test_small_ordinary_photo_keeps_original_only(tmp_path: Path) -> None:
-    """Не применяет table crops к обычному небольшому изображению."""
+def test_small_ordinary_photo_gets_adaptive_reading_scale(tmp_path: Path) -> None:
+    """Увеличивает небольшой обычный список без применения табличной обрезки."""
     photo = tmp_path / "small.png"
     _save_image(photo, (800, 600))
 
     preparation = prepare_photo_views(photo, "image/png")
 
     assert len(preparation.views) == 1
-    assert preparation.views[0].name == "original"
-    assert preparation.views[0].data == photo.read_bytes()
+    assert preparation.views[0].name == "reading_view"
+    assert preparation.views[0].width == 1600
+    assert preparation.views[0].height == 1200
+    assert preparation.upscale_factor == 2
     assert preparation.dense_table_views_used is False

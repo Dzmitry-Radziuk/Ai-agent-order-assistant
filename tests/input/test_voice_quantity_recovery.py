@@ -423,6 +423,48 @@ def test_spoken_range_does_not_replace_explicit_order_quantity() -> None:
     assert (restored[0]["quantity"], restored[0]["unit"]) == (3.0, "кг")
 
 
+def test_single_quantity_before_comment_is_carried_to_catalog_reconciliation() -> None:
+    """Сохраняет предложенное количество до проверки фасовки каталогом."""
+    source = "Утка Жир Кусок 10 кг, желательно на завтра к 8 вечера"
+    restored = restore_explicit_order_terms(
+        [
+            {
+                "product_query": "Утка Жир Кусок",
+                "quantity": 10,
+                "unit": "кг",
+                "source_line": source,
+            }
+        ],
+        source,
+    )
+
+    assert (restored[0]["quantity"], restored[0]["unit"]) == (10.0, "кг")
+
+
+def test_single_quantity_before_comment_survives_ai_recovery() -> None:
+    """Не теряет количество заказа при восстановлении ответа ИИ."""
+    source = "Утка Жир Кусок 10 кг, желательно на завтра к 8 вечера"
+    restored = recover_omitted_explicit_items(
+        {
+            "intent": Intent.ADD_ITEMS,
+            "items": [
+                {
+                    "product_query": "Утка Жир Кусок",
+                    "quantity": 10,
+                    "unit": "кг",
+                    "comment": "желательно на завтра к 8 вечера",
+                    "source_line": source,
+                }
+            ],
+        },
+        source,
+    )
+
+    item = restored["items"][0]
+    assert (item["quantity"], item["unit"]) == (10.0, "кг")
+    assert item["comment"] == "желательно на завтра к 8 вечера"
+
+
 def test_last_explicit_order_term_wins_over_multiple_packaging_measurements() -> None:
     """Не заменяет заказ 5 шт первыми справочными объёмами огурцов."""
     source = "Огурцы 40 на 45 Майер, 10 литров, 700 грамм, 500 грамм, Германия, 5 штук."

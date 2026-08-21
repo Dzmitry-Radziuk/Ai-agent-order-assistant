@@ -110,6 +110,67 @@ def test_spoken_quantity_edit_selects_named_product_instead_of_first_cart_row(
     assert [item.quantity for item in result.state.cart] == [5, 10, 7]
 
 
+def test_quantity_edit_prefers_complete_name_over_longer_similar_name(
+    settings,
+) -> None:  # type: ignore[no-untyped-def]
+    """Выбирает полное название, а не более длинную позицию с теми же словами."""
+    engine = ConversationEngine(settings)
+    state = ConversationState(
+        cart=[
+            _matched_syrup("dijon", "Горчица дижонская", 3),
+            _matched_syrup(
+                "whole_grain",
+                "Горчица дижонская большое зерно",
+                2,
+            ),
+        ]
+    )
+
+    result = engine.handle(
+        _event(),
+        ParsedCommand(
+            intent=Intent.EDIT_QUANTITY,
+            target_query="горчицы дижонской",
+            edit_quantity=10,
+            edit_unit="шт",
+        ),
+        state,
+        [],
+    )
+
+    assert [item.quantity for item in result.state.cart] == [10, 2]
+
+
+def test_quantity_edit_keeps_shared_short_name_ambiguous(settings) -> None:  # type: ignore[no-untyped-def]
+    """Не выбирает товар, если запрос одинаково относится к похожим позициям."""
+    engine = ConversationEngine(settings)
+    state = ConversationState(
+        cart=[
+            _matched_syrup("dijon", "Горчица дижонская", 3),
+            _matched_syrup(
+                "whole_grain",
+                "Горчица дижонская большое зерно",
+                2,
+            ),
+        ]
+    )
+
+    result = engine.handle(
+        _event(),
+        ParsedCommand(
+            intent=Intent.EDIT_QUANTITY,
+            target_query="горчицы",
+            edit_quantity=10,
+            edit_unit="шт",
+        ),
+        state,
+        [],
+    )
+
+    assert [item.quantity for item in result.state.cart] == [3, 2]
+    assert result.reply.text == "Позиция для изменения не найдена."
+
+
 def test_voice_removal_ignores_draft_location_in_product_name(settings) -> None:  # type: ignore[no-untyped-def]
     """Удаляет названный товар, даже если AI сохранил хвост «из заявки»."""
     engine = ConversationEngine(settings)

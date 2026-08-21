@@ -32,19 +32,14 @@ def test_photo_prompt_prioritizes_filled_department_cells() -> None:
     assert "uncertain_order_row_count" in prompt
 
 
-def test_photo_prompt_requires_contiguous_rows_for_table_geometry() -> None:
-    """Проверяет, что пустые строки внутри диапазона заказа сохраняют геометрию."""
+def test_photo_prompt_uses_filled_rows_without_losing_table_geometry() -> None:
+    """Проверяет краткий ответ с сохранением горизонтальной привязки каждой ячейки."""
     prompt = f"{_PHOTO_SYSTEM}\n{_PHOTO_OBSERVATION_CONTRACT}"
 
-    assert (
-        "Строки между первой видимой товарной строкой и последней строкой с заказом обязательны"
-        in prompt
-    )
-    assert "Не пропускай и не объединяй" in prompt
-    assert "пустые строки внутри этого диапазона" in prompt
+    assert "Возвращай только строки с фактически заполненной ячейкой заказа" in prompt
+    assert "установи горизонтальную полосу заполненной ячейки" in prompt
+    assert "прочитай товар в этой же полосе" in prompt
     assert "точность важнее полноты" not in prompt
-    assert "не сжимай список только" in prompt
-    assert "до строк с количеством" in prompt
 
 
 def test_photo_prompt_preserves_same_row_quantity_and_corrections() -> None:
@@ -64,3 +59,25 @@ def test_photo_observation_contract_keeps_order_area_fields() -> None:
     assert "order_area_complete" in _PHOTO_OBSERVATION_CONTRACT
     assert "uncertain_order_row_count" in _PHOTO_OBSERVATION_CONTRACT
     assert "visible_product_row_count" in _PHOTO_OBSERVATION_CONTRACT
+    assert "sheet_row_numbers_visible" in _PHOTO_OBSERVATION_CONTRACT
+    assert "sheet_row_number_confidence" in _PHOTO_OBSERVATION_CONTRACT
+
+
+def test_photo_prompt_supports_headerless_table_fragments() -> None:
+    """Требует разбирать фрагмент без заголовков только по доказательствам одной строки."""
+    prompt = f"{_PHOTO_SYSTEM}\n{_PHOTO_OBSERVATION_CONTRACT}"
+
+    assert "фрагмент таблицы без заголовков" in prompt
+    assert "не придумывай" in prompt
+    assert "explicit_order_quantity" in prompt
+    assert "order_entry_text" in prompt
+
+
+def test_photo_prompt_returns_only_filled_sheet_rows() -> None:
+    """Не расходует vision-ответ на пустые строки электронной таблицы."""
+    prompt = f"{_PHOTO_SYSTEM}\n{_PHOTO_OBSERVATION_CONTRACT}"
+
+    assert "Возвращай только строки с фактически заполненной ячейкой заказа" in prompt
+    assert "пустые товарные" in prompt
+    assert "строки не возвращай" in prompt
+    assert "могут иметь пропуски из-за пустых строк" in prompt

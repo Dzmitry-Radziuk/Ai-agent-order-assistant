@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Sequence
 
 import structlog
 
 from restaurant_bot.catalog.evidence import (
     has_complete_query_evidence,
+    has_sufficient_photo_identity,
     numeric_evidence,
     query_evidence_tokens,
     remove_phrase_overlap,
@@ -168,30 +170,6 @@ def _looks_like_unanchored_gibberish(query: str) -> bool:
     return len(tokens(query)) >= 3
 
 
-def _photo_identity_anchors(value: str) -> set[str]:
-    """Выделяет устойчивые нечисловые якоря товара для trusted photo identity."""
-    return {
-        token
-        for token in tokens(value)
-        if token not in UNIT_ALIASES and not any(char.isdigit() for char in token)
-    }
-
-
-def _photo_matching_anchors(query: str, product_name: str) -> set[str]:
-    """Возвращает якоря OCR-строки, подтверждённые именем каталога."""
-    return _photo_identity_anchors(query) & query_evidence_tokens(query, product_name)
-
-
-def _photo_identity_is_sufficient(query: str, product_name: str) -> bool:
-    """Проверяет достаточность нечисловых якорей для venue-photo identity."""
-    observed = _photo_identity_anchors(query)
-    matched = _photo_matching_anchors(query, product_name)
-    if len(observed) < 2 or len(matched) < 2:
-        return False
-    required = max(2, (len(observed) * 3 + 4) // 5)
-    return len(matched) >= required
-
-
 class CatalogResolutionService:
     """Применяет найденный каталог к позициям черновика заказа."""
 
@@ -280,6 +258,13 @@ class CatalogResolutionService:
             or not fragment_result.candidates
         ):
             return None
+        if self._have_distinct_complete_catalog_identities(
+            previous_query,
+            base_result.candidates,
+            fragment_query,
+            fragment_result.candidates,
+        ):
+            return None
         combined_query = clean_text(f"{previous_query} {fragment_query}")
         combined_result = self.catalog_resolver.search(
             combined_query,
@@ -306,6 +291,26 @@ class CatalogResolutionService:
                     product for product in catalog if product.product_id == candidate.product_id
                 )
         return None
+
+    @staticmethod
+    def _have_distinct_complete_catalog_identities(
+        previous_query: str,
+        previous_candidates: Sequence[Candidate],
+        fragment_query: str,
+        fragment_candidates: Sequence[Candidate],
+    ) -> bool:
+        """Не склеивает запросы, каждый из которых уже описывает отдельный товар."""
+        previous_ids = {
+            candidate.product_id
+            for candidate in previous_candidates
+            if has_complete_query_evidence(previous_query, candidate.name)
+        }
+        fragment_ids = {
+            candidate.product_id
+            for candidate in fragment_candidates
+            if has_complete_query_evidence(fragment_query, candidate.name)
+        }
+        return bool(previous_ids and fragment_ids and previous_ids.isdisjoint(fragment_ids))
 
     @staticmethod
     def _is_independent_quantity_item(
@@ -505,7 +510,33 @@ class CatalogResolutionService:
         row_number = item.photo_sheet_row_number
         if row_number is not None and item.photo_sheet_row_number_confidence >= 0.9:
             row_matches = products_by_row.get(row_number, [])
-            if len(row_matches) == 1 and _photo_identity_is_sufficient(
+            if item.photo_sheet_row_number_authoritative and len(row_matches) == 1:
+                if has_sufficient_photo_identity(item.source_query, row_matches[0].name):
+                    return self._select_photo_identity_product(
+                        item,
+                        row_matches[0],
+                        method="authoritative_row_number",
+                        reason="verified_sheet_row_and_product_identity",
+                    )
+                logger.warning(
+                    "photo_venue_catalog_identity",
+                    resolution_method="unsafe",
+                    sheet_row_number=row_number,
+                    candidate_count=1,
+                    reason="authoritative_row_product_conflict",
+                )
+                item.photo_sheet_row_number_authoritative = False
+            if item.photo_sheet_row_number_authoritative:
+                item.status = ItemStatus.AMBIGUOUS
+                logger.info(
+                    "photo_venue_catalog_identity",
+                    resolution_method="unsafe",
+                    sheet_row_number=row_number,
+                    candidate_count=len(row_matches),
+                    reason="authoritative_row_missing_or_duplicate",
+                )
+                return True
+            if len(row_matches) == 1 and has_sufficient_photo_identity(
                 item.source_query, row_matches[0].name
             ):
                 return self._select_photo_identity_product(
@@ -545,7 +576,7 @@ class CatalogResolutionService:
         ocr_matches = [
             product
             for product in catalog
-            if _photo_identity_is_sufficient(item.source_query, product.name)
+            if has_sufficient_photo_identity(item.source_query, product.name)
         ]
         if len(ocr_matches) == 1:
             return self._select_photo_identity_product(

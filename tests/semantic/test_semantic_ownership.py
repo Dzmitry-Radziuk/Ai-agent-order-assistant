@@ -402,6 +402,23 @@ def test_explicit_order_comment_scope_strips_control_words() -> None:
     assert items[0]["comment"] == ""
 
 
+def test_ai_order_comment_command_wrapper_is_not_saved() -> None:
+    """Удаляет оболочку команды при сверке общего комментария ИИ."""
+    source = "Добавь общий комментарий привезти завтра к восьми вечера"
+    payload = {"global_comment": source}
+    items = [{"product_query": "Лук зелёный", "source_line": source}]
+
+    _apply_semantic_comment_bindings(
+        payload,
+        items,
+        [{"text": source, "scope": "item", "target_item_indexes": [0], "confidence": 0.99}],
+        source,
+    )
+
+    assert payload["global_comment"] == "привезти завтра к восьми вечера"
+    assert items[0]["comment"] == ""
+
+
 def test_supplier_name_inside_product_does_not_lock_scope() -> None:
     """Не принимает название поставщика внутри товара за область поиска."""
     source = "Стейк скерт Блэк Ангус Мираторг"

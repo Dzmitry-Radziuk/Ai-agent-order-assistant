@@ -82,6 +82,7 @@ class PhotoDocumentObservation(BaseModel):
     document_type_proposal: str = ""
     detected_columns: list[str] = Field(default_factory=list)
     has_table_structure: bool = False
+    sheet_row_numbers_visible: bool = False
     rows: list[PhotoRowObservation] = Field(default_factory=list)
     visible_product_row_count: int | None = Field(default=None, ge=0)
     order_area_complete: bool = True

@@ -119,8 +119,16 @@ def has_explicit_order_comment_scope(text: str) -> bool:
 
 
 def strip_explicit_comment_scope_prefix(value: str) -> str:
-    """Убирает из общего комментария слова, задающие область всей заявки."""
+    """Убирает из комментария командную оболочку и слова области заявки."""
     comment = clean_text(value).strip(" .,;:-—–")
+    if not comment:
+        return ""
+    command_pattern = (
+        r"^(?:добав\w*|внес\w*|запис\w*|укаж\w*|помест\w*|полож\w*)\s+"
+        r"(?:в\s+)?(?:общ\w*\s+)?комментар\w*"
+        r"(?:\s*[,;:—–-]\s*|\s+)"
+    )
+    comment = re.sub(command_pattern, "", comment, count=1, flags=re.I).strip(" .,;:-—–")
     if not comment:
         return ""
     pattern = (

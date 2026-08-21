@@ -53,6 +53,7 @@ def build_cart_item(
         catalog_identity_provenance=extracted.catalog_identity_provenance,
         photo_sheet_row_number=extracted.photo_sheet_row_number,
         photo_sheet_row_number_confidence=extracted.photo_sheet_row_number_confidence,
+        photo_sheet_row_number_authoritative=extracted.photo_sheet_row_number_authoritative,
         quantity=quantity,
         unit=unit,
         department=normalize_department(extracted.department) or default_department,
