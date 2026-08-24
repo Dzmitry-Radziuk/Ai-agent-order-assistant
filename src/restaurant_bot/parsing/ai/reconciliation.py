@@ -235,7 +235,7 @@ def _resolve_item_source_spans(
                     span_text = re.sub(
                         r"\s+(?:и|а)\s*$",
                         "",
-                        source_text[span.start:global_comment_start].strip(" .,;:-—–"),
+                        source_text[span.start : global_comment_start].strip(" .,;:-—–"),
                         flags=re.IGNORECASE,
                     )
                 item["source_span"] = _extend_partial_source_with_order_tail(
@@ -317,7 +317,9 @@ def recover_omitted_explicit_items(payload: dict[str, Any], source_text: str) ->
         )
         items = []
         payload["items"] = []
-    spans = _resolve_item_source_spans(items, source_text, clean_text(payload.get("global_comment")))
+    spans = _resolve_item_source_spans(
+        items, source_text, clean_text(payload.get("global_comment"))
+    )
     remove_unsupported_query_qualifiers(items, source_text)
     global_comment = _strip_global_comment_scope(clean_text(payload.get("global_comment")))
     if is_comment_control_text(global_comment):

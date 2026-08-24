@@ -1402,9 +1402,9 @@ def test_unknown_ai_response_recovers_standalone_product_form(source: str) -> No
     )
 
     assert restored["intent"] is Intent.ADD_ITEMS
-    assert [(item["product_query"], item["quantity"], item["unit"]) for item in restored["items"]] == [
-        (source, None, "")
-    ]
+    assert [
+        (item["product_query"], item["quantity"], item["unit"]) for item in restored["items"]
+    ] == [(source, None, "")]
 
 
 def test_unknown_ai_response_does_not_recover_lone_quality_qualifier() -> None:

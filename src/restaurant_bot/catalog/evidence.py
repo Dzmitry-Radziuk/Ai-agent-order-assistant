@@ -104,9 +104,7 @@ _STOP_WORDS = {
 
 # Structural terms do not identify a concrete catalog product by themselves.
 # They are insufficient evidence for preserving a shortlist after AI ``not_found``.
-_WEAK_CATALOG_ANCHOR_TOKENS = frozenset(
-    {"филе", "товар", "продукт", "позиция", "вариант"}
-)
+_WEAK_CATALOG_ANCHOR_TOKENS = frozenset({"филе", "товар", "продукт", "позиция", "вариант"})
 
 # Каталог часто хранит упаковку в коротком виде (``пласт.бут``, ``кор``),
 # пользователь произносит полную форму. Эти корни описывают упаковку, это не
@@ -239,11 +237,7 @@ def _catalog_abbreviation_match(left: str, right: str) -> bool:
         (_canonical_token(left), _canonical_token(right)),
         key=len,
     )
-    if (
-        short in _PACKAGING_ABBREVIATION_ROOTS
-        and len(long) > len(short)
-        and long.startswith(short)
-    ):
+    if short in _PACKAGING_ABBREVIATION_ROOTS and len(long) > len(short) and long.startswith(short):
         return True
     return (
         3 <= len(short) <= 4
@@ -763,9 +757,7 @@ def unverified_product_terms(query: str, product_name: str) -> list[str]:
         return []
     evidence = query_evidence_tokens(query, product_name)
     product_tokens = tokens(product_name)
-    raw_product_tokens = set(
-        re.findall(r"[a-zа-яё0-9]+", normalize_text(product_name), flags=re.I)
-    )
+    raw_product_tokens = set(re.findall(r"[a-zа-яё0-9]+", normalize_text(product_name), flags=re.I))
     product_numeric = numeric_evidence(product_name)
 
     def numeric_alias_matches(token: str) -> bool:

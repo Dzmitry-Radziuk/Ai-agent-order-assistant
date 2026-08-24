@@ -138,8 +138,7 @@ def test_catalog_proof_recovers_ai_merged_complex_product_list(settings: Setting
         items=[
             ExtractedItem(
                 product_query=(
-                    "Бекон копченый Экстра нарезка в/у охл Грудинка Ароматная "
-                    "Нут ЭНДАКСИ"
+                    "Бекон копченый Экстра нарезка в/у охл Грудинка Ароматная Нут ЭНДАКСИ"
                 ),
                 quantity=10,
                 unit="шт",

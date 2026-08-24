@@ -143,9 +143,7 @@ def catalog_matching_comment_context(value: str) -> str:
     """Оставляет для каталога только комментарий со свойством товара."""
     clauses = [clause.strip() for clause in re.split(r"\s*[;,]\s*", value) if clause.strip()]
     retained_clauses = [
-        clause.strip()
-        for clause in clauses
-        if not _contains_operational_instruction(clause)
+        clause.strip() for clause in clauses if not _contains_operational_instruction(clause)
     ]
     if len(retained_clauses) == len(clauses):
         return value.strip()

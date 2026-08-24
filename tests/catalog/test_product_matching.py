@@ -310,14 +310,20 @@ def test_short_unknown_term_is_not_treated_as_a_voice_typo_without_catalog_evide
 
 def test_spoken_packaging_and_catalog_abbreviations_are_verified() -> None:
     """Сверяет разговорную фасовку и сокращения строки каталога."""
-    assert unverified_product_terms(
-        "капуста маринованная по-грузински трехкилограммовое ведро",
-        "Капуста маринованная по-грузински 3 кг ведро",
-    ) == []
-    assert unverified_product_terms(
-        "облепиха замороженная очищенная первый сорт 10 кг в коробке",
-        "Облепиха замороженная очищенная 1 сорт, RB, 10 кг кор",
-    ) == []
+    assert (
+        unverified_product_terms(
+            "капуста маринованная по-грузински трехкилограммовое ведро",
+            "Капуста маринованная по-грузински 3 кг ведро",
+        )
+        == []
+    )
+    assert (
+        unverified_product_terms(
+            "облепиха замороженная очищенная первый сорт 10 кг в коробке",
+            "Облепиха замороженная очищенная 1 сорт, RB, 10 кг кор",
+        )
+        == []
+    )
 
 
 def test_catalog_packaging_attribute_must_match_candidate(settings: Settings) -> None:

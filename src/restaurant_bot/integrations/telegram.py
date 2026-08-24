@@ -190,9 +190,7 @@ class TelegramClient:
                     self._error_text("getFileContent", response.status_code, {})
                 )
             if response.is_error:
-                raise TelegramAPIError(
-                    self._error_text("getFileContent", response.status_code, {})
-                )
+                raise TelegramAPIError(self._error_text("getFileContent", response.status_code, {}))
             return response.content
 
         return cast(bytes, self._retry_media_read(download, deadline))

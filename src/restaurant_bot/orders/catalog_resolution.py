@@ -271,9 +271,7 @@ class CatalogResolutionService:
                 end = start + len(product_tokens)
                 if source_tokens[start:end] != list(product_tokens):
                     continue
-                matches.append(
-                    _CatalogSourceMatch(product, start_token=start, end_token=end)
-                )
+                matches.append(_CatalogSourceMatch(product, start_token=start, end_token=end))
         return matches
 
     def _compound_item_index_for(
@@ -284,9 +282,7 @@ class CatalogResolutionService:
         if self._compound_item_catalog is catalog:
             return self._compound_item_index
 
-        mutable_index: dict[
-            tuple[str, str], list[tuple[CatalogProduct, tuple[str, ...]]]
-        ] = {}
+        mutable_index: dict[tuple[str, str], list[tuple[CatalogProduct, tuple[str, ...]]]] = {}
         for product in catalog:
             product_tokens = _specific_catalog_name_tokens(product)
             if not product_tokens:
@@ -294,9 +290,7 @@ class CatalogResolutionService:
             first_pair = (product_tokens[0], product_tokens[1])
             mutable_index.setdefault(first_pair, []).append((product, product_tokens))
         self._compound_item_catalog = catalog
-        self._compound_item_index = {
-            key: tuple(value) for key, value in mutable_index.items()
-        }
+        self._compound_item_index = {key: tuple(value) for key, value in mutable_index.items()}
         return self._compound_item_index
 
     @staticmethod

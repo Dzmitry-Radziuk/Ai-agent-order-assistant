@@ -356,9 +356,7 @@ def _restore_omitted_explicit_items(
     known_queries = [clean_text(item.get("product_query")) for item in restored]
     normalized_global = normalize_text(global_comment).strip(" .,;:-—–")
     for recovered in deterministic:
-        recovered_query = _strip_conversational_product_leadin(
-            clean_text(recovered.product_query)
-        )
+        recovered_query = _strip_conversational_product_leadin(clean_text(recovered.product_query))
         if not recovered_query or not _contains_product_query_word(recovered_query):
             continue
         normalized_query = normalize_text(recovered_query).strip(" .,;:-—–")
@@ -378,7 +376,9 @@ def _restore_omitted_explicit_items(
             if known_query
         ):
             continue
-        restored.append(recovered.model_copy(update={"product_query": recovered_query}).model_dump())
+        restored.append(
+            recovered.model_copy(update={"product_query": recovered_query}).model_dump()
+        )
         known_queries.append(recovered_query)
     return restored
 
@@ -399,9 +399,7 @@ def _recovered_query_is_covered_by_existing_source(
         source = clean_text(item.get("source_span")) or clean_text(item.get("source_line"))
         if not source:
             continue
-        source_tokens = set(
-            re.findall(r"[a-zа-яё0-9]+", normalize_text(source), flags=re.I)
-        )
+        source_tokens = set(re.findall(r"[a-zа-яё0-9]+", normalize_text(source), flags=re.I))
         if recovered_tokens.issubset(source_tokens):
             return True
     return False

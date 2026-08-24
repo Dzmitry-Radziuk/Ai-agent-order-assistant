@@ -113,7 +113,9 @@ def test_ai_selects_exact_spoken_packaging_and_supplier_requirement(settings) ->
             )
         ],
     )
-    matcher = _Matcher(ProductMatchDecision(action="select", selected_product_id="trout", confidence=0.95))
+    matcher = _Matcher(
+        ProductMatchDecision(action="select", selected_product_id="trout", confidence=0.95)
+    )
 
     resolved = _orchestrator(settings, matcher)._resolve_ai_pending(
         TelegramEvent(update_id=12, chat_id="123456", input_type=InputKind.VOICE),
@@ -136,9 +138,7 @@ def test_zero_confidence_without_contradiction_keeps_strong_similar_option(setti
         quantity=5,
         unit="кг",
         status=ItemStatus.AMBIGUOUS,
-        candidates=[
-            Candidate(product_id="salmon", name=product.name, unit="кг", score=84.0)
-        ],
+        candidates=[Candidate(product_id="salmon", name=product.name, unit="кг", score=84.0)],
     )
     matcher = _Matcher(ProductMatchDecision(action="not_found", confidence=0.0))
 

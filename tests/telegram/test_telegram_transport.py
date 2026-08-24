@@ -281,6 +281,5 @@ def test_edit_read_timeout_is_retried_without_sending_a_duplicate_message(
     assert message_id == 42
     assert client.client.post.call_count == 2
     assert all(
-        call.args[0].endswith("/editMessageText")
-        for call in client.client.post.call_args_list
+        call.args[0].endswith("/editMessageText") for call in client.client.post.call_args_list
     )
