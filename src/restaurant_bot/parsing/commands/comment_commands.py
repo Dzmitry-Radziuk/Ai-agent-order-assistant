@@ -14,6 +14,7 @@ from restaurant_bot.parsing.comment_scope import (
     has_explicit_order_comment_scope,
     strip_comment_scope_suffix,
 )
+from restaurant_bot.parsing.semantic.measurements import has_order_quantity_evidence
 
 _COMMENT_NOUN_RE = r"(?:комментар\w*|примечан\w*)"
 _COMMENT_ACTION_RE = r"(?:добав\w*|внес\w*|запиш\w*|укаж\w*|измени\w*|поправ\w*)"
@@ -167,6 +168,8 @@ def _parse_edit_comment(text: str) -> ParsedCommand | None:
     # товара + пожелание» всё равно безопасна, потому что ищет только черновик.
     wish_match = _COMMENT_WISH_RE.search(normalized)
     if wish_match is not None and not re.search(_COMMENT_NOUN_RE, normalized, re.I):
+        if has_order_quantity_evidence(source):
+            return None
         prefix = normalized[: wish_match.start()].strip(" ,;:-—–")
         comment = normalized[wish_match.start() :]
         match = re.match(

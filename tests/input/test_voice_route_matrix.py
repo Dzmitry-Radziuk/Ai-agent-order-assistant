@@ -38,6 +38,7 @@ def test_voice_clear_draft_phrasings_use_the_same_command_route(phrase: str) -> 
         ("покажи черновик", Intent.SHOW_CART),
         ("открой корзину", Intent.SHOW_CART),
         ("сбрось черновик", Intent.CLEAR_CART),
+        ("брось черновик", Intent.CLEAR_CART),
         ("новый заказ", Intent.START_NEW_ORDER),
         ("добавить товары", Intent.ADD_MORE),
         ("добавь товары", Intent.ADD_MORE),

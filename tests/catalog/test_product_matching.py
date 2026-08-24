@@ -6,6 +6,7 @@ from restaurant_bot.catalog.evidence import has_complete_query_evidence, unverif
 from restaurant_bot.catalog.retrieval import rank_candidates
 from restaurant_bot.catalog.safety import (
     can_auto_select,
+    catalog_matching_comment_context,
     has_conflicting_catalog_qualifiers,
     is_broad_category_query,
     is_safe_catalog_name_equivalent,
@@ -20,6 +21,20 @@ from restaurant_bot.domain.models import (
     ItemStatus,
 )
 from restaurant_bot.services.engine import ConversationEngine
+
+
+@pytest.mark.parametrize(
+    ("comment", "expected"),
+    [
+        ("срез корня от 5 сантиметров", ""),
+        ("обязательно зачищенное", ""),
+        ("свежее, привезти завтра к восьми", "свежее"),
+        ("без костей, без шкуры, без хрящей", "без костей, без шкуры, без хрящей"),
+    ],
+)
+def test_catalog_context_excludes_supplier_operations(comment: str, expected: str) -> None:
+    """Не передаёт инструкции поставщику как свойства товара в каталог."""
+    assert catalog_matching_comment_context(comment) == expected
 
 
 def test_complete_query_evidence_rejects_category_only_match() -> None:
@@ -43,6 +58,10 @@ def test_safe_equivalence_accepts_spoken_range_and_latin_brand_variant() -> None
     assert is_safe_catalog_name_equivalent(
         "Огурцы 40 на 45 Майер",
         "Огурцы Мар. 40/45 Maier 10л",
+    )
+    assert is_safe_catalog_name_equivalent(
+        "Молоко кокосовое арой ди 400 миллилитров таиланд",
+        "Молоко Кокосовое, Aroy-D, 400мл, Таиланд (24/1)",
     )
 
 
@@ -287,6 +306,18 @@ def test_short_unknown_term_is_not_treated_as_a_voice_typo_without_catalog_evide
     """Не разрешает короткий неизвестный признак только из-за сильной категории."""
     assert unverified_product_terms("свинина сало икс", "Свинина Сало копченое") == ["икс"]
     assert unverified_product_terms("сироп рза", "Сироп Роза") == []
+
+
+def test_spoken_packaging_and_catalog_abbreviations_are_verified() -> None:
+    """Сверяет разговорную фасовку и сокращения строки каталога."""
+    assert unverified_product_terms(
+        "капуста маринованная по-грузински трехкилограммовое ведро",
+        "Капуста маринованная по-грузински 3 кг ведро",
+    ) == []
+    assert unverified_product_terms(
+        "облепиха замороженная очищенная первый сорт 10 кг в коробке",
+        "Облепиха замороженная очищенная 1 сорт, RB, 10 кг кор",
+    ) == []
 
 
 def test_catalog_packaging_attribute_must_match_candidate(settings: Settings) -> None:
@@ -645,6 +676,7 @@ def test_one_word_category_never_auto_selects_the_only_catalog_candidate(
     cases = [
         ("говядина", CatalogProduct(product_id="beef", name="Говядина Тонкий край", unit="кг")),
         ("сироп", CatalogProduct(product_id="rose", name="Сироп Роза, 1л", unit="шт")),
+        ("филе", CatalogProduct(product_id="salmon", name="Филе лосося", unit="кг")),
     ]
 
     for query, product in cases:
@@ -679,6 +711,17 @@ def test_exact_one_word_catalog_product_is_not_treated_as_a_category() -> None:
     product = CatalogProduct(product_id="milk", name="Молоко", unit="л")
 
     assert not is_broad_category_query("молоко", rank_candidates("молоко", [product]))
+
+
+def test_specific_identity_prevents_irrelevant_fillet_shortlist() -> None:
+    """Не считает лосося общим запросом к кандидатам другой рыбы."""
+    candidates = [
+        Candidate(product_id="trout", name="Форель филе, 0,8-1,3 кг", unit="кг", score=91),
+        Candidate(product_id="pike", name="Щука филе, 0,8-1,3 кг", unit="кг", score=88),
+    ]
+
+    assert is_broad_category_query("филе", candidates)
+    assert not is_broad_category_query("филе лосося 0,8-1,3 кг", candidates)
 
 
 def test_unsupported_beef_qualifier_cannot_choose_between_equal_category_matches() -> None:

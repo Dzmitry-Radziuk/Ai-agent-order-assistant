@@ -744,7 +744,10 @@ def test_hyphenated_multiline_product_list_skips_ai_and_keeps_quantities(
     ]
 
 
-@pytest.mark.parametrize("text", ["сироп шка", "креветки королевские"])
+@pytest.mark.parametrize(
+    "text",
+    ["сироп шка", "креветки королевские", "филе", "фарш", "тушка", "мякоть"],
+)
 def test_short_product_name_without_quantity_skips_ai(settings, text: str) -> None:  # type: ignore[no-untyped-def]
     """Не зависит от ИИ при поиске короткого названия без количества."""
     service = _service(settings, SimpleNamespace(responses=_FailingResponses()))
@@ -755,6 +758,85 @@ def test_short_product_name_without_quantity_skips_ai(settings, text: str) -> No
     assert len(command.items) == 1
     assert command.items[0].product_query == text
     assert command.items[0].quantity is None
+
+
+def test_explicit_short_product_command_skips_ai_and_keeps_only_product_name(
+    settings,
+) -> None:  # type: ignore[no-untyped-def]
+    """Быстро обрабатывает разговорную команду заказа без засорения каталожного запроса."""
+    service = _service(settings, SimpleNamespace(responses=_FailingResponses()))
+
+    command = service.parse_text("Хочу заказать морковь.")
+
+    assert command.intent is Intent.ADD_ITEMS
+    assert command.explicit_add_items is True
+    assert command.items[0].product_query == "морковь"
+    assert command.items[0].quantity is None
+
+
+def test_incomplete_voice_list_uses_structured_ai_instead_of_malformed_fallback(
+    settings,
+) -> None:  # type: ignore[no-untyped-def]
+    """Передаёт неполный локальный разбор голосового списка в структурированный AI."""
+    source = (
+        "Для лосося 0.8-1.3 килограмма, мне нужно 10 килограмм, "
+        "обязательно зачищенное, лук зеленый 5 килограмм, паста соевая – 10 штук."
+    )
+    parsed = ParsedInputSchema(
+        intent=Intent.ADD_ITEMS,
+        items=[
+            ExtractedItem(
+                product_query="лосось",
+                quantity=10,
+                unit="кг",
+                comment="обязательно зачищенное",
+                source_line="Для лосося 0.8-1.3 килограмма, мне нужно 10 килограмм, обязательно зачищенное",
+            ),
+            ExtractedItem(
+                product_query="лук зеленый",
+                quantity=5,
+                unit="кг",
+                source_line="лук зеленый 5 килограмм",
+            ),
+            ExtractedItem(
+                product_query="паста соевая",
+                quantity=10,
+                unit="шт",
+                source_line="паста соевая – 10 штук",
+            ),
+        ],
+    )
+    responses = _Responses(parsed)
+    service = _service(settings, SimpleNamespace(responses=responses))
+
+    command = service.parse_text(source)
+
+    assert len(responses.calls) == 1
+    assert command.intent is Intent.ADD_ITEMS
+    assert [(item.quantity, item.unit) for item in command.items] == [
+        (10.0, "кг"),
+        (5.0, "кг"),
+        (10.0, "шт"),
+    ]
+    assert command.items[0].comment == "обязательно зачищенное"
+
+
+def test_incomplete_voice_list_does_not_restore_malformed_item_after_empty_ai(
+    settings,
+) -> None:  # type: ignore[no-untyped-def]
+    """Не добавляет повреждённую локальную позицию при пустом ответе AI."""
+    source = (
+        "Для лосося 0.8-1.3 килограмма, мне нужно 10 килограмм, "
+        "обязательно зачищенное, лук зеленый 5 килограмм, паста соевая – 10 штук."
+    )
+    responses = _Responses(None)
+    service = _service(settings, SimpleNamespace(responses=responses))
+
+    command = service.parse_text(source)
+
+    assert len(responses.calls) == 1
+    assert command.intent is Intent.UNKNOWN
+    assert command.items == []
 
 
 def test_support_failure_phrase_uses_semantic_ai_instead_of_becoming_product(settings) -> None:  # type: ignore[no-untyped-def]

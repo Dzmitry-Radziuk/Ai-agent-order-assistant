@@ -234,3 +234,12 @@ def test_product_history_question_keeps_history_semantics() -> None:
 def test_product_name_starting_with_bot_is_not_treated_as_bot_question() -> None:
     """Не принимает название «ботинок» за обращение к боту."""
     assert classify_bot_conversation("ботинок") is None
+
+
+@pytest.mark.parametrize(
+    "phrase",
+    ("Расскажи анекдот про поваров", "Давай поболтаем", "Как дела?"),
+)
+def test_unrelated_small_talk_with_regular_nouns_stays_out_of_history(phrase: str) -> None:
+    """Не принимает бытовую реплику с существительным за товар или историю."""
+    assert classify_bot_conversation(phrase) is Intent.SMALL_TALK

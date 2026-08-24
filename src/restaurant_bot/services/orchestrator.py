@@ -22,11 +22,13 @@ from restaurant_bot.application.history.query_service import HistoryQueryService
 from restaurant_bot.application.order_review.token import new_review_token
 from restaurant_bot.catalog.evidence import (
     canonical_search_query,
+    has_strong_catalog_anchor,
     query_evidence_tokens,
     remove_phrase_overlap,
     unverified_product_terms,
 )
 from restaurant_bot.catalog.safety import (
+    catalog_matching_comment_context,
     has_compatible_numeric_characteristics,
     has_conflicting_catalog_qualifiers,
     has_unscoped_product_variant_qualifier,
@@ -116,6 +118,20 @@ def _lease_kwargs(lease: ChatLease | None) -> dict[str, Any]:
 
 _AI_MATCH_SELECT_MIN_CONFIDENCE = 0.90
 _AI_MATCH_NOT_FOUND_MIN_CONFIDENCE = 0.80
+
+
+def _contradictions_reference_request(
+    contradictions: list[str],
+    source_query: str,
+    comment: str,
+) -> bool:
+    """Проверяет, ссылаются ли AI-противоречия на признаки самого запроса."""
+    request_text = f"{source_query} {comment}"
+    return any(
+        query_evidence_tokens(value, request_text) for value in contradictions if value.strip()
+    )
+
+
 _AI_MATCH_MIN_SCORE = 40.0
 _SHEET_REVIEW_MODE = "sheet_link"
 _REVIEW_INTENTS = frozenset(
@@ -129,8 +145,8 @@ _REVIEW_INTENTS = frozenset(
 
 
 def _catalog_match_evidence(item: CartItem) -> str:
-    """Объединяет название и локальный комментарий для проверки широты запроса."""
-    return " ".join(part for part in (item.source_query, item.comment) if part).strip()
+    """Возвращает название для определения широты каталожного запроса."""
+    return item.source_query
 
 
 @dataclass(slots=True)
@@ -354,10 +370,10 @@ class UpdateOrchestrator:
                     timings["state_load_ms"] = round((perf_counter() - stage_started) * 1000)
                     log.info("conversation_state_loaded", **self._state_log(state))
 
-                    # n8n сразу подтверждает новое голосовое обновление временной
-                    # карточкой. Транскрипция и структурированный разбор могут занять
-                    # несколько секунд; активная старая клавиатура провоцирует устаревшие
-                    # нажатия. Ниже итоговый ответ изменяет эту же карточку.
+                    # Каждое новое сообщение получает собственную временную карточку:
+                    # итог заменяет именно её, но не старый результат выше в чате.
+                    # Клавиатуру прежней карточки отключаем сразу, чтобы старый callback
+                    # не мог изменить уже начавшийся следующий сценарий.
                     if event.input_type == InputKind.VOICE:
                         stage_started = perf_counter()
                         processing_message_id = self._send_processing_best_effort(
@@ -365,8 +381,6 @@ class UpdateOrchestrator:
                             event.chat_id,
                             self._voice_processing_reply(),
                         )
-                        # Медленное изменение карточки Telegram не должно откладывать видимое
-                        # подтверждение того, что голосовое сообщение принято.
                         self._disable_keyboard_best_effort(log, event.chat_id, state.ui_message_id)
                         timings["processing_card_ms"] = round(
                             (perf_counter() - stage_started) * 1000
@@ -520,6 +534,8 @@ class UpdateOrchestrator:
                         result.reply.edit_message_id = processing_message_id
                     elif event.input_type == InputKind.CALLBACK and event.callback_message_id:
                         result.reply.edit_message_id = event.callback_message_id
+                    elif state.ui_message_id:
+                        result.reply.edit_message_id = state.ui_message_id
                     result.state.ui_revision += 1
                     self._attach_ui_revision(result.reply, result.state.ui_revision)
                     result.state.ui_message_text = result.reply.text
@@ -1698,7 +1714,7 @@ class UpdateOrchestrator:
             decision = self.openai.choose_catalog_candidate(
                 item.source_query,
                 [candidate.model_dump() for candidate in item.candidates],
-                item.comment,
+                catalog_matching_comment_context(item.comment),
             )
             search_query = remove_phrase_overlap(item.source_query, item.comment)
             logger.info(
@@ -1751,7 +1767,7 @@ class UpdateOrchestrator:
                 and not has_conflicting_catalog_qualifiers(item.source_query, selected.name)
                 and not has_unscoped_product_variant_qualifier(item.comment)
                 and item.packaging_role != "ambiguous"
-                and not unverified_product_terms(item.source_query, selected.name)
+                and not unverified_product_terms(search_query, selected.name)
             )
             winner_score = selected.score if selected is not None else None
             runner_up_score = item.candidates[1].score if len(item.candidates) > 1 else None
@@ -1772,7 +1788,7 @@ class UpdateOrchestrator:
             if item.packaging_role == "ambiguous":
                 gate_reasons.append("ambiguous_packaging")
             unresolved_terms = (
-                unverified_product_terms(item.source_query, selected.name)
+                unverified_product_terms(search_query, selected.name)
                 if selected is not None
                 else []
             )
@@ -1799,27 +1815,69 @@ class UpdateOrchestrator:
             )
             if can_select and selected is not None:
                 self.engine.catalog_resolution.apply_catalog(item, selected, catalog)
-            elif (
-                decision.action == "not_found"
-                and decision.confidence >= _AI_MATCH_NOT_FOUND_MIN_CONFIDENCE
-            ):
-                # ИИ может отклонить неразрешённый признак, пока детерминированный
-                # shortlist подтверждает основной товар. Сохраняем это свидетельство
-                # для уточнения и удаляем shortlist только при полном отсутствии
-                # содержательного совпадения названия.
-                primary = item.candidates[0] if item.candidates else None
-                deterministic_evidence = (
-                    query_evidence_tokens(search_query, primary.name)
-                    if primary is not None
-                    else set()
-                )
-                if deterministic_evidence and primary is not None:
+            elif decision.action == "not_found":
+                # A zero-confidence ``not_found`` is not evidence for any
+                # candidate. Do not turn it into an unrelated suggestions card.
+                if 0 < decision.confidence < _AI_MATCH_NOT_FOUND_MIN_CONFIDENCE:
                     item.status = ItemStatus.AMBIGUOUS
+                    logger.info(
+                        "catalog_candidate_ai_not_found_uncertain",
+                        target_query=item.source_query,
+                        confidence=decision.confidence,
+                        candidate_count=len(item.candidates),
+                    )
+                    continue
+
+                # При уверенном отказе сохраняем только кандидатов, в названии
+                # которых есть содержательный якорь товара. Совпадения по одному
+                # слову «филе»/«товар» не являются доказательством идентичности.
+                anchored_candidates = [
+                    candidate
+                    for candidate in item.candidates
+                    if has_strong_catalog_anchor(search_query, candidate.name)
+                ]
+                reliable_anchored_candidates = [
+                    candidate
+                    for candidate in anchored_candidates
+                    if has_compatible_numeric_characteristics(item.source_query, candidate.name)
+                    and not has_conflicting_catalog_qualifiers(item.source_query, candidate.name)
+                    and not unverified_product_terms(search_query, candidate.name)
+                    and not _contradictions_reference_request(
+                        decision.contradictions,
+                        item.source_query,
+                        item.comment,
+                    )
+                ]
+                numeric_mismatch_candidates = [
+                    candidate
+                    for candidate in anchored_candidates
+                    if not has_compatible_numeric_characteristics(item.source_query, candidate.name)
+                    and not has_conflicting_catalog_qualifiers(item.source_query, candidate.name)
+                    and not unverified_product_terms(search_query, candidate.name)
+                ]
+                preserve_anchored_candidates = (
+                    decision.confidence >= _AI_MATCH_NOT_FOUND_MIN_CONFIDENCE
+                    or (decision.confidence == 0 and not decision.contradictions)
+                    or bool(reliable_anchored_candidates)
+                )
+                if numeric_mismatch_candidates:
+                    anchored_candidates = numeric_mismatch_candidates
+                    preserve_anchored_candidates = True
+                if preserve_anchored_candidates and anchored_candidates:
+                    item.status = ItemStatus.AMBIGUOUS
+                    item.candidates = anchored_candidates
                     logger.info(
                         "catalog_candidate_ai_not_found_preserved",
                         target_query=item.source_query,
-                        candidate_product_id=primary.product_id,
-                        evidence=sorted(deterministic_evidence),
+                        candidate_product_ids=[
+                            candidate.product_id for candidate in anchored_candidates
+                        ],
+                        evidence={
+                            candidate.product_id: sorted(
+                                query_evidence_tokens(search_query, candidate.name)
+                            )
+                            for candidate in anchored_candidates
+                        },
                         contradictions=decision.contradictions,
                     )
                 else:

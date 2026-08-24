@@ -5,6 +5,7 @@ from __future__ import annotations
 import pytest
 
 from restaurant_bot.config import Settings
+from restaurant_bot.conversation.item_intake import build_cart_item
 from restaurant_bot.conversation.selection import resolve_candidate_reference
 from restaurant_bot.domain.models import (
     Candidate,
@@ -102,6 +103,25 @@ def test_residual_order_quantity_survives_catalog_identity() -> None:
     assert authorization.provenance is QuantityProvenance.ORDER
     assert authorization.quantity == 5
     assert authorization.unit == "шт"
+
+
+def test_cart_item_uses_local_source_span_for_multi_item_voice_quantity() -> None:
+    """Не стирает количество позиции из-за чисел в соседней части транскрипта."""
+    source_line = (
+        "Мне нужно филе лосося 0,8-1,2 килограмма 5 кг, "
+        "а также лук зелёный 10 килограмм срез корня от 5 сантиметров."
+    )
+    extracted = ExtractedItem(
+        product_query="лук зелёный",
+        quantity=10,
+        unit="кг",
+        source_line=source_line,
+        source_span="лук зелёный 10 килограмм срез корня от 5 сантиметров",
+    )
+
+    cart_item = build_cart_item(extracted, default_department="")
+
+    assert (cart_item.quantity, cart_item.unit) == (10.0, "кг")
 
 
 def test_repeated_packaging_and_order_occurrences_use_the_latter_order_span() -> None:

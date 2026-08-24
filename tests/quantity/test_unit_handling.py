@@ -3,6 +3,7 @@
 import pytest
 
 from restaurant_bot.domain.models import (
+    Candidate,
     CatalogProduct,
     ConversationState,
     ExtractedItem,
@@ -13,6 +14,7 @@ from restaurant_bot.domain.models import (
     SessionStage,
     TelegramEvent,
 )
+from restaurant_bot.domain.units import normalize_unit
 from restaurant_bot.input.telegram_callbacks import parse_callback
 from restaurant_bot.services.engine import ConversationEngine
 
@@ -20,6 +22,31 @@ from restaurant_bot.services.engine import ConversationEngine
 def _event() -> TelegramEvent:
     """Создаёт тестовое событие Telegram."""
     return TelegramEvent(update_id=1, chat_id="123456", input_type=InputKind.TEXT)
+
+
+def test_catalog_box_abbreviation_uses_the_same_unit_as_spoken_box(settings) -> None:  # type: ignore[no-untyped-def]
+    """Не создаёт unit mismatch между «кор» и сокращением каталога «корб»."""
+    assert normalize_unit("корб") == "кор"
+
+    item = ConversationEngine(settings)._build_item(
+        ExtractedItem(
+            product_query="Яйцо куриное",
+            quantity=5,
+            unit="кор",
+            source_line="Яйцо куриное 5 коробок",
+        )
+    )
+    product = CatalogProduct(product_id="egg", name="Яйцо куриное", unit="корб")
+
+    ConversationEngine(settings).catalog_resolution.apply_catalog(
+        item,
+        Candidate(product_id="egg", name="Яйцо куриное", unit="корб"),
+        [product],
+    )
+
+    assert item.catalog_unit == "кор"
+    assert item.status is ItemStatus.MATCHED
+    assert (item.quantity, item.unit) == (5, "кор")
 
 
 def test_convertible_units_require_explicit_catalog_unit_confirmation(settings) -> None:  # type: ignore[no-untyped-def]

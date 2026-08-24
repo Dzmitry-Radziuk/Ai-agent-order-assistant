@@ -16,7 +16,10 @@ from restaurant_bot.domain.text import normalize_text
 from restaurant_bot.parsing.delivery_language import has_delivery_wish_shape
 from restaurant_bot.parsing.history.dates import business_today, date_reference_for
 from restaurant_bot.parsing.history.normalization import history_stem, history_tokens
-from restaurant_bot.parsing.semantic_routing import classify_bot_conversation
+from restaurant_bot.parsing.semantic_routing import (
+    classify_bot_conversation,
+    is_conversational_non_history,
+)
 
 _QUESTION_MARKERS = (
     "когда",
@@ -203,9 +206,11 @@ _HISTORY_VERB_RE = re.compile(
 _HISTORY_PHRASE_PATTERNS = (
     re.compile(r"\bподскаж\w*\s+по\b"),
     re.compile(r"\bчто\s+там\s+по\b"),
+    re.compile(r"\bчто\s+(?:там\s+)?с\b"),
     re.compile(r"\bпоставк\w*\s+по\b"),
     re.compile(r"\bмне\s+.+\s+ждат\w*\b"),
     re.compile(r"\b(?:был\w*|были)\s+ли\s+заказан\w*\b"),
+    re.compile(r"\b(?:есть\s+ли\s+)?(?:информац|новост)\w*\s+(?:насчет|по)\b"),
 )
 _INDEFINITE_OBJECT_RE = re.compile(r"\b(?:что|чего)(?:[-\s](?:нибудь|то))\b")
 _GENERAL_DELIVERY_RE = re.compile(
@@ -290,11 +295,7 @@ def _has_history_signal(normalized: str, *, raw_text: str = "") -> bool:
     if any(marker in normalized for marker in _QUESTION_MARKERS):
         return True
     return bool(
-        "?" in raw_text
-        and (
-            re.search(r"\b\d{1,2}[./-]\d{1,2}(?:[./-]\d{2,4})?\b", normalized)
-            or re.search(r"\b(?:что|как|где|почему)\b", normalized)
-        )
+        "?" in raw_text and re.search(r"\b\d{1,2}[./-]\d{1,2}(?:[./-]\d{2,4})?\b", normalized)
     )
 
 
@@ -367,7 +368,11 @@ def parse_history_query(
 ) -> HistoryQuery | None:
     """Распознаёт общий смысл естественного вопроса о товарной поставке."""
     normalized = normalize_text(text)
-    if _is_conversational_question(normalized) or classify_bot_conversation(text) is not None:
+    if (
+        is_conversational_non_history(normalized)
+        or _is_conversational_question(normalized)
+        or classify_bot_conversation(text) is not None
+    ):
         return None
     if _is_global_order_status_request(normalized):
         return None

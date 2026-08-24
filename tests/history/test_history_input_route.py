@@ -9,6 +9,7 @@ from restaurant_bot.domain.history import HistoryQuery, HistoryQuestionType
 from restaurant_bot.domain.models import (
     CartItem,
     ConversationState,
+    ExtractedItem,
     InputKind,
     Intent,
     ParsedCommand,
@@ -118,8 +119,8 @@ def test_pronoun_history_question_requires_one_safe_context_product() -> None:
     assert provider.parse_text.call_count == 0
 
 
-def test_unrecognized_history_formulation_uses_structured_ai_fallback() -> None:
-    """Передаёт свободную формулировку в существующий структурированный AI-путь."""
+def test_free_history_formulation_is_parsed_before_ai() -> None:
+    """Распознаёт свободный вопрос истории до внешнего AI-вызова."""
     provider = MagicMock()
     provider.parse_text.return_value = ParsedCommand(
         intent=Intent.HISTORY_QUERY,
@@ -140,7 +141,21 @@ def test_unrecognized_history_formulation_uses_structured_ai_fallback() -> None:
 
     assert command.intent is Intent.HISTORY_QUERY
     assert command.history_query is not None
-    provider.parse_text.assert_called_once_with("Есть ли информация насчёт говядины")
+    provider.parse_text.assert_not_called()
+
+
+def test_unverified_ai_history_query_becomes_small_talk() -> None:
+    """Не позволяет разговорной фразе вызвать чтение истории из ответа модели."""
+    provider = MagicMock()
+    provider.parse_text.return_value = ParsedCommand(intent=Intent.HISTORY_QUERY)
+    interpreter = TelegramInputInterpreter(
+        provider, lambda: MagicMock(), StateCompatibilityPolicy()
+    )
+
+    command = interpreter.interpret_text("Расскажи анекдот про поваров?", ConversationState())
+
+    assert command.intent is Intent.SMALL_TALK
+    assert command.history_query is None
 
 
 def test_history_text_and_voice_transcript_share_boundary_route() -> None:
@@ -276,6 +291,33 @@ def test_delivery_wish_without_cart_is_safe_unknown() -> None:
 
     assert command.intent is Intent.UNKNOWN
     assert command.items == []
+    assert command.history_query is None
+
+
+def test_explicit_delivery_for_new_list_keeps_items_and_comment_scope() -> None:
+    """Не теряет новый список из-за общего пожелания о доставке."""
+    source = (
+        "Горчица острая 5 штук, лук жареный Митрошеф 600 грамм 5 штук. "
+        "Все привезти завтра до 8 вечера."
+    )
+    provider = MagicMock()
+    provider.parse_text.return_value = ParsedCommand(
+        intent=Intent.ADD_ITEMS,
+        text=source,
+        items=[
+            ExtractedItem(product_query="Горчица острая", quantity=5, unit="шт"),
+            ExtractedItem(product_query="Лук жареный Митрошеф 600 грамм", quantity=5, unit="шт"),
+        ],
+    )
+    interpreter = TelegramInputInterpreter(
+        provider, lambda: MagicMock(), StateCompatibilityPolicy()
+    )
+
+    command = interpreter.interpret_text(source, ConversationState())
+
+    assert command.intent is Intent.ADD_ITEMS
+    assert len(command.items) == 2
+    assert command.comment_clarification == "привезти завтра до 8 вечера"
     assert command.history_query is None
 
 

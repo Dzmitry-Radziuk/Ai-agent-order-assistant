@@ -48,9 +48,15 @@ def test_submit_request_opens_final_review_without_enqueuing(settings) -> None: 
 def test_clear_cart_removes_draft_and_returns_to_collecting(settings) -> None:  # type: ignore[no-untyped-def]
     """Проверяет, что очистка черновик удаляет черновик и возвращает в collecting."""
     engine = ConversationEngine(settings)
-    state = ConversationState(cart=[])
+    state = ConversationState(
+        cart=[],
+        product_add_requests=[{"request_id": "pending-add", "status": "pending_write"}],
+        spreadsheet_id="sheet-1",
+    )
 
     cleared = engine.handle(_event(), ParsedCommand(intent=Intent.CLEAR_CART), state, [])
 
     assert cleared.state.stage is SessionStage.COLLECTING
     assert cleared.state.cart == []
+    assert cleared.state.product_add_requests == []
+    assert cleared.invalidate_catalog is True

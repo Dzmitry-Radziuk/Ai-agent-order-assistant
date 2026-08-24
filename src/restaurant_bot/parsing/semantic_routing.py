@@ -23,6 +23,10 @@ _HELP_SHAPE_RE = re.compile(
     r"как\s+дальше|с\s+чего\s+начать|как\s+пользова\w*|"
     r"как\s+с\s+тобой\s+работа\w*)\b"
 )
+_SMALL_TALK_RE = re.compile(
+    r"\b(?:флуд\w*|болта\w*|поболта\w*|поговор\w*|шут\w*|анекдот\w*|"
+    r"как\s+дела|расскаж\w*\s+(?:анекдот|шутк\w*))\b"
+)
 
 _META_STEMS = (
     "бот",
@@ -155,6 +159,34 @@ _FILLER_WORDS = {
 }
 
 
+_HYPOTHETICAL_CHAT_RE = re.compile(
+    r"(?:\bесли\b.*\bя\b.*\b(?:буду\w*|будем\w*|скажу\w*|говор\w*|разговар\w*)\b.*(?:"
+    r"\bсвободн\w*\b|\bфлуд\w*\b|\bболта\w*\b|\bчто\s+ты\s+скаж\w*\b)"
+    r"|\bесли\b.*\bя\b.*\bчто[-\s]?(?:нибудь|то)\b.*\b(?:скажу\w*|говор\w*|разговар\w*)\b.*\bчто\s+будет\b)",
+    flags=re.IGNORECASE,
+)
+_BOT_ACTION_QUESTION_RE = re.compile(
+    r"\b(?:что|как)\s+ты\s+(?:будешь|можешь|умеешь|делаешь|делать)\b",
+    flags=re.IGNORECASE,
+)
+_SPEECH_HYPOTHETICAL_RE = re.compile(
+    r"\bесли\b.*\bя\b.*\b(?:буд\w*|скажу\w*|говор\w*|разговар\w*)\b",
+    flags=re.IGNORECASE,
+)
+_NON_PRODUCT_ACTOR_STEMS = (
+    "машин",
+    "автомобил",
+    "поезд",
+    "самолёт",
+    "самолет",
+    "люд",
+    "человек",
+    "коллег",
+    "курьер",
+    "водител",
+)
+
+
 def _stem_matches(word: str, stems: tuple[str, ...]) -> bool:
     """Проверяет, начинается ли слово с одного из смысловых корней."""
     return any(word.startswith(stem) for stem in stems)
@@ -172,12 +204,47 @@ def _has_product_anchor(normalized: str, words: list[str]) -> bool:
     )
 
 
+def is_conversational_hypothetical(text: str) -> bool:
+    """Отличает гипотетический разговор от вопроса о поставке."""
+    normalized = normalize_text(text)
+    if not normalized or _EXPLICIT_ACTION_RE.search(normalized) or _QUANTITY_RE.search(normalized):
+        return False
+    return bool(
+        _HYPOTHETICAL_CHAT_RE.search(normalized)
+        or _SPEECH_HYPOTHETICAL_RE.search(normalized)
+        or _BOT_ACTION_QUESTION_RE.search(normalized)
+    )
+
+
+def is_conversational_non_history(text: str) -> bool:
+    """Отличает разговорный вопрос с объектом-участником от вопроса о товарной истории."""
+    normalized = normalize_text(text)
+    if not normalized or _EXPLICIT_ACTION_RE.search(normalized) or _QUANTITY_RE.search(normalized):
+        return False
+    if is_conversational_hypothetical(normalized):
+        return True
+    return bool(
+        re.search(
+            r"\bкогда\s+(?:это\s+)?(?:"
+            + "|".join(re.escape(stem) + r"\w*" for stem in _NON_PRODUCT_ACTOR_STEMS)
+            + r")\s+(?:приед\w*|приех\w*|прилет\w*|приедут\w*)\b",
+            normalized,
+        )
+    )
+
+
 def classify_bot_conversation(text: str) -> Intent | None:
     """Распознаёт разговор о боте, помощь или флуд без выдумывания товара."""
     normalized = normalize_text(text)
     if not normalized:
         return None
     words = normalized.split()
+    if _SMALL_TALK_RE.search(normalized):
+        return Intent.SMALL_TALK
+    if is_conversational_non_history(normalized):
+        if re.search(r"\b(?:что|как)\s+ты\s+(?:умеешь|можешь)\b", normalized):
+            return Intent.HELP
+        return Intent.SMALL_TALK
     if _has_product_anchor(normalized, words):
         return None
     has_bot_reference = bool(_BOT_REFERENCE_RE.search(normalized))

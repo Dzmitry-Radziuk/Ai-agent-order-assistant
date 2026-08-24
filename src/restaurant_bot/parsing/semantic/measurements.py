@@ -216,6 +216,20 @@ def extract_semantic_facts(source_text: str) -> tuple[SemanticFact, ...]:
     return tuple(sorted(facts, key=lambda fact: (fact.start, fact.end, fact.kind)))
 
 
+def order_quantity_facts(source_text: str) -> tuple[SemanticFact, ...]:
+    """Возвращает только подтверждённые факты количества заказа из источника."""
+    return tuple(
+        fact
+        for fact in extract_semantic_facts(source_text)
+        if fact.kind is SemanticFactKind.ORDER_QUANTITY
+    )
+
+
+def has_order_quantity_evidence(source_text: str) -> bool:
+    """Проверяет, содержит ли исходная фраза подтверждённое количество заказа."""
+    return bool(order_quantity_facts(source_text))
+
+
 def has_global_quantity_scope(source_text: str) -> bool:
     """Проверяет, относится ли названное количество ко всему списку товаров."""
     return bool(_GLOBAL_QUANTITY_SCOPE_RE.search(normalize_text(source_text)))

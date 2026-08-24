@@ -12,7 +12,7 @@ from restaurant_bot.parsing.number_words import parse_number_words
 from restaurant_bot.parsing.numeric import to_float
 from restaurant_bot.parsing.numeric_ranges import numeric_range_spans
 from restaurant_bot.parsing.products import parse_product_lines
-from restaurant_bot.parsing.quantities import parse_quantity_unit
+from restaurant_bot.parsing.quantities import has_explicit_order_quantity, parse_quantity_unit
 from restaurant_bot.parsing.semantic.measurements import extract_semantic_facts
 from restaurant_bot.parsing.semantic.models import SemanticFactKind
 
@@ -205,12 +205,86 @@ def restore_explicit_order_terms(
         explicit_terms = _quantities_with_units(original_line)
         model_quantity = to_float(item.get("quantity"))
         model_unit = normalize_unit(item.get("unit"))
-        source_item = recovered_from_message[0] if len(recovered_from_message) == 1 else None
+        # Общий fallback допустим только для единственной позиции: в списке он
+        # не принадлежит ни одной строке и не может передавать фасовку соседям.
+        source_item = (
+            recovered_from_message[0]
+            if len(items) == 1 and len(recovered_from_message) == 1
+            else None
+        )
+
+        source_facts = extract_semantic_facts(original_line)
         source_order_facts = [
-            fact
-            for fact in extract_semantic_facts(original_line)
-            if fact.kind is SemanticFactKind.ORDER_QUANTITY
+            fact for fact in source_facts if fact.kind is SemanticFactKind.ORDER_QUANTITY
         ]
+        has_competing_order_quantity = (
+            any(
+                (parsed_quantity := parse_quantity_unit(fact.original_text)[0]) is not None
+                and abs(parsed_quantity - model_quantity) > 1e-9
+                for fact in source_order_facts
+            )
+            if model_quantity is not None
+            else False
+        )
+        proposed_is_packaging = (
+            any(
+                fact.kind is SemanticFactKind.CATALOG_ATTRIBUTE
+                and (parsed_quantity := parse_quantity_unit(fact.original_text)[0]) is not None
+                and abs(parsed_quantity - model_quantity) <= 1e-9
+                and (
+                    not model_unit
+                    or normalize_unit(parse_quantity_unit(fact.original_text)[1]) == model_unit
+                )
+                for fact in source_facts
+            )
+            if model_quantity is not None
+            else False
+        )
+        proposed_is_measurement = (
+            any(
+                fact.kind is SemanticFactKind.MEASUREMENT
+                and (parsed_quantity := parse_quantity_unit(fact.original_text)[0]) is not None
+                and abs(parsed_quantity - model_quantity) <= 1e-9
+                and (
+                    not model_unit
+                    or normalize_unit(parse_quantity_unit(fact.original_text)[1]) == model_unit
+                )
+                for fact in source_facts
+            )
+            if model_quantity is not None
+            else False
+        )
+
+        # До выбора товара каталог ещё не подтвердил, является ли мера частью
+        # названия или количеством заказа. Поэтому не удаляем предложенную ИИ
+        # локальную меру: если она не похожа на явную фасовку или другое
+        # количество заказа, окончательное решение остаётся за
+        # владельцем catalog provenance после выбора товара.
+        if (
+            model_quantity is not None
+            and model_unit
+            and not has_competing_order_quantity
+            and not proposed_is_packaging
+            and (
+                has_explicit_order_quantity(original_line, model_quantity)
+                or proposed_is_measurement
+            )
+        ):
+            if not shared_source:
+                _mark_item_source(item, original_line)
+            if source_item is not None:
+                item["packaging_text"] = (
+                    clean_text(item.get("packaging_text")) or source_item.packaging_text
+                )
+                item["packaging_role"] = (
+                    clean_text(item.get("packaging_role")) or source_item.packaging_role
+                )
+                item["packaging_confidence"] = (
+                    item.get("packaging_confidence") or source_item.packaging_confidence
+                )
+            item["quantity"] = model_quantity
+            item["unit"] = model_unit
+            continue
         if len(items) == 1 and (
             (
                 source_item is not None
@@ -381,6 +455,7 @@ def restore_explicit_order_terms(
         if pair and query and (pair.group(1) in query or query in pair.group(1)):
             item["quantity"] = 2.0
             item["unit"] = "шт"
+    _remove_confirmed_order_quantities_from_catalog_packaging(items, source_text)
     return items
 
 
@@ -411,6 +486,47 @@ def _remove_matching_quantity(
             continue
         return f"{text[: words[index].start()]} {text[span_end:]}", True
     return text, False
+
+
+def _remove_confirmed_order_quantity_from_catalog_packaging(
+    item: dict[str, Any],
+    source_line: str,
+) -> None:
+    """Не оставляет подтверждённый заказ внутри фасовки каталога."""
+    packaging_text = clean_text(item.get("packaging_text"))
+    if clean_text(item.get("packaging_role")) != "catalog_attribute" or not packaging_text:
+        return
+    quantity = to_float(item.get("quantity"))
+    unit = normalize_unit(item.get("unit"))
+    if quantity is None or not unit or not has_explicit_order_quantity(source_line, quantity):
+        return
+    cleaned_packaging, removed = _remove_matching_quantity(packaging_text, quantity, unit)
+    if not removed:
+        return
+    item["packaging_text"] = clean_text(cleaned_packaging)
+    if item["packaging_text"]:
+        return
+    item["packaging_role"] = "none"
+    item["packaging_confidence"] = 0
+
+
+def _remove_confirmed_order_quantities_from_catalog_packaging(
+    items: list[dict[str, Any]],
+    source_text: str,
+) -> None:
+    """Очищает фасовку от количества заказа только в локальном source span."""
+    normalized_source = normalize_text(source_text)
+    for item in items:
+        source_span = clean_text(item.get("source_span"))
+        source_line = source_span or clean_text(item.get("source_line"))
+        if not source_line and len(items) == 1:
+            source_line = clean_text(source_text)
+        if not source_line:
+            continue
+        source_is_shared = len(items) > 1 and normalize_text(source_line) == normalized_source
+        if source_is_shared:
+            continue
+        _remove_confirmed_order_quantity_from_catalog_packaging(item, source_line)
 
 
 def _source_numeric_ranges(value: str) -> list[str]:

@@ -86,6 +86,72 @@ def test_ai_can_apply_only_catalog_candidate_from_its_shortlist(settings) -> Non
     assert resolved.state.cart[0].catalog_product_id == "rose"
 
 
+def test_ai_selects_exact_spoken_packaging_and_supplier_requirement(settings) -> None:  # type: ignore[no-untyped-def]
+    """Выбирает подтверждённый вариант без ложного уточнения из-за речи."""
+    product = CatalogProduct(
+        product_id="trout",
+        name="Форель Филе свежее 0,8-1,2 кг 20-22 кг/кор",
+        supplier="Рыба",
+        unit="кг",
+    )
+    item = CartItem(
+        id="trout-request",
+        source_query="Филе форели 0.8-1.2 кг, зачищенное",
+        comment="обязательно зачищенное",
+        quantity=10,
+        unit="кг",
+        packaging_text="20-22 кг в коробке",
+        packaging_role="catalog_attribute",
+        status=ItemStatus.AMBIGUOUS,
+        candidates=[
+            Candidate(
+                product_id="trout",
+                name=product.name,
+                supplier=product.supplier,
+                unit="кг",
+                score=44.24,
+            )
+        ],
+    )
+    matcher = _Matcher(ProductMatchDecision(action="select", selected_product_id="trout", confidence=0.95))
+
+    resolved = _orchestrator(settings, matcher)._resolve_ai_pending(
+        TelegramEvent(update_id=12, chat_id="123456", input_type=InputKind.VOICE),
+        EngineResult(state=ConversationState(cart=[item]), reply=issue_reply(item, 0)),
+        [product],
+    )
+
+    assert resolved.state.cart[0].catalog_product_id == "trout"
+    assert resolved.state.cart[0].status is not ItemStatus.AMBIGUOUS
+    assert resolved.state.cart[0].comment == "обязательно зачищенное"
+    assert matcher.calls[0][2] == ""
+
+
+def test_zero_confidence_without_contradiction_keeps_strong_similar_option(settings) -> None:  # type: ignore[no-untyped-def]
+    """Оставляет пользователю полезный вариант при пустом решении модели."""
+    product = CatalogProduct(product_id="salmon", name="Лосось филе свежее", unit="кг")
+    item = CartItem(
+        id="salmon-request",
+        source_query="лосось филе для гриля",
+        quantity=5,
+        unit="кг",
+        status=ItemStatus.AMBIGUOUS,
+        candidates=[
+            Candidate(product_id="salmon", name=product.name, unit="кг", score=84.0)
+        ],
+    )
+    matcher = _Matcher(ProductMatchDecision(action="not_found", confidence=0.0))
+
+    resolved = _orchestrator(settings, matcher)._resolve_ai_pending(
+        TelegramEvent(update_id=13, chat_id="123456", input_type=InputKind.VOICE),
+        EngineResult(state=ConversationState(cart=[item]), reply=issue_reply(item, 0)),
+        [product],
+    )
+
+    assert resolved.state.cart[0].status is ItemStatus.AMBIGUOUS
+    assert [candidate.product_id for candidate in resolved.state.cart[0].candidates] == ["salmon"]
+
+
 def test_low_confidence_ai_not_found_keeps_candidate_choice_for_user(settings) -> None:  # type: ignore[no-untyped-def]
     """Проверяет, что при отказе ИИ выбор кандидата сохраняется для пользователя."""
     candidate = Candidate(product_id="rose", name="Сироп Роза", supplier="Сиропы", unit="шт")
@@ -298,6 +364,135 @@ def test_ai_not_found_preserves_base_candidate_for_unresolved_qualifier(settings
     assert "Брокколи свежая 10 кг" in resolved.reply.text
 
 
+def test_high_confidence_not_found_drops_generic_fish_shortlist(settings) -> None:  # type: ignore[no-untyped-def]
+    """Не показывает вариант, подтверждённый только общим словом «филе»."""
+    catalog = [
+        CatalogProduct(
+            product_id="pelamida",
+            name="Филе пеламиды, с/м, вак.пакет",
+            supplier="Рыба",
+            unit="кг",
+        ),
+    ]
+    query = "филе форели 0,8-1,3 кг зачищенное тринце"
+    item = CartItem(
+        id="trout-request",
+        source_query=query,
+        comment="обязательно зачищенное тринце",
+        quantity=10,
+        unit="кг",
+        status=ItemStatus.AMBIGUOUS,
+        candidates=rank_candidates(query, catalog),
+    )
+    matcher = _Matcher(
+        ProductMatchDecision(
+            action="not_found",
+            confidence=0.99,
+        )
+    )
+
+    resolved = _orchestrator(settings, matcher)._resolve_ai_pending(
+        TelegramEvent(update_id=571, chat_id="123456", input_type=InputKind.VOICE),
+        EngineResult(state=ConversationState(cart=[item]), reply=issue_reply(item, 0)),
+        catalog,
+    )
+
+    resolved_item = resolved.state.cart[0]
+    assert resolved_item.status is ItemStatus.NOT_FOUND
+    assert resolved_item.candidates == []
+    assert "Филе пеламиды" not in resolved.reply.text
+
+
+def test_unmatched_specific_fish_identity_reaches_not_found(settings) -> None:  # type: ignore[no-untyped-def]
+    """Не показывает другую рыбу вместо названного пользователем лосося."""
+    catalog = [
+        CatalogProduct(
+            product_id="trout",
+            name="Форель филе, 0,8-1,3 кг",
+            supplier="Рыба",
+            unit="кг",
+        ),
+        CatalogProduct(
+            product_id="pike",
+            name="Щука филе, 0,8-1,3 кг",
+            supplier="Рыба",
+            unit="кг",
+        ),
+    ]
+    query = "филе лосося 0,8-1,3 кг"
+    item = CartItem(
+        id="salmon-request",
+        source_query=query,
+        quantity=10,
+        unit="кг",
+        status=ItemStatus.AMBIGUOUS,
+        candidates=[
+            Candidate(product_id="trout", name=catalog[0].name, unit="кг", score=91),
+            Candidate(product_id="pike", name=catalog[1].name, unit="кг", score=88),
+        ],
+    )
+    matcher = _Matcher(ProductMatchDecision(action="not_found", confidence=0.99))
+
+    resolved = _orchestrator(settings, matcher)._resolve_ai_pending(
+        TelegramEvent(update_id=572, chat_id="123456", input_type=InputKind.VOICE),
+        EngineResult(state=ConversationState(cart=[item]), reply=issue_reply(item, 0)),
+        catalog,
+    )
+
+    assert len(matcher.calls) == 1
+    assert resolved.state.cart[0].status is ItemStatus.NOT_FOUND
+    assert resolved.state.cart[0].candidates == []
+    assert "Форель филе" not in resolved.reply.text
+
+
+def test_zero_confidence_not_found_drops_candidate_with_unmet_pork_requirements(
+    settings,
+) -> None:  # type: ignore[no-untyped-def]
+    """Не оставляет выбор товара, если голосом явно заданы несовместимые требования."""
+    product = CatalogProduct(
+        product_id="pork-tambov",
+        name="Свинина Окорок Тамбовский В/К",
+        supplier="Мясо",
+        unit="кг",
+    )
+    query = "свинина окорок тамбовский без жира без хрящей"
+    item = CartItem(
+        id="pork-request",
+        source_query=query,
+        comment="без жира, без хрящей",
+        quantity=2,
+        unit="кг",
+        status=ItemStatus.AMBIGUOUS,
+        candidates=[
+            Candidate(
+                product_id=product.product_id,
+                name=product.name,
+                supplier=product.supplier,
+                unit=product.unit,
+                score=90.77,
+            )
+        ],
+    )
+    matcher = _Matcher(
+        ProductMatchDecision(
+            action="not_found",
+            confidence=0.0,
+            contradictions=["кандидат имеет жир", "кандидат имеет хрящи"],
+        )
+    )
+
+    resolved = _orchestrator(settings, matcher)._resolve_ai_pending(
+        TelegramEvent(update_id=579, chat_id="123456", input_type=InputKind.VOICE),
+        EngineResult(state=ConversationState(cart=[item]), reply=issue_reply(item, 0)),
+        [product],
+    )
+
+    resolved_item = resolved.state.cart[0]
+    assert resolved_item.status is ItemStatus.NOT_FOUND
+    assert resolved_item.candidates == []
+    assert "Свинина Окорок Тамбовский" not in resolved.reply.text
+
+
 def test_ai_rejects_semantically_conflicting_pork_candidate(settings) -> None:  # type: ignore[no-untyped-def]
     """Не предлагает свиное сало вместо свинины с явными требованиями."""
     catalog = [
@@ -391,6 +586,50 @@ def test_ai_cannot_override_numeric_range_mismatch(settings) -> None:  # type: i
     assert resolved.state.cart[0].status is ItemStatus.AMBIGUOUS
     assert resolved.state.cart[0].catalog_product_id == ""
     assert resolved.state.cart[0].comment == ""
+
+
+def test_ai_not_found_keeps_same_product_for_explicit_range_mismatch(settings) -> None:  # type: ignore[no-untyped-def]
+    """Предлагает тот же товар с другой фасовкой, но не выбирает его сам."""
+    product = CatalogProduct(
+        product_id="trout",
+        name="Форель Филе свежее 0,8-1,2кг 20-22 кг/кор",
+        supplier="Рыба",
+        unit="кг",
+    )
+    item = CartItem(
+        id="trout-range-request",
+        source_query="филе форели 0,8-1,3 кг",
+        quantity=None,
+        unit="",
+        status=ItemStatus.AMBIGUOUS,
+        candidates=[
+            Candidate(
+                product_id=product.product_id,
+                name=product.name,
+                supplier=product.supplier,
+                unit=product.unit,
+                score=53.79,
+            )
+        ],
+    )
+    matcher = _Matcher(
+        ProductMatchDecision(
+            action="not_found",
+            confidence=0.99,
+            contradictions=["диапазон 0,8-1,3 кг не подтверждён"],
+        )
+    )
+
+    resolved = _orchestrator(settings, matcher)._resolve_ai_pending(
+        TelegramEvent(update_id=801, chat_id="123456", input_type=InputKind.TEXT),
+        EngineResult(state=ConversationState(cart=[item]), reply=issue_reply(item, 0)),
+        [product],
+    )
+
+    resolved_item = resolved.state.cart[0]
+    assert resolved_item.status is ItemStatus.AMBIGUOUS
+    assert resolved_item.catalog_product_id == ""
+    assert [candidate.product_id for candidate in resolved_item.candidates] == ["trout"]
 
 
 def test_ai_cannot_fill_missing_full_name_term(settings) -> None:  # type: ignore[no-untyped-def]

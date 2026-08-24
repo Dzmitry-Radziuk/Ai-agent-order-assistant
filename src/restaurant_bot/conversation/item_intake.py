@@ -30,12 +30,13 @@ def build_cart_item(
         comment_source = CommentSource.SEMANTIC
     quantity = extracted.quantity
     unit = normalize_unit(extracted.unit)
-    if quantity is not None and not extracted.quantity_source and extracted.source_line:
-        source_items = parse_product_lines(extracted.source_line)
+    quantity_source_text = extracted.source_span or extracted.source_line
+    if quantity is not None and not extracted.quantity_source and quantity_source_text:
+        source_items = parse_product_lines(quantity_source_text)
         if (
             len(source_items) == 1
             and source_items[0].quantity is None
-            and not has_explicit_order_quantity(extracted.source_line, quantity)
+            and not has_explicit_order_quantity(quantity_source_text, quantity)
         ):
             # Защищает от ошибочного количества из диапазона размера или фасовки.
             quantity = None

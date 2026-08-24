@@ -75,7 +75,7 @@ class Settings(BaseSettings):
     google_order_submission_url: str
     google_order_submission_secret: SecretStr
     google_order_submission_timeout_seconds: float = Field(default=60.0, ge=5.0, le=180.0)
-    catalog_cache_ttl_seconds: int = Field(default=60, ge=5, le=3600)
+    catalog_cache_ttl_seconds: int = Field(default=3600, ge=5, le=3600)
 
     default_department: str = "Кухня"
 

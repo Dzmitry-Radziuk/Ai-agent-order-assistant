@@ -75,6 +75,11 @@ def test_add_command_is_not_reclassified_as_history() -> None:
     assert parse_history_query("добавь говядину сегодня") is None
 
 
+def test_generic_question_without_delivery_signal_is_not_history() -> None:
+    """Не направляет разговорный вопрос в чтение истории без сигнала поставки."""
+    assert parse_history_query("Почему небо голубое?") is None
+
+
 def test_venue_delivery_phrases_have_no_product_query() -> None:
     """Распознаёт общие вопросы о поставках без выдуманного товара."""
     phrases = (

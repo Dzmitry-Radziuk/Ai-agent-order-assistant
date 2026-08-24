@@ -16,7 +16,9 @@ from restaurant_bot.parsing.commands.item_commands import (
     _parse_edit_quantity,
     _parse_mixed_add_items,
     clean_command_target,
+    explicit_add_item_target,
     has_explicit_add_items,
+    has_unrepresented_order_quantity_evidence,
 )
 from restaurant_bot.parsing.commands.navigation import (
     _infer_free_form_navigation,
@@ -218,11 +220,12 @@ def parse_text_command(text: str) -> ParsedCommand:
         return ParsedCommand(intent=Intent.SUBMIT_AS_IS, text=text)
 
     product_text, global_comment = _extract_global_comment(text)
-    items = parse_product_lines(product_text)
-    if items:
+    explicit_target = explicit_add_item_target(product_text)
+    items = parse_product_lines(explicit_target or product_text)
+    if items and not has_unrepresented_order_quantity_evidence(text, items):
         return ParsedCommand(
             intent=Intent.ADD_ITEMS,
-            explicit_add_items=has_explicit_add_items(text, items),
+            explicit_add_items=bool(explicit_target) and has_explicit_add_items(text, items),
             text=text,
             items=items,
             global_comment=global_comment,

@@ -499,6 +499,50 @@ def test_voice_pipeline_shows_progress_before_transcription(mocker) -> None:  # 
     service.catalog.get.assert_not_called()
 
 
+def test_voice_pipeline_creates_own_card_after_current_draft(mocker) -> None:  # type: ignore[no-untyped-def]
+    """Создаёт новую карточку обработки вместо перезаписи старого черновика."""
+    service = _authorized_orchestrator(mocker)
+    state = ConversationState(ui_message_id=44)
+    orchestrator_module.SessionRepository.return_value.get_for_update.return_value = (None, state)
+    service._claim = MagicMock(return_value=_voice_claim())  # type: ignore[method-assign]
+    service.input_interpreter.interpret = MagicMock(
+        return_value=ParsedCommand(intent=Intent.SHOW_CART, text="покажи черновик")
+    )
+    result = EngineResult(state=state, reply=BotReply(text="Черновик заявки"))
+    service.engine.handle.return_value = result
+    service._resolve_ai_pending = MagicMock(return_value=result)  # type: ignore[method-assign]
+    service.telegram.send_reply.side_effect = [66, 66]
+
+    service.process(2)
+
+    progress = service.telegram.send_reply.call_args_list[0].args[1]
+    final = service.telegram.send_reply.call_args_list[1].args[1]
+    assert progress.edit_message_id is None
+    assert final.edit_message_id == 66
+    service.telegram.disable_keyboard.assert_called_once_with("7", 44)
+
+
+def test_regular_text_reuses_current_draft_card(mocker) -> None:  # type: ignore[no-untyped-def]
+    """Обновляет карточку черновика и для обычной команды без progress-сообщения."""
+    service = _authorized_orchestrator(mocker)
+    state = ConversationState(ui_message_id=44)
+    orchestrator_module.SessionRepository.return_value.get_for_update.return_value = (None, state)
+    service._claim = MagicMock(return_value=_claim("/draft"))  # type: ignore[method-assign]
+    service.input_interpreter.interpret = MagicMock(
+        return_value=ParsedCommand(intent=Intent.SHOW_CART, text="/draft")
+    )
+    result = EngineResult(state=state, reply=BotReply(text="Черновик заявки"))
+    service.engine.handle.return_value = result
+    service._resolve_ai_pending = MagicMock(return_value=result)  # type: ignore[method-assign]
+    service.telegram.send_reply.return_value = 44
+
+    service.process(1)
+
+    reply = service.telegram.send_reply.call_args.args[1]
+    assert reply.edit_message_id == 44
+    service.telegram.disable_keyboard.assert_called_once_with("7", 44)
+
+
 def test_voice_pipeline_continues_when_progress_card_times_out(mocker) -> None:  # type: ignore[no-untyped-def]
     """Не отменяет распознавание голоса из-за сбоя служебной карточки."""
     service = _authorized_orchestrator(mocker)

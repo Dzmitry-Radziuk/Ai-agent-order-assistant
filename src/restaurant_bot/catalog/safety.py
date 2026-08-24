@@ -94,6 +94,38 @@ _HIGH_RISK_UNSCOPED_VARIANT_ROOTS = {
     "безкост",
 }
 
+_OPERATIONAL_COMMENT_ROOTS = (
+    "привез",
+    "достав",
+    "позвон",
+    "упаков",
+    "фасов",
+    "полож",
+    "нарез",
+    "порез",
+    "зачищ",
+    "срез",
+    "обрез",
+    "подрез",
+    "очист",
+    "раздел",
+    "размораж",
+    "смеш",
+    "замен",
+)
+
+# Эти формы могут быть самостоятельным запросом к каталогу («филе», «фарш»),
+# в отличие от характеристики качества или обработки вроде «свежий».
+# Автоматическая подстановка по ним всё равно запрещена: каталоговый resolver
+# решает, показать варианты или выбрать точный товар.
+_STANDALONE_PRODUCT_FORM_ROOTS = {
+    "филе",
+    "тушк",
+    "фарш",
+    "кусоч",
+    "мякот",
+}
+
 
 def _qualifier_tokens(value: str) -> list[str]:
     """Возвращает значимые слова запроса для проверки свойств товара."""
@@ -105,6 +137,28 @@ def _qualifier_tokens(value: str) -> list[str]:
         and not token.isdigit()
         and not any(char.isdigit() for char in token)
     ]
+
+
+def catalog_matching_comment_context(value: str) -> str:
+    """Оставляет для каталога только комментарий со свойством товара."""
+    clauses = [clause.strip() for clause in re.split(r"\s*[;,]\s*", value) if clause.strip()]
+    retained_clauses = [
+        clause.strip()
+        for clause in clauses
+        if not _contains_operational_instruction(clause)
+    ]
+    if len(retained_clauses) == len(clauses):
+        return value.strip()
+    return "; ".join(retained_clauses)
+
+
+def _contains_operational_instruction(value: str) -> bool:
+    """Определяет просьбу к поставщику, а не свойство каталожного товара."""
+    return any(
+        token.startswith(root)
+        for token in _qualifier_tokens(normalize_text(value))
+        for root in _OPERATIONAL_COMMENT_ROOTS
+    )
 
 
 def _qualifier_root(token: str) -> str:
@@ -148,6 +202,14 @@ def has_product_variant_qualifier(value: str) -> bool:
         token.startswith(root)
         for token in _qualifier_tokens(value)
         for root in _PRODUCT_VARIANT_QUALIFIER_ROOTS
+    )
+
+
+def is_standalone_product_form_query(value: str) -> bool:
+    """Определяет самостоятельный запрос формы товара для поиска в каталоге."""
+    query_tokens = tokens(value)
+    return len(query_tokens) == 1 and any(
+        token.startswith(root) for token in query_tokens for root in _STANDALONE_PRODUCT_FORM_ROOTS
     )
 
 
@@ -206,6 +268,11 @@ def is_safe_catalog_name_equivalent(query: str, product_name: str) -> bool:
         for token in tokens(product_name)
         if not any(char.isdigit() for char in token) and token not in UNIT_ALIASES
     }
+    product_tokens.update(
+        token
+        for token in re.findall(r"[a-z]", normalize_text(product_name), flags=re.I)
+        if token.isascii()
+    )
     query_tokens = {_canonical_token(token) for token in query_tokens if token not in NUMBER_WORDS}
     product_tokens = {
         _canonical_token(token) for token in product_tokens if token not in NUMBER_WORDS
@@ -276,8 +343,30 @@ def can_auto_select(candidates: list[Candidate]) -> bool:
     )
 
 
+def _is_known_variant_qualifier(token: str) -> bool:
+    """Проверяет, что слово описывает вариант, а не идентичность товара."""
+    return any(token.startswith(root) for root in _PRODUCT_VARIANT_QUALIFIER_ROOTS)
+
+
+def _has_unmatched_concrete_identity(
+    query: str,
+    query_tokens: set[str],
+    candidates: list[Candidate],
+) -> bool:
+    """Находит названный товарный признак, которого нет ни у одного кандидата."""
+    supported_tokens = set().union(
+        *(query_evidence_tokens(query, candidate.name) for candidate in candidates)
+    )
+    return any(
+        token not in supported_tokens
+        and token not in _QUALIFIER_IGNORED_WORDS
+        and not _is_known_variant_qualifier(token)
+        for token in query_tokens
+    )
+
+
 def is_broad_category_query(query: str, candidates: list[Candidate]) -> bool:
-    """Определяет слишком общий категорийный запрос."""
+    """Определяет общий запрос без неподтверждённой идентичности товара."""
     query_tokens = tokens(query)
     if not query_tokens or not candidates:
         return False
@@ -292,6 +381,18 @@ def is_broad_category_query(query: str, candidates: list[Candidate]) -> bool:
         # Одно полное совпадение безопасно. Одинаковые строки от нескольких
         # поставщиков всё равно требуют явного выбора пользователя.
         return len(exact_matches) > 1
+
+    # Общая форма товара (например, «филе») может требовать выбора варианта.
+    # Но «филе лосося» уже содержит конкретную идентичность. Если ни один  # noqa: RUF003
+    # кандидат её не подтверждает, нельзя показывать форель, судака или щуку
+    # как равноправные варианты: решение должно пройти через семантическую
+    # проверку и при необходимости стать not_found.
+    #
+    # Неподтверждённый известный qualifier («говядина мраморная») остаётся
+    # безопасным общим запросом: он описывает вариант базового товара, а не  # noqa: RUF003
+    # отдельную товарную идентичность.
+    if _has_unmatched_concrete_identity(query, query_tokens, candidates):
+        return False
 
     if len(query_tokens) == 1:
         category = next(iter(query_tokens))

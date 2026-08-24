@@ -102,6 +102,85 @@ _STOP_WORDS = {
     "свежее",
 }
 
+# Structural terms do not identify a concrete catalog product by themselves.
+# They are insufficient evidence for preserving a shortlist after AI ``not_found``.
+_WEAK_CATALOG_ANCHOR_TOKENS = frozenset(
+    {"филе", "товар", "продукт", "позиция", "вариант"}
+)
+
+# Каталог часто хранит упаковку в коротком виде (``пласт.бут``, ``кор``),
+# пользователь произносит полную форму. Эти корни описывают упаковку, это не
+# другой товар, поэтому их безопасно считать эквивалентными при проверке
+# нераспознанных слов.
+_PACKAGING_ABBREVIATION_ROOTS = frozenset(
+    # Значения сравниваются после ``_canonical_token`` (кириллица -> латиница).
+    {"plast", "but", "kor", "upak", "pach", "ban", "vedr", "yashik"}
+)
+
+_COMPOUND_MEASUREMENT_VALUES = {
+    "одно": 1.0,
+    "один": 1.0,
+    "двух": 2.0,
+    "трех": 3.0,
+    "четырех": 4.0,
+    "пяти": 5.0,
+    "шести": 6.0,
+    "семи": 7.0,
+    "восьми": 8.0,
+    "девяти": 9.0,
+    "десяти": 10.0,
+    "одиннадцати": 11.0,
+    "двенадцати": 12.0,
+    "полутора": 1.5,
+}
+_ORDINAL_NUMERIC_VALUES = {
+    "первый": 1.0,
+    "первая": 1.0,
+    "первое": 1.0,
+    "первого": 1.0,
+    "второй": 2.0,
+    "вторая": 2.0,
+    "второе": 2.0,
+    "третья": 3.0,
+    "третье": 3.0,
+    "третий": 3.0,
+}
+_SPOKEN_LATIN_INITIALS = {
+    "эй": "a",
+    "би": "b",
+    "си": "c",
+    "ди": "d",
+    "и": "e",
+    "эф": "f",
+    "джи": "g",
+    "эйч": "h",
+    "ай": "i",
+    "джей": "j",
+    "кей": "k",
+    "эл": "l",
+    "эм": "m",
+    "эн": "n",
+    "оу": "o",
+    "пи": "p",
+    "кью": "q",
+    "ар": "r",
+    "эс": "s",
+    "ти": "t",
+    "ю": "u",
+    "ви": "v",
+    "икс": "x",
+    "уай": "y",
+    "зет": "z",
+}
+_COMPOUND_MEASUREMENT_RE = re.compile(
+    r"(?<![a-zа-я0-9])"
+    r"(?P<number>\d+(?:[.,]\d+)?|"
+    + "|".join(sorted(_COMPOUND_MEASUREMENT_VALUES, key=len, reverse=True))
+    + r")\s*[-–—]?\s*"
+    r"(?P<unit>миллилитр\w*|килограмм\w*|грамм\w*|литр\w*)\b",
+    flags=re.IGNORECASE,
+)
+
 _CYRILLIC_TO_LATIN = str.maketrans(
     {
         "а": "a",
@@ -150,7 +229,8 @@ def _compact_voice_name(value: str) -> str:
 
 def _canonical_token(value: str) -> str:
     """Сводит кириллические и латинские варианты одного слова к общей форме."""
-    return normalize_text(value).translate(_CYRILLIC_TO_LATIN)
+    normalized = normalize_text(value)
+    return _SPOKEN_LATIN_INITIALS.get(normalized, normalized).translate(_CYRILLIC_TO_LATIN)
 
 
 def _catalog_abbreviation_match(left: str, right: str) -> bool:
@@ -159,6 +239,12 @@ def _catalog_abbreviation_match(left: str, right: str) -> bool:
         (_canonical_token(left), _canonical_token(right)),
         key=len,
     )
+    if (
+        short in _PACKAGING_ABBREVIATION_ROOTS
+        and len(long) > len(short)
+        and long.startswith(short)
+    ):
+        return True
     return (
         3 <= len(short) <= 4
         and len(long) >= 7
@@ -186,6 +272,7 @@ def _spoken_range_pattern() -> re.Pattern[str]:
 def canonical_search_query(value: str) -> str:
     """Возвращает временное каноническое представление поискового запроса."""
     normalized = normalize_text(value).replace(",", ".")
+    normalized = _normalize_compound_measurements(normalized)
     normalized = re.sub(
         r"(?P<left>\d+(?:\.\d+)?)\s+на\s+(?P<right>\d+(?:\.\d+)?)",
         r"\g<left>/\g<right>",
@@ -205,6 +292,29 @@ def canonical_search_query(value: str) -> str:
     for start, end, replacement in reversed(replacements):
         normalized = f"{normalized[:start]}{replacement}{normalized[end:]}"
     return normalized
+
+
+def _normalize_compound_measurements(value: str) -> str:
+    """Разворачивает слитную разговорную фасовку в число и единицу."""
+
+    def replacement(match: re.Match[str]) -> str:
+        """Преобразует одну слитную фасовку в каноническую запись."""
+        raw_number = match.group("number").replace(",", ".")
+        value = _COMPOUND_MEASUREMENT_VALUES.get(raw_number)
+        if value is None:
+            value = float(raw_number)
+        unit = match.group("unit")
+        if unit.startswith("миллилитр"):
+            normalized_unit = "мл"
+        elif unit.startswith("килограмм"):
+            normalized_unit = "кг"
+        elif unit.startswith("грамм"):
+            normalized_unit = "г"
+        else:
+            normalized_unit = "л"
+        return f"{value:g} {normalized_unit}"
+
+    return _COMPOUND_MEASUREMENT_RE.sub(replacement, value)
 
 
 def _numeric_unit_pattern() -> str:
@@ -323,6 +433,7 @@ def _spoken_numeric_pairs(value: str) -> list[NumericEvidence]:
 def numeric_evidence(value: str) -> list[NumericEvidence]:
     """Возвращает нормализованные числовые свидетельства с исходными позициями."""
     normalized = normalize_text(str(value or "").replace("\u2013", "-").replace("\u2014", "-"))
+    normalized = _normalize_compound_measurements(normalized)
     if not normalized:
         return []
     unit_pattern = _numeric_unit_pattern()
@@ -412,6 +523,14 @@ def remove_phrase_overlap(source_text: str, phrase: str) -> str:
         normalize_text(token)
         for token in re.findall(r"[a-zа-яё0-9%]+", normalize_text(phrase), flags=re.I)
     ]
+    while phrase_tokens and phrase_tokens[0] in {
+        "обязательно",
+        "желательно",
+        "пожалуйста",
+        "просьба",
+        "главное",
+    }:
+        phrase_tokens.pop(0)
     source_matches = list(re.finditer(r"[a-zа-яё0-9%]+", source, flags=re.I))
     source_tokens = [normalize_text(match.group()) for match in source_matches]
     if not source_tokens or not phrase_tokens or len(phrase_tokens) > len(source_tokens):
@@ -458,6 +577,23 @@ def has_sufficient_photo_identity(query: str, product_name: str) -> bool:
         return matched == observed
     required = max(2, (len(observed) * 3 + 4) // 5)
     return len(matched) >= required
+
+
+def has_strong_catalog_anchor(query: str, product_name: str) -> bool:
+    """Проверяет, что кандидат подтверждён содержательным словом товара."""
+    observed = _product_identity_tokens(query)
+    evidence = observed & query_evidence_tokens(query, product_name)
+    if len(evidence) >= 2:
+        return True
+    if len(evidence) != 1:
+        return False
+    token = next(iter(evidence))
+    if token in _WEAK_CATALOG_ANCHOR_TOKENS:
+        return False
+    return any(
+        _has_strong_token_match(token, product_token)
+        for product_token in _product_identity_tokens(product_name)
+    )
 
 
 def _product_identity_tokens_in_order(value: str) -> list[str]:
@@ -627,6 +763,29 @@ def unverified_product_terms(query: str, product_name: str) -> list[str]:
         return []
     evidence = query_evidence_tokens(query, product_name)
     product_tokens = tokens(product_name)
+    raw_product_tokens = set(
+        re.findall(r"[a-zа-яё0-9]+", normalize_text(product_name), flags=re.I)
+    )
+    product_numeric = numeric_evidence(product_name)
+
+    def numeric_alias_matches(token: str) -> bool:
+        """Проверяет словесный номер варианта против цифры каталога."""
+        value = _ORDINAL_NUMERIC_VALUES.get(token)
+        return value is not None and any(
+            entry.value == value and entry.upper_value is None for entry in product_numeric
+        )
+
+    def compound_measurement_matches(token: str) -> bool:
+        """Проверяет слитную фасовку против числовой фасовки каталога."""
+        match = _COMPOUND_MEASUREMENT_RE.fullmatch(token)
+        if match is None:
+            return False
+        normalized = _normalize_compound_measurements(token)
+        measured = numeric_evidence(normalized)
+        return bool(measured) and any(
+            _same_numeric_evidence(measured[0], entry) for entry in product_numeric
+        )
+
     return [
         token
         for token in re.findall(r"[a-zа-яё0-9]+", normalize_text(query), flags=re.I)
@@ -635,6 +794,10 @@ def unverified_product_terms(query: str, product_name: str) -> list[str]:
         and token not in UNIT_ALIASES
         and not token.isdigit()
         and not any(char.isdigit() for char in token)
+        and not numeric_alias_matches(token)
+        and not compound_measurement_matches(token)
+        and not (token.startswith("короб") and "кор" in raw_product_tokens)
+        and not (token.startswith("бутыл") and "бут" in raw_product_tokens)
         and (
             len(token) > 4
             or not any(
@@ -645,6 +808,15 @@ def unverified_product_terms(query: str, product_name: str) -> list[str]:
             )
         )
     ]
+
+
+def _same_numeric_evidence(left: NumericEvidence, right: NumericEvidence) -> bool:
+    """Сравнивает фасовку из разговорной формы и из каталога."""
+    return (
+        left.value == right.value
+        and left.upper_value == right.upper_value
+        and (not left.unit or left.unit == right.unit)
+    )
 
 
 def supplier_matches_hint(supplier: str, supplier_hint: str) -> bool:

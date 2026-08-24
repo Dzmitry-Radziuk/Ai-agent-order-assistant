@@ -321,6 +321,66 @@ def _collapse_source_reference_variants(
     return [item for index, item in enumerate(items) if index not in removed]
 
 
+def _item_source_fragment(item: dict[str, Any]) -> str:
+    """Возвращает подтверждённый фрагмент исходной фразы позиции."""
+    return normalize_text(item.get("source_span") or item.get("source_line")).strip(" .,;:-—–")
+
+
+def _fragment_is_only_nested_in_source(
+    fragment: str,
+    owner_fragment: str,
+    source_text: str,
+) -> bool:
+    """Проверяет, что короткий фрагмент существует только внутри одной позиции."""
+    if not owner_fragment.startswith(f"{fragment} "):
+        return False
+    suffix = owner_fragment[len(fragment) :].strip()
+    source = normalize_text(source_text)
+    if not suffix or not source:
+        return False
+    starts = [
+        match.start()
+        for match in re.finditer(rf"(?<![^\W_]){re.escape(fragment)}(?![^\W_])", source)
+    ]
+    if not starts:
+        return False
+    return all(source[start + len(fragment) :].lstrip().startswith(suffix) for start in starts)
+
+
+def _collapse_nested_source_projections(
+    items: list[dict[str, Any]], source_text: str
+) -> list[dict[str, Any]]:
+    """Удаляет AI-проекции, не имеющие отдельного появления в исходной фразе."""
+    removed: set[int] = set()
+    for candidate_index, candidate in enumerate(items):
+        candidate_query = clean_text(candidate.get("product_query"))
+        candidate_source = _item_source_fragment(candidate)
+        if (
+            not candidate_query
+            or not candidate_source
+            or clean_text(candidate.get("comment") or candidate.get("user_comment_to_supplier"))
+            or clean_text(candidate.get("supplier_hint"))
+        ):
+            continue
+        for owner_index, owner in enumerate(items):
+            if owner_index == candidate_index or owner_index in removed:
+                continue
+            owner_query = clean_text(owner.get("product_query"))
+            owner_source = _item_source_fragment(owner)
+            if (
+                not owner_query
+                or not owner_source
+                or not _query_covers_reference(owner_query, candidate_query)
+                or not _fragment_is_only_nested_in_source(
+                    candidate_source, owner_source, source_text
+                )
+            ):
+                continue
+            removed.add(candidate_index)
+            break
+    return [item for index, item in enumerate(items) if index not in removed]
+
+
 def _collapse_shadow_item_projections(
     items: list[dict[str, Any]],
     source_text: str,
@@ -336,7 +396,8 @@ def _collapse_shadow_item_projections(
         normalize_text(processing_match.group("instruction")) if processing_match else ""
     )
     for binding in bindings or []:
-        if clean_text(binding.get("scope")).casefold() != "group":
+        scope = clean_text(binding.get("scope")).casefold()
+        if scope not in {"item", "group"}:
             continue
         if (to_float(binding.get("confidence")) or 0.0) < _COMMENT_BINDING_CONFIDENCE:
             continue
@@ -346,9 +407,15 @@ def _collapse_shadow_item_projections(
             and normalized_binding in normalized_source
             and normalized_binding in normalized_processing
         ):
-            root_target_indexes = set(_binding_target_indexes(binding, len(items)))
+            target_indexes = set(_binding_target_indexes(binding, len(items)))
+            if scope == "item" and len(target_indexes) != 1:
+                continue
+            if scope == "group" and len(target_indexes) < 2:
+                continue
+            root_target_indexes = target_indexes
             break
     items = _apply_trailing_root_processing_comment(items, source_text, root_target_indexes)
+    items = _collapse_nested_source_projections(items, source_text)
     explicit_global = global_comment if has_explicit_global_comment_scope(source_text) else ""
     items = collapse_comment_shadow_items(items, explicit_global, source_text, deterministic)
     items = _remove_connector_fragment_items(items, deterministic, source_text)

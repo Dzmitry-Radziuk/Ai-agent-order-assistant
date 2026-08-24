@@ -29,6 +29,8 @@ def test_catalog_cache_is_isolated_by_spreadsheet(settings) -> None:  # type: ig
     assert sheets.load_catalog.call_args_list[0].args == ("sheet-a",)
     assert sheets.load_catalog.call_args_list[1].args == ("sheet-b",)
     assert redis.setex.call_args_list[0].args[0] != redis.setex.call_args_list[1].args[0]
+    assert redis.setex.call_args_list[0].args[1] == 3600
+    assert redis.setex.call_args_list[1].args[1] == 3600
 
 
 def test_catalog_cache_rejects_missing_venue_spreadsheet(settings) -> None:  # type: ignore[no-untyped-def]

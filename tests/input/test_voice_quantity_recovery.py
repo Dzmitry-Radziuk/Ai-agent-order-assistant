@@ -112,6 +112,40 @@ def test_partial_ai_source_lines_are_bound_to_their_product_anchors() -> None:
     assert "10 штук" in second["source_span"]
 
 
+def test_partial_ai_source_line_keeps_trailing_local_comment() -> None:
+    """Не отрезает комментарий между товаром и следующим товарным якорем."""
+    source = (
+        "Филе лосося 0,8-1,3 кг, нужно 10 кг, обязательно зачищенное, "
+        "лук зелёный 10 кг срез корня от 5 сантиметров"
+    )
+    restored = recover_omitted_explicit_items(
+        {
+            "intent": Intent.ADD_ITEMS,
+            "items": [
+                {
+                    "product_query": "Филе лосося 0,8-1,3 кг",
+                    "quantity": 10,
+                    "unit": "кг",
+                    "comment": "обязательно зачищенное",
+                    "source_line": "Филе лосося 0,8-1,3 кг",
+                },
+                {
+                    "product_query": "лук зелёный",
+                    "quantity": 10,
+                    "unit": "кг",
+                    "comment": "срез корня от 5 сантиметров",
+                    "source_line": "лук зелёный 10 кг срез корня от 5 сантиметров",
+                },
+            ],
+        },
+        source,
+    )
+
+    assert restored["items"][0]["comment"] == "обязательно зачищенное"
+    assert restored["items"][1]["comment"] == "срез корня от 5 сантиметров"
+    assert "обязательно зачищенное" in restored["items"][0]["source_span"]
+
+
 @pytest.mark.parametrize(
     ("source", "quantities", "global_comment", "clarification"),
     [
@@ -345,6 +379,88 @@ def test_explicit_order_quantity_is_not_overwritten_by_catalog_packaging() -> No
     assert item["comment"] == ""
     assert item["user_comment_to_supplier"] == ""
     assert item["comment_source"] == "none"
+
+
+def test_order_quantity_is_removed_from_catalog_packaging_metadata() -> None:
+    """Не оставляет заказанные коробки как числовую фасовку товара."""
+    source = "Яйцо куриное 30 штук в пачке 5 коробок"
+    restored = restore_explicit_order_terms(
+        [
+            {
+                "product_query": "Яйцо куриное в пачке",
+                "quantity": 5,
+                "unit": "кор",
+                "packaging_text": "в пачке 5 коробок",
+                "packaging_role": "catalog_attribute",
+                "packaging_confidence": 0.9,
+                "source_line": source,
+            }
+        ],
+        source,
+    )
+
+    item = restored[0]
+    assert (item["quantity"], item["unit"]) == (5.0, "кор")
+    assert item["packaging_text"] == "в пачке"
+    assert item["packaging_role"] == "catalog_attribute"
+
+
+def test_long_voice_list_removes_only_each_item_order_quantity_from_packaging() -> None:
+    """Не смешивает заказанное количество с фасовкой соседних позиций."""
+    source = (
+        "Яйцо куриное 30 штук в пачке 5 коробок, "
+        "вишня без косточки 10 килограмм 3 коробки, "
+        "облепиха замороженная очищенная первый сорт РБ 10 килограмм "
+        "в коробке 3 штуки, яйцо куриное цветное 360 на 30, 8 коробок"
+    )
+    restored = restore_explicit_order_terms(
+        [
+            {
+                "product_query": "Яйцо куриное в пачке",
+                "quantity": 5,
+                "unit": "кор",
+                "packaging_text": "в пачке 5 коробок",
+                "packaging_role": "catalog_attribute",
+                "source_line": source,
+                "source_span": "Яйцо куриное 30 штук в пачке 5 коробок",
+            },
+            {
+                "product_query": "вишня без косточки",
+                "quantity": 3,
+                "unit": "кор",
+                "packaging_text": "10 килограмм 3 коробки",
+                "packaging_role": "catalog_attribute",
+                "source_line": source,
+                "source_span": "вишня без косточки 10 килограмм 3 коробки",
+            },
+            {
+                "product_query": "облепиха замороженная",
+                "quantity": 3,
+                "unit": "шт",
+                "packaging_text": "в коробке 3 штуки",
+                "packaging_role": "catalog_attribute",
+                "source_line": source,
+                "source_span": "облепиха замороженная очищенная первый сорт РБ 10 килограмм в коробке 3 штуки",
+            },
+            {
+                "product_query": "яйцо куриное цветное",
+                "quantity": 8,
+                "unit": "кор",
+                "packaging_text": "360 на 30",
+                "packaging_role": "catalog_attribute",
+                "source_line": source,
+                "source_span": "яйцо куриное цветное 360 на 30, 8 коробок",
+            },
+        ],
+        source,
+    )
+
+    assert [item["packaging_text"] for item in restored] == [
+        "в пачке",
+        "10 килограмм",
+        "в коробке",
+        "360 на 30",
+    ]
 
 
 @pytest.mark.parametrize(
@@ -826,6 +942,72 @@ def test_order_and_packaging_keep_separate_roles() -> None:
     assert item["packaging_role"] == "catalog_attribute"
 
 
+def test_long_voice_items_keep_local_quantities_and_comments() -> None:
+    """Сохраняет количества и комментарии у своих позиций длинного транскрипта."""
+    source = (
+        "Мне нужно филе лосося 0,8-1,2 килограмма, свежее, 5 килограмм мне нужно, "
+        "обязательно зачищенное ТрНЦ, также мне нужен лук зелёный 10 килограмм "
+        "срез корня от 5 сантиметров и вино на кухню."
+    )
+    restored = recover_omitted_explicit_items(
+        {
+            "intent": Intent.ADD_ITEMS,
+            "items": [
+                {
+                    "product_query": "филе лосося 0,8-1,2 килограмма",
+                    "quantity": 5,
+                    "unit": "кг",
+                    "source_line": source,
+                    "source_span": (
+                        "филе лосося 0,8-1,2 килограмма, свежее, 5 килограмм мне "
+                        "нужно, обязательно зачищенное ТрНЦ"
+                    ),
+                },
+                {
+                    "product_query": "лук зелёный",
+                    "quantity": 10,
+                    "unit": "кг",
+                    "source_line": source,
+                    "source_span": "лук зелёный 10 килограмм срез корня от 5 сантиметров",
+                },
+                {
+                    "product_query": "вино на кухню",
+                    "quantity": None,
+                    "unit": "",
+                    "source_line": source,
+                    "source_span": "вино на кухню",
+                },
+            ],
+            "comment_bindings": [
+                {
+                    "text": "обязательно зачищенное ТрНЦ",
+                    "scope": "item",
+                    "target_item_indexes": [0],
+                    "confidence": 0.99,
+                },
+                {
+                    "text": "срез корня от 5 сантиметров",
+                    "scope": "item",
+                    "target_item_indexes": [1],
+                    "confidence": 0.99,
+                },
+            ],
+        },
+        source,
+    )
+
+    assert [(item["quantity"], item["unit"]) for item in restored["items"]] == [
+        (5.0, "кг"),
+        (10.0, "кг"),
+        (None, ""),
+    ]
+    assert [item["comment"] for item in restored["items"]] == [
+        "обязательно зачищенное ТрНЦ",
+        "срез корня от 5 сантиметров",
+        "",
+    ]
+
+
 def test_dash_range_never_becomes_endpoint_quantity() -> None:
     """Очищает AI-число, если источник содержит только диапазон."""
     source = "Говядина 500–700 г"
@@ -1046,6 +1228,119 @@ def test_partial_voice_model_result_restores_the_omitted_conjoined_item() -> Non
     ]
 
 
+def test_recognized_voice_items_do_not_restore_nested_comment_fragments() -> None:
+    """Не добавляет товар из частей уже подтверждённых source-span позиций."""
+    source = (
+        "Мне нужно филе лосося 0,8-1,3 кг, 20-22 кг коробки. "
+        "Обязательно свежее и зачищенное 3NC. "
+        "И лук зеленый срез корня от 5 сантиметров, 5 кг"
+    )
+    payload = {
+        "intent": Intent.ADD_ITEMS,
+        "items": [
+            {
+                "product_query": "филе лосося 0,8-1,3 кг зачищенное 3NC",
+                "quantity": None,
+                "unit": "",
+                "comment": "обязательно свежее",
+                "source_line": "филе лосося 0,8-1,3 кг",
+            },
+            {
+                "product_query": "лук зеленый",
+                "quantity": 5,
+                "unit": "кг",
+                "comment": "срез корня от 5 сантиметров",
+                "source_line": "лук зеленый срез корня от 5 сантиметров, 5 кг",
+            },
+        ],
+    }
+
+    restored = recover_omitted_explicit_items(payload, source)
+
+    assert [item["product_query"] for item in restored["items"]] == [
+        "филе лосося 0,8-1,3 кг зачищенное 3NC",
+        "лук зеленый",
+    ]
+    assert [item["comment"] for item in restored["items"]] == [
+        "обязательно свежее",
+        "срез корня от 5 сантиметров",
+    ]
+
+
+def test_multi_item_recovery_does_not_copy_one_product_packaging() -> None:
+    """Не переносит фасовку первой позиции на соседние товары списка."""
+    source = (
+        "Мне нужно филе лосося 0.8-1.3 кг, 22 кг в коробке. "
+        "Мне нужно 5 кг обязательно зачищенные тримсе и лук зеленый 4 кг "
+        "срез корня от 5 см"
+    )
+    items = [
+        {
+            "product_query": "филе лосося 0.8-1.3 кг",
+            "quantity": 22,
+            "unit": "кг",
+            "source_span": "филе лосося 0.8-1.3 кг, 22 кг в коробке",
+            "packaging_text": "22 кг в коробке",
+            "packaging_role": "catalog_attribute",
+        },
+        {
+            "product_query": "тримсе",
+            "quantity": 5,
+            "unit": "кг",
+            "source_span": "Мне нужно 5 кг обязательно зачищенные тримсе",
+            "packaging_text": "",
+            "packaging_role": "none",
+        },
+        {
+            "product_query": "лук зеленый",
+            "quantity": 4,
+            "unit": "кг",
+            "source_span": "лук зеленый 4 кг срез корня от 5 см",
+            "packaging_text": "",
+            "packaging_role": "none",
+        },
+    ]
+
+    restored = restore_explicit_order_terms(items, source)
+
+    assert [(item["packaging_text"], item["packaging_role"]) for item in restored[1:]] == [
+        ("", "none"),
+        ("", "none"),
+    ]
+
+
+def test_reconciliation_removes_trailing_list_connector_from_product_query() -> None:
+    """Не оставляет союз перед следующей позицией в названии товара."""
+    source = "Мне нужно филе форели 0,8-1,3 кг, а также лук свежий и хлеб."
+    payload = {
+        "intent": Intent.ADD_ITEMS,
+        "items": [
+            {
+                "product_query": "филе форели 0,8-1,3 кг, а",
+                "quantity": None,
+                "unit": "",
+                "source_line": "филе форели 0,8-1,3 кг, а",
+            },
+            {
+                "product_query": "лук свежий",
+                "quantity": None,
+                "unit": "",
+                "source_line": "лук свежий",
+            },
+            {
+                "product_query": "хлеб",
+                "quantity": None,
+                "unit": "",
+                "source_line": "хлеб",
+            },
+        ],
+    }
+
+    restored = recover_omitted_explicit_items(payload, source)
+
+    assert restored["items"][0]["product_query"] == "филе форели 0,8-1,3 кг"
+
+
 def test_pair_of_apples_uses_its_own_spoken_quantity() -> None:
     """Проверяет, что пара для яблок использует its own произнесённый количество."""
     source = "Сироп роза пять штук, говядина десять килограмм и пару яблок."
@@ -1096,3 +1391,28 @@ def test_voice_recovery_removes_a_model_invented_quantity() -> None:
 
     assert restored[1]["quantity"] is None
     assert restored[1]["unit"] == ""
+
+
+@pytest.mark.parametrize("source", ["филе", "фарш", "тушка", "мякоть"])
+def test_unknown_ai_response_recovers_standalone_product_form(source: str) -> None:
+    """Передаёт самостоятельную форму товара в каталог после пустого ответа ИИ."""
+    restored = recover_omitted_explicit_items(
+        {"intent": Intent.UNKNOWN, "items": []},
+        source,
+    )
+
+    assert restored["intent"] is Intent.ADD_ITEMS
+    assert [(item["product_query"], item["quantity"], item["unit"]) for item in restored["items"]] == [
+        (source, None, "")
+    ]
+
+
+def test_unknown_ai_response_does_not_recover_lone_quality_qualifier() -> None:
+    """Не превращает одиночный признак качества в товар без основания."""
+    restored = recover_omitted_explicit_items(
+        {"intent": Intent.UNKNOWN, "items": []},
+        "свежий",
+    )
+
+    assert restored["intent"] is Intent.UNKNOWN
+    assert restored["items"] == []

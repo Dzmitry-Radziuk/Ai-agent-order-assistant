@@ -7,6 +7,7 @@ import re
 from restaurant_bot.domain.models import Intent, ParsedCommand
 from restaurant_bot.domain.units import UNIT_ALIASES
 from restaurant_bot.parsing.commands.normalization import _has_word_stem, has_negation
+from restaurant_bot.parsing.number_words import NUMBER_WORDS
 
 
 def _looks_like_generic_add_navigation(normalized: str, words: list[str]) -> bool:
@@ -377,6 +378,17 @@ def _infer_resolution_intent(normalized: str, words: list[str]) -> Intent | None
         words, "друг", "нов", "измен", "введ", "укаж", "скаж"
     ):
         return Intent.ENTER_OTHER_QUANTITY
+    if _has_word_stem(words, "остав", "сохран") and (
+        (
+            (re.search(r"\d", normalized) or any(word in NUMBER_WORDS for word in words))
+            and any(word in UNIT_ALIASES for word in words)
+        )
+        or any(
+            marker in normalized
+            for marker in ("как есть", "как было", "как указано", "без изменений")
+        )
+    ):
+        return Intent.KEEP_CURRENT_QUANTITY
     if (_has_word_stem(words, "не") and _has_word_stem(words, "меня")) or (
         _has_word_stem(words, "остав", "сохран")
         and (

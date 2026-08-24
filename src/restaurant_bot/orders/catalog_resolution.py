@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Sequence
+from dataclasses import dataclass
 
 import structlog
 
@@ -39,6 +40,7 @@ from restaurant_bot.domain.units import UNIT_ALIASES, normalize_unit
 from restaurant_bot.input.photo_ingestion import canonical_photo_identity
 from restaurant_bot.orders.quantity_provenance import (
     QuantityProvenance,
+    has_independent_order_provenance,
     reconcile_order_quantity_evidence,
 )
 from restaurant_bot.parsing.numeric_ranges import numeric_range_spans
@@ -46,6 +48,17 @@ from restaurant_bot.parsing.products import parse_product_lines
 from restaurant_bot.parsing.quantities import has_explicit_order_marker
 
 logger = structlog.get_logger(__name__)
+
+_SOURCE_TOKEN_RE = re.compile(r"[a-zа-яё0-9%]+", flags=re.IGNORECASE)
+
+
+@dataclass(frozen=True, slots=True)
+class _CatalogSourceMatch:
+    """Хранит точное вхождение полного названия каталога в исходную строку."""
+
+    product: CatalogProduct
+    start_token: int
+    end_token: int
 
 
 def _semantic_source(item: CartItem) -> str:
@@ -105,7 +118,11 @@ def _catalog_evidence_query(item: CartItem) -> str:
 
     deterministic = parse_product_lines(source)
     parsed = deterministic[0] if len(deterministic) == 1 else None
-    if item.quantity_source or item.order_entry_type:
+    if has_independent_order_provenance(
+        item.quantity_source,
+        "",
+        item.order_entry_type,
+    ):
         return query
     if parsed is not None and parsed.packaging_role == "catalog_attribute":
         if not parsed.packaging_text:
@@ -170,12 +187,186 @@ def _looks_like_unanchored_gibberish(query: str) -> bool:
     return len(tokens(query)) >= 3
 
 
+def _ordered_text_tokens(value: str) -> list[str]:
+    """Возвращает все нормализованные токены в исходном порядке."""
+    return [normalize_text(match.group()) for match in _SOURCE_TOKEN_RE.finditer(value)]
+
+
+def _source_token_matches(value: str) -> list[re.Match[str]]:
+    """Возвращает токены исходной строки вместе с исходными границами."""
+    return list(_SOURCE_TOKEN_RE.finditer(value))
+
+
+def _specific_catalog_name_tokens(product: CatalogProduct) -> tuple[str, ...]:
+    """Возвращает полный токенный контур достаточно конкретного названия товара."""
+    ordered = tuple(_ordered_text_tokens(product.name))
+    return ordered if len(tokens(product.name)) >= 2 and len(ordered) >= 2 else ()
+
+
+def _trim_recovered_source_segment(value: str) -> str:
+    """Убирает только разделитель списка с хвоста восстановленного сегмента."""
+    trimmed = value.strip(" \t,;—–-")
+    return re.sub(r"\s+(?:и|а)$", "", trimmed, flags=re.IGNORECASE).strip()
+
+
 class CatalogResolutionService:
     """Применяет найденный каталог к позициям черновика заказа."""
 
     def __init__(self, catalog_resolver: CatalogResolver) -> None:
         """Сохраняет чистый resolver поиска и решений каталога."""
         self.catalog_resolver = catalog_resolver
+        self._compound_item_catalog: list[CatalogProduct] | None = None
+        self._compound_item_index: dict[
+            tuple[str, str], tuple[tuple[CatalogProduct, tuple[str, ...]], ...]
+        ] = {}
+
+    def recover_catalog_compound_items(
+        self,
+        items: list[ExtractedItem],
+        catalog: list[CatalogProduct],
+    ) -> list[ExtractedItem]:
+        """Разделяет один склеенный AI-элемент только по полным совпадениям каталога."""
+        if len(items) != 1 or not catalog:
+            return items
+        item = items[0]
+        if item.catalog_identity_provenance or has_independent_order_provenance(
+            item.quantity_source,
+            item.order_entry_text,
+            item.order_entry_type,
+        ):
+            return items
+
+        source = item.source_span.strip() or item.source_line.strip()
+        source_matches = _source_token_matches(source)
+        source_tokens = [normalize_text(match.group()) for match in source_matches]
+        if len(source_tokens) < 4:
+            return items
+
+        matches = self._compound_catalog_matches(source_tokens, catalog)
+        selected = self._select_non_overlapping_catalog_matches(matches)
+        if len(selected) < 2:
+            return items
+
+        recovered = self._build_recovered_compound_items(item, source, source_matches, selected)
+        if len(recovered) < 2:
+            return items
+        logger.info(
+            "catalog_identity_compound_item_split",
+            recovered_item_count=len(recovered),
+            selected_product_ids=[match.product.product_id for match in selected],
+        )
+        return recovered
+
+    def _compound_catalog_matches(
+        self,
+        source_tokens: list[str],
+        catalog: list[CatalogProduct],
+    ) -> list[_CatalogSourceMatch]:
+        """Находит полные названия каталога как последовательности токенов источника."""
+        index = self._compound_item_index_for(catalog)
+        matches: list[_CatalogSourceMatch] = []
+        for start in range(len(source_tokens) - 1):
+            candidates = index.get((source_tokens[start], source_tokens[start + 1]), ())
+            for product, product_tokens in candidates:
+                end = start + len(product_tokens)
+                if source_tokens[start:end] != list(product_tokens):
+                    continue
+                matches.append(
+                    _CatalogSourceMatch(product, start_token=start, end_token=end)
+                )
+        return matches
+
+    def _compound_item_index_for(
+        self,
+        catalog: list[CatalogProduct],
+    ) -> dict[tuple[str, str], tuple[tuple[CatalogProduct, tuple[str, ...]], ...]]:
+        """Кэширует индекс первых двух токенов для редкой проверки склеенного списка."""
+        if self._compound_item_catalog is catalog:
+            return self._compound_item_index
+
+        mutable_index: dict[
+            tuple[str, str], list[tuple[CatalogProduct, tuple[str, ...]]]
+        ] = {}
+        for product in catalog:
+            product_tokens = _specific_catalog_name_tokens(product)
+            if not product_tokens:
+                continue
+            first_pair = (product_tokens[0], product_tokens[1])
+            mutable_index.setdefault(first_pair, []).append((product, product_tokens))
+        self._compound_item_catalog = catalog
+        self._compound_item_index = {
+            key: tuple(value) for key, value in mutable_index.items()
+        }
+        return self._compound_item_index
+
+    @staticmethod
+    def _select_non_overlapping_catalog_matches(
+        matches: list[_CatalogSourceMatch],
+    ) -> list[_CatalogSourceMatch]:
+        """Выбирает самый длинный доказанный товар в каждой позиции исходной строки."""
+        by_start: dict[int, list[_CatalogSourceMatch]] = {}
+        for match in matches:
+            by_start.setdefault(match.start_token, []).append(match)
+
+        selected: list[_CatalogSourceMatch] = []
+        token_index = min(by_start, default=0)
+        while token_index in by_start:
+            candidate = min(
+                by_start[token_index],
+                key=lambda match: (
+                    -(match.end_token - match.start_token),
+                    match.product.name,
+                    match.product.product_id,
+                ),
+            )
+            selected.append(candidate)
+            next_starts = [start for start in by_start if start >= candidate.end_token]
+            if not next_starts:
+                break
+            token_index = min(next_starts)
+        return selected
+
+    @staticmethod
+    def _build_recovered_compound_items(
+        item: ExtractedItem,
+        source: str,
+        source_matches: list[re.Match[str]],
+        matches: list[_CatalogSourceMatch],
+    ) -> list[ExtractedItem]:
+        """Создаёт локальные доказательства позиций, не копируя фасовку между товарами."""
+        recovered: list[ExtractedItem] = []
+        for index, match in enumerate(matches):
+            start = source_matches[match.start_token].start()
+            end = (
+                source_matches[matches[index + 1].start_token].start()
+                if index + 1 < len(matches)
+                else len(source)
+            )
+            segment = _trim_recovered_source_segment(source[start:end])
+            parsed = parse_product_lines(segment)
+            if len(parsed) != 1:
+                return []
+            parsed_item = parsed[0]
+            update: dict[str, object] = {
+                "department": item.department,
+                "supplier_hint": item.supplier_hint,
+                "source_line": segment,
+                "source_span": segment,
+            }
+            if index == len(matches) - 1:
+                parsed_comment = parsed_item.comment or parsed_item.user_comment_to_supplier
+                item_comment = item.comment or item.user_comment_to_supplier
+                update.update(
+                    {
+                        "comment": merge_comments(parsed_comment, item_comment),
+                        "user_comment_to_supplier": "",
+                        "comment_source": (
+                            item.comment_source if item_comment else parsed_item.comment_source
+                        ),
+                    }
+                )
+            recovered.append(parsed_item.model_copy(update=update))
+        return recovered
 
     def merge_catalog_qualified_items(
         self,

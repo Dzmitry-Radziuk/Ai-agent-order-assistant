@@ -164,6 +164,17 @@ class ContextualCommandPolicy:
 
         has_multiple_warning = is_multiple_warning(current)
         if has_multiple_warning:
+            if self._is_keep_current_quantity_phrase(phrase, current, quantity, unit):
+                return command.model_copy(
+                    update={
+                        "intent": Intent.KEEP_CURRENT_QUANTITY,
+                        "items": [],
+                        "edit_quantity": None,
+                        "edit_unit": "",
+                        "target_query": "",
+                        "target_queries": [],
+                    }
+                )
             if quantity is not None:
                 return command.model_copy(
                     update={
@@ -242,6 +253,27 @@ class ContextualCommandPolicy:
                 }
             )
         return command
+
+    def _is_keep_current_quantity_phrase(
+        self,
+        phrase: str,
+        current: CartItem,
+        quantity: float | None,
+        unit: str,
+    ) -> bool:
+        """Распознаёт просьбу сохранить текущее количество, включая явно повторённое число."""
+        if has_negation(phrase) or not self._has_any_prefix(phrase, "остав", "сохран"):
+            return False
+        if quantity is None:
+            return any(
+                marker in phrase
+                for marker in ("как есть", "как было", "как указано", "без изменений")
+            )
+        if current.quantity is None or abs(current.quantity - quantity) > 1e-9:
+            return False
+        expected_unit = normalize_unit(current.unit or current.catalog_unit)
+        spoken_unit = normalize_unit(unit)
+        return not spoken_unit or not expected_unit or spoken_unit == expected_unit
 
     @staticmethod
     def _is_quantity_only_phrase(phrase: str) -> bool:

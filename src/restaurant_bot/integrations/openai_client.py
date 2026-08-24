@@ -11,7 +11,10 @@ from typing import Any, cast
 import structlog
 from openai import APIConnectionError, APITimeoutError, OpenAI, RateLimitError
 
-from restaurant_bot.catalog.safety import has_product_variant_qualifier
+from restaurant_bot.catalog.safety import (
+    has_product_variant_qualifier,
+    is_standalone_product_form_query,
+)
 from restaurant_bot.config import Settings
 from restaurant_bot.domain.models import ExtractedItem, Intent, ParsedCommand
 from restaurant_bot.domain.text import clean_text, normalize_text
@@ -54,7 +57,10 @@ from restaurant_bot.parsing.commands.dialogue import (
     dialogue_response_for,
     retry_requested_for,
 )
-from restaurant_bot.parsing.commands.item_commands import has_explicit_add_items
+from restaurant_bot.parsing.commands.item_commands import (
+    explicit_add_item_target,
+    has_explicit_add_items,
+)
 from restaurant_bot.parsing.comment_scope import has_explicit_global_comment_scope
 from restaurant_bot.parsing.numeric import to_float
 from restaurant_bot.parsing.numeric_ranges import numeric_range_spans
@@ -459,15 +465,16 @@ class OpenAIService:
         """Проверяет возможность разбора списка без вызова ИИ."""
         if command.intent != Intent.ADD_ITEMS or len(command.items) < 2:
             return False
+        explicit_target = explicit_add_item_target(text)
         # Числовой диапазон может быть размером, фасовкой или кодом товара.
         # Оставляем такие строки на семантическом пути, чтобы признаки
         # поставщика и товара не слились в одно детерминированное название.
         if numeric_range_spans(text):
             return False
-        if OpenAIService._has_conversational_product_leadin(text):
+        if OpenAIService._has_conversational_product_leadin(text) and not explicit_target:
             return False
 
-        raw = str(text or "").strip().lower().replace("ё", "е")
+        raw = str(explicit_target or text or "").strip().lower().replace("ё", "е")
         segments = [
             clean_text(part)
             for part in re.split(r"\s*(?:;|\n|(?<!\d),(?!\d)|\s+и\s+)\s*", raw)
@@ -496,7 +503,7 @@ class OpenAIService:
             name = normalize_text(match.group("name")).strip(" -:—–")
             if not name or re.search(r"\d", name) or suspicious_words.search(name):
                 return False
-            if has_product_variant_qualifier(name):
+            if has_product_variant_qualifier(name) and not is_standalone_product_form_query(name):
                 # Оставляем варианты товара на семантическом пути с проверкой каталога.  # noqa: RUF003
                 return False
             if normalize_text(item.product_query) != name:
@@ -517,18 +524,21 @@ class OpenAIService:
         """Проверяет однозначный одиночный товар с количеством."""
         if command.intent != Intent.ADD_ITEMS or len(command.items) != 1:
             return False
-        if OpenAIService._has_conversational_product_leadin(text):
+        explicit_target = explicit_add_item_target(text)
+        if OpenAIService._has_conversational_product_leadin(text) and not explicit_target:
             return False
         item = command.items[0]
         normalized_units = set(UNIT_ALIASES.values())
-        raw_source = clean_text(text)
+        raw_source = clean_text(explicit_target or text)
         source = raw_source.rstrip(" .!?")
         item_source = clean_text(item.source_line).rstrip(" .!?")
         if numeric_range_spans(source):
             # Не обходить семантический разбор: после числового диапазона здесь  # noqa: RUF003
             # могут находиться и название поставщика, и признаки товара.
             return False
-        if has_product_variant_qualifier(item.product_query):
+        if has_product_variant_qualifier(
+            item.product_query
+        ) and not is_standalone_product_form_query(item.product_query):
             return False
         unit_pattern = "|".join(
             sorted((re.escape(unit) for unit in UNIT_ALIASES), key=len, reverse=True)
@@ -560,9 +570,11 @@ class OpenAIService:
         """Проверяет короткое название товара без количества."""
         if command.intent != Intent.ADD_ITEMS or len(command.items) != 1:
             return False
-        if OpenAIService._has_conversational_product_leadin(text):
+        explicit_target = explicit_add_item_target(text)
+        if OpenAIService._has_conversational_product_leadin(text) and not explicit_target:
             return False
-        if OpenAIService._looks_like_semantic_sentence(text):
+        product_source = explicit_target or text
+        if OpenAIService._looks_like_semantic_sentence(product_source):
             return False
         item = command.items[0]
         query = clean_text(item.product_query)
@@ -581,8 +593,10 @@ class OpenAIService:
             and not item.unit
             and not item.comment
             and not command.global_comment
-            and normalize_text(query) == normalize_text(text)
-            and not has_product_variant_qualifier(query)
+            and normalize_text(query) == normalize_text(product_source)
+            and (
+                not has_product_variant_qualifier(query) or is_standalone_product_form_query(query)
+            )
         )
 
     @staticmethod
@@ -631,9 +645,11 @@ class OpenAIService:
         """Распознаёт одно точное название с компактной записью фасовки."""
         if command.intent != Intent.ADD_ITEMS or len(command.items) != 1:
             return False
-        if OpenAIService._has_conversational_product_leadin(text):
+        explicit_target = explicit_add_item_target(text)
+        if OpenAIService._has_conversational_product_leadin(text) and not explicit_target:
             return False
-        if "\n" in str(text or "") or ";" in str(text or ""):
+        product_source = explicit_target or text
+        if "\n" in str(product_source or "") or ";" in str(product_source or ""):
             return False
         unit_pattern = "|".join(
             sorted((re.escape(unit) for unit in UNIT_ALIASES), key=len, reverse=True)
@@ -642,7 +658,7 @@ class OpenAIService:
             re.search(
                 rf"\d+(?:[,.]\d+)?\s*(?:{unit_pattern})\s*[*xх×]\s*"
                 rf"\d+(?:[,.]\d+)?",
-                text,
+                product_source,
                 flags=re.I,
             )
         )

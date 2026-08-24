@@ -48,7 +48,7 @@ _INDEPENDENT_ORDER_ENTRY_TYPES = frozenset(
 )
 
 
-def _has_independent_order_provenance(
+def has_independent_order_provenance(
     quantity_source: str,
     order_entry_text: str,
     order_entry_type: str,
@@ -155,7 +155,7 @@ def reconcile_order_quantity_evidence(
     if (
         quantity_source
         and quantity_source != "packaging"
-        and _has_independent_order_provenance(
+        and has_independent_order_provenance(
             quantity_source,
             order_entry_text,
             order_entry_type,

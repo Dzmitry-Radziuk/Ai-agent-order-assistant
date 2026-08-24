@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from tempfile import NamedTemporaryFile
-from time import perf_counter
-from typing import Any
+from time import perf_counter, sleep
+from typing import Any, cast
 
 import httpx
 import structlog
@@ -32,6 +33,9 @@ class TelegramRetryableError(TelegramAPIError):
 
 TELEGRAM_CONNECT_ERRORS = (httpx.ConnectTimeout, httpx.ConnectError)
 TELEGRAM_TRANSIENT_ERRORS = (*TELEGRAM_CONNECT_ERRORS, TelegramRetryableError)
+TELEGRAM_SAFE_READ_ERRORS = (httpx.RequestError, TelegramRetryableError)
+TELEGRAM_MEDIA_DOWNLOAD_ATTEMPTS = 3
+TELEGRAM_MEDIA_DOWNLOAD_TIMEOUT_SECONDS = 15.0
 
 
 @dataclass(slots=True)
@@ -55,6 +59,11 @@ class TelegramClient:
         self.file_url = (
             f"https://api.telegram.org/file/bot{settings.telegram_bot_token.get_secret_value()}"
         )
+        self.media_download_timeout_seconds = min(
+            settings.telegram_request_timeout_seconds,
+            TELEGRAM_MEDIA_DOWNLOAD_TIMEOUT_SECONDS,
+        )
+        self.telegram_connect_timeout_seconds = settings.telegram_connect_timeout_seconds
         self.client = httpx.Client(
             timeout=httpx.Timeout(
                 settings.telegram_request_timeout_seconds,
@@ -73,9 +82,19 @@ class TelegramClient:
     )
     def _call(self, method: str, payload: dict[str, Any]) -> dict[str, Any]:
         """Вызывает один метод Telegram Bot API."""
+        return self._call_once(method, payload)
+
+    def _call_once(
+        self,
+        method: str,
+        payload: dict[str, Any],
+        *,
+        timeout: httpx.Timeout | None = None,
+    ) -> dict[str, Any]:
+        """Выполняет один запрос Telegram без повторной попытки."""
         started_at = perf_counter()
         try:
-            response = self.client.post(f"{self.base_url}/{method}", json=payload)
+            response = self.client.post(f"{self.base_url}/{method}", json=payload, timeout=timeout)
         except httpx.HTTPError as exc:
             # Не записываем URL и payload: в них могут быть токен бота или  # noqa: RUF003
             # идентификаторы Telegram. Класса исключения достаточно, чтобы
@@ -106,6 +125,87 @@ class TelegramClient:
         if not data.get("ok"):
             raise TelegramAPIError(self._error_text(method, response.status_code, data))
         return data.get("result") or {}
+
+    def _media_timeout(self, remaining_seconds: float) -> httpx.Timeout:
+        """Ограничивает одну media-попытку остатком общего лимита."""
+        if remaining_seconds <= 0:
+            raise TelegramAPIError("Telegram media download deadline exceeded")
+        return httpx.Timeout(
+            remaining_seconds,
+            connect=min(self.telegram_connect_timeout_seconds, remaining_seconds),
+        )
+
+    def _retry_media_read(
+        self,
+        operation: Callable[[float], Any],
+        deadline: float,
+    ) -> Any:
+        """Выполняет безопасное чтение Telegram в общем временном бюджете."""
+        for attempt in range(TELEGRAM_MEDIA_DOWNLOAD_ATTEMPTS):
+            remaining_seconds = deadline - perf_counter()
+            if remaining_seconds <= 0:
+                raise TelegramAPIError("Telegram media download deadline exceeded")
+            try:
+                return operation(remaining_seconds)
+            except TELEGRAM_SAFE_READ_ERRORS as exc:
+                if attempt + 1 >= TELEGRAM_MEDIA_DOWNLOAD_ATTEMPTS:
+                    raise
+                remaining_seconds = deadline - perf_counter()
+                if remaining_seconds <= 0:
+                    raise TelegramAPIError("Telegram media download deadline exceeded") from exc
+                delay_seconds = min(0.25 * (2**attempt), remaining_seconds)
+                logger.warning(
+                    "telegram_media_read_retry",
+                    attempt=attempt + 1,
+                    error_type=type(exc).__name__,
+                )
+                sleep(delay_seconds)
+        raise AssertionError("Telegram media retry loop exhausted unexpectedly")
+
+    def _read_file_metadata(self, file_id: str, deadline: float) -> dict[str, Any]:
+        """Получает метаданные файла в общем лимите скачивания медиа."""
+        return cast(
+            dict[str, Any],
+            self._retry_media_read(
+                lambda remaining_seconds: self._call_once(
+                    "getFile",
+                    {"file_id": file_id},
+                    timeout=self._media_timeout(remaining_seconds),
+                ),
+                deadline,
+            ),
+        )
+
+    def _download_file_content(self, remote_path: str, deadline: float) -> bytes:
+        """Скачивает содержимое файла в общем лимите скачивания медиа."""
+
+        def download(remaining_seconds: float) -> bytes:
+            """Скачивает одну попытку содержимого Telegram-файла."""
+            response = self.client.get(
+                f"{self.file_url}/{remote_path}",
+                timeout=self._media_timeout(remaining_seconds),
+            )
+            if response.status_code >= 500:
+                raise TelegramRetryableError(
+                    self._error_text("getFileContent", response.status_code, {})
+                )
+            if response.is_error:
+                raise TelegramAPIError(
+                    self._error_text("getFileContent", response.status_code, {})
+                )
+            return response.content
+
+        return cast(bytes, self._retry_media_read(download, deadline))
+
+    @retry(
+        retry=retry_if_exception_type(httpx.ReadTimeout),
+        stop=stop_after_attempt(3),
+        wait=wait_exponential_jitter(initial=0.25, max=2.0),
+        reraise=True,
+    )
+    def _edit_message_text(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Повторяет одинаковое редактирование карточки без создания дубликата."""
+        return self._call("editMessageText", payload)
 
     @staticmethod
     def _error_text(method: str, status_code: int, data: dict[str, Any]) -> str:
@@ -155,7 +255,7 @@ class TelegramClient:
             if index == 0 and reply.edit_message_id:
                 payload["message_id"] = reply.edit_message_id
                 try:
-                    result = self._call("editMessageText", payload)
+                    result = self._edit_message_text(payload)
                 except TELEGRAM_CONNECT_ERRORS as exc:
                     # Ошибка соединения возникает до получения запроса Telegram, поэтому
                     # переход к новому сообщению не может продублировать
@@ -244,16 +344,15 @@ class TelegramClient:
         """Загружает файл из Telegram."""
         if not file_id:
             raise TelegramAPIError("Telegram не передал бинарные данные файла.")
-        file_info = self._call("getFile", {"file_id": file_id})
+        deadline = perf_counter() + self.media_download_timeout_seconds
+        file_info = self._read_file_metadata(file_id, deadline)
         remote_path = file_info.get("file_path")
         if not remote_path:
             raise TelegramAPIError("Telegram did not return file_path")
         suffix = ".ogg" if mime_type.startswith("audio/") else (Path(remote_path).suffix or ".jpg")
-        response = self.client.get(f"{self.file_url}/{remote_path}")
-        if response.is_error:
-            raise TelegramAPIError(self._error_text("getFileContent", response.status_code, {}))
+        content = self._download_file_content(remote_path, deadline)
         with NamedTemporaryFile(delete=False, suffix=suffix) as target:
-            target.write(response.content)
+            target.write(content)
             return DownloadedFile(path=Path(target.name), mime_type=mime_type)
 
     def set_webhook(self, webhook_url: str, secret_token: str) -> None:

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from collections import Counter
 from typing import Any
 
 from restaurant_bot.conversation.comments import remove_global_comment_overlap
@@ -107,6 +108,10 @@ _CONVERSATIONAL_PRODUCT_LEADIN_RE = re.compile(
     """,
     flags=re.I | re.X,
 )
+_ADDITIVE_PRODUCT_LEADIN_RE = re.compile(
+    r"^\s*(?:(?:и|а)\s+)?(?:также|ещ[её])\s*[,;:]?\s*",
+    flags=re.I,
+)
 
 _COMMENT_SCOPE_ALL_RE = re.compile(
     r"\b(?:все|всё|всем|оба|обе|обоих|обеих|обоим|обеим|кажд\w*|перечисленн\w*)\b"
@@ -191,7 +196,7 @@ def _append_local_item_comment(
     existing = clean_text(item.get("comment") or item.get("user_comment_to_supplier")).strip(
         " .,;:-—–"
     )
-    if normalize_text(addition) == normalize_text(existing):
+    if _comments_have_same_words(addition, existing):
         merged = existing
     elif existing:
         merged = f"{existing}; {addition}"
@@ -200,6 +205,17 @@ def _append_local_item_comment(
     item["comment"] = merged
     item["user_comment_to_supplier"] = merged
     item["comment_source"] = source.value
+
+
+def _comments_have_same_words(left: str, right: str) -> bool:
+    """Сверяет комментарии без повторения одной мысли из-за порядка слов."""
+    normalized_left = normalize_text(left)
+    normalized_right = normalize_text(right)
+    if normalized_left == normalized_right:
+        return True
+    left_words = Counter(re.findall(r"[^\W_]+", normalized_left, flags=re.UNICODE))
+    right_words = Counter(re.findall(r"[^\W_]+", normalized_right, flags=re.UNICODE))
+    return bool(left_words) and left_words == right_words
 
 
 def _binding_target_indexes(binding: dict[str, Any], item_count: int) -> list[int]:
@@ -225,6 +241,8 @@ def _validated_binding_target_indexes(
     indexes = _binding_target_indexes(binding, len(items))
     if not indexes or not deterministic:
         return indexes
+    if _binding_has_unique_item_source_evidence(clean_text(binding.get("text")), indexes, items):
+        return indexes
     references = build_item_references(deterministic)
     resolved: list[int] = []
     for index in indexes:
@@ -248,6 +266,26 @@ def _validated_binding_target_indexes(
         else:
             resolved.append(index)
     return list(dict.fromkeys(resolved))
+
+
+def _binding_has_unique_item_source_evidence(
+    comment: str,
+    target_indexes: list[int],
+    items: list[dict[str, Any]],
+) -> bool:
+    """Проверяет, что комментарий встречается только в source span своей позиции."""
+    if len(target_indexes) != 1:
+        return False
+    normalized_comment = normalize_text(comment).strip(" .,;:-—–")
+    if not normalized_comment:
+        return False
+    matching_indexes = [
+        index
+        for index, item in enumerate(items)
+        if normalized_comment
+        in normalize_text(clean_text(item.get("source_span"))).strip(" .,;:-—–")
+    ]
+    return matching_indexes == target_indexes
 
 
 def _merge_global_comment(payload: dict[str, Any], comment: str) -> None:
@@ -288,7 +326,9 @@ def _starts_as_detached_sentence(source_text: str, comment: str) -> bool:
 
 def _strip_conversational_product_leadin(value: str) -> str:
     """Удаляет разговорную просьбу, которая не является комментарием к товару."""
-    return _CONVERSATIONAL_PRODUCT_LEADIN_RE.sub("", clean_text(value), count=1).strip()
+    text = _ADDITIVE_PRODUCT_LEADIN_RE.sub("", clean_text(value), count=1)
+    text = _CONVERSATIONAL_PRODUCT_LEADIN_RE.sub("", text, count=1)
+    return re.sub(r"(?:\s*[,;:]\s*|\s+)(?:и|а|а\s+также)$", "", text, flags=re.I).strip()
 
 
 def _strip_product_facts_from_item_binding(
@@ -635,7 +675,13 @@ def _apply_semantic_comment_bindings(
                 or _starts_as_detached_sentence(source_text, comment)
             )
         )
-        if detached_scope_is_unclear or group_scope_is_unclear:
+        binding_has_unique_source_evidence = (
+            scope == "item"
+            and _binding_has_unique_item_source_evidence(comment, target_indexes, items)
+        )
+        if (
+            detached_scope_is_unclear and not binding_has_unique_source_evidence
+        ) or group_scope_is_unclear:
             payload["comment_clarification"] = comment
             continue
 
@@ -672,6 +718,17 @@ def _apply_trailing_root_processing_comment(
 
     instruction = clean_text(match.group("instruction")).strip(" .,;:-—–")
     normalized_instruction = normalize_text(instruction)
+    existing_targets = {
+        index
+        for index, item in enumerate(items)
+        if normalized_instruction
+        and normalized_instruction
+        in normalize_text(
+            clean_text(item.get("comment") or item.get("user_comment_to_supplier"))
+        ).strip(" .,;:-—–")
+    }
+    if existing_targets:
+        target_indexes = existing_targets
     shadow_indexes = {
         index
         for index, item in enumerate(items)

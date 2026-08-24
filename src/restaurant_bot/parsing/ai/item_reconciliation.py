@@ -348,7 +348,7 @@ def _restore_omitted_explicit_items(
     deterministic: list[ExtractedItem],
     global_comment: str = "",
 ) -> list[dict[str, Any]]:
-    """Добавляет только конкретные позиции, явно найденные детерминированным разбором."""
+    """Добавляет только независимые позиции, пропущенные моделью."""
     if not deterministic or len(deterministic) <= len(items):
         return items
 
@@ -356,7 +356,9 @@ def _restore_omitted_explicit_items(
     known_queries = [clean_text(item.get("product_query")) for item in restored]
     normalized_global = normalize_text(global_comment).strip(" .,;:-—–")
     for recovered in deterministic:
-        recovered_query = clean_text(recovered.product_query)
+        recovered_query = _strip_conversational_product_leadin(
+            clean_text(recovered.product_query)
+        )
         if not recovered_query or not _contains_product_query_word(recovered_query):
             continue
         normalized_query = normalize_text(recovered_query).strip(" .,;:-—–")
@@ -368,12 +370,38 @@ def _restore_omitted_explicit_items(
             continue
         if recovered.comment and not recovered.quantity:
             continue
+        if _recovered_query_is_covered_by_existing_source(recovered_query, restored):
+            continue
         if any(
             _query_is_already_represented(known_query, recovered_query)
             for known_query in known_queries
             if known_query
         ):
             continue
-        restored.append(recovered.model_dump())
+        restored.append(recovered.model_copy(update={"product_query": recovered_query}).model_dump())
         known_queries.append(recovered_query)
     return restored
+
+
+def _recovered_query_is_covered_by_existing_source(
+    recovered_query: str,
+    items: list[dict[str, Any]],
+) -> bool:
+    """Проверяет, что fallback-фрагмент уже лежит в подтверждённом source-span."""
+    recovered_tokens = {
+        token
+        for token in re.findall(r"[a-zа-яё0-9]+", normalize_text(recovered_query), flags=re.I)
+        if len(token) > 1 and token not in _NON_PRODUCT_FRAGMENT_WORDS
+    }
+    if not recovered_tokens:
+        return True
+    for item in items:
+        source = clean_text(item.get("source_span")) or clean_text(item.get("source_line"))
+        if not source:
+            continue
+        source_tokens = set(
+            re.findall(r"[a-zа-яё0-9]+", normalize_text(source), flags=re.I)
+        )
+        if recovered_tokens.issubset(source_tokens):
+            return True
+    return False

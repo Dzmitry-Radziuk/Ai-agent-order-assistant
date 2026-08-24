@@ -608,7 +608,11 @@ class ConversationEngine:
             state.pending_new_order_confirmation = True
             return EngineResult(state=state, reply=new_order_confirmation_reply(state))
         if command.intent == Intent.CLEAR_CART:
-            return self._start_new_order(state)
+            return self._start_new_order(
+                state,
+                clear_product_add_queue=True,
+                invalidate_catalog=bool(state.spreadsheet_id),
+            )
         if command.intent == Intent.PRODUCT_ADD:
             index = self._callback_item_index(command, state)
             item = state.cart[index] if index is not None and index < len(state.cart) else None
@@ -882,8 +886,12 @@ class ConversationEngine:
             selected_supplier = state.supplier_hint_context
             newly_unresolved_ids: list[str] = []
             added_item_ids: list[str] = []
-            items_to_add = self.catalog_resolution.merge_catalog_qualified_items(
+            recovered_items = self.catalog_resolution.recover_catalog_compound_items(
                 command.items,
+                catalog,
+            )
+            items_to_add = self.catalog_resolution.merge_catalog_qualified_items(
+                recovered_items,
                 catalog,
                 state.search_scope,
                 supplier_hint=selected_supplier,
@@ -1120,11 +1128,23 @@ class ConversationEngine:
             product_add_requests=deepcopy(state.product_add_requests),
         )
 
-    def _start_new_order(self, state: ConversationState) -> EngineResult:
-        """Безопасно начинает новую заявку без потери истории и регистрации."""
+    def _start_new_order(
+        self,
+        state: ConversationState,
+        *,
+        clear_product_add_queue: bool = False,
+        invalidate_catalog: bool = False,
+    ) -> EngineResult:
+        """Безопасно начинает новую заявку с управляемой очисткой очереди и кэша."""
         fresh = self._fresh_order_state(state)
+        if clear_product_add_queue:
+            fresh.product_add_requests = []
         fresh.metadata["onboarding_shown"] = True
-        return EngineResult(state=fresh, reply=new_order_started_reply())
+        return EngineResult(
+            state=fresh,
+            reply=new_order_started_reply(),
+            invalidate_catalog=invalidate_catalog,
+        )
 
     def _submit_product_add_description(
         self,

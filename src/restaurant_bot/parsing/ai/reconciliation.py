@@ -7,6 +7,7 @@ from typing import Any
 
 import structlog
 
+from restaurant_bot.catalog.safety import is_standalone_product_form_query
 from restaurant_bot.domain.models import Intent
 from restaurant_bot.domain.text import clean_text, normalize_text
 from restaurant_bot.parsing.ai.comment_reconciliation import (
@@ -28,7 +29,10 @@ from restaurant_bot.parsing.ai.quantity_reconciliation import (
     restore_explicit_order_terms,
 )
 from restaurant_bot.parsing.ai.shadow_items import _collapse_shadow_item_projections
-from restaurant_bot.parsing.commands.item_commands import has_explicit_add_items
+from restaurant_bot.parsing.commands.item_commands import (
+    has_explicit_add_items,
+    has_unrepresented_order_quantity_evidence,
+)
 from restaurant_bot.parsing.comment_policy import is_comment_control_text
 from restaurant_bot.parsing.comment_scope import has_explicit_global_comment_scope
 from restaurant_bot.parsing.products import parse_product_lines
@@ -141,8 +145,12 @@ def _comment_has_order_quantity(value: str) -> bool:
     )
 
 
-def _extend_partial_source_with_order_tail(provided: str, derived: str) -> str:
-    """Добавляет к укороченной строке только доказанный хвост заказа."""
+def _extend_partial_source_with_order_tail(
+    provided: str,
+    derived: str,
+    global_comment: str = "",
+) -> str:
+    """Возвращает подтверждённый локальный span вместе с комментарием."""
     provided = clean_text(provided)
     derived = clean_text(derived)
     if not provided or not derived or normalize_text(provided) == normalize_text(derived):
@@ -150,21 +158,56 @@ def _extend_partial_source_with_order_tail(provided: str, derived: str) -> str:
     prefix = derived[: len(provided)]
     if normalize_text(prefix) != normalize_text(provided):
         return provided
-    suffix = derived[len(provided) :]
-    order_facts = [
-        fact
-        for fact in extract_semantic_facts(suffix)
-        if fact.kind is SemanticFactKind.ORDER_QUANTITY
-    ]
-    if not order_facts:
-        return provided
-    return clean_text(derived[: len(provided) + max(fact.end for fact in order_facts)])
+    # ``derived`` is bounded by the next independent product anchor, so it also
+    # owns the supplier instruction between this item and that next anchor.
+    # The only exception is a separately parsed final order comment: it is not
+    # evidence of the last item's identity or local comment.
+    raw_global_comment = clean_text(global_comment)
+    comment_variants = {
+        raw_global_comment,
+        _strip_global_comment_scope(raw_global_comment),
+    }
+    for comment_variant in sorted(comment_variants, key=len, reverse=True):
+        if not comment_variant:
+            continue
+        comment_pattern = re.escape(comment_variant).replace("ё", "[её]")
+        trailing_global = re.compile(
+            rf"(?:[\s,.;:—–-]+){comment_pattern}\s*$",
+            flags=re.IGNORECASE,
+        )
+        if trailing_global.search(derived):
+            derived = trailing_global.sub("", derived).strip(" .,;:-—–")
+            derived = re.sub(r"\s+(?:и|а)\s*$", "", derived, flags=re.IGNORECASE)
+            break
+    return derived
 
 
-def _resolve_item_source_spans(items: list[dict[str, Any]], source_text: str) -> tuple[Any, ...]:
+def _global_comment_start(source_text: str, global_comment: str) -> int | None:
+    """Возвращает начало явного финального комментария в исходной фразе."""
+    raw_global_comment = clean_text(global_comment)
+    comment_variants = {
+        raw_global_comment,
+        _strip_global_comment_scope(raw_global_comment),
+    }
+    for comment_variant in sorted(comment_variants, key=len, reverse=True):
+        if not comment_variant:
+            continue
+        comment_pattern = re.escape(comment_variant).replace("ё", "[её]")
+        match = re.search(rf"{comment_pattern}\s*$", source_text, flags=re.IGNORECASE)
+        if match is not None:
+            return match.start()
+    return None
+
+
+def _resolve_item_source_spans(
+    items: list[dict[str, Any]],
+    source_text: str,
+    global_comment: str = "",
+) -> tuple[Any, ...]:
     """Заполняет локальные source span, сохраняя полный исходный source_line."""
     had_source_spans = any(clean_text(item.get("source_span")) for item in items)
     provided_sources = [clean_text(item.get("source_line")) for item in items]
+    global_comment_start = _global_comment_start(source_text, global_comment)
     for item in items:
         item["source_span"] = ""
     has_partial_provided_source = any(
@@ -184,8 +227,21 @@ def _resolve_item_source_spans(items: list[dict[str, Any]], source_text: str) ->
         if all(span is not None for span in derived):
             for item, provided_source, span in zip(items, provided_sources, derived, strict=True):
                 assert span is not None
+                span_text = span.text
+                if (
+                    global_comment_start is not None
+                    and span.start < global_comment_start < span.end
+                ):
+                    span_text = re.sub(
+                        r"\s+(?:и|а)\s*$",
+                        "",
+                        source_text[span.start:global_comment_start].strip(" .,;:-—–"),
+                        flags=re.IGNORECASE,
+                    )
                 item["source_span"] = _extend_partial_source_with_order_tail(
-                    provided_source, span.text
+                    provided_source,
+                    span_text,
+                    global_comment,
                 )
             return derived
         for item, provided_source in zip(items, provided_sources, strict=True):
@@ -261,7 +317,7 @@ def recover_omitted_explicit_items(payload: dict[str, Any], source_text: str) ->
         )
         items = []
         payload["items"] = []
-    spans = _resolve_item_source_spans(items, source_text)
+    spans = _resolve_item_source_spans(items, source_text, clean_text(payload.get("global_comment")))
     remove_unsupported_query_qualifiers(items, source_text)
     global_comment = _strip_global_comment_scope(clean_text(payload.get("global_comment")))
     if is_comment_control_text(global_comment):
@@ -367,6 +423,8 @@ def _has_safe_item_recovery_evidence(
     deterministic: list[Any],
 ) -> bool:
     """Проверяет, подтверждает ли исходная фраза восстановление товарных позиций."""
+    if has_unrepresented_order_quantity_evidence(source_text, deterministic):
+        return False
     if has_explicit_add_items(source_text, deterministic):
         return True
     if any(
@@ -378,4 +436,4 @@ def _has_safe_item_recovery_evidence(
         return False
     query = clean_text(getattr(deterministic[0], "product_query", ""))
     words = [word for word in normalize_text(query).split() if len(word) > 1]
-    return len(words) >= 2
+    return len(words) >= 2 or is_standalone_product_form_query(query)

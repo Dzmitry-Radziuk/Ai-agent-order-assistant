@@ -12,6 +12,7 @@ from restaurant_bot.parsing.comment_scope import _extract_global_comment
 from restaurant_bot.parsing.number_words import NUMBER_WORDS
 from restaurant_bot.parsing.products import parse_product_lines
 from restaurant_bot.parsing.quantities import parse_quantity_unit
+from restaurant_bot.parsing.semantic.measurements import order_quantity_facts
 
 _DRAFT_CONTAINER_RE = r"(?:заявк\w*|заказ\w*|корзин\w*|черновик\w*|списк\w*)"
 _DRAFT_MODIFIER_RE = r"(?:мо\w+|наш\w+|текущ\w+|эт\w+|данн\w+)"
@@ -176,13 +177,13 @@ def is_product_add_request_phrase(text: str) -> bool:
 
 _EXPLICIT_ADD_ITEMS_RE = re.compile(
     r"^(?:(?:мне\s+нужно|мне\s+надо|я\s+хочу|хочу|давай(?:те)?|пожалуйста)\s+)?"
-    r"(?:добав(?:ь|ить|им)|закаж(?:и|ем|ать)|полож(?:и|ить)|возьм(?:и|ем)|постав(?:ь|ить))\s+"
+    r"(?:добав(?:ь|ить|им)|закаж(?:и|ем)|заказать|полож(?:и|ить)|возьм(?:и|ем)|постав(?:ь|ить))\s+"
     r"(?P<target>.+)$",
     re.IGNORECASE,
 )
 _MIXED_ADD_ITEMS_RE = re.compile(
     r"^(?:да|нет)\s*(?:[,;:—–-]\s*)?"
-    r"(?:добав(?:ь|ить|им)|закаж(?:и|ем|ать)|полож(?:и|ить)|"
+    r"(?:добав(?:ь|ить|им)|закаж(?:и|ем)|заказать|полож(?:и|ить)|"
     r"возьм(?:и|ем)|постав(?:ь|ить))\s+(?P<target>.+)$",
     re.IGNORECASE,
 )
@@ -198,6 +199,19 @@ _NON_PRODUCT_ADD_TARGET_RE = re.compile(
 )
 
 
+def explicit_add_item_target(text: str) -> str:
+    """Возвращает товарную часть явной команды добавления."""
+    match = _EXPLICIT_ADD_ITEMS_RE.fullmatch(clean_text(text))
+    if match is None:
+        return ""
+    target = clean_text(match.group("target")).strip(" ,;:-—–.!?")
+    if not target or _NON_PRODUCT_ADD_TARGET_RE.fullmatch(target):
+        return ""
+    if re.fullmatch(r"(?:в|во)\s+(?:корзин\w*|заявк\w*)", target, re.IGNORECASE):
+        return ""
+    return target
+
+
 def has_explicit_add_items(text: str, items: Sequence[object] | None = None) -> bool:
     """Определяет явную команду добавления новой товарной позиции."""
     if items is not None:
@@ -211,14 +225,23 @@ def has_explicit_add_items(text: str, items: Sequence[object] | None = None) -> 
         )
         if not has_product:
             return False
-    normalized = normalize_command_text(text)
-    match = _EXPLICIT_ADD_ITEMS_RE.fullmatch(normalized)
-    if match is None:
+    return bool(explicit_add_item_target(text))
+
+
+def has_unrepresented_order_quantity_evidence(source_text: str, items: Sequence[object]) -> bool:
+    """Проверяет, что детерминированный список не потерял количество заказа."""
+    expected = len(order_quantity_facts(source_text))
+    if not expected:
         return False
-    target = clean_command_target(match.group("target"))
-    if not target or _NON_PRODUCT_ADD_TARGET_RE.fullmatch(target):
-        return False
-    return not bool(re.fullmatch(r"(?:в|во)\s+(?:корзин\w*|заявк\w*)", target, re.IGNORECASE))
+    represented = sum(
+        (
+            item.get("quantity") is not None and bool(item.get("unit", ""))
+            if isinstance(item, dict)
+            else getattr(item, "quantity", None) is not None and bool(getattr(item, "unit", ""))
+        )
+        for item in items
+    )
+    return represented < expected
 
 
 def _parse_mixed_add_items(text: str) -> ParsedCommand | None:
@@ -231,7 +254,7 @@ def _parse_mixed_add_items(text: str) -> ParsedCommand | None:
         return None
     product_text, global_comment = _extract_global_comment(target)
     items = parse_product_lines(product_text)
-    if not items:
+    if not items or has_unrepresented_order_quantity_evidence(text, items):
         return None
     return ParsedCommand(
         intent=Intent.ADD_ITEMS,

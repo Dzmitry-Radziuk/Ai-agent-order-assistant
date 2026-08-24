@@ -4,6 +4,7 @@ import pytest
 
 from restaurant_bot.domain.models import Intent
 from restaurant_bot.parsing.commands.api import infer_intent
+from restaurant_bot.parsing.commands.item_commands import has_unrepresented_order_quantity_evidence
 from restaurant_bot.parsing.products import parse_product_lines
 
 
@@ -35,6 +36,72 @@ def test_parses_multiple_products_in_one_message() -> None:
         ("говядина", 10, "кг"),
         ("курица", 10, "шт"),
     ]
+
+
+@pytest.mark.parametrize(
+    ("phrase", "product_query", "quantity", "unit"),
+    [
+        ("Хочу заказать морковь.", "морковь", None, ""),
+        ("Я хочу заказать филе форели 2 кг.", "филе форели", 2, "кг"),
+        ("Хочу заказать Coca-Cola 5 шт.", "Coca-Cola", 5, "шт"),
+    ],
+)
+def test_explicit_order_leadin_is_not_part_of_product_query(
+    phrase: str,
+    product_query: str,
+    quantity: float | None,
+    unit: str,
+) -> None:
+    """Отделяет разговорную команду заказа от названия товара."""
+    command = infer_intent(phrase)
+
+    assert command.intent is Intent.ADD_ITEMS
+    assert command.explicit_add_items is True
+    assert len(command.items) == 1
+    assert command.items[0].product_query == product_query
+    assert command.items[0].quantity == quantity
+    assert command.items[0].unit == unit
+
+
+def test_incomplete_deterministic_list_yields_to_semantic_parser() -> None:
+    """Не выдаёт повреждённый голосовой список за готовую команду добавления."""
+    source = (
+        "Для лосося 0.8-1.3 килограмма, мне нужно 10 килограмм, "
+        "обязательно зачищенное, лук зеленый 5 килограмм, паста соевая – 10 штук."
+    )
+    deterministic_items = parse_product_lines(source)
+    command = infer_intent(source)
+
+    assert len(deterministic_items) == 1
+    assert has_unrepresented_order_quantity_evidence(source, deterministic_items)
+    assert command.intent is Intent.UNKNOWN
+    assert command.items == []
+
+
+@pytest.mark.parametrize(
+    ("phrase", "expected_target", "expected_comment"),
+    [
+        ("для лосося обязательно зачищенное", "лосося", "обязательно зачищенное"),
+        (
+            "для лосося 0.8-1.3 кг, обязательно зачищенное",
+            "",
+            "обязательно зачищенное",
+        ),
+        ("добавь комментарий к лососю: нужно 10 кг", "лососю", "нужно 10 кг"),
+    ],
+)
+def test_comment_command_keeps_safe_markerless_and_explicit_cases(
+    phrase: str,
+    expected_target: str,
+    expected_comment: str,
+) -> None:
+    """Сохраняет комментарии без маркера, но не захватывает новый заказ."""
+    command = infer_intent(phrase)
+
+    assert command.intent is Intent.EDIT_COMMENT
+    if expected_target:
+        assert command.comment_target_query == expected_target
+    assert command.comment_text == expected_comment
 
 
 def test_submit_phrases_are_not_treated_as_product_search() -> None:

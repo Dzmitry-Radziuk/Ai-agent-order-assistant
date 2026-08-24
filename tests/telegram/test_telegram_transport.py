@@ -5,6 +5,7 @@ from unittest.mock import MagicMock
 import httpx
 import pytest
 
+import restaurant_bot.integrations.telegram as telegram_module
 from restaurant_bot.domain.models import BotReply, Button
 from restaurant_bot.integrations.telegram import TelegramAPIError, TelegramClient
 
@@ -204,3 +205,82 @@ def test_read_timeout_is_not_retried_to_avoid_duplicate_message() -> None:
         client._call("sendMessage", {})
 
     client.client.post.assert_called_once()
+
+
+def test_media_download_retries_read_timeouts_without_repeating_a_message(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Повторяет безопасное чтение файла после временного тайм-аута Telegram."""
+    client = object.__new__(TelegramClient)
+    client.base_url = "https://telegram.invalid"
+    client.file_url = "https://telegram.invalid/file"
+    client.media_download_timeout_seconds = 15
+    client.telegram_connect_timeout_seconds = 5
+    request = httpx.Request("POST", "https://telegram.invalid/getFile")
+    client.client = MagicMock()
+    client.client.post.side_effect = [
+        httpx.ReadTimeout("metadata timeout", request=request),
+        httpx.Response(200, json={"ok": True, "result": {"file_path": "voice.ogg"}}),
+    ]
+    client.client.get.side_effect = [
+        httpx.ReadTimeout(
+            "content timeout",
+            request=httpx.Request("GET", "https://telegram.invalid/file/voice.ogg"),
+        ),
+        httpx.Response(200, content=b"voice"),
+    ]
+    monkeypatch.setattr(telegram_module, "sleep", lambda _: None)
+
+    downloaded = client.download_file("file-id", "audio/ogg")
+
+    try:
+        assert downloaded.path.read_bytes() == b"voice"
+        assert client.client.post.call_count == 2
+        assert client.client.get.call_count == 2
+    finally:
+        downloaded.path.unlink(missing_ok=True)
+
+
+def test_media_download_deadline_prevents_a_retry_after_total_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Не начинает новую попытку после исчерпания общего лимита media-скачивания."""
+    client = object.__new__(TelegramClient)
+    request = httpx.Request("GET", "https://telegram.invalid/file/voice.ogg")
+    moments = iter([0.0, 15.0])
+    attempts: list[float] = []
+    monkeypatch.setattr(telegram_module, "perf_counter", lambda: next(moments))
+
+    def timeout(remaining_seconds: float) -> bytes:
+        """Имитирует чтение, занявшее остаток общего лимита."""
+        attempts.append(remaining_seconds)
+        raise httpx.ReadTimeout("content timeout", request=request)
+
+    with pytest.raises(TelegramAPIError, match="deadline exceeded"):
+        client._retry_media_read(timeout, deadline=15.0)
+
+    assert attempts == [15.0]
+
+
+def test_edit_read_timeout_is_retried_without_sending_a_duplicate_message(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Повторяет одинаковое редактирование карточки после потери ответа Telegram."""
+    client = object.__new__(TelegramClient)
+    client.base_url = "https://telegram.invalid"
+    request = httpx.Request("POST", "https://telegram.invalid/editMessageText")
+    client.client = MagicMock()
+    client.client.post.side_effect = [
+        httpx.ReadTimeout("edit timeout", request=request),
+        httpx.Response(200, json={"ok": True, "result": {"message_id": 42}}),
+    ]
+    monkeypatch.setattr(client._edit_message_text.retry, "wait", lambda _: 0)
+
+    message_id = client.send_reply("1", BotReply(text="Готово", edit_message_id=42))
+
+    assert message_id == 42
+    assert client.client.post.call_count == 2
+    assert all(
+        call.args[0].endswith("/editMessageText")
+        for call in client.client.post.call_args_list
+    )

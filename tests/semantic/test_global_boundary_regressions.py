@@ -2,12 +2,17 @@
 
 from restaurant_bot.catalog.evidence import numeric_evidence
 from restaurant_bot.catalog.resolver import CatalogResolver
+from restaurant_bot.config import Settings
 from restaurant_bot.domain.models import (
     CartItem,
     CatalogProduct,
     ConversationState,
     ExtractedItem,
+    InputKind,
     Intent,
+    ItemStatus,
+    ParsedCommand,
+    TelegramEvent,
 )
 from restaurant_bot.orders.catalog_resolution import CatalogResolutionService
 from restaurant_bot.orders.quantity_provenance import (
@@ -17,6 +22,7 @@ from restaurant_bot.orders.quantity_provenance import (
 from restaurant_bot.parsing.ai.reconciliation import recover_omitted_explicit_items
 from restaurant_bot.parsing.products import parse_product_lines
 from restaurant_bot.presentation.telegram.replies import final_review_reply, small_talk_reply
+from restaurant_bot.services.engine import ConversationEngine
 
 
 def test_catalog_identity_tail_is_not_created_as_a_second_item() -> None:
@@ -119,6 +125,90 @@ def test_complete_catalog_names_in_one_text_list_remain_separate() -> None:
         "Горчица Домашняя. Кал-я 170г,СтБ, Россия (1/12) Острая",
         "Свинина Окорок Пармский с/к",
     ]
+
+
+def test_catalog_proof_recovers_ai_merged_complex_product_list(settings: Settings) -> None:
+    """Возвращает все товары, когда AI склеил несколько полных названий каталога."""
+    source = (
+        "Бекон копченый Экстра нарезка в/у охл Грудинка Ароматная "
+        "Нут ЭНДАКСИ, пачка, 450 гр, 10 шт/упак, Россия"
+    )
+    command = ParsedCommand(
+        intent=Intent.ADD_ITEMS,
+        items=[
+            ExtractedItem(
+                product_query=(
+                    "Бекон копченый Экстра нарезка в/у охл Грудинка Ароматная "
+                    "Нут ЭНДАКСИ"
+                ),
+                quantity=10,
+                unit="шт",
+                supplier_hint="Россия",
+                comment="пачка, 450 гр",
+                source_line=source,
+                packaging_text="пачка, 450 гр, 10 шт/упак",
+                packaging_role="catalog_attribute",
+                quantity_source="packaging",
+                printed_reference_text="450 гр, 10 шт/упак",
+            )
+        ],
+    )
+    catalog = [
+        CatalogProduct(
+            product_id="bacon",
+            name="Бекон копченый Экстра нарезка в/у охл",
+            unit="шт",
+        ),
+        CatalogProduct(product_id="brisket", name="Грудинка Ароматная", unit="шт"),
+        CatalogProduct(
+            product_id="chickpeas",
+            name="Нут ЭНДАКСИ, пачка, 450 гр, 10 шт/упак, Россия",
+            unit="шт",
+        ),
+    ]
+
+    result = ConversationEngine(settings).handle(
+        TelegramEvent(
+            update_id=71,
+            chat_id="compound-catalog-list",
+            input_type=InputKind.TEXT,
+            text=source,
+        ),
+        command,
+        ConversationState(),
+        catalog,
+    )
+
+    assert [item.catalog_product_id for item in result.state.cart] == [
+        "bacon",
+        "brisket",
+        "chickpeas",
+    ]
+    assert all(item.status is ItemStatus.MISSING_QTY for item in result.state.cart)
+    assert all(item.quantity is None for item in result.state.cart)
+    assert result.state.cart[-1].comment == ""
+
+
+def test_catalog_proof_does_not_split_a_complete_long_catalog_name() -> None:
+    """Не делит один товар, если весь сложный текст есть в каталоге одной строкой."""
+    source = "Бекон копченый Экстра нарезка в/у охл Грудинка Ароматная"
+    item = ExtractedItem(product_query=source, source_line=source)
+    catalog = [
+        CatalogProduct(product_id="whole", name=source, unit="шт"),
+        CatalogProduct(
+            product_id="bacon",
+            name="Бекон копченый Экстра нарезка в/у охл",
+            unit="шт",
+        ),
+        CatalogProduct(product_id="brisket", name="Грудинка Ароматная", unit="шт"),
+    ]
+
+    result = CatalogResolutionService(CatalogResolver()).recover_catalog_compound_items(
+        [item],
+        catalog,
+    )
+
+    assert result == [item]
 
 
 def test_multword_quantity_item_is_not_merged_into_catalog_identity_tail() -> None:

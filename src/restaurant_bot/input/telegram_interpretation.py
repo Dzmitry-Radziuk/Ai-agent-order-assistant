@@ -42,7 +42,7 @@ from restaurant_bot.parsing.comment_scope import (
     has_explicit_order_comment_scope,
     strip_explicit_comment_scope_prefix,
 )
-from restaurant_bot.parsing.delivery_language import has_delivery_wish_shape
+from restaurant_bot.parsing.delivery_language import extract_delivery_wish, has_delivery_wish_shape
 from restaurant_bot.parsing.history import parse_history_query, requires_history_context
 from restaurant_bot.parsing.products import has_multiple_explicit_order_items
 from restaurant_bot.parsing.semantic_routing import (
@@ -198,7 +198,10 @@ class TelegramInputInterpreter:
             )
         if conversation_intent is None and requires_history_context(text):
             return ParsedCommand(intent=Intent.UNKNOWN, text=text)
-        if has_explicit_global_comment_scope(text) and has_delivery_wish_shape(text):
+        explicit_global_delivery_wish = has_explicit_global_comment_scope(
+            text
+        ) and has_delivery_wish_shape(text)
+        if explicit_global_delivery_wish and not infer_intent(text).items:
             comment_text = strip_explicit_comment_scope_prefix(text)
             if comment_text:
                 if any(item.status is not ItemStatus.SKIPPED for item in state.cart):
@@ -230,6 +233,16 @@ class TelegramInputInterpreter:
         parsed = normalize_comment_proposal(text, parsed)
         parsed = self._normalize_explicit_comment(text, parsed, state)
         parsed = self._authorize_candidate_command(parsed, state, text)
+        if (
+            explicit_global_delivery_wish
+            and parsed.intent is Intent.ADD_ITEMS
+            and parsed.items
+            and not parsed.global_comment
+            and not parsed.comment_clarification
+        ):
+            delivery_comment = extract_delivery_wish(text)
+            if delivery_comment:
+                parsed = parsed.model_copy(update={"comment_clarification": delivery_comment})
         if proven_mutation and conversation_intent is None:
             protected = protect_confirmed_command(deterministic, parsed)
             if protected is not parsed:
@@ -238,6 +251,7 @@ class TelegramInputInterpreter:
             return self._safe_delivery_wish_command(text, state)
         if delivery_wish and not proven_mutation and parsed.intent is Intent.ADD_ITEMS:
             return self._safe_delivery_wish_command(text, state)
+        parsed = self._protect_unverified_history_query(text, parsed, state)
         review_command = self._parse_sheet_review_command(text, parsed, state)
         if review_command is not None:
             return review_command
@@ -291,6 +305,32 @@ class TelegramInputInterpreter:
             update={"text": text}
         )
         return self._authorize_candidate_command(selected_command, state, text)
+
+    def _protect_unverified_history_query(
+        self,
+        text: str,
+        command: ParsedCommand,
+        state: ConversationState,
+    ) -> ParsedCommand:
+        """Не даёт модели читать историю для фразы без признака поставки."""
+        if command.intent is not Intent.HISTORY_QUERY:
+            return command
+        history_query = parse_history_query(
+            text,
+            context_product_queries=self._history_context_products(state),
+            today=self.today,
+            timezone_name=self.timezone_name,
+        )
+        if history_query is not None:
+            return command.model_copy(
+                update={
+                    "history_query": history_query,
+                    "items": [],
+                    "explicit_add_items": False,
+                }
+            )
+        logger.info("unverified_history_query_rejected")
+        return ParsedCommand(intent=Intent.SMALL_TALK, text=text)
 
     @staticmethod
     def _standalone_final_review_command(
