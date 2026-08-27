@@ -666,6 +666,18 @@ def test_text_timeout_does_not_accept_deterministic_product_guess(settings) -> N
         service.parse_text("Сироп роза 5 штук обязательно охлаждённым")
 
 
+def test_text_timeout_uses_only_confirmed_single_item_fallback(settings) -> None:  # type: ignore[no-untyped-def]
+    """Возвращает однозначную позицию, если транспорт AI недоступен."""
+    service = _service(settings, SimpleNamespace(responses=_TimeoutResponses()))
+
+    command = service.parse_text("мешок картошки хочу 50 кг")
+
+    assert command.intent is Intent.ADD_ITEMS
+    assert [(item.product_query, item.quantity, item.unit) for item in command.items] == [
+        ("мешок картошки", 50.0, "кг")
+    ]
+
+
 def test_text_timeout_does_not_guess_comments_for_spoken_products(settings) -> None:  # type: ignore[no-untyped-def]
     """Не разбирает локально список с комментариями после тайм-аута AI."""
     service = _service(settings, SimpleNamespace(responses=_TimeoutResponses()))

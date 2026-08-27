@@ -42,6 +42,7 @@ def test_parses_multiple_products_in_one_message() -> None:
     ("phrase", "product_query", "quantity", "unit"),
     [
         ("Хочу заказать морковь.", "морковь", None, ""),
+        ("дабавь яблак 15 кг", "яблак", 15, "кг"),
         ("Я хочу заказать филе форели 2 кг.", "филе форели", 2, "кг"),
         ("Хочу заказать Coca-Cola 5 шт.", "Coca-Cola", 5, "шт"),
     ],

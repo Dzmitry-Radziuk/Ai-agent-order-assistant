@@ -16,6 +16,7 @@ from restaurant_bot.parsing.ai.comment_reconciliation import (
     _discard_unverified_item_comments,
     _strip_conversational_product_leadin,
     _strip_global_comment_scope,
+    restore_omitted_explicit_item_comments,
 )
 from restaurant_bot.parsing.ai.item_reconciliation import (
     _clear_unknown_item_placeholders,
@@ -48,6 +49,11 @@ from restaurant_bot.parsing.semantic.models import SemanticFactKind
 from restaurant_bot.parsing.semantic_routing import classify_bot_conversation
 
 logger = structlog.get_logger(__name__)
+
+_DEICTIC_ITEM_REFERENCE_RE = re.compile(
+    r"^\s*(?:все|всё|эти|этот|эта|это|такие|такой|такая|данные|указанные)\b",
+    flags=re.IGNORECASE,
+)
 
 
 def _numeric_fact_log(source_text: str) -> list[dict[str, Any]]:
@@ -389,6 +395,7 @@ def recover_omitted_explicit_items(payload: dict[str, Any], source_text: str) ->
             clean_text(after.get("source_span")) or source_text,
         )
     _discard_unverified_item_comments(items, bindings, source_text, global_comment)
+    restore_omitted_explicit_item_comments(items, bindings)
     _restore_dropped_unclassified_terms(items, deterministic, global_comment)
     items = _restore_omitted_explicit_items(items, deterministic, global_comment)
     items = _collapse_shadow_item_projections(
@@ -429,6 +436,10 @@ def _has_safe_item_recovery_evidence(
         return False
     if has_explicit_add_items(source_text, deterministic):
         return True
+    # Указательные фразы описывают уже известный контекст, но сами не называют
+    # новую позицию. Их нельзя превращать в товар, если ИИ явно вернул unknown.
+    if _DEICTIC_ITEM_REFERENCE_RE.match(normalize_text(source_text)):
+        return False
     if any(
         getattr(item, "quantity", None) is not None and bool(getattr(item, "unit", ""))
         for item in deterministic

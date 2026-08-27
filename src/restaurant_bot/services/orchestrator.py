@@ -126,6 +126,16 @@ def _contradictions_reference_request(
     comment: str,
 ) -> bool:
     """Проверяет, ссылаются ли AI-противоречия на признаки самого запроса."""
+    normalized_request = normalize_text(f"{source_query} {comment}")
+    if not re.search(
+        r"\b(?:без|не|только|именно|обязательно|желательн\w*|свеж\w*|"
+        r"охлажд\w*|заморож\w*|сол[её]н\w*|копч[её]н\w*|молод\w*|"
+        r"крупн\w*|мелк\w*|бренд|артикул)\b",
+        normalized_request,
+        flags=re.I,
+    ):
+        # Базовое слово товара в объяснении модели не является требованием.
+        return False
     request_text = f"{source_query} {comment}"
     return any(
         query_evidence_tokens(value, request_text) for value in contradictions if value.strip()
@@ -1767,6 +1777,7 @@ class UpdateOrchestrator:
                 and not has_conflicting_catalog_qualifiers(item.source_query, selected.name)
                 and not has_unscoped_product_variant_qualifier(item.comment)
                 and item.packaging_role != "ambiguous"
+                and selected.reason != "similar"
                 and not unverified_product_terms(search_query, selected.name)
             )
             winner_score = selected.score if selected is not None else None
@@ -1818,6 +1829,23 @@ class UpdateOrchestrator:
             elif decision.action == "not_found":
                 # A zero-confidence ``not_found`` is not evidence for any
                 # candidate. Do not turn it into an unrelated suggestions card.
+                similar_candidates = [
+                    candidate for candidate in item.candidates if candidate.reason == "similar"
+                ]
+                if similar_candidates:
+                    # Похожий вариант уже отобран строгим поиском для ручного уточнения.
+                    # Keep this shortlist for user clarification; a typo must not erase it.
+                    item.status = ItemStatus.AMBIGUOUS
+                    item.candidates = similar_candidates
+                    logger.info(
+                        "catalog_candidate_similar_preserved",
+                        target_query=item.source_query,
+                        candidate_product_ids=[
+                            candidate.product_id for candidate in similar_candidates
+                        ],
+                        ai_confidence=decision.confidence,
+                    )
+                    continue
                 if 0 < decision.confidence < _AI_MATCH_NOT_FOUND_MIN_CONFIDENCE:
                     item.status = ItemStatus.AMBIGUOUS
                     logger.info(

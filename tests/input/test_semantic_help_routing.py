@@ -183,6 +183,10 @@ def test_explicit_add_command_keeps_product_mutation_semantics() -> None:
 @pytest.mark.parametrize(
     ("phrase", "expected"),
     (
+        ("Здрасти!", Intent.GREETING),
+        ("Добрый вечер", Intent.GREETING),
+        ("hello", Intent.GREETING),
+        ("Вечер в хату!", Intent.SMALL_TALK),
         (
             "А если я буду просто флудить, что ты скажешь на это?",
             Intent.SMALL_TALK,

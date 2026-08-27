@@ -29,6 +29,7 @@ from restaurant_bot.parsing.semantic.boundaries import (
 from restaurant_bot.parsing.semantic.measurements import (
     extract_semantic_facts,
     is_catalog_tail_text,
+    strip_order_quantity_from_query,
 )
 from restaurant_bot.parsing.semantic.models import SemanticFactKind
 
@@ -36,6 +37,10 @@ _COMMENT_BINDING_CONFIDENCE = 0.9
 _COMMENT_ACTION_RE = re.compile(
     r"\b(?:разлож\w*|привез\w*|достав\w*|постав\w*|упаков\w*|выбер\w*|"
     r"желательн\w*|обязательн\w*|позвон\w*|смешив\w*)\b",
+    flags=re.I,
+)
+_EXPLICIT_ITEM_REQUIREMENT_RE = re.compile(
+    r"^(?:желательн\w*|обязательн\w*|только|главное|просьб\w*|пожалуйста|чтобы)\b",
     flags=re.I,
 )
 
@@ -93,7 +98,7 @@ _CONVERSATIONAL_PRODUCT_LEADIN_RE = re.compile(
         (?:\s+(?:добавить|заказать|внести|записать|включить|положить|оформить))?
       | давай(?:те)?
         (?:\s+(?:добавим|закажем|внесём|внесем|запишем|включим|положим|оформим))?
-      | (?:добавь|добавьте|закажи|закажите|внеси|внесите|запиши|запишите|
+      | (?:добавь|добавьте|дабавь|дабавьте|закажи|закажите|внеси|внесите|запиши|запишите|
           включи|включите|положи|положите|возьми|возьмите|оформи|оформите|
           подбери|подберите|найди|найдите)
         (?:\s+(?:мне|нам))?
@@ -328,7 +333,15 @@ def _strip_conversational_product_leadin(value: str) -> str:
     """Удаляет разговорную просьбу, которая не является комментарием к товару."""
     text = _ADDITIVE_PRODUCT_LEADIN_RE.sub("", clean_text(value), count=1)
     text = _CONVERSATIONAL_PRODUCT_LEADIN_RE.sub("", text, count=1)
-    return re.sub(r"(?:\s*[,;:]\s*|\s+)(?:и|а|а\s+также)$", "", text, flags=re.I).strip()
+    text = re.sub(r"(?:\s*[,;:]\s*|\s+)(?:и|а|а\s+также)$", "", text, flags=re.I)
+    text = re.sub(
+        r"\s+(?:(?:мне|нам)\s+)?(?:хочу|хотел(?:ось)?\s+бы|нужно|надо|please|"
+        r"i\s+(?:want|need))\s*$",
+        "",
+        text,
+        flags=re.I,
+    )
+    return re.sub(r"\s+(?:мне|нам)\s*$", "", text, flags=re.I).strip()
 
 
 def _strip_product_facts_from_item_binding(
@@ -576,6 +589,49 @@ def _discard_unverified_item_comments(
                 CommentSource.EXPLICIT_MARKER.value if explicit_found else CommentSource.NONE.value
             )
         )
+
+
+def restore_omitted_explicit_item_comments(
+    items: list[dict[str, Any]], bindings: list[dict[str, Any]]
+) -> None:
+    """Возвращает явное локальное пожелание, пропущенное ИИ."""
+    if bindings:
+        return
+    for item in items:
+        if clean_text(item.get("comment") or item.get("user_comment_to_supplier")):
+            continue
+        source = clean_text(item.get("source_span")) or clean_text(item.get("source_line"))
+        query = clean_text(item.get("product_query"))
+        if not source or not query:
+            continue
+        comment = _explicit_comment_after_item_anchor(source, query)
+        if comment and _comment_source_is_authorized(comment, source):
+            _append_local_item_comment(item, comment, CommentSource.EXPLICIT_MARKER)
+
+
+def _explicit_comment_after_item_anchor(source: str, query: str) -> str:
+    """Находит явное пожелание только после подтверждённого товара в строке."""
+    query_words = {
+        word
+        for word in re.findall(r"[a-zа-яё0-9]+", normalize_text(query), flags=re.I)
+        if len(word) >= 4
+    }
+    seen_product_anchor = False
+    for match in re.finditer(r"[a-zа-яё]+", source, flags=re.I):
+        word = normalize_text(match.group(0))
+        if word in query_words:
+            seen_product_anchor = True
+        if not seen_product_anchor:
+            continue
+        comment = explicit_supplier_comment(source[match.start() :])
+        if (
+            not comment
+            or not _EXPLICIT_ITEM_REQUIREMENT_RE.search(normalize_text(comment))
+            or has_explicit_global_comment_scope(comment)
+        ):
+            continue
+        return strip_order_quantity_from_query(comment, comment)
+    return ""
 
 
 def _apply_semantic_comment_bindings(

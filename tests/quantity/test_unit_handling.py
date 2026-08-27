@@ -24,6 +24,12 @@ def _event() -> TelegramEvent:
     return TelegramEvent(update_id=1, chat_id="123456", input_type=InputKind.TEXT)
 
 
+@pytest.mark.parametrize("spoken_unit", ["мешок", "мешка", "мешков", "мешками"])
+def test_spoken_bag_units_are_normalized(spoken_unit: str) -> None:
+    """Приводит падежные формы мешка к одной единице заказа."""
+    assert normalize_unit(spoken_unit) == "мешок"
+
+
 def test_catalog_box_abbreviation_uses_the_same_unit_as_spoken_box(settings) -> None:  # type: ignore[no-untyped-def]
     """Не создаёт unit mismatch между «кор» и сокращением каталога «корб»."""
     assert normalize_unit("корб") == "кор"

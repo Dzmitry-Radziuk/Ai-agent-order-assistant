@@ -13,7 +13,7 @@ from restaurant_bot.catalog.evidence import (
     tokens,
     unverified_product_terms,
 )
-from restaurant_bot.catalog.retrieval import rank_candidates
+from restaurant_bot.catalog.retrieval import rank_candidates, rank_similar_candidates
 from restaurant_bot.catalog.safety import (
     can_auto_select,
     has_compatible_numeric_characteristics,
@@ -40,6 +40,7 @@ class CatalogSearchResult:
     candidates: tuple[Candidate, ...]
     found_in_scope: bool
     supplier_search_locked: bool = False
+    similar_only: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -75,6 +76,13 @@ class CatalogResolver:
             candidates = self._complete_candidates(query, candidates)
         if candidates:
             return CatalogSearchResult(tuple(candidates), found_in_scope=True)
+        similar_candidates = rank_similar_candidates(query, search_catalog, effective_hint)
+        if similar_candidates:
+            return CatalogSearchResult(
+                tuple(similar_candidates),
+                found_in_scope=True,
+                similar_only=True,
+            )
         if not strict_supplier:
             return CatalogSearchResult((), found_in_scope=False)
 
@@ -155,6 +163,8 @@ class CatalogResolver:
     ) -> CatalogDecision:
         """Разрешает автоподстановку только после всех hard veto."""
         if not candidates:
+            return CatalogDecision.CLARIFY
+        if any(candidate.reason == "similar" for candidate in candidates):
             return CatalogDecision.CLARIFY
         primary = candidates[0]
         unverified_terms = unverified_product_terms(query, primary.name)

@@ -161,13 +161,13 @@ def evaluate_not_found(
     if state.stage is SessionStage.AWAIT_PRODUCT_ADD_DETAILS and command.intent is Intent.CANCEL:
         return CompatibilityDecision(CompatibilityAction.CONTINUE)
     if command.intent is Intent.ADD_ITEMS:
-        if has_concrete_new_items(command):
-            return CompatibilityDecision(CompatibilityAction.INTERRUPT)
         if state.stage in {
             SessionStage.AWAIT_MANUAL_DETAILS,
             SessionStage.AWAIT_PRODUCT_ADD_DETAILS,
         }:
             return CompatibilityDecision(CompatibilityAction.CONTINUE)
+        if has_concrete_new_items(command) or has_named_product_items(command, command.text):
+            return CompatibilityDecision(CompatibilityAction.INTERRUPT)
         return CompatibilityDecision(CompatibilityAction.AMBIGUOUS)
 
     if command.intent in interrupt_intents:

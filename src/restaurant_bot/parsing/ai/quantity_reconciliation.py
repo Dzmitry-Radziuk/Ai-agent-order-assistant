@@ -11,6 +11,7 @@ from restaurant_bot.domain.units import UNIT_ALIASES, normalize_unit
 from restaurant_bot.parsing.number_words import parse_number_words
 from restaurant_bot.parsing.numeric import to_float
 from restaurant_bot.parsing.numeric_ranges import numeric_range_spans
+from restaurant_bot.parsing.packaging import explicit_packaging_preference
 from restaurant_bot.parsing.products import parse_product_lines
 from restaurant_bot.parsing.quantities import has_explicit_order_quantity, parse_quantity_unit
 from restaurant_bot.parsing.semantic.measurements import extract_semantic_facts
@@ -88,6 +89,80 @@ def _quantities_with_units(source_line: str) -> list[tuple[float, str]]:
             continue
         index += 1
     return found
+
+
+def _word_quantity_for_item(
+    source_line: str,
+    proposed_quantity: float | None,
+    proposed_unit: str,
+) -> tuple[float | None, str]:
+    """Подтверждает количество, произнесённое словом, в локальном фрагменте позиции."""
+    if proposed_quantity is None:
+        return None, ""
+    words = [
+        normalize_text(match.group(0)).strip(" .,:;—–-")
+        for match in re.finditer(r"\d+|[a-zа-яё]+", source_line, flags=re.IGNORECASE)
+    ]
+    expected_unit = normalize_unit(proposed_unit)
+    matches: list[tuple[float, str]] = []
+    for index in range(len(words)):
+        parsed = parse_number_words(words, index)
+        if parsed is None:
+            continue
+        quantity, end = parsed
+        if abs(quantity - proposed_quantity) > 1e-9:
+            continue
+        actual_unit = (
+            normalize_unit(words[end]) if end < len(words) and words[end] in UNIT_ALIASES else ""
+        )
+        if expected_unit and actual_unit and expected_unit != actual_unit:
+            continue
+        if expected_unit and not actual_unit and not (expected_unit == "шт" and index == 0):
+            continue
+        matches.append((quantity, actual_unit))
+    if not matches:
+        return None, ""
+    quantity, unit = matches[0]
+    return quantity, unit or expected_unit
+
+
+def _same_inflected_product_word(left: str, right: str) -> bool:
+    """Сопоставляет одно слово товара с безопасным учётом окончания."""
+    normalized_left = normalize_text(left)
+    normalized_right = normalize_text(right)
+    if normalized_left == normalized_right:
+        return True
+    shared_length = 0
+    for left_char, right_char in zip(normalized_left, normalized_right, strict=False):
+        if left_char != right_char:
+            break
+        shared_length += 1
+    return (
+        shared_length >= 4
+        and len(normalized_left) - shared_length <= 2
+        and len(normalized_right) - shared_length <= 2
+    )
+
+
+def _spoken_pair_quantity_for_item(
+    source_text: str, product_query: str
+) -> tuple[float, str] | None:
+    """Находит локальную конструкцию «пару <товар>» без переноса единицы соседа."""
+    query_tokens = re.findall(r"[a-zа-яё0-9-]+", normalize_text(product_query), flags=re.I)
+    if not query_tokens:
+        return None
+    for pair_match in re.finditer(r"\b(?:пару|пара)\b", normalize_text(source_text), flags=re.I):
+        phrase = re.split(r"\bи\b|[,.;]", source_text[pair_match.end() :], maxsplit=1)[0]
+        phrase_tokens = re.findall(r"[a-zа-яё0-9-]+", normalize_text(phrase), flags=re.I)
+        if not any(
+            _same_inflected_product_word(query_token, phrase_token)
+            for query_token in query_tokens
+            for phrase_token in phrase_tokens
+        ):
+            continue
+        unit = normalize_unit(phrase_tokens[0]) if phrase_tokens[0] in UNIT_ALIASES else "шт"
+        return 2.0, unit
+    return None
 
 
 def _terminal_order_quantity(source_line: str) -> tuple[float | None, str]:
@@ -254,6 +329,34 @@ def restore_explicit_order_terms(
             if model_quantity is not None
             else False
         )
+
+        word_quantity, word_unit = _word_quantity_for_item(
+            original_line,
+            model_quantity,
+            model_unit,
+        )
+        if (
+            word_quantity is not None
+            and not proposed_is_packaging
+            and not has_competing_order_quantity
+            and not (
+                source_item is not None
+                and source_item.packaging_role in {"catalog_attribute", "user_preference"}
+            )
+        ):
+            if not shared_source:
+                _mark_item_source(item, original_line)
+            item["quantity"] = word_quantity
+            item["unit"] = word_unit
+            continue
+
+        # Словесное «пару яблок» — явное количество этой позиции. Его нужно  # noqa: RUF003
+        # применить до fallback по общей source_line, иначе единица соседа
+        # («две бутылки ... и пару яблок») переносится на этот товар.
+        pair_quantity = _spoken_pair_quantity_for_item(source_text, item.get("product_query", ""))
+        if pair_quantity is not None:
+            item["quantity"], item["unit"] = pair_quantity
+            continue
 
         # До выбора товара каталог ещё не подтвердил, является ли мера частью
         # названия или количеством заказа. Поэтому не удаляем предложенную ИИ
@@ -445,16 +548,6 @@ def restore_explicit_order_terms(
             if source_quantity is not None:
                 continue
 
-        # Словесное «пару яблок» — явное количество этой позиции,
-        # а не случайная числовая характеристика товара.  # noqa: RUF003
-        query = normalize_text(item.get("product_query"))
-        pair = re.search(
-            r"\b(?:пару|пара)\s+([a-zа-я][a-zа-я0-9-]*)",
-            normalize_text(source_text),
-        )
-        if pair and query and (pair.group(1) in query or query in pair.group(1)):
-            item["quantity"] = 2.0
-            item["unit"] = "шт"
     _remove_confirmed_order_quantities_from_catalog_packaging(items, source_text)
     return items
 
@@ -544,16 +637,13 @@ def _packaging_role_from_context(
         confidence = float(item.get("packaging_confidence") or 0)
     except (TypeError, ValueError):
         confidence = 0
-    if role in {"catalog_attribute", "user_preference"} and confidence >= (
-        _PACKAGING_ROLE_CONFIDENCE_THRESHOLD
-    ):
+    normalized_source = normalize_text(source)
+    if explicit_packaging_preference(source):
+        return "user_preference", 0.9
+    if role == "catalog_attribute" and confidence >= _PACKAGING_ROLE_CONFIDENCE_THRESHOLD:
         return role, confidence
     if role == "ambiguous":
         return "ambiguous", max(confidence, 0.5)
-
-    normalized_source = normalize_text(source)
-    if _PACKAGING_PREFERENCE_RE.search(normalized_source):
-        return "user_preference", 0.9
     range_end = normalized_source.find(normalize_text(range_text))
     if re.search(r"\b(?:фасов\w*|упаков\w*)\b", normalized_source):
         return "ambiguous", 0.5

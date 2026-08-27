@@ -664,7 +664,13 @@ def _parse_product_line(
             flags=re.I,
         )
     ) or has_explicit_order_marker(line)
-    stripped = re.sub(r"^(?:добавь|добавить|закажи|заказать|нужно|надо)\s+", "", line, flags=re.I)
+    stripped = re.sub(
+        r"^(?:(?:добавь|добавьте|дабавь|дабавьте|добавить|закажи|закажите|заказать|"
+        r"хочу|хотим|мне\s+(?:нужно|надо)|нам\s+(?:нужно|надо))\s+)+",
+        "",
+        line,
+        flags=re.I,
+    )
     if _is_standalone_quantity(stripped):
         return []
     spoken_pair = _spoken_measurement_pair(stripped, unit_pattern)

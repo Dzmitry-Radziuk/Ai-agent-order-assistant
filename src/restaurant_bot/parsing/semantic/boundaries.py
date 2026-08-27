@@ -44,7 +44,7 @@ def _token_matches(left: str, right: str) -> bool:
         len(left) >= 4
         and len(right) >= 4
         and left[0] == right[0]
-        and (SequenceMatcher(None, left, right).ratio() >= 0.78)
+        and SequenceMatcher(None, left, right).ratio() >= 0.72
     )
 
 
@@ -108,15 +108,60 @@ def derive_item_source_spans(
         starts.append(start_index)
         minimum_index = start_index + 1
 
+    adjusted_starts = [
+        _extend_start_over_order_quantity(
+            source,
+            tokens,
+            start_index,
+            0 if index == 0 else starts[index - 1] + 1,
+        )
+        for index, start_index in enumerate(starts)
+    ]
     spans: list[ItemSourceSpan] = []
-    for index, start_index in enumerate(starts):
+    for index, start_index in enumerate(adjusted_starts):
         start = tokens[start_index][1]
-        end = tokens[starts[index + 1]][1] if index + 1 < len(starts) else len(source)
+        end = (
+            tokens[adjusted_starts[index + 1]][1]
+            if index + 1 < len(adjusted_starts)
+            else len(source)
+        )
         end = _trim_separator_connector(source, start, end)
         if index == len(starts) - 1:
             end = _trim_conflicting_detached_quantity(source, start, end)
         spans.append(ItemSourceSpan(start, end, source[start:end].strip(" ,;")))
     return tuple(spans)
+
+
+def _extend_start_over_order_quantity(
+    source: str,
+    source_tokens: list[tuple[str, int, int]],
+    anchor_index: int,
+    minimum_index: int,
+) -> int:
+    """Включает непосредственно стоящее перед товаром явное количество в его source span."""
+    if anchor_index <= minimum_index:
+        return anchor_index
+
+    previous_index = anchor_index - 1
+    previous_token = source_tokens[previous_index][0]
+    separator = source[source_tokens[previous_index][2] : source_tokens[anchor_index][1]]
+    if separator and not separator.isspace():
+        return anchor_index
+    unit_tokens = {normalize_text(value) for value in UNIT_ALIASES}
+    if previous_token in unit_tokens and previous_index > minimum_index:
+        number_index = previous_index - 1
+        number_token = source_tokens[number_index][0]
+        if _is_explicit_number_token(number_token) and number_index >= minimum_index:
+            return number_index
+
+    if _is_explicit_number_token(previous_token) and previous_index >= minimum_index:
+        return previous_index
+    return anchor_index
+
+
+def _is_explicit_number_token(value: str) -> bool:
+    """Проверяет цифровое или словесное обозначение количества."""
+    return bool(re.fullmatch(r"\d+(?:[,.]\d+)?", value)) or value in NUMBER_WORDS
 
 
 def _trim_separator_connector(source: str, start: int, end: int) -> int:
@@ -197,8 +242,16 @@ def build_item_references(items: list[ExtractedItem]) -> tuple[SemanticItemRefer
 
 
 def query_anchor_overlap(query: str, reference: SemanticItemReference) -> int:
-    """Считает число общих содержательных слов кандидата и ссылки товара."""
-    return len(semantic_anchor_tokens(query) & reference.anchor_tokens)
+    """Считает совпавшие якоря с учётом безопасных окончаний слов."""
+    query_tokens = semantic_anchor_tokens(query)
+    return sum(
+        1
+        for query_token in query_tokens
+        if any(
+            _token_matches(query_token, reference_token)
+            for reference_token in reference.anchor_tokens
+        )
+    )
 
 
 def has_independent_product_anchor(

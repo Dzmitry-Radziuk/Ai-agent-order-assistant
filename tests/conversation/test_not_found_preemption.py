@@ -330,6 +330,31 @@ def test_not_found_new_product_keeps_current_issue_behavior(settings) -> None:  
     assert result.state.stage is SessionStage.COLLECTING
 
 
+@pytest.mark.parametrize("input_type", [InputKind.TEXT, InputKind.VOICE])
+def test_named_product_without_quantity_interrupts_not_found(
+    settings, input_type: InputKind
+) -> None:  # type: ignore[no-untyped-def]
+    """Добавляет новый названный товар, не принимая его за ответ по старой ошибке."""
+    state = _not_found_state()
+    command = ParsedCommand(
+        intent=Intent.ADD_ITEMS,
+        text="пармезан",
+        items=[ExtractedItem(product_query="пармезан")],
+    )
+
+    result = ConversationEngine(settings).handle(
+        _event(command.text, input_type),
+        command,
+        state,
+        _catalog(),
+    )
+
+    old, new = result.state.cart
+    assert old.status is ItemStatus.NOT_FOUND
+    assert new.source_query == "пармезан"
+    assert new.status is ItemStatus.MISSING_QTY
+
+
 def test_not_found_independent_actions_do_not_mutate_context(settings) -> None:  # type: ignore[no-untyped-def]
     """Навигация и благодарность не применяются к старой карточке товара."""
     for text, command in (

@@ -614,6 +614,9 @@ class CatalogResolutionService:
             item.unit = ""
         item.candidates = candidates
         item.supplier_search_locked = search.supplier_search_locked
+        if search.similar_only:
+            item.status = ItemStatus.AMBIGUOUS
+            return
         if not search.found_in_scope:
             if (
                 catalog is not None

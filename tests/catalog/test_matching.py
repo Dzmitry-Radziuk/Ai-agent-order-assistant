@@ -2,7 +2,7 @@
 
 from restaurant_bot.catalog.evidence import has_catalog_search_evidence, remove_phrase_overlap
 from restaurant_bot.catalog.resolver import CatalogDecision, CatalogResolver
-from restaurant_bot.catalog.retrieval import rank_candidates
+from restaurant_bot.catalog.retrieval import rank_candidates, rank_similar_candidates
 from restaurant_bot.catalog.safety import can_auto_select
 from restaurant_bot.domain.models import CatalogProduct
 
@@ -25,6 +25,59 @@ def test_close_product_typo_keeps_only_relevant_candidate() -> None:
 def test_unrelated_words_do_not_create_false_candidate() -> None:
     """Проверяет, что несвязанные слова не создают ложного кандидата."""
     assert rank_candidates("пару яблок", _catalog()) == []
+
+
+def test_typo_gets_similar_candidate_when_strict_score_is_too_low() -> None:
+    """Показывает осторожный вариант для опечатки, не превращая его в точный матч."""
+    catalog = [
+        CatalogProduct(
+            product_id="apple",
+            name="Яблоко красное сладкое Россия",
+            unit="кг",
+        )
+    ]
+
+    result = CatalogResolver().search("яблак", catalog)
+
+    assert result.similar_only is True
+    assert [candidate.product_id for candidate in result.candidates] == ["apple"]
+    assert result.candidates[0].reason == "similar"
+
+
+def test_colloquial_potato_name_offers_catalog_variants_without_auto_selection() -> None:
+    """Показывает картофель для «картошки», не считая его точным совпадением."""
+    catalog = [
+        CatalogProduct(product_id="old-potato", name="Картофель старый (вес)", unit="кг"),
+        CatalogProduct(product_id="young-potato", name="Картофель молодой (вес)", unit="кг"),
+    ]
+
+    result = CatalogResolver().search("картошка", catalog)
+
+    assert result.similar_only is True
+    assert {candidate.product_id for candidate in result.candidates} == {
+        "old-potato",
+        "young-potato",
+    }
+    assert all(candidate.reason == "similar" for candidate in result.candidates)
+
+
+def test_similar_candidate_does_not_make_strict_unrelated_query_match() -> None:
+    """Не предлагает вариант по одному случайному или общему слову."""
+    catalog = [CatalogProduct(product_id="apple", name="Яблоко красное сладкое Россия")]
+
+    assert CatalogResolver().search("текстовый маркер", catalog).candidates == ()
+
+
+def test_similar_candidate_respects_explicit_numeric_variant() -> None:
+    """Не предлагает похожую фасовку, если числовой признак товара противоречит запросу."""
+    catalog = [
+        CatalogProduct(product_id="cream-10", name="Сметана 10% фермерская"),
+        CatalogProduct(product_id="cream-20", name="Сметана 20% фермерская"),
+    ]
+
+    result = rank_similar_candidates("сметана 30%", catalog)
+
+    assert result == []
 
 
 def test_multitoken_query_needs_evidence_for_each_product_word() -> None:

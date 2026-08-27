@@ -76,6 +76,94 @@ def test_multi_item_source_spans_keep_order_quantity_local_to_last_item() -> Non
     assert result["items"][0]["source_span"] != result["items"][1]["source_span"]
 
 
+def test_leading_spoken_quantities_stay_with_the_following_product() -> None:
+    """Не переносит начальное словесное количество на соседний товар."""
+    source = "Один килограмм пеламиды и два килограмма томатов."
+    restored = recover_omitted_explicit_items(
+        {
+            "intent": Intent.ADD_ITEMS,
+            "items": [
+                {
+                    "product_query": "пеламиды",
+                    "quantity": 1,
+                    "unit": "кг",
+                    "source_line": "",
+                },
+                {
+                    "product_query": "томатов",
+                    "quantity": 2,
+                    "unit": "кг",
+                    "source_line": "",
+                },
+            ],
+        },
+        source,
+    )
+
+    assert [(item["quantity"], item["unit"]) for item in restored["items"]] == [
+        (1.0, "кг"),
+        (2.0, "кг"),
+    ]
+
+
+def test_leading_count_word_keeps_model_piece_quantity() -> None:
+    """Сохраняет количество штук без повторно названной единицы."""
+    source = "Бутылка водки и две селедки."
+    restored = recover_omitted_explicit_items(
+        {
+            "intent": Intent.ADD_ITEMS,
+            "items": [
+                {
+                    "product_query": "водки",
+                    "quantity": None,
+                    "unit": "",
+                    "source_line": "",
+                },
+                {
+                    "product_query": "селедки",
+                    "quantity": 2,
+                    "unit": "шт",
+                    "source_line": "",
+                },
+            ],
+        },
+        source,
+    )
+
+    assert restored["items"][0]["quantity"] is None
+    assert (restored["items"][1]["quantity"], restored["items"][1]["unit"]) == (2.0, "шт")
+
+
+def test_spoken_pair_keeps_piece_unit_after_neighbor_bottle_quantity() -> None:
+    """Не переносит единицу «бутылка» на товар с количеством «пару»."""
+    source = "А если я хочу две бутылки водки и пару селедки?"
+    restored = recover_omitted_explicit_items(
+        {
+            "intent": Intent.ADD_ITEMS,
+            "items": [
+                {
+                    "product_query": "водка",
+                    "quantity": 2,
+                    "unit": "бутылка",
+                    "source_line": source,
+                },
+                {
+                    "product_query": "селедка",
+                    "quantity": 2,
+                    "unit": "штука",
+                    "source_line": source,
+                },
+            ],
+        },
+        source,
+    )
+
+    assert [(item["quantity"], item["unit"]) for item in restored["items"]] == [
+        (2.0, "бут"),
+        (2.0, "шт"),
+    ]
+
+
 def test_partial_ai_source_lines_are_bound_to_their_product_anchors() -> None:
     """Восстанавливает хвост количества по границе товара, а не по соседней фасовке."""
     source = (
@@ -1412,6 +1500,17 @@ def test_unknown_ai_response_does_not_recover_lone_quality_qualifier() -> None:
     restored = recover_omitted_explicit_items(
         {"intent": Intent.UNKNOWN, "items": []},
         "свежий",
+    )
+
+    assert restored["intent"] is Intent.UNKNOWN
+    assert restored["items"] == []
+
+
+def test_unknown_ai_response_does_not_recover_deictic_voice_phrase() -> None:
+    """Не создаёт новый товар из голосовой ссылки на неуказанный контекст."""
+    restored = recover_omitted_explicit_items(
+        {"intent": Intent.UNKNOWN, "items": []},
+        "Все эти лежитки оранжевые",
     )
 
     assert restored["intent"] is Intent.UNKNOWN

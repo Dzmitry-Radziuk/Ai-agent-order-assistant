@@ -36,6 +36,7 @@ from restaurant_bot.observability import Tracer
 from restaurant_bot.parsing.ai.comment_reconciliation import (
     _CONVERSATIONAL_PRODUCT_LEADIN_RE,
     _comment_scope_has_explicit_anchor,
+    _strip_conversational_product_leadin,
 )
 from restaurant_bot.parsing.ai.item_reconciliation import _repair_command_mixed_script_queries
 from restaurant_bot.parsing.ai.quantity_reconciliation import (
@@ -356,14 +357,25 @@ class OpenAIService:
                     usage_details=self._usage_details(response),
                 )
         except (APIConnectionError, APITimeoutError, RateLimitError) as error:
+            fallback = self._deterministic_transport_fallback(
+                text, deterministic, force_ai=force_ai
+            )
             logger.warning(
                 "text_ai_transport_failed",
                 text=text,
                 error_type=type(error).__name__,
                 deterministic_intent=deterministic.intent.value,
                 deterministic_item_count=len(deterministic.items),
-                deterministic_fallback_used=False,
+                deterministic_fallback_used=fallback is not None,
             )
+            if fallback is not None:
+                logger.warning(
+                    "text_ai_transport_fallback",
+                    text=text,
+                    intent=fallback.intent.value,
+                    item_count=len(fallback.items),
+                )
+                return fallback
             raise
         parsed = response.output_parsed
         if parsed is None:
@@ -515,6 +527,45 @@ class OpenAIService:
             if normalize_unit(match.group("unit")) != normalize_unit(item.unit):
                 return False
         return True
+
+    @staticmethod
+    def _deterministic_transport_fallback(
+        text: str,
+        command: ParsedCommand,
+        *,
+        force_ai: bool,
+    ) -> ParsedCommand | None:
+        """Разрешает резервный ответ после сбоя AI только для одной однозначной позиции."""
+        if force_ai or command.intent != Intent.ADD_ITEMS or len(command.items) != 1:
+            return None
+        if numeric_range_spans(text) or command.global_comment:
+            return None
+        item = command.items[0]
+        quantities = _quantities_with_units(text)
+        if (
+            item.quantity is None
+            or item.quantity <= 0
+            or not normalize_unit(item.unit)
+            or clean_text(item.comment)
+            or clean_text(item.user_comment_to_supplier)
+            or len(quantities) != 1
+        ):
+            return None
+        quantity, unit = quantities[0]
+        if abs(float(item.quantity) - quantity) > 1e-9 or normalize_unit(item.unit) != unit:
+            return None
+        query = _strip_conversational_product_leadin(item.product_query)
+        query = re.sub(
+            r"\s+\b(?:хочу|хотим|нужно|надо)\b(?=\s+\d|\s*$)",
+            "",
+            query,
+            flags=re.IGNORECASE,
+        ).strip(" .,;:-—–")
+        if not query or not re.search(r"[a-zа-яё]", normalize_text(query), flags=re.IGNORECASE):
+            return None
+        if query != item.product_query:
+            item = item.model_copy(update={"product_query": query})
+        return _repair_command_mixed_script_queries(command.model_copy(update={"items": [item]}))
 
     @staticmethod
     def _can_use_deterministic_single_product_with_quantity(

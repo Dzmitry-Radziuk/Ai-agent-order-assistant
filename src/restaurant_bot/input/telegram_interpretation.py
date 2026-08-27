@@ -330,7 +330,10 @@ class TelegramInputInterpreter:
                 }
             )
         logger.info("unverified_history_query_rejected")
-        return ParsedCommand(intent=Intent.SMALL_TALK, text=text)
+        return ParsedCommand(
+            intent=classify_bot_conversation(text) or Intent.SMALL_TALK,
+            text=text,
+        )
 
     @staticmethod
     def _standalone_final_review_command(

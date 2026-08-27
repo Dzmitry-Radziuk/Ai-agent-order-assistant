@@ -25,7 +25,13 @@ _HELP_SHAPE_RE = re.compile(
 )
 _SMALL_TALK_RE = re.compile(
     r"\b(?:флуд\w*|болта\w*|поболта\w*|поговор\w*|шут\w*|анекдот\w*|"
-    r"как\s+дела|расскаж\w*\s+(?:анекдот|шутк\w*))\b"
+    r"как\s+дела|вечер\s+в\s+хату|what(?:'s| is)\s+up|how\s+are\s+you|"
+    r"расскаж\w*\s+(?:анекдот|шутк\w*))\b"
+)
+_GREETING_RE = re.compile(
+    r"^\s*(?:привет|здрасти|здравствуйте|добрый\s+(?:день|вечер)|доброе\s+утро|"
+    r"hi|hello|hey|good\s+(?:morning|afternoon|evening)|privet|zdrasti)[\s!,.?]*$",
+    flags=re.IGNORECASE,
 )
 
 _META_STEMS = (
@@ -239,6 +245,8 @@ def classify_bot_conversation(text: str) -> Intent | None:
     if not normalized:
         return None
     words = normalized.split()
+    if _GREETING_RE.fullmatch(normalized):
+        return Intent.GREETING
     if _SMALL_TALK_RE.search(normalized):
         return Intent.SMALL_TALK
     if is_conversational_non_history(normalized):

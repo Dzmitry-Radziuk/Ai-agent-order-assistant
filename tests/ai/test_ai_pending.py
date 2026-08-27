@@ -152,6 +152,41 @@ def test_zero_confidence_without_contradiction_keeps_strong_similar_option(setti
     assert [candidate.product_id for candidate in resolved.state.cart[0].candidates] == ["salmon"]
 
 
+def test_base_product_candidate_survives_model_variant_contradiction(settings) -> None:  # type: ignore[no-untyped-def]
+    """Оставляет близкий вариант пользователю, если модель добавила признак сама."""
+    candidate = Candidate(
+        product_id="lard-salted",
+        name="Свинина Сало солен. (кг)",
+        supplier="Мясо",
+        unit="кг",
+        score=53.75,
+    )
+    item = CartItem(
+        id="lard-request",
+        source_query="сало",
+        quantity=None,
+        unit="",
+        status=ItemStatus.AMBIGUOUS,
+        candidates=[candidate],
+    )
+    matcher = _Matcher(
+        ProductMatchDecision(
+            action="not_found",
+            confidence=0.0,
+            contradictions=['запрос содержит "Сало", но продукт имеет информацию о засолке'],
+        )
+    )
+
+    resolved = _orchestrator(settings, matcher)._resolve_ai_pending(
+        TelegramEvent(update_id=14, chat_id="123456", input_type=InputKind.VOICE),
+        EngineResult(state=ConversationState(cart=[item]), reply=issue_reply(item, 0)),
+        [CatalogProduct(product_id=candidate.product_id, name=candidate.name, unit="кг")],
+    )
+
+    assert resolved.state.cart[0].status is ItemStatus.AMBIGUOUS
+    assert [entry.product_id for entry in resolved.state.cart[0].candidates] == ["lard-salted"]
+
+
 def test_low_confidence_ai_not_found_keeps_candidate_choice_for_user(settings) -> None:  # type: ignore[no-untyped-def]
     """Проверяет, что при отказе ИИ выбор кандидата сохраняется для пользователя."""
     candidate = Candidate(product_id="rose", name="Сироп Роза", supplier="Сиропы", unit="шт")
@@ -172,6 +207,35 @@ def test_low_confidence_ai_not_found_keeps_candidate_choice_for_user(settings) -
 
     assert resolved.state.cart[0].status is ItemStatus.AMBIGUOUS
     assert resolved.state.cart[0].candidates[0].product_id == "rose"
+
+
+def test_ai_not_found_does_not_drop_typo_similarity_shortlist(settings) -> None:  # type: ignore[no-untyped-def]
+    """Сохраняет похожий вариант, чтобы пользователь мог подтвердить опечатку вручную."""
+    candidate = Candidate(
+        product_id="apple",
+        name="Яблоко красное",
+        unit="кг",
+        score=34.5,
+        reason="similar",
+    )
+    item = CartItem(
+        id="typo",
+        source_query="яблак",
+        quantity=5,
+        unit="кг",
+        status=ItemStatus.AMBIGUOUS,
+        candidates=[candidate],
+    )
+    matcher = _Matcher(ProductMatchDecision(action="not_found", confidence=0.99))
+
+    resolved = _orchestrator(settings, matcher)._resolve_ai_pending(
+        TelegramEvent(update_id=15, chat_id="123456", input_type=InputKind.TEXT),
+        EngineResult(state=ConversationState(cart=[item]), reply=issue_reply(item, 0)),
+        [CatalogProduct(product_id="apple", name="Яблоко красное", unit="кг")],
+    )
+
+    assert resolved.state.cart[0].status is ItemStatus.AMBIGUOUS
+    assert [entry.product_id for entry in resolved.state.cart[0].candidates] == ["apple"]
 
 
 @pytest.mark.parametrize(

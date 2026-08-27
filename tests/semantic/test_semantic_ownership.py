@@ -68,6 +68,47 @@ def test_decimal_comma_is_not_a_product_separator() -> None:
     assert "3,2%" in items[0].product_query
 
 
+def test_explicit_voice_requirement_is_restored_without_losing_order_quantity() -> None:
+    """Сохраняет явное пожелание из голоса в комментарии одной позиции."""
+    source = (
+        "Мне нужно филе форели 0,8-1,3 кг, обязательно зачищенные тренце, "
+        "нужно 10 кг, и картошка 5 кг."
+    )
+    result = recover_omitted_explicit_items(
+        {
+            "intent": Intent.ADD_ITEMS,
+            "items": [
+                {
+                    "product_query": "филе форели 0,8-1,3 кг зачищенные тренце",
+                    "quantity": 10,
+                    "unit": "кг",
+                    "comment": "",
+                    "source_span": "филе форели 0,8-1,3 кг, обязательно зачищенные тренце, нужно 10 кг",
+                    "source_line": "филе форели 0,8-1,3 кг, обязательно зачищенные тренце, нужно 10 кг",
+                    "packaging_role": "user_preference",
+                    "packaging_confidence": 1,
+                },
+                {
+                    "product_query": "картошка",
+                    "quantity": 5,
+                    "unit": "кг",
+                    "comment": "",
+                    "source_span": "картошка 5 кг",
+                    "source_line": "картошка 5 кг",
+                },
+            ],
+        },
+        source,
+    )
+
+    trout, potato = result["items"]
+    assert (trout["quantity"], trout["unit"]) == (10.0, "кг")
+    assert trout["comment"] == "обязательно зачищенные тренце"
+    assert trout["comment_source"] == "explicit_marker"
+    assert trout["packaging_role"] == "catalog_attribute"
+    assert (potato["quantity"], potato["unit"]) == (5.0, "кг")
+
+
 def test_product_anchor_evidence_keeps_real_list_boundaries() -> None:
     """Разделяет только самостоятельные товарные названия."""
     assert [item.product_query for item in parse_product_lines("лук, картошка, морковь")] == [
@@ -79,6 +120,64 @@ def test_product_anchor_evidence_keeps_real_list_boundaries() -> None:
         (item.product_query, item.quantity, item.unit)
         for item in parse_product_lines("лук 5 кг, картошка 10 кг")
     ] == [("лук", 5, "кг"), ("картошка", 10, "кг")]
+
+
+def test_conjoined_voice_items_keep_each_word_quantity() -> None:
+    """Сохраняет две позиции и их количества после семантической сверки."""
+    source = "Один килограмм пеламиды тушка и два килограмма томатов."
+    result = recover_omitted_explicit_items(
+        {
+            "intent": Intent.ADD_ITEMS,
+            "items": [
+                {
+                    "product_query": "пеламида тушка",
+                    "quantity": 1,
+                    "unit": "кг",
+                    "source_line": source,
+                },
+                {
+                    "product_query": "томаты",
+                    "quantity": 2,
+                    "unit": "кг",
+                    "source_line": source,
+                },
+            ],
+        },
+        source,
+    )
+
+    assert [
+        (item["product_query"], item["quantity"], item["unit"]) for item in result["items"]
+    ] == [("пеламида тушка", 1, "кг"), ("томаты", 2, "кг")]
+
+
+def test_spoken_package_quantity_is_restored_without_inventing_implicit_one() -> None:
+    """Восстанавливает «два мешка», но не придумывает количество для второй позиции."""
+    source = "Два мешка картошки и тушу лосося"
+    result = recover_omitted_explicit_items(
+        {
+            "intent": Intent.ADD_ITEMS,
+            "items": [
+                {
+                    "product_query": "картошка",
+                    "quantity": 2,
+                    "unit": "мешок",
+                    "source_line": "Два мешка картошки",
+                },
+                {
+                    "product_query": "туша лосося",
+                    "quantity": 1,
+                    "unit": "",
+                    "source_line": "тушу лосося",
+                },
+            ],
+        },
+        source,
+    )
+
+    assert result["items"][0]["quantity"] == 2
+    assert result["items"][0]["unit"] == "мешок"
+    assert result["items"][1]["quantity"] is None
 
 
 def test_unmarked_qualifier_tail_stays_with_one_product() -> None:
