@@ -66,7 +66,11 @@ from restaurant_bot.parsing.commands.item_commands import (
 from restaurant_bot.parsing.comment_scope import has_explicit_global_comment_scope
 from restaurant_bot.parsing.numeric import to_float
 from restaurant_bot.parsing.numeric_ranges import numeric_range_spans
-from restaurant_bot.parsing.semantic.measurements import strip_order_quantity_from_query
+from restaurant_bot.parsing.semantic.measurements import (
+    has_spoken_pair_marker,
+    strip_authorized_spoken_pair_marker,
+    strip_order_quantity_from_query,
+)
 from restaurant_bot.parsing.semantic_routing import (
     classify_bot_conversation,
     normalize_comment_proposal,
@@ -564,6 +568,8 @@ class OpenAIService:
                 return None
         query = _strip_conversational_product_leadin(item.product_query)
         query = strip_order_quantity_from_query(query, text)
+        if pair_quantity is not None:
+            query = strip_authorized_spoken_pair_marker(query, text)
         query = re.sub(
             r"\s+\b(?:хочу|хотим|нужно|надо)\b(?=\s+\d|\s*$)",
             "",
@@ -634,6 +640,10 @@ class OpenAIService:
             return False
         product_source = explicit_target or text
         if OpenAIService._looks_like_semantic_sentence(product_source):
+            return False
+        # Разговорное «пару/пара» требует AI-сверки: детерминированный короткий
+        # путь не должен принять количество за часть названия товара.
+        if has_spoken_pair_marker(product_source):
             return False
         item = command.items[0]
         query = clean_text(item.product_query)

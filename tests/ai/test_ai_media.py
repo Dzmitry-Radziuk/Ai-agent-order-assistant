@@ -20,6 +20,7 @@ from restaurant_bot.integrations.openai_client import (
 )
 from restaurant_bot.observability import Tracer
 from restaurant_bot.parsing.ai.schemas import PhotoDocumentObservation
+from restaurant_bot.parsing.commands.api import infer_intent
 
 
 class _Transcriptions:
@@ -60,6 +61,13 @@ def test_text_client_uses_bounded_timeout_without_hidden_retries(settings, mocke
         "timeout": settings.openai_text_timeout_seconds,
         "max_retries": settings.openai_text_max_retries,
     }
+
+
+def test_short_spoken_pair_does_not_use_product_only_fast_path() -> None:
+    """Передаёт «пару яблок» в AI, чтобы не потерять количество без единицы."""
+    command = infer_intent("Пару яблок.")
+
+    assert not OpenAIService._can_use_deterministic_short_product("Пару яблок.", command)
 
 
 def test_openai_input_schema_has_fixed_department_quantity_fields() -> None:
@@ -688,6 +696,18 @@ def test_text_timeout_falls_back_to_a_spoken_pair_quantity(settings) -> None:  #
     assert [
         (item.product_query, item.quantity, item.unit, item.comment) for item in command.items
     ] == [("лука свежего", 2.0, "кг", "")]
+
+
+def test_text_timeout_cleans_an_untyped_spoken_pair_from_product_query(settings) -> None:  # type: ignore[no-untyped-def]
+    """Очищает «пару» из названия при подтверждённом fallback в штуках."""
+    service = _service(settings, SimpleNamespace(responses=_TimeoutResponses()))
+
+    command = service.parse_text("Пару яблок")
+
+    assert command.intent is Intent.ADD_ITEMS
+    assert [(item.product_query, item.quantity, item.unit) for item in command.items] == [
+        ("яблок", 2.0, "шт")
+    ]
 
 
 def test_text_timeout_does_not_guess_comments_for_spoken_products(settings) -> None:  # type: ignore[no-untyped-def]

@@ -82,6 +82,26 @@ def test_spoken_pair_measurement_is_removed_only_when_source_confirms_it() -> No
     assert strip_order_quantity_from_query("пара обуви", "пара обуви") == "пара обуви"
 
 
+def test_short_spoken_pair_is_parsed_as_order_quantity() -> None:
+    """Распознаёт короткую голосовую фразу «пару килограмм лука»."""
+    items = parse_product_lines("Пару килограмм лука.")
+
+    assert len(items) == 1
+    assert (items[0].product_query, items[0].quantity, items[0].unit) == ("лука", 2.0, "кг")
+
+
+def test_spoken_pair_with_order_leadin_keeps_product_anchor() -> None:
+    """Отделяет вводную команду и количество от названия товара."""
+    items = parse_product_lines("Нужно пара килограмма лука зеленого.")
+
+    assert len(items) == 1
+    assert (items[0].product_query, items[0].quantity, items[0].unit) == (
+        "лука зеленого",
+        2.0,
+        "кг",
+    )
+
+
 def test_trailing_spoken_pair_measurement_is_removed_only_from_its_product() -> None:
     """Очищает хвост «пару килограмм» без затрагивания названия другого товара."""
     source = "Лука зелёного пару килограмм, форели пару килограмм."

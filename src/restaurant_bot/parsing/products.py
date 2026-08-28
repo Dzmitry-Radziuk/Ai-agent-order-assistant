@@ -23,6 +23,7 @@ from restaurant_bot.parsing.quantities import (
     has_explicit_order_marker,
     shared_quantity_phrase,
 )
+from restaurant_bot.parsing.semantic.measurements import spoken_pair_quantity_for_query
 
 _CATALOG_ATTRIBUTE_WORDS = {
     "в",
@@ -648,6 +649,55 @@ def _word_quantity_item(
     return None
 
 
+def _spoken_pair_quantity_item(
+    stripped: str,
+    source_line: str,
+    unit_pattern: str,
+) -> ExtractedItem | None:
+    """Разбирает разговорное количество «пару/пара единиц» перед или после товара."""
+    if len(re.findall(r"\b(?:пару|пара)\b", normalize_text(stripped), flags=re.I)) != 1:
+        return None
+    prefix = re.match(
+        rf"^(?:пару|пара)\s+(?P<unit>{unit_pattern})\b\s+",
+        stripped,
+        flags=re.I,
+    )
+    if prefix is not None:
+        query = clean_text(stripped[prefix.end() :]).strip(" .,;:!?-—–")
+        quantity = spoken_pair_quantity_for_query(stripped, query)
+        if (
+            query
+            and quantity is not None
+            and _has_independent_product_evidence(query, unit_pattern)
+        ):
+            return ExtractedItem(
+                product_query=query,
+                quantity=quantity[0],
+                unit=quantity[1],
+                source_line=source_line,
+            )
+    suffix = re.search(
+        rf"\s+(?:пару|пара)\s+(?P<unit>{unit_pattern})\b\s*[.,;:!?]*$",
+        stripped,
+        flags=re.I,
+    )
+    if suffix is not None:
+        query = clean_text(stripped[: suffix.start()]).strip(" .,;:!?-—–")
+        quantity = spoken_pair_quantity_for_query(stripped, query)
+        if (
+            query
+            and quantity is not None
+            and _has_independent_product_evidence(query, unit_pattern)
+        ):
+            return ExtractedItem(
+                product_query=query,
+                quantity=quantity[0],
+                unit=quantity[1],
+                source_line=source_line,
+            )
+    return None
+
+
 def _parse_product_line(
     line: str,
     lines_count: int,
@@ -666,13 +716,16 @@ def _parse_product_line(
     ) or has_explicit_order_marker(line)
     stripped = re.sub(
         r"^(?:(?:добавь|добавьте|дабавь|дабавьте|добавить|закажи|закажите|заказать|"
-        r"хочу|хотим|мне\s+(?:нужно|надо)|нам\s+(?:нужно|надо))\s+)+",
+        r"хочу|хотим|нужно|надо|мне\s+(?:нуж\w*|надо)|нам\s+(?:нуж\w*|надо))\s+)+",
         "",
         line,
         flags=re.I,
     )
     if _is_standalone_quantity(stripped):
         return []
+    spoken_pair_item = _spoken_pair_quantity_item(stripped, line, unit_pattern)
+    if spoken_pair_item is not None:
+        return [spoken_pair_item]
     spoken_pair = _spoken_measurement_pair(stripped, unit_pattern)
     if spoken_pair is not None:
         if not _has_independent_product_evidence(stripped, unit_pattern):

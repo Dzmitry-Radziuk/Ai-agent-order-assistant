@@ -104,6 +104,20 @@ def test_spoken_pair_quantity_does_not_replace_ai_product_query() -> None:
     ] == [("лука свежего", 2, "кг")]
 
 
+def test_standalone_spoken_pair_leadin_preserves_ai_product_query() -> None:
+    """Не заменяет результат AI исходной фразой «нужно пара килограмма»."""
+    source = "Нужно пара килограмма лука зеленого."
+    payload = _item_payload(source, "лук зеленый")
+    payload["items"][0]["quantity"] = 2
+    payload["items"][0]["unit"] = "кг"
+
+    restored = recover_omitted_explicit_items(payload, source)
+
+    assert [
+        (item["product_query"], item["quantity"], item["unit"]) for item in restored["items"]
+    ] == [("лук зеленый", 2, "кг")]
+
+
 def test_source_order_quantity_is_not_replaced_by_packaging_fallback() -> None:
     """Не заменяет количество заказа из исходной строки найденной фасовкой."""
     source = "Соус 500 мл, 12 штук в коробке — 2 шт"

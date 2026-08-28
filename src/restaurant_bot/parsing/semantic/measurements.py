@@ -69,6 +69,7 @@ _SPOKEN_PAIR_MEASUREMENT_SUFFIX_RE = re.compile(
     rf"\s+(?:пару|пара)\s+(?P<unit>{_UNIT})\b\s*[.,;:!?]*\s*$",
     flags=re.I,
 )
+_SPOKEN_PAIR_MARKER_RE = re.compile(r"\b(?:пару|пара)\b", flags=re.I)
 _SPOKEN_PAIR_SEGMENT_BOUNDARY_RE = re.compile(
     r"[,.;]|\b(?:и|или|а|также|потом|затем)\b",
     flags=re.I,
@@ -326,6 +327,25 @@ def spoken_pair_quantity_for_query(
             continue
         return 2.0, normalize_unit(match.group("unit"))
     return None
+
+
+def has_spoken_pair_marker(source_text: str) -> bool:
+    """Проверяет разговорный маркер количества «пару» или «пара»."""
+    return bool(_SPOKEN_PAIR_MARKER_RE.search(normalize_text(source_text)))
+
+
+def strip_authorized_spoken_pair_marker(query: str, source_text: str) -> str:
+    """Удаляет «пару/пара» из названия только после подтверждения количества."""
+    value = clean_text(query).strip(" .,;:-—–")
+    if not value or not has_spoken_pair_marker(source_text):
+        return value
+    prefix = re.match(r"^(?:пару|пара)\s+", value, flags=re.I)
+    if prefix is not None:
+        return value[prefix.end() :].strip(" .,;:-—–")
+    suffix = re.search(r"\s+(?:пару|пара)\s*$", value, flags=re.I)
+    if suffix is not None:
+        return value[: suffix.start()].strip(" .,;:-—–")
+    return value
 
 
 def _source_has_spoken_pair_measurement(source_text: str, unit: str) -> bool:

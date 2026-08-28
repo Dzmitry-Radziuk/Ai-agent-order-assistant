@@ -48,6 +48,10 @@ def _token_matches(left: str, right: str) -> bool:
     """Проверяет точное или безопасное лексическое совпадение якоря."""
     if left == right:
         return True
+    if len(left) == 3 and len(right) >= 3 and left == right[:3]:
+        return True
+    if len(right) == 3 and len(left) >= 3 and right == left[:3]:
+        return True
     return (
         len(left) >= 4
         and len(right) >= 4
