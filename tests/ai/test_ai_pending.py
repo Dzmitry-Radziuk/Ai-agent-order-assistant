@@ -129,6 +129,90 @@ def test_ai_selects_exact_spoken_packaging_and_supplier_requirement(settings) ->
     assert matcher.calls[0][2] == ""
 
 
+def test_catalog_equivalence_resolves_joined_voice_brand_before_ai(settings) -> None:  # type: ignore[no-untyped-def]
+    """Не передаёт ИИ единственный точный вариант, подтверждённый голосовой формой."""
+    expected = CatalogProduct(
+        product_id="shiro-miso",
+        name="Паста соевая shiro miso светлая, Китай 1 кг",
+        supplier="Соусы",
+        unit="шт",
+    )
+    other = CatalogProduct(
+        product_id="aka-miso",
+        name="Паста соевая aka miso темная, Китай 1 кг",
+        supplier="Соусы",
+        unit="шт",
+    )
+    item = CartItem(
+        id="miso-request",
+        source_query="паста соевая широмисо",
+        quantity=3,
+        unit="шт",
+        status=ItemStatus.AMBIGUOUS,
+        candidates=[
+            Candidate(product_id=expected.product_id, name=expected.name, unit="шт", score=81),
+            Candidate(product_id=other.product_id, name=other.name, unit="шт", score=80),
+        ],
+    )
+    matcher = _Matcher(ProductMatchDecision(action="not_found", confidence=0.99))
+
+    resolved = _orchestrator(settings, matcher)._resolve_ai_pending(
+        TelegramEvent(update_id=12_001, chat_id="123456", input_type=InputKind.VOICE),
+        EngineResult(state=ConversationState(cart=[item]), reply=issue_reply(item, 0)),
+        [expected, other],
+    )
+
+    assert matcher.calls == []
+    assert resolved.state.cart[0].catalog_product_id == expected.product_id
+    assert resolved.state.cart[0].status is ItemStatus.MATCHED
+
+
+def test_catalog_equivalence_resolves_spoken_packaging_before_ai(settings) -> None:  # type: ignore[no-untyped-def]
+    """Выбирает единственный вариант с подтверждённой разговорной фасовкой."""
+    expected = CatalogProduct(
+        product_id="dijon-chatel",
+        name="Горчица Дижонская CHATEL, ведро, 1 кг, 6 шт/кор, Франция",
+        supplier="Соусы",
+        unit="шт",
+    )
+    other = CatalogProduct(
+        product_id="grain-chatel",
+        name="Горчица Зернистая CHATEL, ведро, 1 кг, 6 шт/кор, Франция",
+        supplier="Соусы",
+        unit="шт",
+    )
+    item = CartItem(
+        id="mustard-request",
+        source_query="горчица дижонская чатал ведро шесть штук в коробке",
+        source_line=(
+            "горчица дижонская чатал ведро один килограмм, шесть штук в коробке, пятнадцать штук"
+        ),
+        source_span=(
+            "горчица дижонская чатал ведро один килограмм, шесть штук в коробке, пятнадцать штук"
+        ),
+        quantity=15,
+        unit="шт",
+        packaging_text="один килограмм, шесть штук в коробке",
+        packaging_role="catalog_attribute",
+        status=ItemStatus.AMBIGUOUS,
+        candidates=[
+            Candidate(product_id=expected.product_id, name=expected.name, unit="шт", score=66),
+            Candidate(product_id=other.product_id, name=other.name, unit="шт", score=45),
+        ],
+    )
+    matcher = _Matcher(ProductMatchDecision(action="not_found", confidence=0.99))
+
+    resolved = _orchestrator(settings, matcher)._resolve_ai_pending(
+        TelegramEvent(update_id=12_002, chat_id="123456", input_type=InputKind.VOICE),
+        EngineResult(state=ConversationState(cart=[item]), reply=issue_reply(item, 0)),
+        [expected, other],
+    )
+
+    assert matcher.calls == []
+    assert resolved.state.cart[0].catalog_product_id == expected.product_id
+    assert resolved.state.cart[0].status is ItemStatus.MATCHED
+
+
 def test_zero_confidence_without_contradiction_keeps_strong_similar_option(settings) -> None:  # type: ignore[no-untyped-def]
     """Оставляет пользователю полезный вариант при пустом решении модели."""
     product = CatalogProduct(product_id="salmon", name="Лосось филе свежее", unit="кг")

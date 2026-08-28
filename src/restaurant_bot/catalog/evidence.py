@@ -784,6 +784,7 @@ def unverified_product_terms(query: str, product_name: str) -> list[str]:
         if token in query_tokens
         and token not in evidence
         and token not in UNIT_ALIASES
+        and token not in NUMBER_WORDS
         and not token.isdigit()
         and not any(char.isdigit() for char in token)
         and not numeric_alias_matches(token)

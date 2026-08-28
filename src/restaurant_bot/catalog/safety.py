@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from difflib import SequenceMatcher
 
 from restaurant_bot.catalog.evidence import (
     _canonical_token,
@@ -252,35 +253,80 @@ def _identity_token_matches(query_token: str, product_token: str) -> bool:
     )
 
 
+def _voice_token_matches_catalog_token(query_token: str, product_token: str) -> bool:
+    """Сверяет одну ASR-ошибку слова при устойчивом общем совпадении товара."""
+    query_token = _canonical_token(query_token)
+    product_token = _canonical_token(product_token)
+    if min(len(query_token), len(product_token)) < 5:
+        return False
+    if abs(len(query_token) - len(product_token)) > 1:
+        return False
+    if query_token[:4] != product_token[:4]:
+        return False
+    return SequenceMatcher(None, query_token, product_token).ratio() >= 0.8
+
+
+def _joined_catalog_token_matches(query_token: str, product_tokens: list[str]) -> bool:
+    """Сверяет слитое голосом слово с последовательностью слов каталога."""
+    canonical_query = _canonical_token(query_token)
+    if len(canonical_query) < 6:
+        return False
+    canonical_product = [
+        _canonical_token(token)
+        for token in product_tokens
+        if not any(char.isdigit() for char in token) and token not in UNIT_ALIASES
+    ]
+    for start in range(len(canonical_product) - 1):
+        for end in range(start + 2, min(start + 4, len(canonical_product) + 1)):
+            if canonical_query == "".join(canonical_product[start:end]):
+                return True
+    return False
+
+
+def _catalog_identity_tokens(value: str) -> list[str]:
+    """Возвращает слова, которые не являются числом или единицей измерения."""
+    searchable_tokens = tokens(value)
+    return [
+        token
+        for token in re.findall(r"[a-zа-яё0-9]+", normalize_text(value), flags=re.I)
+        if token in searchable_tokens
+        and token not in UNIT_ALIASES
+        and token not in NUMBER_WORDS
+        and not token.isdigit()
+        and not any(char.isdigit() for char in token)
+    ]
+
+
 def is_safe_catalog_name_equivalent(query: str, product_name: str) -> bool:
     """Проверяет, что запрос и каталог называют один товар, а не похожую категорию."""
     if not has_compatible_numeric_characteristics(query, product_name):
         return False
-    query_tokens = {
-        token
-        for token in tokens(query)
-        if not any(char.isdigit() for char in token) and token not in UNIT_ALIASES
-    }
-    product_tokens = {
-        token
-        for token in tokens(product_name)
-        if not any(char.isdigit() for char in token) and token not in UNIT_ALIASES
-    }
-    product_tokens.update(
-        token
-        for token in re.findall(r"[a-z]", normalize_text(product_name), flags=re.I)
-        if token.isascii()
-    )
-    query_tokens = {_canonical_token(token) for token in query_tokens if token not in NUMBER_WORDS}
-    product_tokens = {
-        _canonical_token(token) for token in product_tokens if token not in NUMBER_WORDS
-    }
+    query_tokens = _catalog_identity_tokens(query)
+    product_tokens = _catalog_identity_tokens(product_name)
+    raw_product_tokens = re.findall(r"[a-zа-яё0-9]+", normalize_text(product_name), flags=re.I)
     if len(query_tokens) < 2 or not product_tokens:
         return False
-    return all(
-        any(_identity_token_matches(query_token, product_token) for product_token in product_tokens)
-        for query_token in query_tokens
-    )
+    for query_token in query_tokens:
+        if any(
+            _identity_token_matches(query_token, product_token)
+            or _voice_token_matches_catalog_token(query_token, product_token)
+            for product_token in product_tokens
+        ):
+            continue
+        if any(
+            _canonical_token(query_token) == _canonical_token(product_token)
+            for product_token in raw_product_tokens
+        ):
+            continue
+        if any(
+            _catalog_abbreviation_match(query_token, product_token)
+            for product_token in raw_product_tokens
+        ):
+            continue
+        if _joined_catalog_token_matches(query_token, product_tokens):
+            continue
+        return False
+    return True
 
 
 def _numeric_characteristics(value: str) -> list[tuple[float, float | None, str]]:

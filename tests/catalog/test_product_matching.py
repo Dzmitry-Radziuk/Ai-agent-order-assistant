@@ -65,6 +65,22 @@ def test_safe_equivalence_accepts_spoken_range_and_latin_brand_variant() -> None
     )
 
 
+def test_safe_equivalence_accepts_structural_voice_packaging_and_joined_brand() -> None:
+    """Сверяет слитый бренд и разговорную фасовку без правил для конкретного товара."""
+    assert is_safe_catalog_name_equivalent(
+        "горчица дижонская чатал ведро шесть штук в коробке",
+        "Горчица Дижонская CHATEL, ведро, 1 кг, 6 шт/кор, Франция",
+    )
+    assert is_safe_catalog_name_equivalent(
+        "паста соевая широмисо",
+        "Паста соевая shiro miso светлая, Китай 1 кг",
+    )
+    assert not is_safe_catalog_name_equivalent(
+        "паста соевая широмисо",
+        "Паста соевая aka miso темная, Китай 1 кг",
+    )
+
+
 def test_safe_catalog_name_equivalence_rejects_related_different_products() -> None:
     """Не подменяет товар похожей категорией или другим видом продукта."""
     assert not is_safe_catalog_name_equivalent(
