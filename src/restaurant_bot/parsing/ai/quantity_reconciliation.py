@@ -14,7 +14,11 @@ from restaurant_bot.parsing.numeric_ranges import numeric_range_spans
 from restaurant_bot.parsing.packaging import explicit_packaging_preference
 from restaurant_bot.parsing.products import parse_product_lines
 from restaurant_bot.parsing.quantities import has_explicit_order_quantity, parse_quantity_unit
-from restaurant_bot.parsing.semantic.measurements import extract_semantic_facts
+from restaurant_bot.parsing.semantic.measurements import (
+    extract_semantic_facts,
+    product_query_has_anchor,
+    spoken_pair_quantity_for_query,
+)
 from restaurant_bot.parsing.semantic.models import SemanticFactKind
 
 _PACKAGING_ROLE_CONFIDENCE_THRESHOLD = 0.85
@@ -126,39 +130,20 @@ def _word_quantity_for_item(
     return quantity, unit or expected_unit
 
 
-def _same_inflected_product_word(left: str, right: str) -> bool:
-    """Сопоставляет одно слово товара с безопасным учётом окончания."""
-    normalized_left = normalize_text(left)
-    normalized_right = normalize_text(right)
-    if normalized_left == normalized_right:
-        return True
-    shared_length = 0
-    for left_char, right_char in zip(normalized_left, normalized_right, strict=False):
-        if left_char != right_char:
-            break
-        shared_length += 1
-    return (
-        shared_length >= 4
-        and len(normalized_left) - shared_length <= 2
-        and len(normalized_right) - shared_length <= 2
-    )
-
-
 def _spoken_pair_quantity_for_item(
     source_text: str, product_query: str
 ) -> tuple[float, str] | None:
     """Находит локальную конструкцию «пару <товар>» без переноса единицы соседа."""
+    measured_pair = spoken_pair_quantity_for_query(source_text, product_query)
+    if measured_pair is not None:
+        return measured_pair
     query_tokens = re.findall(r"[a-zа-яё0-9-]+", normalize_text(product_query), flags=re.I)
     if not query_tokens:
         return None
     for pair_match in re.finditer(r"\b(?:пару|пара)\b", normalize_text(source_text), flags=re.I):
         phrase = re.split(r"\bи\b|[,.;]", source_text[pair_match.end() :], maxsplit=1)[0]
         phrase_tokens = re.findall(r"[a-zа-яё0-9-]+", normalize_text(phrase), flags=re.I)
-        if not any(
-            _same_inflected_product_word(query_token, phrase_token)
-            for query_token in query_tokens
-            for phrase_token in phrase_tokens
-        ):
+        if not product_query_has_anchor(product_query, phrase):
             continue
         unit = normalize_unit(phrase_tokens[0]) if phrase_tokens[0] in UNIT_ALIASES else "шт"
         return 2.0, unit
@@ -353,7 +338,11 @@ def restore_explicit_order_terms(
         # Словесное «пару яблок» — явное количество этой позиции. Его нужно  # noqa: RUF003
         # применить до fallback по общей source_line, иначе единица соседа
         # («две бутылки ... и пару яблок») переносится на этот товар.
-        pair_quantity = _spoken_pair_quantity_for_item(source_text, item.get("product_query", ""))
+        pair_quantity = _spoken_pair_quantity_for_item(original_line, item.get("product_query", ""))
+        if pair_quantity is None and normalize_text(original_line) != normalize_text(source_text):
+            pair_quantity = _spoken_pair_quantity_for_item(
+                source_text, item.get("product_query", "")
+            )
         if pair_quantity is not None:
             item["quantity"], item["unit"] = pair_quantity
             continue
@@ -736,6 +725,21 @@ def _restore_unordered_measurement_pair(
     if recovered.quantity is not None:
         return
     item = items[0]
+    source = clean_text(item.get("source_span")) or clean_text(item.get("source_line"))
+    model_quantity = to_float(item.get("quantity"))
+    model_unit = normalize_unit(item.get("unit"))
+    source_quantity, source_unit = _explicit_order_quantity_from_source(
+        source,
+        model_quantity,
+        model_unit,
+    )
+    if (
+        source_quantity is not None
+        and model_quantity is not None
+        and abs(source_quantity - model_quantity) <= 1e-9
+        and (not model_unit or not source_unit or model_unit == source_unit)
+    ) or spoken_pair_quantity_for_query(source, clean_text(item.get("product_query"))) is not None:
+        return
     item["product_query"] = recovered.product_query
     item["quantity"] = None
     item["unit"] = ""

@@ -36,7 +36,11 @@ def build_cart_item(
         if (
             len(source_items) == 1
             and source_items[0].quantity is None
-            and not has_explicit_order_quantity(quantity_source_text, quantity)
+            and not has_explicit_order_quantity(
+                quantity_source_text,
+                quantity,
+                product_query=extracted.product_query,
+            )
         ):
             # Защищает от ошибочного количества из диапазона размера или фасовки.
             quantity = None

@@ -41,6 +41,7 @@ from restaurant_bot.parsing.ai.comment_reconciliation import (
 from restaurant_bot.parsing.ai.item_reconciliation import _repair_command_mixed_script_queries
 from restaurant_bot.parsing.ai.quantity_reconciliation import (
     _quantities_with_units,
+    _spoken_pair_quantity_for_item,
     restore_explicit_order_terms,
 )
 from restaurant_bot.parsing.ai.reconciliation import recover_omitted_explicit_items
@@ -65,6 +66,7 @@ from restaurant_bot.parsing.commands.item_commands import (
 from restaurant_bot.parsing.comment_scope import has_explicit_global_comment_scope
 from restaurant_bot.parsing.numeric import to_float
 from restaurant_bot.parsing.numeric_ranges import numeric_range_spans
+from restaurant_bot.parsing.semantic.measurements import strip_order_quantity_from_query
 from restaurant_bot.parsing.semantic_routing import (
     classify_bot_conversation,
     normalize_comment_proposal,
@@ -541,20 +543,27 @@ class OpenAIService:
         if numeric_range_spans(text) or command.global_comment:
             return None
         item = command.items[0]
-        quantities = _quantities_with_units(text)
-        if (
-            item.quantity is None
-            or item.quantity <= 0
-            or not normalize_unit(item.unit)
-            or clean_text(item.comment)
-            or clean_text(item.user_comment_to_supplier)
-            or len(quantities) != 1
-        ):
-            return None
-        quantity, unit = quantities[0]
-        if abs(float(item.quantity) - quantity) > 1e-9 or normalize_unit(item.unit) != unit:
-            return None
+        pair_quantity = _spoken_pair_quantity_for_item(text, item.product_query)
+        if pair_quantity is not None:
+            quantity, unit = pair_quantity
+            if clean_text(item.comment) or clean_text(item.user_comment_to_supplier):
+                return None
+        else:
+            quantities = _quantities_with_units(text)
+            if (
+                item.quantity is None
+                or item.quantity <= 0
+                or not normalize_unit(item.unit)
+                or clean_text(item.comment)
+                or clean_text(item.user_comment_to_supplier)
+                or len(quantities) != 1
+            ):
+                return None
+            quantity, unit = quantities[0]
+            if abs(float(item.quantity) - quantity) > 1e-9 or normalize_unit(item.unit) != unit:
+                return None
         query = _strip_conversational_product_leadin(item.product_query)
+        query = strip_order_quantity_from_query(query, text)
         query = re.sub(
             r"\s+\b(?:хочу|хотим|нужно|надо)\b(?=\s+\d|\s*$)",
             "",
@@ -563,8 +572,7 @@ class OpenAIService:
         ).strip(" .,;:-—–")
         if not query or not re.search(r"[a-zа-яё]", normalize_text(query), flags=re.IGNORECASE):
             return None
-        if query != item.product_query:
-            item = item.model_copy(update={"product_query": query})
+        item = item.model_copy(update={"quantity": quantity, "unit": unit, "product_query": query})
         return _repair_command_mixed_script_queries(command.model_copy(update={"items": [item]}))
 
     @staticmethod

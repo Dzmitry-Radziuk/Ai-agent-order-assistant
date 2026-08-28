@@ -10,6 +10,7 @@ from restaurant_bot.catalog.evidence import NumericEvidence, numeric_evidence
 from restaurant_bot.domain.units import normalize_unit
 from restaurant_bot.parsing.comment_policy import explicit_supplier_comment
 from restaurant_bot.parsing.quantities import has_explicit_order_marker
+from restaurant_bot.parsing.semantic.measurements import spoken_pair_quantity_for_query
 
 
 class QuantityProvenance(StrEnum):
@@ -147,6 +148,7 @@ def reconcile_order_quantity_evidence(
     order_entry_type: str = "",
     catalog_name: str = "",
     packaging_role: str = "none",
+    product_query: str = "",
 ) -> QuantityAuthorization:
     """Отделяет количество заказа от числовых признаков выбранного каталога."""
     normalized_unit = normalize_unit(proposed_unit)
@@ -191,6 +193,18 @@ def reconcile_order_quantity_evidence(
         return QuantityAuthorization(None, "", QuantityProvenance.NONE)
     if not source:
         return QuantityAuthorization(None, "", QuantityProvenance.NONE)
+
+    spoken_pair = spoken_pair_quantity_for_query(source, product_query)
+    if (
+        spoken_pair is not None
+        and abs(spoken_pair[0] - proposed_quantity) <= 1e-9
+        and (
+            not normalized_unit
+            or not spoken_pair[1]
+            or normalized_unit == normalize_unit(spoken_pair[1])
+        )
+    ):
+        return QuantityAuthorization(proposed_quantity, normalized_unit, QuantityProvenance.ORDER)
 
     source_entries = numeric_evidence(source)
     if not source_entries:

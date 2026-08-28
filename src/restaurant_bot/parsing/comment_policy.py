@@ -86,6 +86,42 @@ def comment_semantic_key(value: str) -> str:
         normalized = stripped
 
 
+def _same_normalized_product_word(left: str, right: str) -> bool:
+    """Сопоставляет формы одного слова товара без агрессивного угадывания."""
+    if left == right:
+        return True
+    shorter_length = min(len(left), len(right))
+    if shorter_length < 3:
+        return False
+    common_length = 0
+    for left_char, right_char in zip(left, right, strict=False):
+        if left_char != right_char:
+            break
+        common_length += 1
+    if shorter_length <= 4:
+        return common_length >= 3 and abs(len(left) - len(right)) <= 2
+    return common_length >= 4 and abs(len(left) - len(right)) <= 2
+
+
+def is_product_name_fragment(value: str, product_query: str) -> bool:
+    """Проверяет, входит ли фрагмент в название товара после нормализации."""
+    value_tokens = re.findall(r"[a-zа-яё0-9]+", normalize_text(value), flags=re.I)
+    query_tokens = re.findall(r"[a-zа-яё0-9]+", normalize_text(product_query), flags=re.I)
+    if not value_tokens or len(value_tokens) > len(query_tokens):
+        return False
+    return any(
+        all(
+            _same_normalized_product_word(value_token, query_token)
+            for value_token, query_token in zip(
+                value_tokens,
+                query_tokens[start : start + len(value_tokens)],
+                strict=True,
+            )
+        )
+        for start in range(len(query_tokens) - len(value_tokens) + 1)
+    )
+
+
 def is_comment_control_text(value: str) -> bool:
     """Проверяет, является ли текст командой, а не пожеланием поставщику."""
     comment = clean_text(value).strip(" .,;:-—–")

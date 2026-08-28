@@ -9,6 +9,7 @@ from restaurant_bot.domain.units import UNIT_ALIASES, normalize_unit
 from restaurant_bot.parsing.comment_policy import explicit_supplier_comment
 from restaurant_bot.parsing.number_words import NUMBER_WORDS, parse_number_words
 from restaurant_bot.parsing.numeric_ranges import numeric_range_spans
+from restaurant_bot.parsing.semantic.measurements import spoken_pair_quantity_for_query
 
 
 def shared_quantity_phrase(text: str) -> tuple[list[str], float, str, str] | None:
@@ -43,13 +44,21 @@ _EXPLICIT_ORDER_QUANTITY_RE = re.compile(
 )
 
 
-def has_explicit_order_quantity(source_line: str, quantity: float | None) -> bool:
+def has_explicit_order_quantity(
+    source_line: str,
+    quantity: float | None,
+    *,
+    product_query: str = "",
+) -> bool:
     """Отличает объём заказа от числа в размере или фасовке товара."""
     if quantity is None:
         return False
     source = str(source_line or "").strip()
     if not source:
         return False
+    spoken_pair = spoken_pair_quantity_for_query(source, product_query)
+    if spoken_pair is not None and abs(spoken_pair[0] - quantity) <= 1e-9:
+        return True
     range_spans = numeric_range_spans(source)
     masked = list(source)
     for start, end in range_spans:

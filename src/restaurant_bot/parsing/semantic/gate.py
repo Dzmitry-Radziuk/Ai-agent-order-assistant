@@ -8,7 +8,10 @@ from typing import Any
 from restaurant_bot.domain.models import CommentSource, ExtractedItem
 from restaurant_bot.domain.text import clean_text, normalize_text
 from restaurant_bot.orders.quantity_provenance import reconcile_order_quantity_evidence
-from restaurant_bot.parsing.comment_policy import explicit_supplier_comment
+from restaurant_bot.parsing.comment_policy import (
+    explicit_supplier_comment,
+    is_product_name_fragment,
+)
 from restaurant_bot.parsing.semantic.boundaries import (
     build_item_references,
     is_catalog_tail_fragment,
@@ -21,12 +24,16 @@ from restaurant_bot.parsing.semantic.measurements import (
 )
 from restaurant_bot.parsing.semantic.models import SemanticFactKind
 
+_PRICE_ONLY_HINT_RE = re.compile(r"\d+(?:[.,]\d+)?")
 
-def _source_supports_comment(comment: str, source_text: str) -> bool:
+
+def _source_supports_comment(comment: str, source_text: str, product_query: str = "") -> bool:
     """Проверяет наличие комментария в исходной фразе и его явную семантику."""
     value = normalize_text(comment).strip(" .,;:-—–")
     source = normalize_text(source_text)
     if not value:
+        return False
+    if product_query and is_product_name_fragment(comment, product_query):
         return False
     if explicit_supplier_comment(comment):
         marker = normalize_text(comment).split(maxsplit=1)[0]
@@ -67,7 +74,13 @@ def _clear_catalog_comments(items: list[dict[str, Any]], source_text: str) -> No
             or clean_text(item.get("source_line"))
             or source_text
         )
-        if comment and not _source_supports_comment(comment, context):
+        product_query = clean_text(item.get("product_query"))
+        context_supports_comment = _source_supports_comment(comment, context, product_query)
+        source_supports_authorized_comment = clean_text(item.get("comment_source")) in {
+            CommentSource.SEMANTIC.value,
+            CommentSource.EXPLICIT_MARKER.value,
+        } and _source_supports_comment(comment, source_text, product_query)
+        if comment and not (context_supports_comment or source_supports_authorized_comment):
             item["comment"] = ""
             item["user_comment_to_supplier"] = ""
             item["comment_source"] = CommentSource.NONE.value
@@ -86,6 +99,9 @@ def _clear_unanchored_supplier_hints(items: list[dict[str, Any]], source_text: s
     for item in items:
         hint = normalize_text(item.get("supplier_hint") or "")
         query = normalize_text(item.get("product_query") or "")
+        if hint and _PRICE_ONLY_HINT_RE.fullmatch(hint):
+            item["supplier_hint"] = ""
+            continue
         if hint and source and hint in source and hint in query:
             item["supplier_hint"] = ""
 
@@ -113,6 +129,7 @@ def _merge_order_quantity(
         order_entry_text=candidate.get("order_entry_text") or "",
         order_entry_type=candidate.get("order_entry_type") or "",
         packaging_role=candidate.get("packaging_role") or "none",
+        product_query=candidate.get("product_query") or "",
     )
     if quantity.provenance.value == "order":
         target["quantity"] = quantity.quantity
@@ -168,6 +185,7 @@ def apply_semantic_gate(
                     and _source_supports_comment(
                         candidate_comment,
                         clean_text(candidate.get("source_span")) or source_text,
+                        clean_text(candidate.get("product_query")),
                     )
                     and not merged.get("comment")
                 ):

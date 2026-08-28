@@ -57,6 +57,23 @@ _WORD_MEASUREMENT_RE = re.compile(
     rf"(?P<unit>{_UNIT})\b",
     flags=re.I,
 )
+_SPOKEN_PAIR_MEASUREMENT_RE = re.compile(
+    rf"\b(?:пару|пара)\s+(?P<unit>{_UNIT})\b",
+    flags=re.I,
+)
+_SPOKEN_PAIR_MEASUREMENT_PREFIX_RE = re.compile(
+    rf"^\s*(?:пару|пара)\s+(?P<unit>{_UNIT})\b\s+",
+    flags=re.I,
+)
+_SPOKEN_PAIR_MEASUREMENT_SUFFIX_RE = re.compile(
+    rf"\s+(?:пару|пара)\s+(?P<unit>{_UNIT})\b\s*[.,;:!?]*\s*$",
+    flags=re.I,
+)
+_SPOKEN_PAIR_SEGMENT_BOUNDARY_RE = re.compile(
+    r"[,.;]|\b(?:и|или|а|также|потом|затем)\b",
+    flags=re.I,
+)
+_PRODUCT_TOKEN_RE = re.compile(r"[a-zа-яё0-9-]+", flags=re.I)
 
 
 def _span_overlaps(span: tuple[int, int], other: tuple[int, int]) -> bool:
@@ -235,11 +252,111 @@ def has_global_quantity_scope(source_text: str) -> bool:
     return bool(_GLOBAL_QUANTITY_SCOPE_RE.search(normalize_text(source_text)))
 
 
+def _same_inflected_product_word(left: str, right: str) -> bool:
+    """Сопоставляет слово товара с безопасным учётом окончания."""
+    normalized_left = normalize_text(left)
+    normalized_right = normalize_text(right)
+    if normalized_left == normalized_right:
+        return True
+    shared_length = 0
+    for left_char, right_char in zip(normalized_left, normalized_right, strict=False):
+        if left_char != right_char:
+            break
+        shared_length += 1
+    shorter_length = min(len(normalized_left), len(normalized_right))
+    required_shared_length = 3 if shorter_length <= 4 else 4
+    return (
+        shorter_length >= 3
+        and shared_length >= required_shared_length
+        and len(normalized_left) - shared_length <= 2
+        and len(normalized_right) - shared_length <= 2
+    )
+
+
+def _pair_local_segment(source: str, match: re.Match[str], *, after: bool) -> str:
+    """Возвращает часть одной разговорной позиции рядом с конструкцией «пару»."""
+    if after:
+        # Запятая после количества часто отделяет комментарий, а не следующую  # noqa: RUF003
+        # позицию. Убираем её до поиска границы, чтобы не потерять товар перед
+        # конструкцией «товар, пару килограмм, ...».
+        tail = source[match.end() :].lstrip(" \t,;:")
+        boundary = _SPOKEN_PAIR_SEGMENT_BOUNDARY_RE.search(tail)
+        return tail[: boundary.start()] if boundary is not None else tail
+    head = source[: match.start()].rstrip(" \t,;:")
+    boundaries = tuple(_SPOKEN_PAIR_SEGMENT_BOUNDARY_RE.finditer(head))
+    return head[boundaries[-1].end() :] if boundaries else head
+
+
+def _segment_has_product_anchor(segment: str, query_tokens: tuple[str, ...]) -> bool:
+    """Проверяет, что локальный фрагмент содержит якорь конкретного товара."""
+    segment_tokens = _PRODUCT_TOKEN_RE.findall(segment)
+    return any(
+        _same_inflected_product_word(query_token, segment_token)
+        for query_token in query_tokens
+        for segment_token in segment_tokens
+    )
+
+
+def product_query_has_anchor(product_query: str, source_fragment: str) -> bool:
+    """Проверяет, что фрагмент содержит слово указанного товара."""
+    query_tokens = tuple(_PRODUCT_TOKEN_RE.findall(normalize_text(product_query)))
+    return bool(query_tokens) and _segment_has_product_anchor(source_fragment, query_tokens)
+
+
+def spoken_pair_quantity_for_query(
+    source_text: str, product_query: str
+) -> tuple[float, str] | None:
+    """Находит «пару <единиц>» только в локальном фрагменте указанного товара."""
+    source = normalize_text(source_text)
+    if not source or not _PRODUCT_TOKEN_RE.search(normalize_text(product_query)):
+        return None
+    for match in _SPOKEN_PAIR_MEASUREMENT_RE.finditer(source):
+        before_segment = _pair_local_segment(source, match, after=False)
+        after_segment = _pair_local_segment(source, match, after=True)
+        if product_query_has_anchor(product_query, before_segment):
+            return 2.0, normalize_unit(match.group("unit"))
+        if not product_query_has_anchor(product_query, after_segment):
+            continue
+        prefix = source[: match.start()].rstrip(" \t,;:")
+        if prefix and not re.search(
+            r"\b(?:и|или|а|также|нужно|надо|хочу|закаж\w*|добав\w*)\s*$",
+            prefix,
+            flags=re.I,
+        ):
+            continue
+        return 2.0, normalize_unit(match.group("unit"))
+    return None
+
+
+def _source_has_spoken_pair_measurement(source_text: str, unit: str) -> bool:
+    """Проверяет наличие в источнике той же разговорной единицы количества."""
+    normalized_unit = normalize_unit(unit)
+    return any(
+        normalize_unit(match.group("unit")) == normalized_unit
+        for match in _SPOKEN_PAIR_MEASUREMENT_RE.finditer(normalize_text(source_text))
+    )
+
+
 def strip_order_quantity_from_query(query: str, source_text: str) -> str:
     """Удаляет из поискового названия только подтверждённый заказной хвост."""
     value = clean_text(query)
     if not value:
         return ""
+    spoken_pair_prefix = _SPOKEN_PAIR_MEASUREMENT_PREFIX_RE.match(value)
+    if spoken_pair_prefix is not None:
+        pair_unit = normalize_unit(spoken_pair_prefix.group("unit"))
+        source_has_same_pair = _source_has_spoken_pair_measurement(source_text, pair_unit)
+        query_tail = value[spoken_pair_prefix.end() :].strip(" .,;:-—–")
+        if source_has_same_pair and re.search(r"[a-zа-яё]", normalize_text(query_tail), flags=re.I):
+            return query_tail
+    spoken_pair_suffix = _SPOKEN_PAIR_MEASUREMENT_SUFFIX_RE.search(value)
+    if spoken_pair_suffix is not None:
+        pair_unit = normalize_unit(spoken_pair_suffix.group("unit"))
+        query_head = value[: spoken_pair_suffix.start()].strip(" .,;:-—–")
+        if _source_has_spoken_pair_measurement(source_text, pair_unit) and re.search(
+            r"[a-zа-яё]", normalize_text(query_head), flags=re.I
+        ):
+            return query_head
     normalized_value = normalize_text(value)
     source_has_global_scope = has_global_quantity_scope(source_text)
     for fact in extract_semantic_facts(source_text):
@@ -258,9 +375,13 @@ def strip_order_quantity_from_query(query: str, source_text: str) -> str:
         ):
             continue
         term = normalize_text(fact.original_text)
-        position = normalized_value.find(term)
-        if position < 0:
+        term_match = re.search(
+            rf"(?<![\w.,]){re.escape(term)}(?![\w.])",
+            normalized_value,
+        )
+        if term_match is None:
             continue
+        position = term_match.start()
         prefix = normalized_value[:position]
         marker = re.search(
             r"(?:\b(?:\u0432\u0441\u0435\u0433\u043e|\u0438\u0442\u043e\u0433\u043e)\b\s+)?"

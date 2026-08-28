@@ -124,6 +124,32 @@ def test_cart_item_uses_local_source_span_for_multi_item_voice_quantity() -> Non
     assert (cart_item.quantity, cart_item.unit) == (10.0, "кг")
 
 
+def test_spoken_pair_quantity_survives_item_intake_and_catalog_reconciliation() -> None:
+    """Сохраняет подтверждённые «пару килограмм» при выборе фасованного товара."""
+    source = "Филе форели, пару килограмм, обязательно зачищенное"
+    extracted = ExtractedItem(
+        product_query="филе форели",
+        quantity=2,
+        unit="кг",
+        source_line=source,
+        source_span=source,
+    )
+
+    cart_item = build_cart_item(extracted, default_department="")
+    authorization = reconcile_order_quantity_evidence(
+        source,
+        cart_item.quantity,
+        cart_item.unit,
+        catalog_name="Форель филе свежее 0,8-1,2 кг 20-22 кг/кор",
+        packaging_role="catalog_attribute",
+        product_query=extracted.product_query,
+    )
+
+    assert (cart_item.quantity, cart_item.unit) == (2.0, "кг")
+    assert authorization.provenance is QuantityProvenance.ORDER
+    assert (authorization.quantity, authorization.unit) == (2.0, "кг")
+
+
 def test_repeated_packaging_and_order_occurrences_use_the_latter_order_span() -> None:
     """Различает фасовочные и заказные одинаковые числа по их occurrence span."""
     source = (

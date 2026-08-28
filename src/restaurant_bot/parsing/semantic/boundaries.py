@@ -26,14 +26,22 @@ class ItemSourceSpan:
 
 
 _SOURCE_TOKEN_RE = re.compile(r"[^\W_]+", flags=re.UNICODE)
+_CYRILLIC_CASE_BOUNDARY_RE = re.compile(r"(?<=[а-яё])(?=[А-ЯЁ])")
 
 
 def _source_tokens(value: str) -> list[tuple[str, int, int]]:
     """Возвращает нормализованные слова с их исходными границами."""
-    return [
-        (normalize_text(match.group(0)), match.start(), match.end())
-        for match in _SOURCE_TOKEN_RE.finditer(value)
-    ]
+    tokens: list[tuple[str, int, int]] = []
+    for match in _SOURCE_TOKEN_RE.finditer(value):
+        token = match.group(0)
+        parts = tuple(_CYRILLIC_CASE_BOUNDARY_RE.split(token))
+        offset = match.start()
+        for part in parts:
+            end = offset + len(part)
+            if part:
+                tokens.append((normalize_text(part), offset, end))
+            offset = end
+    return tokens
 
 
 def _token_matches(left: str, right: str) -> bool:

@@ -13,6 +13,7 @@ from restaurant_bot.parsing.ai.quantity_reconciliation import _remove_matching_q
 from restaurant_bot.parsing.comment_policy import (
     explicit_supplier_comment,
     is_comment_control_text,
+    is_product_name_fragment,
     supplier_comment_start,
 )
 from restaurant_bot.parsing.comment_scope import (
@@ -134,9 +135,9 @@ _COMMENT_SCOPE_POSITION_RE = re.compile(
 _TRAILING_ROOT_PROCESSING_RE = re.compile(
     r"(?P<instruction>"
     r"(?:"
-    r"(?:срез|длина)\s+корн(?:я|ей)"
-    r"|(?:срезать|обрезать|подрезать|укоротить|оставить)\s+корн\w*"
-    r"|корн\w*\s+(?:срезать|обрезать|подрезать|укоротить|оставить)"
+    r"(?:срез|длина)\s+кор(?:н(?:я|ей)?|ен\w*)"
+    r"|(?:срезать|обрезать|подрезать|укоротить|оставить)\s+кор(?:н|ен)\w*"
+    r"|кор(?:н|ен)\w*\s+(?:срезать|обрезать|подрезать|укоротить|оставить)"
     r")"
     r"[^.!?]*?\d+(?:[,.]\d+)?\s*"
     r"(?:см|сантиметр\w*|мм|миллиметр\w*)"
@@ -245,6 +246,10 @@ def _validated_binding_target_indexes(
     """Переводит индекс AI в подтверждённую ссылку на товарную позицию."""
     indexes = _binding_target_indexes(binding, len(items))
     if not indexes or not deterministic:
+        return indexes
+    if len(items) == 1:
+        # для однотоварного сообщения валидный индекс не указывает на другую
+        # позицию. Формы «картошка/картошки» не должны терять локальное пожелание.
         return indexes
     if _binding_has_unique_item_source_evidence(clean_text(binding.get("text")), indexes, items):
         return indexes
@@ -391,15 +396,6 @@ def _strip_product_facts_from_item_binding(
     return _strip_conversational_product_leadin(remainder).strip(" .,;:-—–")
 
 
-def _is_product_name_fragment(comment: str, query: str) -> bool:
-    """Проверяет, является ли комментарий началом названия товара."""
-    comment_tokens = re.findall(r"[a-zа-яё0-9]+", normalize_text(comment), flags=re.I)
-    query_tokens = re.findall(r"[a-zа-яё0-9]+", normalize_text(query), flags=re.I)
-    if not comment_tokens or len(comment_tokens) > len(query_tokens):
-        return False
-    return query_tokens[: len(comment_tokens)] == comment_tokens
-
-
 def _comment_scope_has_explicit_anchor(text: str, item_names: list[str]) -> bool:
     """Проверяет, что ответ явно указывает товары, их номера или весь список."""
     normalized = normalize_text(text)
@@ -470,7 +466,11 @@ def _is_verified_root_group_comment(comment: str, source_text: str) -> bool:
     if match is None:
         return False
     instruction = clean_text(match.group("instruction")).strip(" .,;:-—–")
-    return normalize_text(instruction) == normalize_text(comment)
+    normalized_instruction = normalize_text(instruction)
+    normalized_comment = normalize_text(comment)
+    return normalized_instruction == normalized_comment or bool(
+        re.fullmatch(rf"всем\s+{re.escape(normalized_comment)}", normalized_instruction)
+    )
 
 
 def _discard_unverified_item_comments(
@@ -521,22 +521,17 @@ def _discard_unverified_item_comments(
                 normalized_fragment == normalized_global or normalized_fragment in normalized_global
             ):
                 continue
+            if is_product_name_fragment(fragment, query):
+                product_facts.append(fragment)
+                continue
             source_supported = normalized_fragment in normalized_context
             semantic_source_supported = _comment_source_is_authorized(fragment, context)
-            if source_supported and normalized_fragment == normalized_query:
-                product_facts.append(fragment)
-                continue
-            if _is_product_name_fragment(fragment, query):
-                product_facts.append(fragment)
-                continue
-            if source_supported and normalized_fragment in normalized_query:
-                kept.append(fragment)
-                semantic_found = True
-                continue
-            if (
+            binding_source_supported = (
                 normalized_fragment in bound_comments
-                and source_supported
-                and semantic_source_supported
+                and _comment_source_is_authorized(fragment, source_text)
+            )
+            if binding_source_supported and (
+                (source_supported and semantic_source_supported) or verified_semantic
             ):
                 kept.append(fragment)
                 semantic_found = True
@@ -576,7 +571,7 @@ def _discard_unverified_item_comments(
                 )
                 product_facts = []
         for fact in product_facts:
-            if normalize_text(fact) not in normalized_query:
+            if not is_product_name_fragment(fact, query):
                 query = clean_text(f"{query} {fact}")
                 normalized_query = normalize_text(query)
         item["product_query"] = query
@@ -648,6 +643,17 @@ def _apply_semantic_comment_bindings(
     payload["global_comment"] = _strip_global_comment_scope(
         clean_text(payload.get("global_comment"))
     )
+
+    normalized_global_comment = normalize_text(payload["global_comment"]).strip(" .,;:-—–")
+    if normalized_global_comment and not has_explicit_global_comment_scope(source_text):
+        has_local_binding_for_global = any(
+            clean_text(binding.get("scope")).casefold() in {"item", "group"}
+            and normalize_text(clean_text(binding.get("text"))).strip(" .,;:-—–")
+            == normalized_global_comment
+            for binding in bindings
+        )
+        if has_local_binding_for_global:
+            payload["global_comment"] = ""
 
     bound_comments = {clean_text(binding.get("text")).strip(" .,;:-—–") for binding in bindings}
     for comment in bound_comments:

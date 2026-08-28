@@ -544,6 +544,7 @@ class CatalogResolutionService:
             order_entry_type=fragment.order_entry_type,
             catalog_name=product.name,
             packaging_role=fragment.packaging_role,
+            product_query=fragment.product_query,
         )
         previous_authorization = reconcile_order_quantity_evidence(
             source_for_quantity,
@@ -554,6 +555,7 @@ class CatalogResolutionService:
             order_entry_type=previous.order_entry_type,
             catalog_name=product.name,
             packaging_role=previous.packaging_role,
+            product_query=previous.product_query,
         )
         quantity = previous.quantity
         unit = previous.unit
@@ -959,6 +961,7 @@ class CatalogResolutionService:
             order_entry_type=item.order_entry_type,
             catalog_name=packaging_candidates[0].name,
             packaging_role=item.packaging_role,
+            product_query=item.source_query,
         )
         if authorization.provenance is QuantityProvenance.ORDER:
             return None
@@ -1012,6 +1015,7 @@ class CatalogResolutionService:
                 order_entry_type=item.order_entry_type,
                 catalog_name=product_name,
                 packaging_role=item.packaging_role,
+                product_query=item.source_query,
             )
             if authorization.provenance is not QuantityProvenance.ORDER:
                 item.quantity = None
@@ -1049,6 +1053,7 @@ class CatalogResolutionService:
             order_entry_type=item.order_entry_type,
             catalog_name=product_name,
             packaging_role=item.packaging_role,
+            product_query=item.source_query,
         )
         if authorization.provenance is QuantityProvenance.ORDER:
             item.quantity = authorization.quantity

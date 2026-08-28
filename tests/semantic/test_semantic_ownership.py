@@ -6,7 +6,10 @@ from restaurant_bot.domain.models import Intent
 from restaurant_bot.parsing.ai.comment_reconciliation import _apply_semantic_comment_bindings
 from restaurant_bot.parsing.ai.reconciliation import recover_omitted_explicit_items
 from restaurant_bot.parsing.products import parse_product_lines
-from restaurant_bot.parsing.semantic.measurements import extract_semantic_facts
+from restaurant_bot.parsing.semantic.measurements import (
+    extract_semantic_facts,
+    strip_order_quantity_from_query,
+)
 from restaurant_bot.parsing.semantic.models import SemanticFactKind
 
 
@@ -66,6 +69,47 @@ def test_decimal_comma_is_not_a_product_separator() -> None:
     assert len(items) == 1
     assert len(items[0].product_query.split()) >= 2
     assert "3,2%" in items[0].product_query
+
+
+def test_spoken_pair_measurement_is_removed_only_when_source_confirms_it() -> None:
+    """Удаляет словесное количество только из подтверждённой фразы заказа."""
+    source = "Мне нужно пару килограмм лука свежего."
+
+    assert strip_order_quantity_from_query("пару килограмм лука свежего", source) == "лука свежего"
+    assert strip_order_quantity_from_query("пару килограмм лука", "лук 2 кг") == (
+        "пару килограмм лука"
+    )
+    assert strip_order_quantity_from_query("пара обуви", "пара обуви") == "пара обуви"
+
+
+def test_trailing_spoken_pair_measurement_is_removed_only_from_its_product() -> None:
+    """Очищает хвост «пару килограмм» без затрагивания названия другого товара."""
+    source = "Лука зелёного пару килограмм, форели пару килограмм."
+
+    assert (
+        strip_order_quantity_from_query("лука зелёного пару килограмм.", source) == "лука зелёного"
+    )
+    assert strip_order_quantity_from_query("форели пару килограмм", source) == "форели"
+    assert strip_order_quantity_from_query("пара обуви", "пара обуви") == "пара обуви"
+
+
+def test_concatenated_cyrillic_product_rows_keep_their_source_boundaries() -> None:
+    """Разделяет соседние кириллические строки даже без пробела между ними."""
+    from restaurant_bot.parsing.semantic.boundaries import derive_item_source_spans
+
+    source = "Горчица зернистая, ФранцияГорчица домашняя"
+    spans = derive_item_source_spans(
+        source,
+        [
+            {"product_query": "Горчица зернистая"},
+            {"product_query": "Горчица домашняя"},
+        ],
+    )
+
+    assert [span.text if span is not None else "" for span in spans] == [
+        "Горчица зернистая, Франция",
+        "Горчица домашняя",
+    ]
 
 
 def test_explicit_voice_requirement_is_restored_without_losing_order_quantity() -> None:
@@ -230,6 +274,112 @@ def test_ai_qualifier_item_is_not_reparsed_as_extra_positions() -> None:
 
     assert len(result["items"]) == 1
     assert result["items"][0]["comment"] == "чтобы крупные были картошинки"
+
+
+def test_bound_comment_survives_partial_ai_source_line() -> None:
+    """Сохраняет локальное пожелание вне неполной строки, возвращённой ИИ."""
+    source = "Картошки восемь килограмм. Только без червей."
+    result = recover_omitted_explicit_items(
+        {
+            "intent": Intent.ADD_ITEMS,
+            "global_comment": "без червей",
+            "items": [
+                {
+                    "product_query": "картошка",
+                    "quantity": 8,
+                    "unit": "кг",
+                    "source_line": "Картошки восемь килограмм.",
+                }
+            ],
+            "comment_bindings": [
+                {
+                    "text": "без червей",
+                    "scope": "item",
+                    "target_item_indexes": [0],
+                    "confidence": 0.99,
+                }
+            ],
+        },
+        source,
+    )
+
+    assert result["global_comment"] == ""
+    assert result["items"][0]["comment"] == "без червей"
+
+
+def test_multiple_bound_comments_survive_partial_ai_source_lines() -> None:
+    """Сохраняет независимые локальные пожелания у соответствующих товаров."""
+    source = "Томаты 5 кг, только красные. Огурцы 4 кг, только без червей."
+    result = recover_omitted_explicit_items(
+        {
+            "intent": Intent.ADD_ITEMS,
+            "items": [
+                {
+                    "product_query": "томаты",
+                    "quantity": 5,
+                    "unit": "кг",
+                    "source_line": "Томаты 5 кг",
+                },
+                {
+                    "product_query": "огурцы",
+                    "quantity": 4,
+                    "unit": "кг",
+                    "source_line": "Огурцы 4 кг",
+                },
+            ],
+            "comment_bindings": [
+                {
+                    "text": "только красные",
+                    "scope": "item",
+                    "target_item_indexes": [0],
+                    "confidence": 0.99,
+                },
+                {
+                    "text": "только без червей",
+                    "scope": "item",
+                    "target_item_indexes": [1],
+                    "confidence": 0.99,
+                },
+            ],
+        },
+        source,
+    )
+
+    assert [item["comment"] for item in result["items"]] == [
+        "только красные",
+        "только без червей",
+    ]
+
+
+def test_product_name_fragment_is_not_comment_after_normalization() -> None:
+    """Не сохраняет часть названия комментарием при различии регистра и формы слова."""
+    source = "Говядина без кожи 5 кг"
+    result = recover_omitted_explicit_items(
+        {
+            "intent": Intent.ADD_ITEMS,
+            "items": [
+                {
+                    "product_query": "ГОВЯДИНА БЕЗ КОЖЕЙ",
+                    "quantity": 5,
+                    "unit": "кг",
+                    "comment": "без-кожи",
+                    "source_line": source,
+                }
+            ],
+            "comment_bindings": [
+                {
+                    "text": "без-кожи",
+                    "scope": "item",
+                    "target_item_indexes": [0],
+                    "confidence": 0.99,
+                }
+            ],
+        },
+        source,
+    )
+
+    assert result["items"][0]["comment"] == ""
+    assert not result["items"][0]["product_query"].endswith("без-кожи")
 
 
 def test_catalog_country_does_not_become_comment() -> None:
@@ -501,6 +651,31 @@ def test_explicit_order_comment_scope_strips_control_words() -> None:
     assert items[0]["comment"] == ""
 
 
+def test_bare_everyone_group_binding_is_not_promoted_to_order_comment() -> None:
+    """Оставляет «всем» комментарием двух новых позиций, а не всего черновика."""
+    source = "Укроп 2 кг, петрушка 3 кг, всем срезать корень 5 см"
+    payload = {
+        "global_comment": "срезать корень 5 см",
+        "comment_bindings": [
+            {
+                "text": "срезать корень 5 см",
+                "scope": "group",
+                "target_item_indexes": [0, 1],
+                "confidence": 0.99,
+            }
+        ],
+    }
+    items = [
+        {"product_query": "Укроп", "source_line": source},
+        {"product_query": "петрушка", "source_line": source},
+    ]
+
+    _apply_semantic_comment_bindings(payload, items, payload["comment_bindings"], source)
+
+    assert payload["global_comment"] == ""
+    assert [item["comment"] for item in items] == ["срезать корень 5 см"] * 2
+
+
 def test_ai_order_comment_command_wrapper_is_not_saved() -> None:
     """Удаляет оболочку команды при сверке общего комментария ИИ."""
     source = "Добавь общий комментарий привезти завтра к восьми вечера"
@@ -554,6 +729,26 @@ def test_explicit_supplier_relation_is_preserved() -> None:
         source,
     )
     assert result["items"][0]["supplier_hint"] == "Мираторг"
+
+
+def test_currency_only_supplier_hint_is_removed() -> None:
+    """Не принимает цену из строки каталога за название поставщика."""
+    source = "Паста соевая 1 кг, 10 шт/кор 202₽"
+    result = recover_omitted_explicit_items(
+        {
+            "intent": "add_items",
+            "items": [
+                {
+                    "product_query": "Паста соевая",
+                    "supplier_hint": "202₽",
+                    "source_line": source,
+                }
+            ],
+        },
+        source,
+    )
+
+    assert result["items"][0]["supplier_hint"] == ""
 
 
 def test_numeric_source_fragment_is_not_comment() -> None:

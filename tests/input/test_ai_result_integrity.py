@@ -32,8 +32,8 @@ def _item_payload(source: str, product_query: str, comment: str = "") -> dict:
     return payload
 
 
-def test_product_facts_are_intentionally_preserved_in_query_and_comment() -> None:
-    """Сохраняет дублирующиеся требования товара в обоих полях позиции."""
+def test_product_facts_in_query_are_not_duplicated_as_supplier_comment() -> None:
+    """Не дублирует подтверждённый признак названия в комментарии поставщику."""
     source = "свиная шея 5 кг без костей без кожи без хрящиков"
     comment = "без костей без кожи без хрящиков"
 
@@ -44,7 +44,7 @@ def test_product_facts_are_intentionally_preserved_in_query_and_comment() -> Non
 
     item = restored["items"][0]
     assert "без костей без кожи без хрящиков" in item["product_query"]
-    assert item["comment"] == comment
+    assert item["comment"] == ""
 
 
 def test_structured_comments_are_preserved_for_common_product_constraints() -> None:
@@ -90,8 +90,118 @@ def test_clean_product_query_is_not_replaced_by_conversational_wrapper() -> None
     assert restored["items"][0]["product_query"] == "\u043b\u0443\u043a"
 
 
-def test_source_evidence_reconciliation_is_idempotent() -> None:
-    """Повторная сверка не дублирует комментарий или количество."""
+def test_spoken_pair_quantity_does_not_replace_ai_product_query() -> None:
+    """Не возвращает словесное количество в уже корректное название от ИИ."""
+    source = "Мне нужно пару килограмм лука свежего."
+    payload = _item_payload(source, "лука свежего")
+    payload["items"][0]["quantity"] = 2
+    payload["items"][0]["unit"] = "кг"
+
+    restored = recover_omitted_explicit_items(payload, source)
+
+    assert [
+        (item["product_query"], item["quantity"], item["unit"]) for item in restored["items"]
+    ] == [("лука свежего", 2, "кг")]
+
+
+def test_source_order_quantity_is_not_replaced_by_packaging_fallback() -> None:
+    """Не заменяет количество заказа из исходной строки найденной фасовкой."""
+    source = "Соус 500 мл, 12 штук в коробке — 2 шт"
+    payload = {
+        "intent": Intent.ADD_ITEMS,
+        "items": [
+            {
+                "product_query": "Соус 500 мл",
+                "quantity": 2,
+                "unit": "шт",
+                "packaging_text": "12 штук в коробке",
+                "packaging_role": "catalog_attribute",
+                "source_line": source,
+            }
+        ],
+    }
+
+    restored = recover_omitted_explicit_items(payload, source)
+
+    item = restored["items"][0]
+    assert item["product_query"] == "Соус 500 мл, 12 штук в коробке"
+    assert (item["quantity"], item["unit"]) == (2.0, "шт")
+
+
+def test_spoken_pair_quantity_does_not_replace_each_item_in_voice_list() -> None:
+    """Не возвращает словесное количество в названия всех позиций голосового списка."""
+    source = "Нужно пару килограмм филе форели и пару килограмм лука свежего, а также пару килограмм икры"
+    payload = {
+        "intent": Intent.ADD_ITEMS,
+        "items": [
+            {
+                "product_query": "филе форели",
+                "quantity": 2,
+                "unit": "кг",
+                "source_line": "пару килограмм филе форели",
+            },
+            {
+                "product_query": "лук свежий",
+                "quantity": 2,
+                "unit": "кг",
+                "source_line": "пару килограмм лука свежего",
+            },
+            {
+                "product_query": "икра",
+                "quantity": 2,
+                "unit": "кг",
+                "source_line": "пару килограмм икры",
+            },
+        ],
+    }
+
+    restored = recover_omitted_explicit_items(payload, source)
+
+    assert [item["product_query"] for item in restored["items"]] == [
+        "филе форели",
+        "лук свежий",
+        "икра",
+    ]
+    assert [(item["quantity"], item["unit"]) for item in restored["items"]] == [
+        (2, "кг"),
+        (2, "кг"),
+        (2, "кг"),
+    ]
+
+
+def test_trailing_spoken_weight_pair_keeps_ai_items_clean_in_voice_list() -> None:
+    """Сохраняет названия и вес для разговорного порядка «товар пару килограмм»."""
+    source = "Форели пару килограмм, лук зелёный пару килограмм."
+    payload = {
+        "intent": Intent.ADD_ITEMS,
+        "items": [
+            {
+                "product_query": "форель",
+                "quantity": 2,
+                "unit": "кг",
+                "source_line": "Форели пару килограмм",
+            },
+            {
+                "product_query": "лук зелёный",
+                "quantity": 2,
+                "unit": "кг",
+                "source_line": "лук зелёный пару килограмм",
+            },
+        ],
+    }
+
+    restored = recover_omitted_explicit_items(payload, source)
+
+    assert [
+        (item["product_query"], item["quantity"], item["unit"]) for item in restored["items"]
+    ] == [
+        ("форель", 2.0, "кг"),
+        ("лук зелёный", 2.0, "кг"),
+    ]
+
+
+def test_source_evidence_reconciliation_is_idempotent_without_title_comment() -> None:
+    """Повторная сверка не создаёт комментарий из признака названия."""
     source = "свиная шея 5 кг без костей без кожи"
     payload = _item_payload(
         source,
@@ -104,11 +214,11 @@ def test_source_evidence_reconciliation_is_idempotent() -> None:
 
     assert twice["items"] == once["items"]
     assert twice["items"][0]["quantity"] == 5
-    assert twice["items"][0]["comment"] == "без костей без кожи"
+    assert twice["items"][0]["comment"] == ""
 
 
-def test_source_evidence_idempotency_covers_comment_and_quantity_contracts() -> None:
-    """Проверяет идемпотентность валидного, выдуманного комментария и quantity."""
+def test_source_evidence_idempotency_covers_title_comments_and_quantity_contracts() -> None:
+    """Проверяет идемпотентность признака названия, выдуманного комментария и quantity."""
     valid_comment = _item_payload("курица охлаждённая 5 кг", "курица охлаждённая", "охлаждённая")
     invented_comment = _item_payload("курица 5 кг", "курица", "охлаждённая")
     spoken_quantity = _item_payload("пармезан пять штук", "пармезан")
@@ -116,7 +226,7 @@ def test_source_evidence_idempotency_covers_comment_and_quantity_contracts() -> 
     spoken_quantity["items"][0]["unit"] = ""
 
     for payload, expected_comment in (
-        (valid_comment, "охлаждённая"),
+        (valid_comment, ""),
         (invented_comment, ""),
         (spoken_quantity, ""),
     ):

@@ -1457,6 +1457,108 @@ def test_pair_of_apples_uses_its_own_spoken_quantity() -> None:
     ]
 
 
+def test_pair_with_weight_unit_keeps_quantity_for_inflected_product() -> None:
+    """Восстанавливает «пару килограмм» для склонённого названия товара."""
+    source = "Пару килограмм лука свежего"
+    items = [
+        {
+            "product_query": "лук свежий",
+            "quantity": 2,
+            "unit": "кг",
+            "source_line": source,
+        }
+    ]
+
+    restored = restore_explicit_order_terms(items, source)
+
+    assert (restored[0]["quantity"], restored[0]["unit"]) == (2.0, "кг")
+
+
+def test_trailing_weight_pair_is_bound_to_each_voice_list_item() -> None:
+    """Не теряет «пару килограмм» после товара и не переносит её соседу."""
+    source = "Форели пару килограмм, лук зелёный пару килограмм."
+    items = [
+        {
+            "product_query": "форель",
+            "quantity": 2,
+            "unit": "кг",
+            "source_line": "Форели пару килограмм",
+        },
+        {
+            "product_query": "лук зелёный",
+            "quantity": 2,
+            "unit": "кг",
+            "source_line": "лук зелёный пару килограмм",
+        },
+    ]
+
+    restored = restore_explicit_order_terms(items, source)
+
+    assert [(item["quantity"], item["unit"]) for item in restored] == [
+        (2.0, "кг"),
+        (2.0, "кг"),
+    ]
+
+
+def test_weight_pair_before_comma_comment_is_bound_to_its_product() -> None:
+    """Не теряет «пару килограмм» перед запятой и локальным комментарием."""
+    source = "Филе форели, пару килограмм, обязательно зачищенное от ринце"
+    items = [
+        {
+            "product_query": "филе форели зачищенное от ринце",
+            "quantity": 2,
+            "unit": "кг",
+            "source_line": source,
+        }
+    ]
+
+    restored = restore_explicit_order_terms(items, source)
+
+    assert (restored[0]["quantity"], restored[0]["unit"]) == (2.0, "кг")
+
+
+def test_spoken_weight_pair_does_not_cross_a_list_separator() -> None:
+    """Не применяет количество яблок к соседней позиции без собственной пары."""
+    source = "Пару килограмм яблок и груши"
+    items = [
+        {
+            "product_query": "яблоки",
+            "quantity": 2,
+            "unit": "кг",
+            "source_line": "Пару килограмм яблок",
+        },
+        {"product_query": "груши", "quantity": None, "unit": "", "source_line": "груши"},
+    ]
+
+    restored = restore_explicit_order_terms(items, source)
+
+    assert [(item["quantity"], item["unit"]) for item in restored] == [
+        (2.0, "кг"),
+        (None, ""),
+    ]
+
+
+def test_spoken_weight_pair_with_comma_does_not_bind_to_next_product() -> None:
+    """Не считает товар после запятой получателем количества предыдущей позиции."""
+    source = "Яблоки, пару килограмм, груши"
+    items = [
+        {
+            "product_query": "яблоки",
+            "quantity": 2,
+            "unit": "кг",
+            "source_line": "Яблоки, пару килограмм",
+        },
+        {"product_query": "груши", "quantity": None, "unit": "", "source_line": "груши"},
+    ]
+
+    restored = restore_explicit_order_terms(items, source)
+
+    assert [(item["quantity"], item["unit"]) for item in restored] == [
+        (2.0, "кг"),
+        (None, ""),
+    ]
+
+
 def test_voice_recovery_removes_a_model_invented_quantity() -> None:
     """Проверяет, что восстановление голоса удаляет выдуманное моделью количество."""
     source = "Сироп роза пять штук и бутылка воды."

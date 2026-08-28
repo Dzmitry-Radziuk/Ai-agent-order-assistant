@@ -1301,6 +1301,7 @@ class ConversationEngine:
                 order_entry_type=extracted.order_entry_type,
                 catalog_name=outcome.candidate.name,
                 packaging_role=extracted.packaging_role,
+                product_query=extracted.product_query,
             )
             if authorization.provenance is QuantityProvenance.ORDER:
                 item.quantity = authorization.quantity

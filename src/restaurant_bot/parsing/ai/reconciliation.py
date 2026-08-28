@@ -164,6 +164,12 @@ def _extend_partial_source_with_order_tail(
     prefix = derived[: len(provided)]
     if normalize_text(prefix) != normalize_text(provided):
         return provided
+    suffix = derived[len(provided) :]
+    if suffix and provided[-1:].isalnum() and suffix[0].isalnum():
+        # Не склеиваем соседние строки, если OCR/копирование потеряло разделитель  # noqa: RUF003
+        # (например, «ФранцияГорчица»). Такой хвост не является доказанным
+        # количеством или комментарием текущей позиции.
+        return provided
     # ``derived`` is bounded by the next independent product anchor, so it also
     # owns the supplier instruction between this item and that next anchor.
     # The only exception is a separately parsed final order comment: it is not
