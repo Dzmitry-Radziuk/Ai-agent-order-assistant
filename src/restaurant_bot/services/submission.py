@@ -11,7 +11,6 @@ from redis import Redis
 
 from restaurant_bot.config import Settings
 from restaurant_bot.conversation.state.transitions import normalize_cart_page
-from restaurant_bot.domain.text import clean_text
 from restaurant_bot.domain.models import (
     BotReply,
     Button,
@@ -19,6 +18,7 @@ from restaurant_bot.domain.models import (
     PendingSubmission,
     SessionStage,
 )
+from restaurant_bot.domain.text import clean_text
 from restaurant_bot.integrations.cache import (
     CatalogCache,
     ChatLease,
