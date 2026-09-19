@@ -41,8 +41,6 @@ def _save_sheet_like_image(path: Path, size: tuple[int, int] = (1400, 600)) -> N
     image.save(path, format="PNG")
 
 
-
-
 def _save_light_sheet_with_order_rows(path: Path) -> None:
     """Создаёт светлый Sheets-скриншот с двумя заполненными order-строками."""
     image = Image.new("RGB", (1000, 500), "white")

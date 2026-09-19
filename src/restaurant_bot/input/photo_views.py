@@ -228,7 +228,6 @@ def _table_focus_upscale_factor(width: int, height: int) -> int:
     return min(_MAX_TABLE_UPSCALE_FACTOR, max(_CROP_UPSCALE_FACTOR, factor))
 
 
-
 def _detect_light_spreadsheet_reading_box(
     image: Image.Image,
 ) -> tuple[int, int, int, int] | None:
@@ -435,11 +434,10 @@ def _sheet_cell_ink_pixels(
     bottom: int,
 ) -> int:
     """Считает тёмные пиксели внутри ячейки без её рамки."""
-    rgb = image.convert("RGB")
     count = 0
     for y in range(top + 2, max(top + 2, bottom - 2)):
         for x in range(left + 2, max(left + 2, right - 2)):
-            red, green, blue = cast(tuple[int, int, int], rgb.getpixel((x, y)))
+            red, green, blue = cast(tuple[int, int, int], image.getpixel((x, y)))
             if max(red, green, blue) < 170:
                 count += 1
     return count
@@ -452,13 +450,14 @@ def _filled_order_row_ranges(
     row_boundaries: list[int],
 ) -> list[tuple[int, int]]:
     """Выбирает строки с реальным ink в одной из трёх order-ячеек."""
+    rgb = image.convert("RGB")
     filled: list[tuple[int, int]] = []
     for top, bottom in zip(row_boundaries, row_boundaries[1:]):
         if bottom - top < 5:
             continue
         cell_counts = [
             _sheet_cell_ink_pixels(
-                image,
+                rgb,
                 left=order_columns[index],
                 right=order_columns[index + 1],
                 top=top,

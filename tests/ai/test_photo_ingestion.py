@@ -46,8 +46,6 @@ def _photo_event() -> TelegramEvent:
     )
 
 
-
-
 def _save_light_order_sheet(path: Path) -> None:
     """Создаёт таблицу, где пиксельная геометрия доказывает две order-строки."""
     image = Image.new("RGB", (1000, 500), "white")
@@ -506,7 +504,6 @@ def test_mocked_photo_pipeline_converges_into_existing_cart_pipeline(
     assert "какой товар" not in result.reply.text.lower()
     assert len(responses.calls) == 1
     assert responses.calls[0]["text_format"] is PhotoDocumentObservation
-
 
 
 def test_preprocessed_row_count_retries_shifted_photo_and_selects_aligned_rows(
