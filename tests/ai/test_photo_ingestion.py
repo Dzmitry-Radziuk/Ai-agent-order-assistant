@@ -3,7 +3,7 @@
 from pathlib import Path
 from types import SimpleNamespace
 
-from PIL import Image
+from PIL import Image, ImageDraw
 
 from restaurant_bot.application.conversation.contracts import ConversationInput
 from restaurant_bot.domain.models import (
@@ -44,6 +44,22 @@ def _photo_event() -> TelegramEvent:
         file_id="photo",
         mime_type="image/jpeg",
     )
+
+
+
+
+def _save_light_order_sheet(path: Path) -> None:
+    """Создаёт таблицу, где пиксельная геометрия доказывает две order-строки."""
+    image = Image.new("RGB", (1000, 500), "white")
+    draw = ImageDraw.Draw(image)
+    draw.rectangle((0, 100, 700, 118), fill=(205, 225, 210))
+    for x in [20, 120, 320, 400, 450, 500, 550, 700, 760, 820]:
+        draw.line((x, 119, x, 400), fill=(185, 185, 185))
+    for y in range(120, 401, 20):
+        draw.line((0, y, 700, y), fill=(215, 215, 215))
+    draw.text((415, 143), "20", fill=(20, 20, 20))
+    draw.text((515, 283), "6", fill=(20, 20, 20))
+    image.save(path, format="PNG")
 
 
 def test_photo_uses_observation_schema_without_cart_item_shape() -> None:
@@ -490,6 +506,86 @@ def test_mocked_photo_pipeline_converges_into_existing_cart_pipeline(
     assert "какой товар" not in result.reply.text.lower()
     assert len(responses.calls) == 1
     assert responses.calls[0]["text_format"] is PhotoDocumentObservation
+
+
+
+def test_preprocessed_row_count_retries_shifted_photo_and_selects_aligned_rows(
+    settings, tmp_path: Path
+) -> None:  # type: ignore[no-untyped-def]
+    """Повторяет vision при self-consistent пропуске и принимает полный row-focused результат."""
+    first = PhotoDocumentObservation(
+        document_type_proposal="client_order_sheet",
+        detected_columns=["Товар", "Зал", "Бар", "Кухня", "Комментарий"],
+        has_table_structure=True,
+        visible_filled_order_row_count=1,
+        rows=[
+            _row(
+                "Судак Филе охл 500+ Крупный",
+                kitchen_quantity=6,
+                comment_text="доставить завтра до восьми вечера",
+                comment_source="explicit_marker",
+            )
+        ],
+    )
+    second = PhotoDocumentObservation(
+        document_type_proposal="client_order_sheet",
+        detected_columns=["Товар", "Зал", "Бар", "Кухня", "Комментарий"],
+        has_table_structure=True,
+        visible_filled_order_row_count=2,
+        rows=[
+            _row("Горчица дижонская", hall_quantity=20),
+            _row(
+                "зам. Щука филе б/к, Россия",
+                kitchen_quantity=6,
+                comment_text="доставить завтра до восьми вечера",
+                comment_source="explicit_marker",
+            ),
+        ],
+    )
+    responses = _SequenceVisionResponses([first, second])
+    service = object.__new__(OpenAIService)
+    service.settings = settings
+    service.tracer = Tracer(settings)
+    service.vision_client = SimpleNamespace(responses=responses)
+    photo = tmp_path / "light-order-sheet.png"
+    _save_light_order_sheet(photo)
+
+    result = service.parse_photo(photo, "image/png")
+
+    assert len(responses.calls) == 2
+    assert [(item.product_query, item.quantity) for item in result.items] == [
+        ("Горчица дижонская", 20),
+        ("зам. Щука филе б/к, Россия", 6),
+    ]
+    assert all(item.product_query != "Судак Филе охл 500+ Крупный" for item in result.items)
+    retry_content = responses.calls[1]["input"][0]["content"]  # type: ignore[index]
+    assert len([part for part in retry_content if part["type"] == "input_image"]) == 2
+
+
+def test_preprocessed_row_count_fails_closed_after_second_incomplete_read(
+    settings, tmp_path: Path
+) -> None:  # type: ignore[no-untyped-def]
+    """Не создаёт частичную заявку, если оба vision-прохода пропустили заполненную строку."""
+    shifted = PhotoDocumentObservation(
+        document_type_proposal="client_order_sheet",
+        detected_columns=["Товар", "Зал", "Бар", "Кухня", "Комментарий"],
+        has_table_structure=True,
+        visible_filled_order_row_count=1,
+        rows=[_row("Судак Филе охл 500+ Крупный", kitchen_quantity=6)],
+    )
+    responses = _SequenceVisionResponses([shifted, shifted.model_copy(deep=True)])
+    service = object.__new__(OpenAIService)
+    service.settings = settings
+    service.tracer = Tracer(settings)
+    service.vision_client = SimpleNamespace(responses=responses)
+    photo = tmp_path / "light-order-sheet.png"
+    _save_light_order_sheet(photo)
+
+    result = service.parse_photo(photo, "image/png")
+
+    assert len(responses.calls) == 2
+    assert result.photo_outcome == "incomplete_photo_read"
+    assert result.items == []
 
 
 def test_uncertain_photo_observation_retries_with_original_and_focus_views(

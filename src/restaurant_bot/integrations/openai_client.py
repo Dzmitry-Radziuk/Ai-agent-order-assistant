@@ -97,10 +97,24 @@ _LARGE_ORDER_LIST_CHUNK_SIZE = 8
 logger = structlog.get_logger(__name__)
 
 
+def _photo_observation_matches_preprocessed_count(
+    observation: PhotoDocumentObservation,
+    expected_filled_order_row_count: int | None,
+) -> bool:
+    """Сверяет vision-строки с независимым пиксельным подсчётом order-строк."""
+    if expected_filled_order_row_count is None:
+        return True
+    if len(observation.rows) != expected_filled_order_row_count:
+        return False
+    reported = observation.visible_filled_order_row_count
+    return reported is None or reported == expected_filled_order_row_count
+
+
 def _photo_observation_needs_second_pass(
     observation: PhotoDocumentObservation,
     *,
     require_sheet_row_numbers: bool = False,
+    expected_filled_order_row_count: int | None = None,
 ) -> bool:
     """Определяет, нужен ли повторный vision-проход для неполной привязки заказа."""
     sheet_rows_incomplete = (
@@ -114,6 +128,12 @@ def _photo_observation_needs_second_pass(
         observation,
         classify_photo_document(observation),
     )
+    preprocessed_count_mismatch = not _photo_observation_matches_preprocessed_count(
+        observation,
+        expected_filled_order_row_count,
+    )
+    if preprocessed_count_mismatch and expected_filled_order_row_count is not None:
+        return True
     return (
         observation.document_type_proposal
         in {"client_order_sheet", "order_table", "printed_order_form"}
@@ -131,6 +151,7 @@ def _photo_observation_is_complete(
     observation: PhotoDocumentObservation,
     *,
     require_sheet_row_numbers: bool = False,
+    expected_filled_order_row_count: int | None = None,
 ) -> bool:
     """Проверяет, что повторное наблюдение не содержит неопределённых строк заказа."""
     integrity = photo_order_area_integrity(
@@ -146,6 +167,10 @@ def _photo_observation_is_complete(
         observation.order_area_complete
         and observation.uncertain_order_row_count == 0
         and integrity.reason != "filled_order_row_count_mismatch"
+        and _photo_observation_matches_preprocessed_count(
+            observation,
+            expected_filled_order_row_count,
+        )
         and sheet_rows_complete
     )
 
@@ -856,6 +881,7 @@ class OpenAIService:
     ) -> ParsedCommand:
         """Извлекает товары из фотографии."""
         preparation = prepare_photo_views(path, mime_type)
+        expected_filled_order_row_count = preparation.detected_filled_order_row_count
         table_focus_view_size = preparation.table_focus_view_size
         logger.info(
             "photo_image_views_prepared",
@@ -866,6 +892,7 @@ class OpenAIService:
             upscale_factor=preparation.upscale_factor,
             dense_table_views_used=preparation.dense_table_views_used,
             spreadsheet_layout_detected=preparation.spreadsheet_layout_detected,
+            detected_filled_order_row_count=expected_filled_order_row_count,
         )
         input_text = caption or "Распознай заявку на фото"
         if preparation.dense_table_views_used:
@@ -910,10 +937,21 @@ class OpenAIService:
             observation,
             require_sheet_row_numbers=True,
         )
-        if _photo_observation_needs_second_pass(observation):
+        if _photo_observation_needs_second_pass(
+            observation,
+            expected_filled_order_row_count=expected_filled_order_row_count,
+        ):
+            preprocess_count_matches = _photo_observation_matches_preprocessed_count(
+                observation,
+                expected_filled_order_row_count,
+            )
             logger.info(
                 "photo_ai_second_pass_started",
-                reason="order_area_uncertain",
+                reason=(
+                    "order_area_uncertain"
+                    if preprocess_count_matches
+                    else "preprocessed_filled_row_count_mismatch"
+                ),
                 row_count=len(observation.rows),
                 uncertain_order_row_count=observation.uncertain_order_row_count,
                 require_sheet_row_numbers=False,
@@ -922,6 +960,7 @@ class OpenAIService:
                 path,
                 mime_type,
                 include_original=True,
+                prefer_filled_order_rows=True,
             )
             retry_text = (
                 f"{input_text}\n\n"
@@ -945,7 +984,10 @@ class OpenAIService:
             if (
                 retry_complete
                 and retry_observation is not None
-                and _photo_observation_is_complete(retry_observation)
+                and _photo_observation_is_complete(
+                    retry_observation,
+                    expected_filled_order_row_count=expected_filled_order_row_count,
+                )
             ):
                 observation = retry_observation
                 authoritative_sheet_rows = photo_sheet_row_mapping_is_authoritative(
@@ -960,7 +1002,15 @@ class OpenAIService:
                     sheet_row_numbers_visible=observation.sheet_row_numbers_visible,
                 )
             else:
-                logger.warning("photo_ai_second_pass_not_selected")
+                logger.warning(
+                    "photo_ai_second_pass_not_selected",
+                    expected_filled_order_row_count=expected_filled_order_row_count,
+                )
+                if expected_filled_order_row_count is not None:
+                    return ParsedCommand(
+                        intent=Intent.ADD_ITEMS,
+                        photo_outcome="incomplete_photo_read",
+                    )
 
         logger.info(
             "photo_ai_parsed",

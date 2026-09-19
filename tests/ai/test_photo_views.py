@@ -41,6 +41,24 @@ def _save_sheet_like_image(path: Path, size: tuple[int, int] = (1400, 600)) -> N
     image.save(path, format="PNG")
 
 
+
+
+def _save_light_sheet_with_order_rows(path: Path) -> None:
+    """Создаёт светлый Sheets-скриншот с двумя заполненными order-строками."""
+    image = Image.new("RGB", (1000, 500), "white")
+    draw = ImageDraw.Draw(image)
+    draw.rectangle((0, 100, 700, 118), fill=(205, 225, 210))
+    verticals = [20, 120, 320, 400, 450, 500, 550, 700, 760, 820]
+    for x in verticals:
+        draw.line((x, 119, x, 400), fill=(185, 185, 185))
+    boundaries = list(range(120, 401, 20))
+    for y in boundaries:
+        draw.line((0, y, 700, y), fill=(215, 215, 215))
+    draw.text((415, 143), "20", fill=(20, 20, 20))
+    draw.text((515, 283), "6", fill=(20, 20, 20))
+    image.save(path, format="PNG")
+
+
 def test_wide_table_prepares_one_full_table_focus(tmp_path: Path) -> None:
     """Готовит одно полное увеличенное представление таблицы."""
     photo = tmp_path / "wide.png"
@@ -165,3 +183,16 @@ def test_small_ordinary_photo_gets_adaptive_reading_scale(tmp_path: Path) -> Non
     assert preparation.views[0].height == 1200
     assert preparation.upscale_factor == 2
     assert preparation.dense_table_views_used is False
+
+
+def test_light_sheet_detects_independent_filled_order_row_count(tmp_path: Path) -> None:
+    """Считает заполненные order-строки без тёмно-зелёного или тёплого заголовка."""
+    photo = tmp_path / "light-sheet.png"
+    _save_light_sheet_with_order_rows(photo)
+
+    preparation = prepare_photo_views(photo, "image/png")
+
+    assert preparation.spreadsheet_layout_detected is True
+    assert preparation.detected_filled_order_row_count == 2
+    assert preparation.table_focus_view_size is not None
+    assert preparation.table_focus_view_size[0] < 1000 * preparation.upscale_factor

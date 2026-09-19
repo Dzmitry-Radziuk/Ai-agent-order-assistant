@@ -29,6 +29,12 @@ _MAX_READING_UPSCALE_FACTOR = 5
 _TABLE_READING_TARGET_WIDTH = 2400
 _TABLE_READING_TARGET_HEIGHT = 1000
 _MAX_TABLE_UPSCALE_FACTOR = 5
+_LIGHT_SHEET_HEADER_MIN_RATIO = 0.35
+_LIGHT_SHEET_HEADER_SEARCH_MAX_RATIO = 0.55
+_LIGHT_SHEET_GRID_VERTICAL_MIN_RATIO = 0.55
+_LIGHT_SHEET_GRID_HORIZONTAL_MIN_RATIO = 0.70
+_LIGHT_SHEET_MAX_GRID_GROUP_WIDTH = 3
+_LIGHT_SHEET_MIN_CELL_INK_PIXELS = 4
 
 
 @dataclass(frozen=True, slots=True)
@@ -52,6 +58,7 @@ class PhotoImagePreparation:
     upscale_factor: int
     dense_table_views_used: bool
     spreadsheet_layout_detected: bool
+    detected_filled_order_row_count: int | None = None
 
     @property
     def table_focus_view_size(self) -> tuple[int, int] | None:
@@ -64,14 +71,17 @@ def prepare_photo_views(
     mime_type: str,
     *,
     include_original: bool = False,
+    prefer_filled_order_rows: bool = False,
 ) -> PhotoImagePreparation:
-    """Готовит увеличенный вид таблицы и при необходимости добавляет оригинал для сверки."""
+    """Готовит reading-view и детерминированную проверку заполненных строк заказа."""
     original_data = path.read_bytes()
     try:
         with Image.open(BytesIO(original_data)) as image:
             image = ImageOps.exif_transpose(image)
             width, height = image.size
             reading_box = _detect_spreadsheet_reading_box(image)
+            if reading_box is None:
+                reading_box = _detect_light_spreadsheet_reading_box(image)
             if reading_box is None and not _is_dense_table(width, height):
                 reading_view, upscale_factor = _build_ordinary_reading_view(
                     image,
@@ -87,10 +97,22 @@ def prepare_photo_views(
                     spreadsheet_layout_detected=False,
                 )
 
+            filled_order_view: PhotoImageView | None = None
+            detected_filled_order_row_count: int | None = None
+            filled_order_upscale_factor = 1
+            if reading_box is not None:
+                (
+                    filled_order_view,
+                    detected_filled_order_row_count,
+                    filled_order_upscale_factor,
+                ) = _build_filled_order_rows_view(image)
             table_focus_view, upscale_factor = _build_table_focus_view(
                 image,
                 reading_box=reading_box,
             )
+            if prefer_filled_order_rows and filled_order_view is not None:
+                table_focus_view = filled_order_view
+                upscale_factor = filled_order_upscale_factor
     except (UnidentifiedImageError, OSError):
         return PhotoImagePreparation(
             views=(PhotoImageView("original", original_data, mime_type, 0, 0),),
@@ -111,6 +133,7 @@ def prepare_photo_views(
         upscale_factor=upscale_factor,
         dense_table_views_used=True,
         spreadsheet_layout_detected=reading_box is not None,
+        detected_filled_order_row_count=detected_filled_order_row_count,
     )
 
 
@@ -203,6 +226,314 @@ def _table_focus_upscale_factor(width: int, height: int) -> int:
         math.ceil(_TABLE_READING_TARGET_HEIGHT / max(1, height)),
     )
     return min(_MAX_TABLE_UPSCALE_FACTOR, max(_CROP_UPSCALE_FACTOR, factor))
+
+
+
+def _detect_light_spreadsheet_reading_box(
+    image: Image.Image,
+) -> tuple[int, int, int, int] | None:
+    """Находит светлую Google Sheets-таблицу по сетке order/comment колонок."""
+    header_band = _light_sheet_header_band(image)
+    if header_band is None:
+        return None
+    header_top, header_bottom = header_band
+    order_columns = _detect_light_sheet_order_columns(
+        image,
+        start_y=header_bottom + 1,
+    )
+    if order_columns is None:
+        return None
+    row_boundaries = _detect_light_sheet_row_boundaries(
+        image,
+        start_y=header_bottom + 1,
+        right=order_columns[-1],
+    )
+    if len(row_boundaries) < 2:
+        return None
+    right = min(image.width, order_columns[-1] + 1)
+    bottom = min(image.height, row_boundaries[-1] + 1)
+    return 0, header_top, right, bottom
+
+
+def _light_sheet_header_band(image: Image.Image) -> tuple[int, int] | None:
+    """Ищет светло-зелёную строку букв колонок без привязки к теме оформления."""
+    rgb = image.convert("RGB")
+    width, height = rgb.size
+    max_y = min(height, max(1, round(height * _LIGHT_SHEET_HEADER_SEARCH_MAX_RATIO)))
+    step_x = max(1, width // 900)
+    candidate_rows: list[int] = []
+    for y in range(max_y):
+        samples = 0
+        matches = 0
+        for x in range(0, width, step_x):
+            samples += 1
+            if _is_light_sheet_header_pixel(
+                cast(tuple[int, int, int], rgb.getpixel((x, y)))
+            ):
+                matches += 1
+        if samples and matches / samples >= _LIGHT_SHEET_HEADER_MIN_RATIO:
+            candidate_rows.append(y)
+    groups = _contiguous_groups(candidate_rows)
+    if not groups:
+        return None
+    return max(groups, key=lambda group: group[1] - group[0])
+
+
+def _is_light_sheet_header_pixel(pixel: tuple[int, int, int]) -> bool:
+    """Отличает нейтральный светло-зелёный header от белого фона."""
+    red, green, blue = pixel
+    return (
+        160 <= red <= 245
+        and 170 <= green <= 250
+        and 160 <= blue <= 245
+        and green - red >= 4
+        and green - blue >= 2
+        and max(pixel) - min(pixel) <= 55
+    )
+
+
+def _is_sheet_grid_pixel(pixel: tuple[int, int, int]) -> bool:
+    """Определяет серый или тёмный нейтральный пиксель линии таблицы."""
+    red, green, blue = pixel
+    intensity = (red + green + blue) / 3
+    return max(pixel) - min(pixel) <= 12 and 45 <= intensity <= 245
+
+
+def _contiguous_groups(values: list[int]) -> list[tuple[int, int]]:
+    """Склеивает соседние координаты одной линии в диапазоны."""
+    if not values:
+        return []
+    groups: list[tuple[int, int]] = []
+    start = values[0]
+    previous = values[0]
+    for value in values[1:]:
+        if value - previous <= 1:
+            previous = value
+            continue
+        groups.append((start, previous))
+        start = previous = value
+    groups.append((start, previous))
+    return groups
+
+
+def _detect_light_sheet_vertical_groups(
+    image: Image.Image,
+    *,
+    start_y: int,
+) -> list[tuple[int, int]]:
+    """Находит устойчивые вертикальные линии сетки ниже заголовка."""
+    rgb = image.convert("RGB")
+    sample_y = list(range(max(0, start_y), rgb.height, 2))
+    if not sample_y:
+        return []
+    candidates: list[int] = []
+    for x in range(rgb.width):
+        matches = sum(
+            _is_sheet_grid_pixel(cast(tuple[int, int, int], rgb.getpixel((x, y))))
+            for y in sample_y
+        )
+        if matches / len(sample_y) >= _LIGHT_SHEET_GRID_VERTICAL_MIN_RATIO:
+            candidates.append(x)
+    return _contiguous_groups(candidates)
+
+
+def _detect_light_sheet_order_columns(
+    image: Image.Image,
+    *,
+    start_y: int,
+) -> tuple[int, int, int, int, int] | None:
+    """Находит три узкие order-колонки и следующую широкую comment-колонку."""
+    groups = _detect_light_sheet_vertical_groups(image, start_y=start_y)
+    width = image.width
+    centers = [
+        (left + right) / 2
+        for left, right in groups
+        if right - left <= _LIGHT_SHEET_MAX_GRID_GROUP_WIDTH
+        and width * 0.30 <= (left + right) / 2 <= width * 0.75
+    ]
+    best: tuple[float, tuple[int, int, int, int, int]] | None = None
+    for index in range(len(centers) - 4):
+        candidate = centers[index : index + 5]
+        widths = [candidate[offset + 1] - candidate[offset] for offset in range(4)]
+        order_widths = widths[:3]
+        mean_width = sum(order_widths) / 3
+        if mean_width < max(18, width * 0.02) or mean_width > width * 0.12:
+            continue
+        if min(order_widths) <= 0 or max(order_widths) / min(order_widths) > 1.35:
+            continue
+        if widths[3] < mean_width * 1.5 or widths[3] > mean_width * 5:
+            continue
+        score = sum(abs(value - mean_width) for value in order_widths)
+        rounded = cast(
+            tuple[int, int, int, int, int],
+            tuple(round(value) for value in candidate),
+        )
+        if best is None or score < best[0]:
+            best = score, rounded
+    return None if best is None else best[1]
+
+
+def _detect_light_sheet_horizontal_groups(
+    image: Image.Image,
+    *,
+    start_y: int,
+    right: int,
+) -> list[tuple[int, int]]:
+    """Находит горизонтальные границы строк внутри товарной и order-зоны."""
+    rgb = image.convert("RGB")
+    sample_x = list(range(0, min(rgb.width, right + 1), 2))
+    if not sample_x:
+        return []
+    candidates: list[int] = []
+    for y in range(max(0, start_y), rgb.height):
+        matches = sum(
+            _is_sheet_grid_pixel(cast(tuple[int, int, int], rgb.getpixel((x, y))))
+            for x in sample_x
+        )
+        if matches / len(sample_x) >= _LIGHT_SHEET_GRID_HORIZONTAL_MIN_RATIO:
+            candidates.append(y)
+    return _contiguous_groups(candidates)
+
+
+def _detect_light_sheet_row_boundaries(
+    image: Image.Image,
+    *,
+    start_y: int,
+    right: int,
+) -> list[int]:
+    """Возвращает границы видимых строк и отсекает нижний интерфейс Sheets."""
+    groups = _detect_light_sheet_horizontal_groups(
+        image,
+        start_y=start_y,
+        right=right,
+    )
+    points = [
+        round((top + bottom) / 2)
+        for top, bottom in groups
+        if bottom - top <= _LIGHT_SHEET_MAX_GRID_GROUP_WIDTH
+    ]
+    if len(points) < 3:
+        return points
+    gaps = [right_y - left_y for left_y, right_y in zip(points, points[1:])]
+    positive_gaps = sorted(gap for gap in gaps if gap > 0)
+    if not positive_gaps:
+        return points
+    typical_gap = positive_gaps[len(positive_gaps) // 2]
+    maximum_row_gap = max(30, round(typical_gap * 2.2))
+    for index, gap in enumerate(gaps):
+        if index >= 2 and gap > maximum_row_gap:
+            return points[: index + 1]
+    return points
+
+
+def _sheet_cell_ink_pixels(
+    image: Image.Image,
+    *,
+    left: int,
+    right: int,
+    top: int,
+    bottom: int,
+) -> int:
+    """Считает тёмные пиксели внутри ячейки без её рамки."""
+    rgb = image.convert("RGB")
+    count = 0
+    for y in range(top + 2, max(top + 2, bottom - 2)):
+        for x in range(left + 2, max(left + 2, right - 2)):
+            red, green, blue = cast(tuple[int, int, int], rgb.getpixel((x, y)))
+            if max(red, green, blue) < 170:
+                count += 1
+    return count
+
+
+def _filled_order_row_ranges(
+    image: Image.Image,
+    *,
+    order_columns: tuple[int, int, int, int, int],
+    row_boundaries: list[int],
+) -> list[tuple[int, int]]:
+    """Выбирает строки с реальным ink в одной из трёх order-ячеек."""
+    filled: list[tuple[int, int]] = []
+    for top, bottom in zip(row_boundaries, row_boundaries[1:]):
+        if bottom - top < 5:
+            continue
+        cell_counts = [
+            _sheet_cell_ink_pixels(
+                image,
+                left=order_columns[index],
+                right=order_columns[index + 1],
+                top=top,
+                bottom=bottom,
+            )
+            for index in range(3)
+        ]
+        if max(cell_counts, default=0) >= _LIGHT_SHEET_MIN_CELL_INK_PIXELS:
+            filled.append((top, bottom))
+    return filled
+
+
+def _build_filled_order_rows_view(
+    image: Image.Image,
+) -> tuple[PhotoImageView | None, int | None, int]:
+    """Строит второй reading-view только из детерминированно заполненных строк."""
+    header_band = _light_sheet_header_band(image)
+    if header_band is None:
+        return None, None, 1
+    header_top, header_bottom = header_band
+    order_columns = _detect_light_sheet_order_columns(
+        image,
+        start_y=header_bottom + 1,
+    )
+    if order_columns is None:
+        return None, None, 1
+    row_boundaries = _detect_light_sheet_row_boundaries(
+        image,
+        start_y=header_bottom + 1,
+        right=order_columns[-1],
+    )
+    if len(row_boundaries) < 2:
+        return None, None, 1
+    filled_rows = _filled_order_row_ranges(
+        image,
+        order_columns=order_columns,
+        row_boundaries=row_boundaries,
+    )
+    if not filled_rows:
+        return None, 0, 1
+
+    source = image.convert("RGB")
+    right = min(source.width, order_columns[-1] + 1)
+    header = source.crop((0, header_top, right, row_boundaries[0]))
+    separator = 2
+    canvas_height = header.height + sum(
+        bottom - top + separator for top, bottom in filled_rows
+    )
+    canvas = Image.new("RGB", (right, canvas_height), "white")
+    cursor_y = 0
+    canvas.paste(header, (0, cursor_y))
+    cursor_y += header.height
+    for top, bottom in filled_rows:
+        row = source.crop((0, top, right, bottom))
+        canvas.paste(row, (0, cursor_y))
+        cursor_y += row.height + separator
+
+    upscale_factor = _table_focus_upscale_factor(canvas.width, canvas.height)
+    enlarged = canvas.resize(
+        (canvas.width * upscale_factor, canvas.height * upscale_factor),
+        resample=Image.Resampling.LANCZOS,
+    )
+    output = BytesIO()
+    enlarged.save(output, format="PNG", optimize=False)
+    return (
+        PhotoImageView(
+            name="table_focus",
+            data=output.getvalue(),
+            mime_type="image/png",
+            width=enlarged.width,
+            height=enlarged.height,
+        ),
+        len(filled_rows),
+        upscale_factor,
+    )
 
 
 def _detect_spreadsheet_reading_box(image: Image.Image) -> tuple[int, int, int, int] | None:
