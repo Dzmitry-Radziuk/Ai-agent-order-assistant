@@ -1874,6 +1874,7 @@ _PHOTO_OBSERVATION_CONTRACT = """
 Объект верхнего уровня содержит поля:
 document_type_proposal, detected_columns, has_table_structure,
 sheet_row_numbers_visible, rows, visible_product_row_count, order_area_complete,
+visible_filled_order_row_count,
 uncertain_order_row_count,
 scan_complete, scan_warning, document_comment, document_comment_scope и
 extraction_confidence.
@@ -1896,6 +1897,9 @@ sheet_row_number указывай только если номер строки 
 вниз без повторов, но могут иметь пропуски из-за пустых строк.
 Для таблицы с заказом сохраняй порядок заполненных строк сверху вниз; пустые товарные
 строки не возвращай.
+Если удаётся надёжно посчитать все видимые заполненные ячейки заказа, укажи их число
+в visible_filled_order_row_count. Это число должно совпадать с количеством возвращённых
+строк с положительным количеством; не считай пустые строки и не включай справочные числа.
 """.strip()
 
 

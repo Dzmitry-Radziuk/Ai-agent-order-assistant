@@ -59,6 +59,7 @@ def test_photo_observation_contract_keeps_order_area_fields() -> None:
     assert "order_area_complete" in _PHOTO_OBSERVATION_CONTRACT
     assert "uncertain_order_row_count" in _PHOTO_OBSERVATION_CONTRACT
     assert "visible_product_row_count" in _PHOTO_OBSERVATION_CONTRACT
+    assert "visible_filled_order_row_count" in _PHOTO_OBSERVATION_CONTRACT
     assert "sheet_row_numbers_visible" in _PHOTO_OBSERVATION_CONTRACT
     assert "sheet_row_number_confidence" in _PHOTO_OBSERVATION_CONTRACT
 

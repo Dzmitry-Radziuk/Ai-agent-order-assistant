@@ -54,6 +54,7 @@ def test_photo_uses_observation_schema_without_cart_item_shape() -> None:
     assert "sheet_row_numbers_visible" in schema["properties"]
     assert "product_text" in schema["$defs"]["PhotoRowObservation"]["properties"]
     assert "visible_product_row_count" in schema["properties"]
+    assert "visible_filled_order_row_count" in schema["properties"]
     assert "order_area_complete" in schema["properties"]
     assert "uncertain_order_row_count" in schema["properties"]
     assert "scan_complete" in schema["properties"]
@@ -262,6 +263,23 @@ def test_uncertain_order_row_is_incomplete_photo(settings) -> None:  # type: ign
 
     assert result.command.photo_outcome == "incomplete_photo_read"
     assert result.reason == "uncertain_potential_order_row"
+
+
+def test_filled_order_row_count_mismatch_is_incomplete_photo(settings) -> None:  # type: ignore[no-untyped-def]
+    """Не принимает фото, если vision заметил больше заполненных строк, чем вернул."""
+    result = normalize_photo_observation(
+        PhotoDocumentObservation(
+            document_type_proposal="client_order_sheet",
+            detected_columns=["Товар", "Зал", "Бар", "Кухня"],
+            has_table_structure=True,
+            visible_filled_order_row_count=2,
+            rows=[_row("Горчица дижонская", kitchen_quantity=1)],
+        ),
+        settings,
+    )
+
+    assert result.command.photo_outcome == "incomplete_photo_read"
+    assert result.reason == "filled_order_row_count_mismatch"
 
 
 def test_cropped_order_area_is_incomplete_photo(settings) -> None:  # type: ignore[no-untyped-def]
@@ -578,7 +596,8 @@ def test_unverified_sheet_row_conflict_does_not_override_product_identity(
         "Горчица дижонская большое зерно",
         "Хрен столовый Домашний, Кал-й,160гр/Б, Россия (12/1)",
     ]
-    assert [item.photo_sheet_row_number for item in result.items] == [None, None]
+    assert [item.photo_sheet_row_number for item in result.items] == [11, 14]
+    assert all(item.photo_sheet_row_number_authoritative for item in result.items)
 
 
 def test_headerless_table_with_catalog_rows_is_accepted_without_sheet_numbers(

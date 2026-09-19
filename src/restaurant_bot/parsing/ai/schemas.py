@@ -85,6 +85,7 @@ class PhotoDocumentObservation(BaseModel):
     sheet_row_numbers_visible: bool = False
     rows: list[PhotoRowObservation] = Field(default_factory=list)
     visible_product_row_count: int | None = Field(default=None, ge=0)
+    visible_filled_order_row_count: int | None = Field(default=None, ge=0)
     order_area_complete: bool = True
     uncertain_order_row_count: int = Field(default=0, ge=0)
     scan_complete: bool = True

@@ -261,3 +261,31 @@ def test_fix_multiple_button_opens_choice_without_changing_quantity(settings) ->
 
     assert accepted.state.cart[0].quantity == 20
     assert "Финальная проверка" in accepted.reply.text
+
+
+def test_accepted_multiple_quantity_is_written_instead_of_stale_department_value(
+    settings,
+) -> None:  # type: ignore[no-untyped-def]
+    """После выбора нового количества заявка не использует старое значение отдела."""
+    engine = ConversationEngine(settings)
+    item = engine._build_item(ExtractedItem(product_query="Говядина", quantity=5, unit="кг"))
+    item.id = "beef"
+    item.status = ItemStatus.MATCHED
+    item.catalog_product_id = "beef"
+    item.catalog_name = "Говядина"
+    item.catalog_unit = "кг"
+    item.minimum_multiple = 20
+    item.department_quantities = DepartmentQuantities(kitchen=1)
+    item.suggested_quantity = 20
+    state = ConversationState(
+        restaurant="Тест",
+        spreadsheet_id="venue-sheet",
+        current_issue_item_id="beef",
+        cart=[item],
+    )
+
+    accepted = engine.handle(_event(), parse_callback("v2:accept_multiple"), state, [])
+    prepared = engine._prepare_submission(_event(), accepted.state)
+    submission_rows = prepared.state.pending_submission.rows  # type: ignore[union-attr]
+
+    assert [(row["_department"], row["Кол-во"]) for row in submission_rows] == [("Кухня", 20)]

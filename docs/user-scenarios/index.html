@@ -1217,7 +1217,7 @@
           <div><dt>Перед началом</dt><dd>Все обязательные уточнения завершены, открыта финальная проверка.</dd></div>
           <div><dt>Пользователь</dt><dd>Нажимает «Отправить в таблицу заказа» или подтверждает запись текстом либо голосом.</dd></div>
           <div><dt>Бот</dt><dd>Записывает товары и комментарии в лист «Заявка», запускает перерасчёт и сообщает «Заявка записана». Объясняет, что поставщикам её отправит ответственный сотрудник.</dd></div>
-          <div class="result"><dt>Итог</dt><dd>Черновик завершается только после успешной записи и перерасчёта. При выключенной автоматической отправке центральный сервис не вызывается.</dd></div>
+          <div class="result"><dt>Итог</dt><dd>Черновик завершается только после успешной записи и перерасчёта. При временном сбое перерасчёт восстанавливается автоматически; при выключенной автоматической отправке центральный сервис не вызывается.</dd></div>
           <div><dt>Статус проверки</dt><dd><code>AUTOMATED_PARTIAL</code> — Основной контракт подтверждён, но реальный внешний контур не проверен</dd></div>
           <div><dt>Ручная проверка</dt><dd>Нужен изолированный live-прогон записи и перерасчёта в тестовой Google Sheets; внешняя отправка поставщику должна быть выключена.</dd></div>
         </dl>
@@ -1228,7 +1228,7 @@
             <div><dt>Распознаём</dt><dd>заявка, поставщик, сумма, статус, дата поставки</dd></div>
             <div><dt>Подтверждение</dt><dd>Обязательно перед началом записи в таблицу заказа.</dd></div>
             <div><dt>Что изменится</dt><dd>Заявка записывается и пересчитывается в таблице заведения. Технический номер остаётся только во внутренних данных.</dd></div>
-            <div><dt>Если произошла ошибка</dt><dd>Если запись точно не началась, можно повторить. При неизвестном результате бот не должен создавать возможный дубль.</dd></div>
+            <div><dt>Если произошла ошибка</dt><dd>Если запись точно не началась, можно повторить. Неопределённый перерасчёт бот повторяет в фоне до успеха, а после /reset не меняет новый черновик.</dd></div>
           </dl>
         </details>
         <details>
@@ -1284,7 +1284,7 @@
 
       <article id="scenario-SUB-05" class="scenario-card"
         data-category="submission"
-        data-priority="critical" data-search="sub-05 сбой внешней отправки, когда она будет включена проверка и запись заявки следует инструкции бота: безопасно повторяет ранний этап либо передаёт внутренний код менеджеру. до центрального post предлагает безопасный повтор. после начала post не отправляет заявку повторно и просит проверить результат через менеджера по снабжению. пользователь подключён к заведению и видит только заявки своего заведения. заявка поставщик сумма статус дата поставки повторить отправку не отправляйте её повторно сообщить код менеджеру">
+        data-priority="critical" data-search="sub-05 сбой внешней отправки, когда она будет включена проверка и запись заявки при сбое может повторить безопасный этап или выполнить `/reset`, чтобы начать новую заявку; система сама проверяет незавершённые этапы. до центрального post безопасно повторяет незавершённый этап. неопределённый перерасчёт повторяется в фоне до успеха, а после начала post история проверяется без повторной отправки заявки. после /reset бот предупреждает, что старая заявка ещё проверяется и её не нужно оформлять повторно. пользователь подключён к заведению и видит только заявки своего заведения. заявка поставщик сумма статус дата поставки повторить отправку /reset не отправляйте её повторно сообщить код менеджеру">
         <div class="card-top">
           <span class="scenario-id">SUB-05</span>
           <span class="badges">
@@ -1297,9 +1297,9 @@
         <div class="channels"><span>Системный</span></div>
         <dl>
           <div><dt>Перед началом</dt><dd>Автоматическая внешняя отправка включена, а центральный скрипт или сеть временно не отвечают.</dd></div>
-          <div><dt>Пользователь</dt><dd>Следует инструкции бота: безопасно повторяет ранний этап либо передаёт внутренний код менеджеру.</dd></div>
-          <div><dt>Бот</dt><dd>До центрального POST предлагает безопасный повтор. После начала POST не отправляет заявку повторно и просит проверить результат через менеджера по снабжению.</dd></div>
-          <div class="result"><dt>Итог</dt><dd>Неоднозначный сетевой ответ не приводит к автоматическому дублю заказа поставщикам.</dd></div>
+          <div><dt>Пользователь</dt><dd>При сбое может повторить безопасный этап или выполнить `/reset`, чтобы начать новую заявку; система сама проверяет незавершённые этапы.</dd></div>
+          <div><dt>Бот</dt><dd>До центрального POST безопасно повторяет незавершённый этап. Неопределённый перерасчёт повторяется в фоне до успеха, а после начала POST история проверяется без повторной отправки заявки. После /reset бот предупреждает, что старая заявка ещё проверяется и её не нужно оформлять повторно.</dd></div>
+          <div class="result"><dt>Итог</dt><dd>Сбой старой заявки не блокирует новый черновик; таблица не получает новых колонок, а неоднозначный сетевой ответ не приводит к автоматическому дублю заказа поставщикам.</dd></div>
           <div><dt>Статус проверки</dt><dd><code>AUTOMATED_PARTIAL</code> — Основной контракт подтверждён, но реальный внешний контур не проверен</dd></div>
           <div><dt>Ручная проверка</dt><dd>До включения функции нужен контролируемый прогон с отказами сети и операторской сверкой неопределённого результата.</dd></div>
         </dl>
@@ -1309,17 +1309,17 @@
             <div><dt>Доступ</dt><dd>Пользователь подключён к заведению и видит только заявки своего заведения.</dd></div>
             <div><dt>Распознаём</dt><dd>заявка, поставщик, сумма, статус, дата поставки</dd></div>
             <div><dt>Подтверждение</dt><dd>Нужно перед записью заявки в таблицу и перед продолжением при предупреждении о минимальной сумме.</dd></div>
-            <div><dt>Что изменится</dt><dd>Неоднозначный сетевой ответ не приводит к автоматическому дублю заказа поставщикам.</dd></div>
+            <div><dt>Что изменится</dt><dd>Сбой старой заявки не блокирует новый черновик; таблица не получает новых колонок, а неоднозначный сетевой ответ не приводит к автоматическому дублю заказа поставщикам.</dd></div>
             <div><dt>Если произошла ошибка</dt><dd>До записи разрешить безопасный повтор; после неоднозначного результата не создавать возможный дубль.</dd></div>
           </dl>
         </details>
         <details>
           <summary>Примеры фраз</summary>
-          <ul><li>«Повторить отправку»</li><li>«Не отправляйте её повторно»</li><li>«Сообщить код менеджеру»</li></ul>
+          <ul><li>«Повторить отправку»</li><li>«/reset»</li><li>«Не отправляйте её повторно»</li><li>«Сообщить код менеджеру»</li></ul>
         </details>
         <details>
-          <summary>Связанные pytest-тесты · 4</summary>
-          <ul class="tests"><li><a href="../../tests/submission/test_submission.py">tests/submission/test_submission.py</a><span>test_transient_pre_dispatch_error_can_be_retried_safely</span></li><li><a href="../../tests/submission/test_submission.py">tests/submission/test_submission.py</a><span>test_ambiguous_dispatch_failure_is_never_automatically_retried</span></li><li><a href="../../tests/submission/test_submission.py">tests/submission/test_submission.py</a><span>test_redelivery_after_started_dispatch_does_not_send_second_post</span></li><li><a href="../../tests/submission/test_submission_guards.py">tests/submission/test_submission_guards.py</a><span>test_submission_retry_is_blocked_after_uncertain_dispatch</span></li></ul>
+          <summary>Связанные pytest-тесты · 7</summary>
+          <ul class="tests"><li><a href="../../tests/submission/test_submission.py">tests/submission/test_submission.py</a><span>test_transient_pre_dispatch_error_can_be_retried_safely</span></li><li><a href="../../tests/submission/test_submission.py">tests/submission/test_submission.py</a><span>test_ambiguous_dispatch_failure_is_never_automatically_retried</span></li><li><a href="../../tests/submission/test_submission.py">tests/submission/test_submission.py</a><span>test_redelivery_after_started_dispatch_does_not_send_second_post</span></li><li><a href="../../tests/submission/test_submission_guards.py">tests/submission/test_submission_guards.py</a><span>test_submission_retry_is_blocked_after_uncertain_dispatch</span></li><li><a href="../../tests/conversation/test_submission_failed_routing.py">tests/conversation/test_submission_failed_routing.py</a><span>test_reset_starts_new_order_without_deleting_uncertain_submission</span></li><li><a href="../../tests/submission/test_submission.py">tests/submission/test_submission.py</a><span>test_pending_submission_checker_retries_active_snapshot_and_checks_dispatch</span></li><li><a href="../../tests/quantity/test_multiple_existing_stock.py">tests/quantity/test_multiple_existing_stock.py</a><span>test_accepted_multiple_quantity_is_written_instead_of_stale_department_value</span></li></ul>
         </details>
       </article>
 

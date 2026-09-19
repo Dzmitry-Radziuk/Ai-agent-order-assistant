@@ -20,7 +20,9 @@ from restaurant_bot.domain.models import ExtractedItem, Intent, ParsedCommand
 from restaurant_bot.domain.text import clean_text, normalize_text
 from restaurant_bot.domain.units import UNIT_ALIASES, normalize_unit
 from restaurant_bot.input.photo_ingestion import (
+    classify_photo_document,
     normalize_photo_observation,
+    photo_order_area_integrity,
     photo_sheet_row_mapping_is_authoritative,
 )
 from restaurant_bot.input.photo_views import PhotoImagePreparation, prepare_photo_views
@@ -108,6 +110,10 @@ def _photo_observation_needs_second_pass(
             require_sheet_row_numbers=require_sheet_row_numbers,
         )
     )
+    integrity = photo_order_area_integrity(
+        observation,
+        classify_photo_document(observation),
+    )
     return (
         observation.document_type_proposal
         in {"client_order_sheet", "order_table", "printed_order_form"}
@@ -116,6 +122,7 @@ def _photo_observation_needs_second_pass(
             not observation.order_area_complete
             or observation.uncertain_order_row_count > 0
             or sheet_rows_incomplete
+            or integrity.reason == "filled_order_row_count_mismatch"
         )
     )
 
@@ -126,6 +133,11 @@ def _photo_observation_is_complete(
     require_sheet_row_numbers: bool = False,
 ) -> bool:
     """Проверяет, что повторное наблюдение не содержит неопределённых строк заказа."""
+    integrity = photo_order_area_integrity(
+        observation,
+        classify_photo_document(observation),
+        require_sheet_row_numbers=require_sheet_row_numbers,
+    )
     sheet_rows_complete = not require_sheet_row_numbers or photo_sheet_row_mapping_is_authoritative(
         observation,
         require_sheet_row_numbers=require_sheet_row_numbers,
@@ -133,6 +145,7 @@ def _photo_observation_is_complete(
     return (
         observation.order_area_complete
         and observation.uncertain_order_row_count == 0
+        and integrity.reason != "filled_order_row_count_mismatch"
         and sheet_rows_complete
     )
 
@@ -893,6 +906,10 @@ class OpenAIService:
             logger.warning("photo_ai_incomplete_result", mime_type=mime_type)
             return ParsedCommand(intent=Intent.ADD_ITEMS, photo_outcome="incomplete_photo_read")
 
+        authoritative_sheet_rows = photo_sheet_row_mapping_is_authoritative(
+            observation,
+            require_sheet_row_numbers=True,
+        )
         if _photo_observation_needs_second_pass(observation):
             logger.info(
                 "photo_ai_second_pass_started",
@@ -904,7 +921,7 @@ class OpenAIService:
             retry_preparation = prepare_photo_views(
                 path,
                 mime_type,
-                include_original=not preparation.spreadsheet_layout_detected,
+                include_original=True,
             )
             retry_text = (
                 f"{input_text}\n\n"
@@ -931,6 +948,10 @@ class OpenAIService:
                 and _photo_observation_is_complete(retry_observation)
             ):
                 observation = retry_observation
+                authoritative_sheet_rows = photo_sheet_row_mapping_is_authoritative(
+                    observation,
+                    require_sheet_row_numbers=True,
+                )
                 logger.info(
                     "photo_ai_second_pass_selected",
                     row_count=len(observation.rows),
@@ -950,9 +971,14 @@ class OpenAIService:
             uncertain_order_row_count=observation.uncertain_order_row_count,
             scan_complete=observation.scan_complete,
             sheet_row_numbers_visible=observation.sheet_row_numbers_visible,
+            visible_filled_order_row_count=observation.visible_filled_order_row_count,
             require_sheet_row_numbers=False,
         )
-        normalization = normalize_photo_observation(observation, self.settings)
+        normalization = normalize_photo_observation(
+            observation,
+            self.settings,
+            require_sheet_row_numbers=authoritative_sheet_rows,
+        )
         normalized = normalization.command
         logger.info(
             "photo_command_normalized",

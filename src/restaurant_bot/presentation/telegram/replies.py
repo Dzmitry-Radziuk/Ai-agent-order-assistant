@@ -161,9 +161,15 @@ def new_order_confirmation_reply(state: ConversationState) -> BotReply:
     )
 
 
-def new_order_started_reply() -> BotReply:
-    """Показывает однозначный пустой экран только что начатой заявки."""
-    return BotReply(text=_NEW_ORDER_MESSAGE)
+def new_order_started_reply(*, previous_submission_pending: bool = False) -> BotReply:
+    """Показывает пустой экран новой заявки с предупреждением о старой отправке."""
+    warning = (
+        "⚠️ Предыдущая заявка ещё проверяется. Не оформляйте её повторно — поставщики "
+        "могли уже получить этот заказ. Эта заявка будет создана отдельно.\n\n"
+        if previous_submission_pending
+        else ""
+    )
+    return BotReply(text=f"{warning}{_NEW_ORDER_MESSAGE}")
 
 
 def help_reply(state: ConversationState | None = None) -> BotReply:

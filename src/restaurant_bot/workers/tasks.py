@@ -126,6 +126,13 @@ def redrive_telegram_updates() -> int:
     return len(update_ids)
 
 
+@celery_app.task(name="restaurant_bot.check_pending_submissions")
+def check_pending_submissions() -> int:
+    """Проверяет незавершённые заявки без повторной неопределённой отправки."""
+    _, submission = dependencies()
+    return submission.check_pending_submissions()
+
+
 @celery_app.task(
     bind=True,
     autoretry_for=(Exception,),

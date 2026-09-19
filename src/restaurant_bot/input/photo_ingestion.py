@@ -197,6 +197,7 @@ def normalize_photo_observation(
     logger.info(
         "photo_scan_integrity",
         visible_product_row_count=observation.visible_product_row_count,
+        visible_filled_order_row_count=observation.visible_filled_order_row_count,
         returned_row_count=len(observation.rows),
         row_count_mismatch=integrity.row_count_mismatch,
         order_area_complete=observation.order_area_complete,
@@ -331,6 +332,11 @@ def photo_order_area_integrity(
         observation.visible_product_row_count is not None
         and len(observation.rows) != observation.visible_product_row_count
     )
+    filled_rows = sum(_row_has_potential_order_evidence(row) for row in observation.rows)
+    filled_row_count_mismatch = (
+        observation.visible_filled_order_row_count is not None
+        and filled_rows != observation.visible_filled_order_row_count
+    )
     if document_type in {"unknown", "product_card"}:
         return PhotoOrderAreaIntegrity(
             decision="no_order_evidence",
@@ -341,6 +347,12 @@ def photo_order_area_integrity(
         return PhotoOrderAreaIntegrity(
             decision="incomplete_order_evidence",
             reason="potential_order_row_unreadable",
+            row_count_mismatch=row_count_mismatch,
+        )
+    if filled_row_count_mismatch:
+        return PhotoOrderAreaIntegrity(
+            decision="incomplete_order_evidence",
+            reason="filled_order_row_count_mismatch",
             row_count_mismatch=row_count_mismatch,
         )
     if observation.uncertain_order_row_count:

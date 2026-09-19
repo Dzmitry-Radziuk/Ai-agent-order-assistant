@@ -34,6 +34,7 @@ from restaurant_bot.services.submission import (
     submission_dispatch_uncertain_reply,
     submission_failure_reply,
     submission_local_saved_reply,
+    submission_recalculation_uncertain_reply,
     submission_success_reply,
 )
 
@@ -47,6 +48,15 @@ def test_submission_success_card_matches_n8n() -> None:
         ("Проверить статус", "v2:orders:r4"),
         ("Новая заявка", "v2:clear:r4"),
     ]
+
+
+def test_recalculation_uncertain_reply_explains_background_recovery() -> None:
+    """Сообщение не требует повторно оформлять заявку и подсказывает reset."""
+    reply = submission_recalculation_uncertain_reply(ConversationState(), "ORDER-1")
+
+    assert "автоматически проверит" in reply.text
+    assert "/reset" in reply.text
+    assert "повторно оформлять" in reply.text
 
 
 def test_large_draft_has_navigation_without_hiding_items() -> None:
@@ -292,6 +302,145 @@ def test_local_submission_clears_draft_and_marks_state_saved_locally() -> None:
     assert state.stage is SessionStage.SUBMITTED
     assert state.status == "saved_locally"
     assert state.last_order_no == "ORDER-LOCAL"
+
+
+def test_history_order_number_supports_current_and_legacy_aliases() -> None:
+    """Автовосстановление читает номер заявки из всех поддержанных колонок."""
+    assert SubmissionService._history_order_number({"Номер заявки": " A-1 "}) == "A-1"
+    assert SubmissionService._history_order_number({"№ Заявки": "A-2"}) == "A-2"
+    assert SubmissionService._history_order_number({"ID заявки": "A-3"}) == "A-3"
+    assert SubmissionService._history_order_number({}) == ""
+
+
+def test_pending_submission_checker_retries_active_snapshot_and_checks_dispatch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Планировщик разделяет безопасный retry и проверку уже начатой отправки."""
+
+    class _ScalarResult:
+        """Возвращает три контрольные записи для разных этапов восстановления."""
+
+        def all(self) -> list[SimpleNamespace]:
+            """Возвращает записи для retry, проверки отправки и перерасчёта."""
+            return [
+                SimpleNamespace(
+                    order_no="ORDER-RETRY",
+                    telegram_id="chat-retry",
+                    payload=PendingSubmission(order_no="ORDER-RETRY").model_dump(mode="json"),
+                    dispatch_started=False,
+                    dispatch_completed=False,
+                    recalc_status="pending",
+                    created_at=None,
+                ),
+                SimpleNamespace(
+                    order_no="ORDER-CHECK",
+                    telegram_id="chat-check",
+                    payload=PendingSubmission(order_no="ORDER-CHECK").model_dump(mode="json"),
+                    dispatch_started=True,
+                    dispatch_completed=False,
+                    recalc_status="completed",
+                    created_at=None,
+                ),
+                SimpleNamespace(
+                    order_no="ORDER-RECALC",
+                    telegram_id="chat-recalc",
+                    payload=PendingSubmission(order_no="ORDER-RECALC").model_dump(mode="json"),
+                    dispatch_started=False,
+                    dispatch_completed=False,
+                    recalc_status="uncertain",
+                    created_at=None,
+                ),
+            ]
+
+    class _Session:
+        """Изображает минимальную транзакционную сессию для планировщика."""
+
+        def __enter__(self):  # type: ignore[no-untyped-def]
+            """Открывает тестовую сессию."""
+            return self
+
+        def __exit__(self, *_args: object) -> None:
+            """Закрывает тестовую сессию без изменения результата."""
+            return None
+
+        def scalars(self, _query: object) -> _ScalarResult:
+            """Возвращает подготовленные записи вместо обращения к базе."""
+            return _ScalarResult()
+
+    service = object.__new__(SubmissionService)
+    service._has_retryable_pending_state = MagicMock(  # type: ignore[method-assign]
+        return_value=True
+    )
+    service.submit = MagicMock()  # type: ignore[method-assign]
+    service._recover_dispatch_from_history = MagicMock(  # type: ignore[method-assign]
+        return_value=True
+    )
+    service._recover_recalculation = MagicMock(  # type: ignore[method-assign]
+        return_value=True
+    )
+    service._has_active_pending_state = MagicMock(  # type: ignore[method-assign]
+        return_value=False
+    )
+    service._finalize_detached_local_recalculation = MagicMock()  # type: ignore[method-assign]
+    monkeypatch.setattr(submission_module, "SessionLocal", lambda: _Session())
+
+    assert service.check_pending_submissions() == 2
+    service.submit.assert_called_once_with("chat-retry", report_failure=False)
+    service._recover_dispatch_from_history.assert_called_once()
+    service._recover_recalculation.assert_called_once()
+    assert service._recover_recalculation.call_args.args[0] == "chat-recalc"
+    assert service._recover_recalculation.call_args.args[1].order_no == "ORDER-RECALC"
+    service._finalize_detached_local_recalculation.assert_called_once()
+    assert (
+        service._finalize_detached_local_recalculation.call_args.args[0].order_no == "ORDER-RECALC"
+    )
+
+
+def test_recalculation_recovery_reuses_snapshot_without_table_schema_change(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Восстановление повторяет только Apps Script-вызов из локального снимка."""
+
+    class _Sessions:
+        """Возвращает состояние чата и имитирует блокировку восстановления."""
+
+        def get_for_update(self, _chat_id: str) -> tuple[None, ConversationState]:
+            """Возвращает состояние заведения для теста перерасчёта."""
+            return None, ConversationState(spreadsheet_id="venue-sheet")
+
+    class _Session:
+        """Изображает контекст транзакции при восстановлении перерасчёта."""
+
+        def __enter__(self):  # type: ignore[no-untyped-def]
+            """Открывает тестовую транзакцию."""
+            return self
+
+        def __exit__(self, *_args: object) -> None:
+            """Закрывает тестовую транзакцию без побочного эффекта."""
+            return None
+
+    service = object.__new__(SubmissionService)
+    service.redis = MagicMock()
+    chat_redis_lock = MagicMock()
+    chat_redis_lock.acquire.return_value = True
+    chat_redis_lock.owned.return_value = True
+    service.redis.lock.return_value = chat_redis_lock
+    service.sheets = MagicMock()
+    service.sheets.prepare_recalculation.return_value = MagicMock()
+    service._has_current_access = MagicMock(return_value=True)  # type: ignore[method-assign]
+    service._claim_recalculation_recovery = MagicMock(return_value=True)  # type: ignore[method-assign]
+    service._mark_recalc_completed = MagicMock()  # type: ignore[method-assign]
+    service._mark_recalc_uncertain = MagicMock()  # type: ignore[method-assign]
+    monkeypatch.setattr(submission_module, "SessionLocal", lambda: _Session())
+    monkeypatch.setattr(submission_module, "SessionRepository", lambda _db: _Sessions())
+
+    pending = PendingSubmission(order_no="ORDER-RECALC", spreadsheet_id="venue-sheet")
+
+    assert service._recover_recalculation("chat-1", pending) is True
+    service.sheets.prepare_recalculation.assert_called_once_with("venue-sheet")
+    service.sheets.send_recalculation.assert_called_once()
+    service._mark_recalc_completed.assert_called_once_with("ORDER-RECALC")
+    service._mark_recalc_uncertain.assert_not_called()
 
 
 def test_order_status_limits_to_ten_tracked_orders_and_formats_delivery_date() -> None:

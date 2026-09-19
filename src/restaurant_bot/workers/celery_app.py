@@ -37,6 +37,10 @@ celery_app.conf.update(
             "task": "restaurant_bot.redrive_telegram_updates",
             "schedule": 60.0,
         },
+        "check-pending-submissions": {
+            "task": "restaurant_bot.check_pending_submissions",
+            "schedule": 300.0,
+        },
         "cleanup-expired-audit-data": {
             "task": "restaurant_bot.cleanup_expired_audit_data",
             "schedule": crontab(hour=3, minute=15),

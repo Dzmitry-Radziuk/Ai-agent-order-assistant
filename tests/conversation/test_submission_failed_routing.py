@@ -169,15 +169,32 @@ def test_dispatch_uncertain_never_retries_or_mutates(settings: Settings, phrase:
     assert "Нужно проверить отправку" in result.reply.text
 
 
-def test_start_new_order_and_clear_are_locked_until_recovery(settings: Settings) -> None:
-    """Fresh-order reset не уничтожает marker неуверенной отправки."""
+def test_reset_starts_new_order_without_deleting_uncertain_submission(
+    settings: Settings,
+) -> None:
+    """Reset освобождает чат, сохраняя старую заявку в журнале отправки."""
     for phrase in ("новый заказ", "/reset"):
         state = _state(uncertain=True)
         result = _run(settings, state, phrase)
 
         assert result.enqueue_submission is False
-        assert result.state.stage is SessionStage.SUBMISSION_FAILED
-        assert result.state.pending_submission is not None
+        assert result.state.stage is SessionStage.COLLECTING
+        assert result.state.cart == []
+        assert result.state.pending_submission is None
+        assert result.state.spreadsheet_id == ""
+        assert "Предыдущая заявка ещё проверяется" in result.reply.text
+        assert "не оформляйте её повторно" in result.reply.text.lower()
+
+
+def test_reset_keeps_retry_and_dispatch_status_routes_separate(settings: Settings) -> None:
+    """Reset не превращает retry или проверку внешней отправки в новый POST."""
+    retryable = _run(settings, _state(), "/reset")
+    uncertain = _run(settings, _state(uncertain=True), "/reset")
+
+    assert retryable.state.stage is SessionStage.COLLECTING
+    assert uncertain.state.stage is SessionStage.COLLECTING
+    assert retryable.enqueue_submission is False
+    assert uncertain.enqueue_submission is False
 
 
 def test_missing_pending_submission_has_safe_broken_state_fallback(settings: Settings) -> None:

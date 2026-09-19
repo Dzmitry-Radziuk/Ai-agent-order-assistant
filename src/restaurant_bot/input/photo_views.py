@@ -8,7 +8,7 @@ from io import BytesIO
 from pathlib import Path
 from typing import cast
 
-from PIL import Image, UnidentifiedImageError
+from PIL import Image, ImageOps, UnidentifiedImageError
 
 _DENSE_TABLE_MIN_WIDTH = 900
 _DENSE_TABLE_MIN_HEIGHT = 200
@@ -69,6 +69,7 @@ def prepare_photo_views(
     original_data = path.read_bytes()
     try:
         with Image.open(BytesIO(original_data)) as image:
+            image = ImageOps.exif_transpose(image)
             width, height = image.size
             reading_box = _detect_spreadsheet_reading_box(image)
             if reading_box is None and not _is_dense_table(width, height):

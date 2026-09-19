@@ -1142,7 +1142,12 @@ class ConversationEngine:
         fresh.metadata["onboarding_shown"] = True
         return EngineResult(
             state=fresh,
-            reply=new_order_started_reply(),
+            reply=new_order_started_reply(
+                previous_submission_pending=(
+                    state.stage is SessionStage.SUBMISSION_FAILED
+                    and state.pending_submission is not None
+                )
+            ),
             invalidate_catalog=invalidate_catalog,
         )
 
@@ -1306,6 +1311,7 @@ class ConversationEngine:
             if authorization.provenance is QuantityProvenance.ORDER:
                 item.quantity = authorization.quantity
                 item.unit = authorization.unit
+                item.quantity_user_edited = True
                 if extracted.quantity_source:
                     item.quantity_source = extracted.quantity_source
         self.catalog_resolution.apply_catalog(item, outcome.candidate, catalog)
@@ -1344,6 +1350,7 @@ class ConversationEngine:
             return EngineResult(state=state, reply=cart_reply(state))
         if item.suggested_quantity is not None:
             item.quantity = item.suggested_quantity
+            item.quantity_user_edited = True
         item.status = ItemStatus.MATCHED if item.quantity else ItemStatus.MISSING_QTY
         return self._advance_multiple_quantity_choice(state)
 
@@ -1552,10 +1559,12 @@ class ConversationEngine:
             and normalize_unit(command.edit_unit) != normalize_unit(item.catalog_unit)
         ):
             item.quantity = quantity
+            item.quantity_user_edited = True
             item.unit = normalize_unit(command.edit_unit)
             item.status = ItemStatus.UNIT_MISMATCH
             return self._advance(state)
         item.quantity = quantity
+        item.quantity_user_edited = True
         item.unit = item.catalog_unit or command.edit_unit or item.unit
         if item.catalog_product_id:
             item.status = ItemStatus.MATCHED
@@ -1662,6 +1671,12 @@ class ConversationEngine:
         action = decision.action
         mode = decision.mode
         pending = state.pending_submission
+        if command.intent in {Intent.CLEAR_CART, Intent.START_NEW_ORDER} and mode == "reset":
+            return self._start_new_order(
+                state,
+                clear_product_add_queue=True,
+                invalidate_catalog=bool(state.spreadsheet_id),
+            )
         if action in {CompatibilityAction.REJECT, CompatibilityAction.AMBIGUOUS}:
             if mode == "broken" or pending is None:
                 reply = submission_recovery_unavailable_reply()
@@ -1710,6 +1725,8 @@ class ConversationEngine:
     @staticmethod
     def _submission_department_quantities(item: CartItem) -> list[tuple[str, float]]:
         """Возвращает количества позиции по отделам для записи в таблицу."""
+        if item.quantity_user_edited:
+            return [(normalize_department(item.department) or "Кухня", item.quantity or 0)]
         department_values = (
             ("Зал", item.department_quantities.hall),
             ("Бар", item.department_quantities.bar),

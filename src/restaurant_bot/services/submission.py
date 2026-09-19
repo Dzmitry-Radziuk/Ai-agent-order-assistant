@@ -602,6 +602,328 @@ class SubmissionService:
                     )
             return None
 
+    def check_pending_submissions(self, *, limit: int = 100) -> int:
+        """Проверяет незавершённые заявки и безопасно продолжает retryable-сбои."""
+        from sqlalchemy import select
+
+        with SessionLocal() as db:
+            records = db.scalars(
+                select(SubmissionRecord)
+                .where(SubmissionRecord.finalized.is_(False))
+                .order_by(SubmissionRecord.created_at)
+                .limit(limit)
+            ).all()
+            candidates = [
+                (
+                    record.order_no,
+                    record.telegram_id,
+                    PendingSubmission.model_validate(record.payload),
+                    bool(record.dispatch_started),
+                    bool(record.dispatch_completed),
+                    self._recalc_status(record),
+                )
+                for record in records
+            ]
+
+        recovered = 0
+        for (
+            order_no,
+            chat_id,
+            pending,
+            dispatch_started,
+            dispatch_completed,
+            recalc_status,
+        ) in candidates:
+            if dispatch_started and not dispatch_completed:
+                try:
+                    if self._recover_dispatch_from_history(chat_id, pending):
+                        recovered += 1
+                except Exception:
+                    logger.exception(
+                        "submission_status_check_failed",
+                        chat_id=chat_id,
+                        order_no=order_no,
+                    )
+                continue
+            if recalc_status in {"started", "uncertain"}:
+                try:
+                    if self._recover_recalculation(chat_id, pending):
+                        recovered += 1
+                        if self._has_active_pending_state(chat_id, order_no):
+                            self.submit(chat_id, report_failure=False)
+                        else:
+                            self._finalize_detached_local_recalculation(pending)
+                except Exception:
+                    logger.exception(
+                        "submission_recalculation_recovery_failed",
+                        chat_id=chat_id,
+                        order_no=order_no,
+                    )
+                continue
+            if not self._has_retryable_pending_state(chat_id, order_no):
+                continue
+            try:
+                self.submit(chat_id, report_failure=False)
+            except Exception:
+                logger.exception(
+                    "submission_recovery_failed",
+                    chat_id=chat_id,
+                    order_no=order_no,
+                )
+        logger.info(
+            "submission_status_check_completed",
+            checked_count=len(candidates),
+            recovered_count=recovered,
+        )
+        return recovered
+
+    def _recover_recalculation(
+        self,
+        chat_id: str,
+        pending: PendingSubmission,
+    ) -> bool:
+        """Периодически повторяет конвергентный перерасчёт до успеха."""
+        with chat_lock(self.redis, chat_id, timeout=300) as lease:
+            if lease is not None:
+                lease.ensure_owned()
+            with SessionLocal() as db:
+                _, state = SessionRepository(db).get_for_update(chat_id)
+            spreadsheet_id = pending.spreadsheet_id or state.spreadsheet_id
+            if not spreadsheet_id or not self._has_current_access(
+                chat_id,
+                user_id=pending.telegram_user_id or chat_id,
+                bound_chat_id=pending.telegram_chat_id or chat_id,
+                venue_code=pending.venue_code or state.venue_code,
+                spreadsheet_id=spreadsheet_id,
+            ):
+                return False
+            if not self._claim_recalculation_recovery(pending.order_no):
+                return False
+            try:
+                prepared = self.sheets.prepare_recalculation(spreadsheet_id)
+                if lease is not None:
+                    lease.ensure_owned()
+                self.sheets.send_recalculation(prepared)
+            except Exception as exc:
+                if lease is not None:
+                    lease.ensure_owned()
+                self._mark_recalc_uncertain(
+                    chat_id,
+                    pending.order_no,
+                    str(exc) or type(exc).__name__,
+                )
+                return False
+            if lease is not None:
+                lease.ensure_owned()
+            self._mark_recalc_completed(pending.order_no)
+            logger.info(
+                "submission_recalculation_recovered",
+                chat_id=chat_id,
+                order_no=pending.order_no,
+            )
+            return True
+
+    def _claim_recalculation_recovery(self, order_no: str) -> bool:
+        """Атомарно резервирует следующую попытку перерасчёта в локальной БД."""
+        from sqlalchemy import select
+
+        with SessionLocal.begin() as db:
+            record = db.scalar(
+                select(SubmissionRecord)
+                .where(SubmissionRecord.order_no == order_no)
+                .with_for_update()
+            )
+            if record is None or self._recalc_status(record) == "completed":
+                return False
+            attempt = self._recalc_attempt(record.recalc_operation_id)
+            next_attempt = attempt + 1
+            record.recalc_status = "started"
+            record.recalc_operation_id = f"recalc:{order_no}:attempt:{next_attempt}"
+            record.recalc_started_at = datetime.now(UTC)
+            record.recalc_completed_at = None
+            record.recalc_done = False
+            record.last_error = None
+            pending = PendingSubmission.model_validate(record.payload)
+            self._append_submission_event(
+                OrderEventRepository(db),
+                pending,
+                event_type="submission_recalculation_retry_started",
+                idempotency_key=f"order:{order_no}:recalc-retry-{next_attempt}",
+                details={
+                    "operation_id": record.recalc_operation_id,
+                    "attempt": next_attempt,
+                },
+            )
+            return True
+
+    @staticmethod
+    def _recalc_attempt(operation_id: str) -> int:
+        """Извлекает номер попытки из локального идентификатора перерасчёта."""
+        marker = ":attempt:"
+        if marker not in operation_id:
+            return 1 if operation_id else 0
+        value = operation_id.rsplit(marker, 1)[-1]
+        try:
+            return max(0, int(value))
+        except ValueError:
+            return 1
+
+    @staticmethod
+    def _has_active_pending_state(chat_id: str, order_no: str) -> bool:
+        """Проверяет, что восстановленная заявка ещё является текущим черновиком."""
+        with SessionLocal() as db:
+            _, state = SessionRepository(db).get_for_update(chat_id)
+        pending = state.pending_submission
+        return bool(pending is not None and pending.order_no == order_no)
+
+    def _finalize_detached_local_recalculation(self, pending: PendingSubmission) -> None:
+        """Завершает старую локальную заявку после reset без изменения нового черновика."""
+        if getattr(self.settings, "google_order_submission_enabled", True):
+            return
+        from sqlalchemy import select
+
+        with SessionLocal.begin() as db:
+            record = db.scalar(
+                select(SubmissionRecord)
+                .where(SubmissionRecord.order_no == pending.order_no)
+                .with_for_update()
+            )
+            if (
+                record is None
+                or record.finalized
+                or not record.recalc_done
+                or record.dispatch_started
+            ):
+                return
+            record.finalized = True
+            record.completion_notified = True
+            record.completion_notification_status = "suppressed"
+            record.last_error = None
+            self._append_submission_event(
+                OrderEventRepository(db),
+                pending,
+                event_type="submission_recalculation_recovered_after_reset",
+                idempotency_key=f"order:{pending.order_no}:recalc-recovered-after-reset",
+            )
+
+    @staticmethod
+    def _has_retryable_pending_state(chat_id: str, order_no: str) -> bool:
+        """Проверяет, что чат всё ещё хранит безопасный снимок для retry."""
+        with SessionLocal() as db:
+            _, state = SessionRepository(db).get_for_update(chat_id)
+        pending = state.pending_submission
+        return bool(
+            pending is not None and pending.order_no == order_no and not pending.failed_stage
+        )
+
+    def _recover_dispatch_from_history(
+        self,
+        chat_id: str,
+        pending: PendingSubmission,
+    ) -> bool:
+        """Находит неопределённую отправку в истории под блокировкой чата."""
+        with chat_lock(self.redis, chat_id, timeout=300) as lease:
+            if lease is not None:
+                lease.ensure_owned()
+            return self._recover_dispatch_from_history_locked(chat_id, pending, lease=lease)
+
+    def _recover_dispatch_from_history_locked(
+        self,
+        chat_id: str,
+        pending: PendingSubmission,
+        *,
+        lease: ChatLease | None = None,
+    ) -> bool:
+        """Находит неопределённую отправку в истории без повторного POST."""
+        from sqlalchemy import select
+
+        with SessionLocal() as db:
+            _, state = SessionRepository(db).get_for_update(chat_id)
+        _ensure_lease(lease)
+        spreadsheet_id = pending.spreadsheet_id or state.spreadsheet_id
+        if not spreadsheet_id or not self._has_current_access(
+            chat_id,
+            user_id=pending.telegram_user_id or chat_id,
+            bound_chat_id=pending.telegram_chat_id or chat_id,
+            venue_code=pending.venue_code or state.venue_code,
+            spreadsheet_id=spreadsheet_id,
+        ):
+            return False
+        rows = self.sheets.read_order_statuses(
+            [pending.order_no],
+            spreadsheet_id,
+            state.venue_name or state.restaurant,
+        )
+        _ensure_lease(lease)
+        if not rows:
+            return False
+        recovered_order_no = self._history_order_number(rows[0]) or pending.order_no
+        notify_state: ConversationState | None = None
+        with SessionLocal.begin() as db:
+            sessions = SessionRepository(db)
+            session_row, current_state = sessions.get_for_update(chat_id)
+            record = db.scalar(
+                select(SubmissionRecord)
+                .where(SubmissionRecord.order_no == pending.order_no)
+                .with_for_update()
+            )
+            if record is None or record.finalized:
+                return False
+            current_pending = current_state.pending_submission
+            active_in_chat = bool(
+                current_pending is not None and current_pending.order_no == pending.order_no
+            )
+            record.dispatch_completed = True
+            record.dispatch_completed_at = datetime.now(UTC)
+            record.external_order_no = recovered_order_no
+            record.finalized = True
+            record.last_error = None
+            if active_in_chat:
+                self._apply_successful_submission_state(
+                    current_state,
+                    recovered_order_no,
+                    status="submitted",
+                )
+                sessions.save(chat_id, current_state, session_row)
+                notify_state = current_state
+                event_type = "submission_recovered_from_history"
+            else:
+                record.completion_notification_status = "suppressed"
+                record.completion_notified = True
+                event_type = "submission_recovered_after_reset"
+            self._append_submission_event(
+                OrderEventRepository(db),
+                pending,
+                event_type=event_type,
+                idempotency_key=f"order:{pending.order_no}:recovered-from-history",
+                details={"history_order_no": recovered_order_no},
+            )
+        _ensure_lease(lease)
+        if notify_state is not None:
+            self._send_completion(
+                chat_id,
+                notify_state,
+                recovered_order_no,
+                pending.order_no,
+            )
+        logger.info(
+            "submission_recovered_from_history",
+            chat_id=chat_id,
+            order_no=pending.order_no,
+            history_order_no=recovered_order_no,
+            active_in_chat=notify_state is not None,
+        )
+        return True
+
+    @staticmethod
+    def _history_order_number(row: dict[str, Any]) -> str:
+        """Возвращает номер заявки из строки истории по поддержанным alias."""
+        for key in ("Номер заявки", "№ Заявки", "ID заявки", "order_no"):
+            value = str(row.get(key) or "").strip()
+            if value:
+                return value
+        return ""
+
     def send_status(
         self,
         chat_id: str,
@@ -1176,7 +1498,7 @@ class SubmissionService:
                     return
                 raise RuntimeError("Recalculation is already started or uncertain")
             record.recalc_status = "started"
-            record.recalc_operation_id = f"recalc:{order_no}"
+            record.recalc_operation_id = f"recalc:{order_no}:attempt:1"
             record.recalc_started_at = datetime.now(UTC)
             record.recalc_completed_at = None
             record.recalc_done = False
@@ -1215,18 +1537,19 @@ class SubmissionService:
             )
 
     def _mark_recalc_uncertain(self, chat_id: str, order_no: str, error: str) -> None:
-        """Блокирует повтор пересчёта после неизвестного внешнего результата."""
+        """Фиксирует неопределённый результат и оставляет recovery планировщику."""
         from sqlalchemy import select
 
         with SessionLocal.begin() as db:
             sessions = SessionRepository(db)
             row, state = sessions.get_for_update(chat_id)
-            state.stage = SessionStage.SUBMISSION_FAILED
-            state.status = "recalculation_uncertain"
-            if state.pending_submission:
-                state.pending_submission.failed_stage = "recalculation_uncertain"
-                state.pending_submission.last_error = error[:1000]
-            sessions.save(chat_id, state, row)
+            active_pending = state.pending_submission
+            if active_pending is not None and active_pending.order_no == order_no:
+                state.stage = SessionStage.SUBMISSION_FAILED
+                state.status = "recalculation_uncertain"
+                active_pending.failed_stage = "recalculation_uncertain"
+                active_pending.last_error = error[:1000]
+                sessions.save(chat_id, state, row)
             record = db.scalar(
                 select(SubmissionRecord)
                 .where(SubmissionRecord.order_no == order_no)

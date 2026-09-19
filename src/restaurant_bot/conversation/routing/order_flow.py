@@ -143,7 +143,7 @@ def evaluate_submission_failed(
     command: ParsedCommand,
     state: ConversationState,
 ) -> CompatibilityDecision:
-    """Блокирует изменение черновика до безопасного восстановления отправки."""
+    """Разрешает восстановление или безопасный сброс неудачной отправки."""
     mode = submission_failure_mode(state)
     if state.stage is not SessionStage.SUBMISSION_FAILED:
         return CompatibilityDecision(CompatibilityAction.NOT_APPLICABLE)
@@ -160,6 +160,9 @@ def evaluate_submission_failed(
         }:
             return CompatibilityDecision(CompatibilityAction.CONTINUE, mode="broken")
         return CompatibilityDecision(CompatibilityAction.REJECT, mode="broken")
+
+    if command.intent in {Intent.CLEAR_CART, Intent.START_NEW_ORDER}:
+        return CompatibilityDecision(CompatibilityAction.CONTINUE, mode="reset")
 
     retry = (
         command.retry_requested

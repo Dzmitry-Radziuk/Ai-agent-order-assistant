@@ -159,6 +159,7 @@ class PendingQuantityHandler:
         if quantity is None:
             return PendingQuantityAction.NOT_HANDLED
         item.quantity = quantity
+        item.quantity_user_edited = True
         item.unit = unit or item.catalog_unit or item.unit
         short_quantity, short_unit = self.spoken_unit_only_quantity(text)
         if (

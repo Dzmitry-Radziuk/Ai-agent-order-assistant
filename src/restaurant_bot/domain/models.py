@@ -365,6 +365,7 @@ class CartItem(BaseModel):
     source_line: str = ""
     source_span: str = ""
     quantity_source: str = ""
+    quantity_user_edited: bool = False
     order_entry_type: str = ""
     packaging_text: str = ""
     packaging_role: Literal[
