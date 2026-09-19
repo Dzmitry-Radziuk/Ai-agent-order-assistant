@@ -104,10 +104,7 @@ def _photo_observation_matches_preprocessed_count(
     """Сверяет vision-строки с независимым пиксельным подсчётом order-строк."""
     if expected_filled_order_row_count is None:
         return True
-    if len(observation.rows) != expected_filled_order_row_count:
-        return False
-    reported = observation.visible_filled_order_row_count
-    return reported is None or reported == expected_filled_order_row_count
+    return len(observation.rows) == expected_filled_order_row_count
 
 
 def _photo_observation_needs_second_pass(
@@ -161,11 +158,6 @@ def _photo_observation_is_complete(
     expected_filled_order_row_count: int | None = None,
 ) -> bool:
     """Проверяет, что повторное наблюдение не содержит неопределённых строк заказа."""
-    integrity = photo_order_area_integrity(
-        observation,
-        classify_photo_document(observation),
-        require_sheet_row_numbers=require_sheet_row_numbers,
-    )
     sheet_rows_complete = not require_sheet_row_numbers or photo_sheet_row_mapping_is_authoritative(
         observation,
         require_sheet_row_numbers=require_sheet_row_numbers,

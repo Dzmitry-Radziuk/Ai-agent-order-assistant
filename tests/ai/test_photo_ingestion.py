@@ -279,7 +279,9 @@ def test_uncertain_order_row_is_incomplete_photo(settings) -> None:  # type: ign
     assert result.reason == "uncertain_potential_order_row"
 
 
-def test_model_filled_row_count_mismatch_is_advisory_without_geometry(settings) -> None:  # type: ignore[no-untyped-def]
+def test_model_filled_row_count_mismatch_is_advisory_without_geometry(
+    settings,
+) -> None:  # type: ignore[no-untyped-def]
     """Не отклоняет произвольное фото только по self-reported счётчику vision."""
     result = normalize_photo_observation(
         PhotoDocumentObservation(
@@ -294,8 +296,6 @@ def test_model_filled_row_count_mismatch_is_advisory_without_geometry(settings) 
 
     assert result.command.photo_outcome == ""
     assert result.command.items[0].quantity == 1
-
-
 
 
 def test_headerless_layout_with_explicit_quantities_is_accepted(settings) -> None:  # type: ignore[no-untyped-def]

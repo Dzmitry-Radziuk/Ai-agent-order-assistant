@@ -124,7 +124,6 @@ def classify_photo_document(observation: PhotoDocumentObservation) -> str:
     has_reference_column = bool(columns & _REFERENCE_HEADERS)
     has_card_evidence = bool(columns & _CARD_HEADERS)
     rows = [row for row in observation.rows if clean_text(row.product_text)]
-    proposal = canonical_photo_identity(observation.document_type_proposal)
     has_aligned_explicit_order = any(
         _row_has_order_evidence(row)
         and row.row_alignment_confidence >= 0.9
