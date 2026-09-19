@@ -82,3 +82,21 @@ def test_photo_prompt_returns_only_filled_sheet_rows() -> None:
     assert "пустые товарные" in prompt
     assert "строки не возвращай" in prompt
     assert "могут иметь пропуски из-за пустых строк" in prompt
+
+
+def test_photo_prompt_does_not_require_table_or_row_numbers() -> None:
+    """Фиксирует поддержку обычных фото-списков без сетки и нумерации."""
+    prompt = f"{_PHOTO_SYSTEM}\n{_PHOTO_OBSERVATION_CONTRACT}"
+
+    assert "Таблица, заголовки колонок и номера строк НЕ обязательны" in prompt
+    assert "используй free_list" in prompt
+    assert "Не требуй" in prompt
+
+
+def test_photo_prompt_preserves_item_and_global_comments() -> None:
+    """Фиксирует комментарии в строке и явный общий комментарий к заказу."""
+    prompt = f"{_PHOTO_SYSTEM}\n{_PHOTO_OBSERVATION_CONTRACT}"
+
+    assert "comment_text" in prompt
+    assert "document_comment_scope=order" in prompt
+    assert "все товары" in prompt

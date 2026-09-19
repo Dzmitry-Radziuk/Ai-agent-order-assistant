@@ -48,7 +48,8 @@ def _save_light_sheet_with_order_rows(path: Path) -> None:
     draw.rectangle((0, 100, 700, 118), fill=(205, 225, 210))
     verticals = [20, 120, 320, 400, 450, 500, 550, 700, 760, 820]
     for x in verticals:
-        draw.line((x, 119, x, 400), fill=(185, 185, 185))
+        line_color = (0, 0, 0) if x in {550, 700} else (185, 185, 185)
+        draw.line((x, 119, x, 400), fill=line_color)
     boundaries = list(range(120, 401, 20))
     for y in boundaries:
         draw.line((0, y, 700, y), fill=(215, 215, 215))

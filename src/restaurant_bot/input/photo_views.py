@@ -295,7 +295,7 @@ def _is_sheet_grid_pixel(pixel: tuple[int, int, int]) -> bool:
     """Определяет серый или тёмный нейтральный пиксель линии таблицы."""
     red, green, blue = pixel
     intensity = (red + green + blue) / 3
-    return max(pixel) - min(pixel) <= 12 and 45 <= intensity <= 245
+    return max(pixel) - min(pixel) <= 12 and intensity <= 245
 
 
 def _contiguous_groups(values: list[int]) -> list[tuple[int, int]]:

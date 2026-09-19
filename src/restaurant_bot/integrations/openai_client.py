@@ -124,9 +124,10 @@ def _photo_observation_needs_second_pass(
             require_sheet_row_numbers=require_sheet_row_numbers,
         )
     )
-    integrity = photo_order_area_integrity(
-        observation,
-        classify_photo_document(observation),
+    document_type = classify_photo_document(observation)
+    reported_count_mismatch = (
+        observation.visible_filled_order_row_count is not None
+        and observation.visible_filled_order_row_count != len(observation.rows)
     )
     preprocessed_count_mismatch = not _photo_observation_matches_preprocessed_count(
         observation,
@@ -134,16 +135,22 @@ def _photo_observation_needs_second_pass(
     )
     if preprocessed_count_mismatch and expected_filled_order_row_count is not None:
         return True
-    return (
-        observation.document_type_proposal
-        in {"client_order_sheet", "order_table", "printed_order_form"}
-        and bool(observation.rows)
-        and (
-            not observation.order_area_complete
-            or observation.uncertain_order_row_count > 0
-            or sheet_rows_incomplete
-            or integrity.reason == "filled_order_row_count_mismatch"
-        )
+    is_order_document = document_type in {
+        "client_order_sheet",
+        "order_table",
+        "printed_order_form",
+        "free_list",
+    } or clean_text(observation.document_type_proposal).casefold() in {
+        "client_order_sheet",
+        "order_table",
+        "printed_order_form",
+        "free_list",
+    }
+    return is_order_document and (
+        not observation.order_area_complete
+        or observation.uncertain_order_row_count > 0
+        or sheet_rows_incomplete
+        or reported_count_mismatch
     )
 
 
@@ -166,7 +173,6 @@ def _photo_observation_is_complete(
     return (
         observation.order_area_complete
         and observation.uncertain_order_row_count == 0
-        and integrity.reason != "filled_order_row_count_mismatch"
         and _photo_observation_matches_preprocessed_count(
             observation,
             expected_filled_order_row_count,

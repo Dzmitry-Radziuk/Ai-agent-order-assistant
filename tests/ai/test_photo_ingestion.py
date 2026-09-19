@@ -279,8 +279,8 @@ def test_uncertain_order_row_is_incomplete_photo(settings) -> None:  # type: ign
     assert result.reason == "uncertain_potential_order_row"
 
 
-def test_filled_order_row_count_mismatch_is_incomplete_photo(settings) -> None:  # type: ignore[no-untyped-def]
-    """Не принимает фото, если vision заметил больше заполненных строк, чем вернул."""
+def test_model_filled_row_count_mismatch_is_advisory_without_geometry(settings) -> None:  # type: ignore[no-untyped-def]
+    """Не отклоняет произвольное фото только по self-reported счётчику vision."""
     result = normalize_photo_observation(
         PhotoDocumentObservation(
             document_type_proposal="client_order_sheet",
@@ -292,8 +292,70 @@ def test_filled_order_row_count_mismatch_is_incomplete_photo(settings) -> None: 
         settings,
     )
 
-    assert result.command.photo_outcome == "incomplete_photo_read"
-    assert result.reason == "filled_order_row_count_mismatch"
+    assert result.command.photo_outcome == ""
+    assert result.command.items[0].quantity == 1
+
+
+
+
+def test_headerless_layout_with_explicit_quantities_is_accepted(settings) -> None:  # type: ignore[no-untyped-def]
+    """Принимает фото без заголовков и номеров строк по same-row количеству."""
+    result = normalize_photo_observation(
+        PhotoDocumentObservation(
+            document_type_proposal="free_list",
+            has_table_structure=True,
+            detected_columns=[],
+            rows=[
+                _row(
+                    "Молоко",
+                    explicit_order_quantity=4,
+                    explicit_order_unit="шт",
+                    order_entry_text="4 шт",
+                    row_alignment_confidence=1,
+                    quantity_confidence=1,
+                ),
+                _row(
+                    "Картофель",
+                    explicit_order_quantity=6,
+                    explicit_order_unit="кг",
+                    order_entry_text="6 кг",
+                    row_alignment_confidence=1,
+                    quantity_confidence=1,
+                ),
+            ],
+        ),
+        settings,
+    )
+
+    assert [(item.product_query, item.quantity) for item in result.command.items] == [
+        ("Молоко", 4),
+        ("Картофель", 6),
+    ]
+    assert result.command.photo_outcome == ""
+
+
+def test_global_photo_comment_can_live_in_regular_row(settings) -> None:  # type: ignore[no-untyped-def]
+    """Поднимает явный комментарий «все товары» на уровень всей заявки."""
+    result = normalize_photo_observation(
+        PhotoDocumentObservation(
+            document_type_proposal="order_table",
+            has_table_structure=False,
+            rows=[
+                _row(
+                    "Молоко",
+                    explicit_order_quantity=4,
+                    explicit_order_unit="шт",
+                    order_entry_text="4",
+                    comment_text="все товары доставить завтра до восьми вечера",
+                    comment_source="user_note",
+                )
+            ],
+        ),
+        settings,
+    )
+
+    assert result.command.global_comment == "доставить завтра до восьми вечера"
+    assert result.command.items[0].comment == ""
 
 
 def test_cropped_order_area_is_incomplete_photo(settings) -> None:  # type: ignore[no-untyped-def]

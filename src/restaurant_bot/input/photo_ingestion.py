@@ -60,7 +60,8 @@ _UNIT_RE = re.compile(
     flags=re.IGNORECASE,
 )
 _GLOBAL_COMMENT_RE = re.compile(
-    r"(?:комментар\w*\s+(?:ко\s+всей\s+заявк\w*|для\s+всех\s+позиц\w*)|для\s+всех\s+позиц\w*)",
+    r"(?:комментар\w*\s+(?:ко\s+всей\s+заявк\w*|для\s+всех\s+(?:позиц|товар)\w*)"
+    r"|для\s+всех\s+(?:позиц|товар)\w*|все\s+товар\w*)",
     flags=re.IGNORECASE,
 )
 
@@ -154,14 +155,8 @@ def classify_photo_document(observation: PhotoDocumentObservation) -> str:
         and any(_row_has_order_evidence(row) for row in rows)
     ):
         return "order_table"
-    if (
-        observation.has_table_structure
-        and rows
-        and has_aligned_explicit_order
-        and proposal in {"client_order_sheet", "order_table", "printed_order_form"}
-        and not has_card_evidence
-    ):
-        return "order_table"
+    if rows and has_aligned_explicit_order and not has_card_evidence:
+        return "order_table" if observation.has_table_structure else "free_list"
     if has_card_evidence and not has_order_column and not has_departments:
         return "product_card"
     if (
@@ -332,11 +327,6 @@ def photo_order_area_integrity(
         observation.visible_product_row_count is not None
         and len(observation.rows) != observation.visible_product_row_count
     )
-    filled_rows = sum(_row_has_potential_order_evidence(row) for row in observation.rows)
-    filled_row_count_mismatch = (
-        observation.visible_filled_order_row_count is not None
-        and filled_rows != observation.visible_filled_order_row_count
-    )
     if document_type in {"unknown", "product_card"}:
         return PhotoOrderAreaIntegrity(
             decision="no_order_evidence",
@@ -347,12 +337,6 @@ def photo_order_area_integrity(
         return PhotoOrderAreaIntegrity(
             decision="incomplete_order_evidence",
             reason="potential_order_row_unreadable",
-            row_count_mismatch=row_count_mismatch,
-        )
-    if filled_row_count_mismatch:
-        return PhotoOrderAreaIntegrity(
-            decision="incomplete_order_evidence",
-            reason="filled_order_row_count_mismatch",
             row_count_mismatch=row_count_mismatch,
         )
     if observation.uncertain_order_row_count:
@@ -461,9 +445,11 @@ def _authorize_row(
         quantities = DepartmentQuantities()
         exact_provenance = ""
 
+    row_comment = clean_text(row.comment_text)
     comment = (
-        clean_text(row.comment_text)
+        row_comment
         if row.comment_source in {"explicit_marker", "user_note"}
+        and _GLOBAL_COMMENT_RE.search(row_comment) is None
         else ""
     )
     return ExtractedItem(
@@ -551,14 +537,21 @@ def _client_sheet_quantity_without_department(row: PhotoRowObservation) -> bool:
 
 
 def _authorized_document_comment(observation: PhotoDocumentObservation) -> str:
-    """Возвращает только явно обозначенный комментарий ко всему документу."""
-    comment = clean_text(observation.document_comment)
-    if observation.document_comment_scope != "order" or not comment:
-        return ""
-    marker = _GLOBAL_COMMENT_RE.search(comment)
-    if marker is None:
-        return ""
-    return clean_text(comment[marker.end() :].lstrip(" :-—–")) or comment
+    """Извлекает явно общий комментарий из документа или любой видимой строки."""
+    candidates = [clean_text(observation.document_comment)]
+    candidates.extend(
+        clean_text(row.comment_text)
+        for row in observation.rows
+        if row.comment_source in {"explicit_marker", "user_note"}
+    )
+    for comment in candidates:
+        if not comment:
+            continue
+        marker = _GLOBAL_COMMENT_RE.search(comment)
+        if marker is None:
+            continue
+        return clean_text(comment[marker.end() :].lstrip(" :-—–")) or comment
+    return ""
 
 
 def _positive_or_none(value: float | None) -> float | None:
