@@ -8,12 +8,18 @@ from typing import Any
 
 from restaurant_bot.domain.text import clean_text
 
+_CURRENCY_PREFIX_RE = re.compile(
+    r"^\s*(?:₽|руб(?:\.|лей|ля|ль)?|р\.?)\s*",
+    flags=re.IGNORECASE,
+)
+
 
 def to_float(value: Any) -> float | None:
     """Безопасно преобразует значение в положительное число."""
     if value is None or value == "":
         return None
-    raw = clean_text(value).replace(" ", "").replace(",", ".")
+    raw = _CURRENCY_PREFIX_RE.sub("", clean_text(value))
+    raw = re.sub(r"\s+", "", raw).replace(",", ".")
     raw = re.sub(r"[^0-9.\-]", "", raw)
     if raw.count(".") > 1:
         sign = "-" if raw.startswith("-") else ""
