@@ -9,8 +9,10 @@ from restaurant_bot.domain.models import (
     Intent,
     ItemStatus,
     ParsedCommand,
+    SessionStage,
     TelegramEvent,
 )
+from restaurant_bot.input.telegram_callbacks import parse_callback
 from restaurant_bot.services.engine import ConversationEngine
 
 
@@ -245,3 +247,93 @@ def test_spoken_quantity_edit_understands_short_product_case_ending(
     )
 
     assert result.state.cart[0].quantity == 5
+
+
+def test_multiple_quantity_callback_updates_exact_item(settings) -> None:  # type: ignore[no-untyped-def]
+    """Привязывает кнопку кратности к товару, который был показан пользователю."""
+    dijon = CartItem(
+        id="dijon",
+        source_query="Горчица дижонская",
+        catalog_product_id="dijon-id",
+        catalog_name="Горчица дижонская",
+        catalog_unit="шт",
+        quantity=1,
+        unit="шт",
+        minimum_multiple=3,
+        suggested_quantity=3,
+        status=ItemStatus.MATCHED,
+    )
+    whole = CartItem(
+        id="whole",
+        source_query="Горчица дижонская большое зерно",
+        catalog_product_id="whole-id",
+        catalog_name="Горчица дижонская большое зерно",
+        catalog_unit="шт",
+        quantity=1,
+        unit="шт",
+        minimum_multiple=3,
+        suggested_quantity=3,
+        status=ItemStatus.MATCHED,
+    )
+    state = ConversationState(
+        stage=SessionStage.AWAIT_SUBMIT_CONFIRM,
+        current_issue_item_id="whole",
+        cart=[dijon, whole],
+    )
+    command = parse_callback("v2:accept_multiple:dijon")
+
+    result = ConversationEngine(settings).handle(
+        TelegramEvent(
+            update_id=2,
+            chat_id="123456",
+            input_type=InputKind.CALLBACK,
+            callback_data="v2:accept_multiple:dijon",
+        ),
+        command,
+        state,
+        [],
+    )
+
+    assert result.state.cart[0].quantity == 3
+    assert result.state.cart[1].quantity == 1
+
+
+def test_accept_multiple_then_shows_supplier_minimum_warning(settings) -> None:  # type: ignore[no-untyped-def]
+    """После выбора кратности снова считает минимальную сумму поставщика."""
+    item = CartItem(
+        id="dijon",
+        source_query="Горчица дижонская",
+        catalog_product_id="dijon-id",
+        catalog_name="Горчица дижонская",
+        catalog_unit="шт",
+        supplier="Тестовый поставщик",
+        price=100,
+        supplier_minimum_amount=5000,
+        supplier_current_sum=0,
+        quantity=1,
+        unit="шт",
+        minimum_multiple=3,
+        suggested_quantity=3,
+        status=ItemStatus.MATCHED,
+    )
+    state = ConversationState(
+        stage=SessionStage.AWAIT_SUBMIT_CONFIRM,
+        current_issue_item_id=item.id,
+        cart=[item],
+    )
+
+    result = ConversationEngine(settings).handle(
+        TelegramEvent(
+            update_id=3,
+            chat_id="123456",
+            input_type=InputKind.CALLBACK,
+            callback_data="v2:accept_multiple:dijon",
+        ),
+        parse_callback("v2:accept_multiple:dijon"),
+        state,
+        [],
+    )
+
+    assert result.state.cart[0].quantity == 3
+    assert "Минимальная сумма поставщика" in result.reply.text
+    assert "300 ₽ из 5 000 ₽" in result.reply.text

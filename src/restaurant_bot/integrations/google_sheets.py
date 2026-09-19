@@ -233,8 +233,16 @@ class GoogleSheetsGateway:
         """Строит детерминированный план записи каталога без внешней записи."""
         target_id = self._require_spreadsheet_id(spreadsheet_id)
         catalog = self.load_catalog(target_id)
-        by_id = {product.product_id: product for product in catalog}
+        products_by_id: dict[str, list[CatalogProduct]] = defaultdict(list)
+        for product in catalog:
+            products_by_id[product.product_id].append(product)
+        by_id = {
+            product_id: products[0]
+            for product_id, products in products_by_id.items()
+            if len(products) == 1
+        }
         increments: dict[tuple[str, str], float] = defaultdict(float)
+        expected_names: dict[str, set[str]] = defaultdict(set)
         comments: dict[str, str] = {}
         for row in rows:
             product_id = clean_text(row.get("ID товара"))
@@ -244,6 +252,9 @@ class GoogleSheetsGateway:
             quantity = to_float(row.get("Кол-во", row.get("Количество"))) or 0
             if product_id and quantity:
                 increments[(product_id, department)] += quantity
+                expected_name = normalize_text(row.get("Наименование у поставщика"))
+                if expected_name:
+                    expected_names[product_id].add(expected_name)
                 product = by_id.get(product_id)
                 comments[product_id] = self._merge_comment(
                     comments.get(product_id) or (product.comment if product else ""),
@@ -263,10 +274,26 @@ class GoogleSheetsGateway:
         header_index = {header: index + 1 for index, header in enumerate(headers)}
         mutations: list[dict[str, Any]] = []
         for (product_id, department), increment in increments.items():
-            product = by_id.get(product_id)
+            products = products_by_id.get(product_id, [])
+            if len(products) != 1:
+                raise GoogleSheetsError(
+                    f"Catalog product ID is missing or duplicated: {product_id}"
+                )
+            product = products[0]
+            pending_names = expected_names.get(product_id, set())
+            if len(pending_names) > 1 or (
+                pending_names and normalize_text(product.name) not in pending_names
+            ):
+                raise GoogleSheetsError(
+                    f"Catalog product identity changed before write: {product_id}"
+                )
+            if department not in {"Зал", "Бар", "Кухня"}:
+                raise GoogleSheetsError(f"Unsupported order department: {department}")
             column = header_index.get(department)
-            if not product or not product.row_number or not column:
-                continue
+            if not product.row_number or not column:
+                raise GoogleSheetsError(
+                    f"Catalog row or department column is unavailable: {product_id}"
+                )
             old = product.department_quantities.for_department(department) or 0
             cell = f"'{self.settings.google_catalog_sheet}'!{self._column_letter(column)}{product.row_number}"
             mutations.append(

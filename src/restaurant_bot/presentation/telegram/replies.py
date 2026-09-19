@@ -900,14 +900,19 @@ def multiple_quantity_choice_reply(item: CartItem) -> BotReply:
             [
                 Button(
                     text=f"Выбрать {suggested} {unit}",
-                    callback_data="v2:accept_multiple",
+                    callback_data=f"v2:accept_multiple:{item.id}",
                 )
             ],
-            [Button(text="Ввести другое количество", callback_data="v2:enter_quantity")],
+            [
+                Button(
+                    text="Ввести другое количество",
+                    callback_data=f"v2:enter_quantity:{item.id}",
+                )
+            ],
             [
                 Button(
                     text=f"Оставить {current} {unit}",
-                    callback_data="v2:keep_current",
+                    callback_data=f"v2:keep_current:{item.id}",
                 )
             ],
             [Button(text="К финальной проверке", callback_data="v2:final_review")],

@@ -22,6 +22,7 @@ DEPARTMENT_ALIASES: dict[str, str] = {
     "hall": "Зал",
     "bar": "Бар",
     "kitchen": "Кухня",
+    "condiments": "Кухня",
 }
 
 

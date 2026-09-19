@@ -11,6 +11,7 @@ from redis import Redis
 
 from restaurant_bot.config import Settings
 from restaurant_bot.conversation.state.transitions import normalize_cart_page
+from restaurant_bot.domain.text import clean_text
 from restaurant_bot.domain.models import (
     BotReply,
     Button,
@@ -53,6 +54,7 @@ from restaurant_bot.presentation.telegram.submission import (
     submission_recalculation_uncertain_reply,
     submission_success_reply,
 )
+from restaurant_bot.parsing.numeric import to_float
 from restaurant_bot.presentation.telegram.venue_registration import access_disabled_reply
 from restaurant_bot.repositories.order_events import OrderEventRepository
 from restaurant_bot.repositories.sessions import SessionRepository
@@ -1896,6 +1898,19 @@ class SubmissionService:
             return "Номер заявки в плане каталога не совпадает с заявкой."
         if plan["spreadsheet_id"] != pending.spreadsheet_id:
             return "Таблица в плане каталога не совпадает с таблицей заведения."
+        expected_quantity_rows = [
+            row
+            for row in pending.rows
+            if clean_text(row.get("ID товара"))
+            and (to_float(row.get("Кол-во", row.get("Количество"))) or 0) > 0
+        ]
+        quantity_mutations = [
+            mutation
+            for mutation in plan["mutations"]
+            if isinstance(mutation, dict) and mutation.get("kind") == "quantity"
+        ]
+        if expected_quantity_rows and not quantity_mutations:
+            return "План записи не содержит ни одного изменения количества."
         return ""
 
     def _persist_catalog_started(
