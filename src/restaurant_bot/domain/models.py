@@ -74,6 +74,7 @@ class Intent(StrEnum):
     UNIT_EDIT = "unit_edit"
     UNIT_OK = "unit_ok"
     MERGE_DUPLICATE = "merge_duplicate"
+    SELECT_DEPARTMENT = "select_department"
     UNKNOWN = "unknown"
 
 
@@ -476,6 +477,8 @@ class ConversationState(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
     status: str = "collecting"
     department: str = "Кухня"
+    department_confirmation_required: bool = False
+    department_confirmed: bool = False
     ui_revision: int = 0
     ui_message_text: str = ""
     visible_actions: list[dict[str, str]] = Field(default_factory=list)

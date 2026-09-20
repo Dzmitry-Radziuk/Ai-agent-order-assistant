@@ -10,6 +10,7 @@ from PIL import Image
 
 from restaurant_bot.domain.history import HistoryQuery, HistoryQuestionType
 from restaurant_bot.domain.models import ExtractedItem, Intent, ParsedCommand
+from restaurant_bot.input.photo_views import PhotoImagePreparation, PhotoImageView
 from restaurant_bot.integrations import openai_client
 from restaurant_bot.integrations.openai_client import (
     CommentScopeDecision,
@@ -19,7 +20,7 @@ from restaurant_bot.integrations.openai_client import (
     restore_explicit_order_terms,
 )
 from restaurant_bot.observability import Tracer
-from restaurant_bot.parsing.ai.schemas import PhotoDocumentObservation
+from restaurant_bot.parsing.ai.schemas import PhotoDocumentObservation, PhotoRowObservation
 from restaurant_bot.parsing.commands.api import infer_intent
 
 
@@ -331,11 +332,87 @@ def test_dense_photo_parser_sends_one_canonical_view_in_one_vision_request(
     assert "не начинай с первой заполненной цифры" in content[0]["text"]
     assert "не переноси верхнюю заполненную ячейку на строку выше" in content[0]["text"]
     assert "PhotoDocumentObservation" in content[0]["text"]
-    assert "visible_filled_order_row_count" in content[0]["text"]
     assert call["reasoning"] == {"effort": "minimal"}
     assert call["text"] == {"verbosity": "low"}
     assert "verbosity" not in call
     assert call["text_format"] is PhotoDocumentObservation
+    assert "visible_filled_order_row_count" in call["text_format"].model_fields
+
+
+def test_photo_parser_prefers_rows_with_order_or_comment(
+    settings,
+    tmp_path: Path,
+    mocker,
+) -> None:  # type: ignore[no-untyped-def]
+    """Передаёт модели сфокусированные строки таблицы уже на первом проходе."""
+    responses = _Responses(PhotoDocumentObservation())
+    service = _service(settings, SimpleNamespace(responses=responses))
+    photo = tmp_path / "order.png"
+    photo.write_bytes(b"image")
+    preparation = PhotoImagePreparation(
+        views=(PhotoImageView("table_focus", b"png", "image/png", 800, 300),),
+        original_width=1200,
+        original_height=700,
+        upscale_factor=2,
+        dense_table_views_used=True,
+        spreadsheet_layout_detected=True,
+        detected_filled_order_row_count=None,
+    )
+    prepare = mocker.patch.object(
+        openai_client,
+        "prepare_photo_views",
+        return_value=preparation,
+    )
+
+    service.parse_photo(photo, "image/png")
+
+    prepare.assert_called_once_with(
+        photo,
+        "image/png",
+        prefer_filled_order_rows=True,
+    )
+
+
+def test_preprocessed_order_count_ignores_comment_only_rows() -> None:
+    """Не принимает отдельный комментарий за дополнительную строку заказа."""
+    observation = PhotoDocumentObservation(
+        rows=[
+            PhotoRowObservation(product_text="Горчица", hall_quantity=2),
+            PhotoRowObservation(
+                product_text="Пеламида",
+                comment_text="Все товары доставить завтра",
+                comment_source="user_note",
+            ),
+        ]
+    )
+
+    assert openai_client._photo_observation_matches_preprocessed_count(observation, 1)
+    assert not openai_client._photo_observation_matches_preprocessed_count(observation, 2)
+
+
+def test_reported_order_count_ignores_comment_only_rows() -> None:
+    """Не запускает повторное vision-чтение из-за отдельной строки комментария."""
+    observation = PhotoDocumentObservation(
+        document_type_proposal="client_order_sheet",
+        detected_columns=["Товар", "Зал", "Бар", "Кухня", "Комментарий"],
+        has_table_structure=True,
+        visible_filled_order_row_count=1,
+        order_area_complete=True,
+        uncertain_order_row_count=0,
+        rows=[
+            PhotoRowObservation(product_text="Горчица", hall_quantity=2),
+            PhotoRowObservation(
+                product_text="Пеламида",
+                comment_text="Все товары доставить завтра",
+                comment_source="user_note",
+            ),
+        ],
+    )
+
+    assert not openai_client._photo_observation_needs_second_pass(
+        observation,
+        expected_filled_order_row_count=1,
+    )
 
 
 def test_catalog_matcher_uses_only_structured_candidate_decision(settings) -> None:  # type: ignore[no-untyped-def]

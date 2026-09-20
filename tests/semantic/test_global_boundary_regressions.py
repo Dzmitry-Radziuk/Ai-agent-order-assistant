@@ -431,6 +431,6 @@ def test_final_review_explains_submission_and_return_to_draft() -> None:
     """Объясняет отправку заявки и доступные изменения до подтверждения."""
     reply = final_review_reply(ConversationState())
 
-    assert "После нажатия «Отправить заявку» заявка будет передана в обработку." in reply.text
+    assert "После подтверждения заявка будет записана в таблицу заказа." in reply.text
     assert "нажмите «К черновику»" in reply.text
     assert "изменить количество или удалить позицию" in reply.text

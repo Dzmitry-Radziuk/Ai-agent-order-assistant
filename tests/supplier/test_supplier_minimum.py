@@ -11,7 +11,10 @@ from restaurant_bot.domain.models import (
     ParsedCommand,
     TelegramEvent,
 )
-from restaurant_bot.presentation.telegram.replies import supplier_warning_details_reply
+from restaurant_bot.presentation.telegram.replies import (
+    final_review_reply,
+    supplier_warning_details_reply,
+)
 from restaurant_bot.services.engine import ConversationEngine
 
 
@@ -35,6 +38,26 @@ def test_supplier_minimum_warning_shows_gap_and_recovery_actions() -> None:
     callbacks = [button.callback_data for row in reply.rows for button in row]
     assert callbacks[0] == "v2:minsumadd:0"
     assert callbacks[-1] == "v2:cart"
+
+
+def test_final_review_requires_opening_supplier_minimum_warning() -> None:
+    """Не показывает обычную запись рядом с предупреждением о минимальной сумме."""
+    item = CartItem(
+        id="rose",
+        source_query="Сироп Роза",
+        catalog_name="Сироп Роза",
+        supplier="Сиропы",
+        quantity=5,
+        price=100,
+        supplier_minimum_amount=1000,
+        status=ItemStatus.MATCHED,
+    )
+
+    reply = final_review_reply(ConversationState(cart=[item]))
+
+    callbacks = [button.callback_data for row in reply.rows for button in row]
+    assert "v2:minsum" in callbacks
+    assert "v2:submit" not in callbacks
 
 
 def test_supplier_minimum_uses_existing_order_total_plus_current_draft() -> None:

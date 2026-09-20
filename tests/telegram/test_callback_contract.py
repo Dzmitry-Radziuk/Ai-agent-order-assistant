@@ -20,6 +20,10 @@ def test_callback_actions_have_explicit_state_machine_meanings() -> None:
     assert parse_callback("v2:submit").intent is Intent.SUBMIT_AS_IS
     assert parse_callback("v2:addreq:2").intent is Intent.PRODUCT_ADD
     assert parse_callback("v2:dupmerge:3:0").intent is Intent.MERGE_DUPLICATE
+    department = parse_callback("v2:dept:bar:r4")
+    assert department.intent is Intent.SELECT_DEPARTMENT
+    assert department.callback_target == "bar"
+    assert department.callback_revision == 4
 
 
 def test_pagination_callbacks_have_explicit_targets() -> None:

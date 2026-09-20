@@ -22,7 +22,7 @@ from restaurant_bot.domain.units import UNIT_ALIASES, normalize_unit
 from restaurant_bot.input.photo_ingestion import (
     classify_photo_document,
     normalize_photo_observation,
-    photo_order_area_integrity,
+    photo_row_has_potential_order_evidence,
     photo_sheet_row_mapping_is_authoritative,
 )
 from restaurant_bot.input.photo_views import PhotoImagePreparation, prepare_photo_views
@@ -104,7 +104,10 @@ def _photo_observation_matches_preprocessed_count(
     """Сверяет vision-строки с независимым пиксельным подсчётом order-строк."""
     if expected_filled_order_row_count is None:
         return True
-    return len(observation.rows) == expected_filled_order_row_count
+    observed_order_row_count = sum(
+        photo_row_has_potential_order_evidence(row) for row in observation.rows
+    )
+    return observed_order_row_count == expected_filled_order_row_count
 
 
 def _photo_observation_needs_second_pass(
@@ -122,9 +125,12 @@ def _photo_observation_needs_second_pass(
         )
     )
     document_type = classify_photo_document(observation)
+    observed_order_row_count = sum(
+        photo_row_has_potential_order_evidence(row) for row in observation.rows
+    )
     reported_count_mismatch = (
         observation.visible_filled_order_row_count is not None
-        and observation.visible_filled_order_row_count != len(observation.rows)
+        and observation.visible_filled_order_row_count != observed_order_row_count
     )
     preprocessed_count_mismatch = not _photo_observation_matches_preprocessed_count(
         observation,
@@ -878,7 +884,11 @@ class OpenAIService:
         caption: str = "",
     ) -> ParsedCommand:
         """Извлекает товары из фотографии."""
-        preparation = prepare_photo_views(path, mime_type)
+        preparation = prepare_photo_views(
+            path,
+            mime_type,
+            prefer_filled_order_rows=True,
+        )
         expected_filled_order_row_count = preparation.detected_filled_order_row_count
         table_focus_view_size = preparation.table_focus_view_size
         logger.info(

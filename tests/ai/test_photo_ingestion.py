@@ -156,6 +156,58 @@ def test_headerless_table_fragment_uses_aligned_explicit_quantity(settings) -> N
     assert result.command.items[0].quantity == 1
 
 
+def test_headerless_table_sums_multiple_confirmed_order_cells_in_same_row(settings) -> None:  # type: ignore[no-untyped-def]
+    """Суммирует несколько order-ячеек обрезанной таблицы без выдумывания отделов."""
+    product = "Свинина Окорок Тамбовский В/К"
+    observation = PhotoDocumentObservation(
+        document_type_proposal="order_table",
+        detected_columns=["department", "product", "unit", "supplier", "order_quantity"],
+        has_table_structure=True,
+        rows=[
+            PhotoRowObservation(
+                row_index=0,
+                row_text=f"Кухня | {product} | кг | Тестовый поставщик | 1 | 25",
+                product_text=product,
+                kitchen_quantity=1,
+                order_entry_text="1",
+                order_entry_type="typed",
+            )
+        ],
+    )
+
+    result = normalize_photo_observation(observation, settings)
+
+    assert result.document_type == "order_table"
+    assert result.command.items[0].quantity == 26
+    assert result.command.items[0].quantity_source == "table_order_cells"
+    assert result.command.items[0].department_quantities == DepartmentQuantities()
+
+
+def test_headerless_table_does_not_sum_packaging_or_price_from_product_cell(settings) -> None:  # type: ignore[no-untyped-def]
+    """Не считает числа названия, фасовки и цены дополнительными order-ячейками."""
+    product = "Паста aka miso, 1 кг, 10 шт/кор 202₽"
+    observation = PhotoDocumentObservation(
+        document_type_proposal="order_table",
+        detected_columns=["product", "unit", "supplier", "order_quantity"],
+        has_table_structure=True,
+        rows=[
+            PhotoRowObservation(
+                row_index=0,
+                row_text=f"Кухня | {product} | шт | Тестовый поставщик | 2",
+                product_text=product,
+                kitchen_quantity=2,
+                order_entry_text="2",
+                order_entry_type="typed",
+            )
+        ],
+    )
+
+    result = normalize_photo_observation(observation, settings)
+
+    assert result.command.items[0].quantity == 2
+    assert result.command.items[0].quantity_source == "typed"
+
+
 def test_empty_client_sheet_with_unreadable_order_area_is_incomplete(settings) -> None:  # type: ignore[no-untyped-def]
     """Сохраняет неполный результат vision как нечитаемую область заказа."""
     result = normalize_photo_observation(

@@ -53,6 +53,7 @@ _REFERENCE_HEADERS = {
 }
 _CARD_HEADERS = {"цена", "остаток", "price", "stock", "фасовка", "упаковка", "package", "packaging"}
 _NUMBER_RE = re.compile(r"(?<![\w-])\d+(?:[,.]\d+)?(?![\w-])")
+_NUMERIC_CELL_RE = re.compile(r"^\s*\d+(?:[,.]\d+)?\s*$")
 _UNIT_RE = re.compile(
     r"(?P<unit>"
     + "|".join(re.escape(alias) for alias in sorted(UNIT_ALIASES, key=len, reverse=True))
@@ -344,7 +345,9 @@ def photo_order_area_integrity(
             reason="uncertain_potential_order_row",
             row_count_mismatch=row_count_mismatch,
         )
-    has_order_evidence = any(_row_has_potential_order_evidence(row) for row in observation.rows)
+    has_order_evidence = any(
+        photo_row_has_potential_order_evidence(row) for row in observation.rows
+    )
     sheet_rows_required = require_sheet_row_numbers
     if (
         sheet_rows_required
@@ -383,7 +386,7 @@ def photo_sheet_row_mapping_is_authoritative(
     ordered_rows = [
         row
         for row in sorted(observation.rows, key=_visual_row_sort_key)
-        if _row_has_potential_order_evidence(row)
+        if photo_row_has_potential_order_evidence(row)
     ]
     if not ordered_rows:
         return False
@@ -489,6 +492,9 @@ def _resolve_row_quantity(row: PhotoRowObservation) -> tuple[float, str, str] | 
         return corrected, _row_unit(row), "handwritten_correction"
     if corrected is not None:
         return corrected, _row_unit(row), "handwritten_correction"
+    aligned_table_quantities = _aligned_table_order_quantities(row)
+    if len(aligned_table_quantities) > 1:
+        return sum(aligned_table_quantities), _row_unit(row), "table_order_cells"
     if len(row.active_quantity_texts) > 1:
         return None
     if len(_numbers(row.order_entry_text)) > 1:
@@ -508,6 +514,71 @@ def _resolve_row_quantity(row: PhotoRowObservation) -> tuple[float, str, str] | 
     return quantity, _row_unit(row), source
 
 
+def _aligned_table_order_quantities(row: PhotoRowObservation) -> list[float]:
+    """Восстанавливает несколько order-ячеек из одной разделённой строки."""
+    confirmed_department_values = [
+        value
+        for value in (
+            _positive_or_none(row.hall_quantity),
+            _positive_or_none(row.bar_quantity),
+            _positive_or_none(row.kitchen_quantity),
+        )
+        if value is not None
+    ]
+    if not confirmed_department_values or "|" not in row.row_text:
+        return []
+
+    cells = [clean_text(cell) for cell in row.row_text.split("|")]
+    product_identity = canonical_photo_identity(row.product_text)
+    product_index = next(
+        (
+            index
+            for index, cell in enumerate(cells)
+            if product_identity
+            and (
+                canonical_photo_identity(cell) == product_identity
+                or product_identity in canonical_photo_identity(cell)
+            )
+        ),
+        -1,
+    )
+    ignored_cells = {
+        canonical_photo_identity(value)
+        for value in (
+            row.printed_reference_text,
+            row.comment_text,
+            row.supplier_hint,
+            row.explicit_order_unit,
+        )
+        if clean_text(value)
+    }
+    quantities: list[float] = []
+    for index, cell in enumerate(cells):
+        if index <= product_index or not _NUMERIC_CELL_RE.fullmatch(cell):
+            continue
+        if (
+            index == 0
+            and row.sheet_row_number is not None
+            and _single_number(cell) == float(row.sheet_row_number)
+        ):
+            continue
+        if canonical_photo_identity(cell) in ignored_cells:
+            continue
+        quantity = _single_number(cell)
+        if quantity is not None and math.isfinite(quantity) and quantity > 0:
+            quantities.append(quantity)
+
+    if len(quantities) < 2:
+        return []
+    if not any(
+        math.isclose(quantity, confirmed, rel_tol=0, abs_tol=1e-9)
+        for quantity in quantities
+        for confirmed in confirmed_department_values
+    ):
+        return []
+    return quantities
+
+
 def _row_has_order_evidence(row: PhotoRowObservation) -> bool:
     """Проверяет положительное evidence заказа в самой строке."""
     return (
@@ -518,7 +589,7 @@ def _row_has_order_evidence(row: PhotoRowObservation) -> bool:
     )
 
 
-def _row_has_potential_order_evidence(row: PhotoRowObservation) -> bool:
+def photo_row_has_potential_order_evidence(row: PhotoRowObservation) -> bool:
     """Проверяет department и обычные order evidence одной визуальной строки."""
     return any(
         _positive_or_none(value) is not None

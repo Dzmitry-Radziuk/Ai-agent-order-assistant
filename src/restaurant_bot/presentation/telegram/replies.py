@@ -97,6 +97,55 @@ def _item_unit(item: CartItem) -> str:
     return item.unit or item.catalog_unit or ""
 
 
+def _department_parts(item: CartItem) -> list[tuple[str, float]]:
+    """Возвращает положительные количества позиции по подразделениям."""
+    values = (
+        ("Зал", item.department_quantities.hall),
+        ("Бар", item.department_quantities.bar),
+        ("Кухня", item.department_quantities.kitchen),
+    )
+    return [(department, value) for department, value in values if value and value > 0]
+
+
+def department_selection_reply(state: ConversationState) -> BotReply:
+    """Просит явно подтвердить подразделение перед финальной проверкой."""
+    distributed_items = [item for item in _active_items(state) if _department_parts(item)]
+    has_photo_distribution = bool(distributed_items)
+
+    lines = [
+        f"🏷 {heading('К какому подразделению относится заказ?')}",
+        "",
+    ]
+    rows: list[list[Button]] = []
+    if has_photo_distribution:
+        lines += [
+            "На фото распознано распределение:",
+            *[
+                f"• {product_name(_item_name(item))}: "
+                + ", ".join(
+                    f"{escape(department)} {format_number(quantity)} "
+                    f"{escape(_item_unit(item) or 'шт')}"
+                    for department, quantity in _department_parts(item)
+                )
+                for item in distributed_items[:8]
+            ],
+            "Если колонки прочитаны верно, сохраните распределение с фото. "
+            "Если весь заказ относится к одному подразделению, выберите его ниже.",
+        ]
+        if len(distributed_items) > 8:
+            lines.insert(-1, f"…и ещё {len(distributed_items) - 8} позиций.")
+        rows.append([Button(text="Оставить как на фото", callback_data="v2:dept:preserve")])
+    else:
+        lines.append("Выберите подразделение. Я применю его ко всем позициям этой заявки.")
+    rows += [
+        [Button(text="Зал", callback_data="v2:dept:hall")],
+        [Button(text="Бар", callback_data="v2:dept:bar")],
+        [Button(text="Кухня", callback_data="v2:dept:kitchen")],
+        [Button(text="К черновику", callback_data="v2:back")],
+    ]
+    return BotReply(text="\n".join(lines), rows=rows)
+
+
 def _multiple_quantity_explanation(item: CartItem, unit: str) -> str:
     """Объясняет пользователю допустимые шаги количества без внутреннего термина."""
     if not item.minimum_multiple:
@@ -281,7 +330,6 @@ def unrecognized_voice_reply(state: ConversationState) -> BotReply:
             "Пример: <code>сироп роза 3 штуки</code>"
         ),
         rows=[
-            [Button(text="Обновить статусы", callback_data="v2:orders")],
             [
                 Button(
                     text="Показать черновик" if has_draft else "Добавить товары",
@@ -294,7 +342,9 @@ def unrecognized_voice_reply(state: ConversationState) -> BotReply:
 
 def photo_without_quantities_reply(state: ConversationState) -> BotReply:
     """Объясняет отсутствие заполненных количеств на фотографии."""
-    rows = [[Button(text="Черновик", callback_data="v2:cart")]] if _has_draft_content(state) else []
+    rows = [[Button(text="Добавить товары текстом", callback_data="v2:add")]]
+    if _has_draft_content(state):
+        rows.append([Button(text="Черновик", callback_data="v2:cart")])
     return BotReply(
         text=(
             f"📷 {heading('Не нашёл заполненных количеств')}\n\n"
@@ -307,7 +357,9 @@ def photo_without_quantities_reply(state: ConversationState) -> BotReply:
 
 def photo_incomplete_read_reply(state: ConversationState) -> BotReply:
     """Объясняет, что таблицу на фотографии не удалось надёжно прочитать."""
-    rows = [[Button(text="Черновик", callback_data="v2:cart")]] if _has_draft_content(state) else []
+    rows = [[Button(text="Добавить товары текстом", callback_data="v2:add")]]
+    if _has_draft_content(state):
+        rows.append([Button(text="Черновик", callback_data="v2:cart")])
     return BotReply(
         text=(
             f"📷 {heading('Не удалось надёжно прочитать фото')}\n\n"
@@ -802,15 +854,25 @@ def final_review_reply(state: ConversationState) -> BotReply:
         page_items,
         start=page * FINAL_REVIEW_PAGE_SIZE + 1,
     ):
+        unit = escape(_item_unit(item) or "шт")
+        departments = _department_parts(item)
+        department_text = (
+            ", ".join(
+                f"{escape(department)} {format_number(quantity)} {unit}"
+                for department, quantity in departments
+            )
+            if departments
+            else f"{escape(item.department)}"
+        )
         lines.append(
-            f"{index}. {product_name(_item_name(item))} — {format_number(item.quantity)} {escape(_item_unit(item) or 'шт')}"
+            f"{index}. {product_name(_item_name(item))} — {format_number(item.quantity)} {unit} · {department_text}"
         )
         if item.comment:
             lines.append(format_item_comment(item.comment))
     lines += [
         "",
-        "Проверьте товары и количество перед отправкой.",
-        "После нажатия «Отправить заявку» заявка будет передана в обработку.",
+        "Проверьте товары, количество и подразделение перед подтверждением.",
+        "После подтверждения заявка будет записана в таблицу заказа.",
         "Если требуется что-то изменить, нажмите «К черновику»: там можно добавить товар, изменить количество или удалить позицию.",
     ]
     multiple = multiple_warnings(state)
@@ -867,16 +929,24 @@ def final_review_reply(state: ConversationState) -> BotReply:
                     )
                 ]
             )
-        rows.append(
-            [
-                Button(
-                    text="Отправить заявку",
-                    callback_data="v2:submit",
-                )
-            ]
-        )
+        else:
+            rows.append(
+                [
+                    Button(
+                        text="Записать заявку",
+                        callback_data="v2:submit",
+                    )
+                ]
+            )
     rows.append([Button(text="К черновику", callback_data="v2:back")])
     return BotReply(text="\n".join(lines), rows=rows)
+
+
+def review_or_department_reply(state: ConversationState) -> BotReply:
+    """Не даёт обойти обязательный выбор подразделения при возврате к проверке."""
+    if state.department_confirmation_required and not state.department_confirmed:
+        return department_selection_reply(state)
+    return final_review_reply(state)
 
 
 def multiple_quantity_choice_reply(item: CartItem) -> BotReply:
@@ -952,7 +1022,7 @@ def supplier_warning_details_reply(state: ConversationState) -> BotReply:
         else [[Button(text="Выбрать поставщика", callback_data="v2:minsumchoose")]]
     )
     rows += [
-        [Button(text="Отправить как есть", callback_data="v2:submit")],
+        [Button(text="Записать как есть", callback_data="v2:submit")],
         [Button(text="К финальной проверке", callback_data="v2:cart")],
     ]
     return BotReply(text="\n".join(lines), rows=rows)

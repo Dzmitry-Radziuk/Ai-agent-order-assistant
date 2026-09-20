@@ -1,5 +1,6 @@
 """Проверяет подготовку детерминированных view для фото заявки."""
 
+from io import BytesIO
 from pathlib import Path
 
 import pytest
@@ -55,6 +56,29 @@ def _save_light_sheet_with_order_rows(path: Path) -> None:
         draw.line((0, y, 700, y), fill=(215, 215, 215))
     draw.text((415, 143), "20", fill=(20, 20, 20))
     draw.text((515, 283), "6", fill=(20, 20, 20))
+    image.save(path, format="PNG")
+
+
+def _save_headerless_sheet_with_bottom_ui(path: Path) -> None:
+    """Создаёт обрезанную таблицу с комментариями и нижней панелью приложения."""
+    image = Image.new("RGB", (1000, 420), "white")
+    draw = ImageDraw.Draw(image)
+    draw.rectangle((0, 0, 700, 19), fill=(250, 225, 190))
+    verticals = [20, 120, 320, 400, 450, 500, 550, 700, 760, 820]
+    for x in verticals:
+        line_color = (0, 0, 0) if x in {550, 700} else (185, 185, 185)
+        draw.line((x, 0, x, 340), fill=line_color)
+    for y in range(0, 341, 20):
+        draw.line((0, y, 700, y), fill=(215, 215, 215))
+    draw.text((410, 3), "Hall", fill=(20, 20, 20))
+    draw.text((460, 3), "Bar", fill=(20, 20, 20))
+    draw.text((510, 3), "Kitchen", fill=(20, 20, 20))
+    draw.text((415, 43), "20", fill=(20, 20, 20))
+    draw.text((515, 283), "6", fill=(20, 20, 20))
+    draw.text((130, 123), "Product without order", fill=(20, 20, 20))
+    draw.text((565, 123), "bring tomorrow", fill=(20, 20, 20))
+    draw.rectangle((0, 348, 999, 357), fill=(190, 190, 190))
+    draw.text((415, 373), "9", fill=(20, 20, 20))
     image.save(path, format="PNG")
 
 
@@ -195,3 +219,26 @@ def test_light_sheet_detects_independent_filled_order_row_count(tmp_path: Path) 
     assert preparation.detected_filled_order_row_count == 2
     assert preparation.table_focus_view_size is not None
     assert preparation.table_focus_view_size[0] < 1000 * preparation.upscale_factor
+
+
+def test_headerless_sheet_focuses_order_and_comment_rows_before_bottom_ui(
+    tmp_path: Path,
+) -> None:
+    """Читает обрезанную сетку без заголовка и не принимает нижнюю панель за товар."""
+    photo = tmp_path / "headerless-sheet.png"
+    _save_headerless_sheet_with_bottom_ui(photo)
+
+    preparation = prepare_photo_views(
+        photo,
+        "image/png",
+        prefer_filled_order_rows=True,
+    )
+
+    assert preparation.spreadsheet_layout_detected is True
+    assert preparation.detected_filled_order_row_count == 2
+    assert preparation.table_focus_view_size is not None
+    assert preparation.table_focus_view_size[1] == 88 * preparation.upscale_factor
+    with Image.open(BytesIO(preparation.views[0].data)) as focused:
+        scale = preparation.upscale_factor
+        product_area = focused.crop((120 * scale, 44 * scale, 320 * scale, 64 * scale))
+        assert all(max(pixel) > 245 for pixel in product_area.convert("RGB").getdata())

@@ -92,7 +92,6 @@ def test_empty_voice_add_items_uses_the_source_recovery_card(settings) -> None: 
         "Пример: <code>сироп роза 3 штуки</code>"
     )
     assert [[button.text, button.callback_data] for row in result.reply.rows for button in row] == [
-        ["Обновить статусы", "v2:orders"],
         ["Добавить товары", "v2:add"],
     ]
     assert result.state.cart == []
@@ -109,7 +108,6 @@ def test_unknown_empty_voice_uses_the_same_source_recovery_card(settings) -> Non
 
     assert "К сожалению, мне не удалось распознать голосовое сообщение" in result.reply.text
     assert [[button.callback_data for button in row] for row in result.reply.rows] == [
-        ["v2:orders"],
         ["v2:add"],
     ]
     assert result.state.cart == []

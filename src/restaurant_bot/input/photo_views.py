@@ -5,6 +5,7 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass
 from io import BytesIO
+from itertools import pairwise
 from pathlib import Path
 from typing import cast
 
@@ -34,6 +35,7 @@ _LIGHT_SHEET_HEADER_SEARCH_MAX_RATIO = 0.55
 _LIGHT_SHEET_GRID_VERTICAL_MIN_RATIO = 0.55
 _LIGHT_SHEET_GRID_HORIZONTAL_MIN_RATIO = 0.70
 _LIGHT_SHEET_MAX_GRID_GROUP_WIDTH = 3
+_LIGHT_SHEET_UI_SEPARATOR_MIN_WIDTH = 6
 _LIGHT_SHEET_MIN_CELL_INK_PIXELS = 4
 
 
@@ -232,26 +234,41 @@ def _detect_light_spreadsheet_reading_box(
     image: Image.Image,
 ) -> tuple[int, int, int, int] | None:
     """Находит светлую Google Sheets-таблицу по сетке order/comment колонок."""
-    header_band = _light_sheet_header_band(image)
-    if header_band is None:
+    geometry = _detect_light_sheet_geometry(image)
+    if geometry is None:
         return None
-    header_top, header_bottom = header_band
-    order_columns = _detect_light_sheet_order_columns(
-        image,
-        start_y=header_bottom + 1,
-    )
-    if order_columns is None:
-        return None
-    row_boundaries = _detect_light_sheet_row_boundaries(
-        image,
-        start_y=header_bottom + 1,
-        right=order_columns[-1],
-    )
-    if len(row_boundaries) < 2:
-        return None
+    header_band, order_columns, row_boundaries = geometry
+    top = header_band[0] if header_band is not None else row_boundaries[0]
     right = min(image.width, order_columns[-1] + 1)
     bottom = min(image.height, row_boundaries[-1] + 1)
-    return 0, header_top, right, bottom
+    return 0, top, right, bottom
+
+
+def _detect_light_sheet_geometry(
+    image: Image.Image,
+) -> (
+    tuple[
+        tuple[int, int] | None,
+        tuple[int, int, int, int, int],
+        list[int],
+    ]
+    | None
+):
+    """Находит order-сетку Sheets даже у снимка без строки заголовков."""
+    header_band = _light_sheet_header_band(image)
+    start_positions = [header_band[1] + 1, 0] if header_band is not None else [0]
+    for start_y in start_positions:
+        order_columns = _detect_light_sheet_order_columns(image, start_y=start_y)
+        if order_columns is None:
+            continue
+        row_boundaries = _detect_light_sheet_row_boundaries(
+            image,
+            start_y=start_y,
+            right=order_columns[-1],
+        )
+        if len(row_boundaries) >= 4:
+            return header_band, order_columns, row_boundaries
+    return None
 
 
 def _light_sheet_header_band(image: Image.Image) -> tuple[int, int] | None:
@@ -266,9 +283,7 @@ def _light_sheet_header_band(image: Image.Image) -> tuple[int, int] | None:
         matches = 0
         for x in range(0, width, step_x):
             samples += 1
-            if _is_light_sheet_header_pixel(
-                cast(tuple[int, int, int], rgb.getpixel((x, y)))
-            ):
+            if _is_light_sheet_header_pixel(cast(tuple[int, int, int], rgb.getpixel((x, y)))):
                 matches += 1
         if samples and matches / samples >= _LIGHT_SHEET_HEADER_MIN_RATIO:
             candidate_rows.append(y)
@@ -328,8 +343,7 @@ def _detect_light_sheet_vertical_groups(
     candidates: list[int] = []
     for x in range(rgb.width):
         matches = sum(
-            _is_sheet_grid_pixel(cast(tuple[int, int, int], rgb.getpixel((x, y))))
-            for y in sample_y
+            _is_sheet_grid_pixel(cast(tuple[int, int, int], rgb.getpixel((x, y)))) for y in sample_y
         )
         if matches / len(sample_y) >= _LIGHT_SHEET_GRID_VERTICAL_MIN_RATIO:
             candidates.append(x)
@@ -386,8 +400,7 @@ def _detect_light_sheet_horizontal_groups(
     candidates: list[int] = []
     for y in range(max(0, start_y), rgb.height):
         matches = sum(
-            _is_sheet_grid_pixel(cast(tuple[int, int, int], rgb.getpixel((x, y))))
-            for x in sample_x
+            _is_sheet_grid_pixel(cast(tuple[int, int, int], rgb.getpixel((x, y)))) for x in sample_x
         )
         if matches / len(sample_x) >= _LIGHT_SHEET_GRID_HORIZONTAL_MIN_RATIO:
             candidates.append(y)
@@ -406,14 +419,16 @@ def _detect_light_sheet_row_boundaries(
         start_y=start_y,
         right=right,
     )
-    points = [
-        round((top + bottom) / 2)
-        for top, bottom in groups
-        if bottom - top <= _LIGHT_SHEET_MAX_GRID_GROUP_WIDTH
-    ]
+    points: list[int] = []
+    for top, bottom in groups:
+        group_width = bottom - top + 1
+        if len(points) >= 3 and group_width >= _LIGHT_SHEET_UI_SEPARATOR_MIN_WIDTH:
+            break
+        if bottom - top <= _LIGHT_SHEET_MAX_GRID_GROUP_WIDTH:
+            points.append(round((top + bottom) / 2))
     if len(points) < 3:
         return points
-    gaps = [right_y - left_y for left_y, right_y in zip(points, points[1:])]
+    gaps = [right_y - left_y for left_y, right_y in pairwise(points)]
     positive_gaps = sorted(gap for gap in gaps if gap > 0)
     if not positive_gaps:
         return points
@@ -443,6 +458,33 @@ def _sheet_cell_ink_pixels(
     return count
 
 
+def _sheet_row_has_order_header_fill(
+    image: Image.Image,
+    *,
+    order_columns: tuple[int, int, int, int, int],
+    top: int,
+    bottom: int,
+) -> bool:
+    """Отличает тёплую строку заголовков Зал/Бар/Кухня от заказа."""
+    rgb = image.convert("RGB")
+    samples = 0
+    warm = 0
+    step_y = max(1, (bottom - top) // 8)
+    for y in range(top + 2, max(top + 3, bottom - 2), step_y):
+        for x in range(order_columns[0] + 2, order_columns[3] - 2, 3):
+            red, green, blue = cast(tuple[int, int, int], rgb.getpixel((x, y)))
+            samples += 1
+            if (
+                red >= 190
+                and green >= 140
+                and blue <= 235
+                and red - green >= 8
+                and red - blue >= 20
+            ):
+                warm += 1
+    return bool(samples) and warm / samples >= 0.25
+
+
 def _filled_order_row_ranges(
     image: Image.Image,
     *,
@@ -452,8 +494,15 @@ def _filled_order_row_ranges(
     """Выбирает строки с реальным ink в одной из трёх order-ячеек."""
     rgb = image.convert("RGB")
     filled: list[tuple[int, int]] = []
-    for top, bottom in zip(row_boundaries, row_boundaries[1:]):
+    for top, bottom in pairwise(row_boundaries):
         if bottom - top < 5:
+            continue
+        if _sheet_row_has_order_header_fill(
+            rgb,
+            order_columns=order_columns,
+            top=top,
+            bottom=bottom,
+        ):
             continue
         cell_counts = [
             _sheet_cell_ink_pixels(
@@ -470,27 +519,41 @@ def _filled_order_row_ranges(
     return filled
 
 
+def _relevant_sheet_row_ranges(
+    image: Image.Image,
+    *,
+    order_columns: tuple[int, int, int, int, int],
+    row_boundaries: list[int],
+) -> list[tuple[int, int]]:
+    """Сохраняет строки с заказом и отдельные строки комментариев."""
+    rgb = image.convert("RGB")
+    relevant: list[tuple[int, int]] = []
+    for top, bottom in pairwise(row_boundaries):
+        if bottom - top < 5:
+            continue
+        cell_counts = [
+            _sheet_cell_ink_pixels(
+                rgb,
+                left=order_columns[index],
+                right=order_columns[index + 1],
+                top=top,
+                bottom=bottom,
+            )
+            for index in range(4)
+        ]
+        if max(cell_counts, default=0) >= _LIGHT_SHEET_MIN_CELL_INK_PIXELS:
+            relevant.append((top, bottom))
+    return relevant
+
+
 def _build_filled_order_rows_view(
     image: Image.Image,
 ) -> tuple[PhotoImageView | None, int | None, int]:
     """Строит второй reading-view только из детерминированно заполненных строк."""
-    header_band = _light_sheet_header_band(image)
-    if header_band is None:
+    geometry = _detect_light_sheet_geometry(image)
+    if geometry is None:
         return None, None, 1
-    header_top, header_bottom = header_band
-    order_columns = _detect_light_sheet_order_columns(
-        image,
-        start_y=header_bottom + 1,
-    )
-    if order_columns is None:
-        return None, None, 1
-    row_boundaries = _detect_light_sheet_row_boundaries(
-        image,
-        start_y=header_bottom + 1,
-        right=order_columns[-1],
-    )
-    if len(row_boundaries) < 2:
-        return None, None, 1
+    header_band, order_columns, row_boundaries = geometry
     filled_rows = _filled_order_row_ranges(
         image,
         order_columns=order_columns,
@@ -498,20 +561,46 @@ def _build_filled_order_rows_view(
     )
     if not filled_rows:
         return None, 0, 1
+    relevant_rows = _relevant_sheet_row_ranges(
+        image,
+        order_columns=order_columns,
+        row_boundaries=row_boundaries,
+    )
 
     source = image.convert("RGB")
     right = min(source.width, order_columns[-1] + 1)
-    header = source.crop((0, header_top, right, row_boundaries[0]))
+    header = (
+        source.crop((0, header_band[0], right, row_boundaries[0]))
+        if header_band is not None
+        else None
+    )
     separator = 2
-    canvas_height = header.height + sum(
-        bottom - top + separator for top, bottom in filled_rows
+    canvas_height = (header.height if header is not None else 0) + sum(
+        bottom - top + separator for top, bottom in relevant_rows
     )
     canvas = Image.new("RGB", (right, canvas_height), "white")
     cursor_y = 0
-    canvas.paste(header, (0, cursor_y))
-    cursor_y += header.height
-    for top, bottom in filled_rows:
-        row = source.crop((0, top, right, bottom))
+    full_row_set = set(filled_rows)
+    full_row_set.update(
+        (top, bottom)
+        for top, bottom in relevant_rows
+        if _sheet_row_has_order_header_fill(
+            source,
+            order_columns=order_columns,
+            top=top,
+            bottom=bottom,
+        )
+    )
+    if header is not None:
+        canvas.paste(header, (0, cursor_y))
+        cursor_y += header.height
+    for top, bottom in relevant_rows:
+        if (top, bottom) in full_row_set:
+            row = source.crop((0, top, right, bottom))
+        else:
+            row = Image.new("RGB", (right, bottom - top), "white")
+            comment = source.crop((order_columns[3], top, right, bottom))
+            row.paste(comment, (order_columns[3], 0))
         canvas.paste(row, (0, cursor_y))
         cursor_y += row.height + separator
 

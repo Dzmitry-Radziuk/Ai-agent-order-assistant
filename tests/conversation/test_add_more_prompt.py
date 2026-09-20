@@ -123,7 +123,7 @@ def test_voice_submit_wins_over_wrong_add_more_intent(settings) -> None:  # type
     )
 
     assert result.state.stage is SessionStage.AWAIT_SUBMIT_CONFIRM
-    assert "Финальная проверка" in result.reply.text
+    assert "К какому подразделению" in result.reply.text
     assert result.enqueue_submission is False
 
 

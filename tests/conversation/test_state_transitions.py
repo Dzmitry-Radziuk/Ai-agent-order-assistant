@@ -38,9 +38,11 @@ def test_submit_request_opens_final_review_without_enqueuing(settings) -> None: 
 
     assert review.state.stage is SessionStage.AWAIT_SUBMIT_CONFIRM
     assert review.enqueue_submission is False
-    assert "Финальная проверка" in review.reply.text
+    assert "К какому подразделению" in review.reply.text
     assert [(button.text, button.callback_data) for row in review.reply.rows for button in row] == [
-        ("Отправить заявку", "v2:submit"),
+        ("Зал", "v2:dept:hall"),
+        ("Бар", "v2:dept:bar"),
+        ("Кухня", "v2:dept:kitchen"),
         ("К черновику", "v2:back"),
     ]
 

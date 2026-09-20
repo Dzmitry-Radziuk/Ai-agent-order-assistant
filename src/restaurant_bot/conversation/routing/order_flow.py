@@ -277,6 +277,7 @@ def evaluate_submit_confirm(
         Intent.ADD_SUPPLIER_ITEMS,
         Intent.SEARCH_ALL_SUPPLIERS,
         Intent.SWITCH_SUPPLIER,
+        Intent.SELECT_DEPARTMENT,
     }:
         return CompatibilityDecision(CompatibilityAction.CONTINUE)
     if command.intent is Intent.UNKNOWN:

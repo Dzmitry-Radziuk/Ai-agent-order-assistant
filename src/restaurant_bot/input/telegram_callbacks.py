@@ -159,6 +159,13 @@ def parse_callback(data: str) -> ParsedCommand:
             callback_target=f"page:{page}",
             callback_revision=revision,
         )
+    if action == "dept" and rest:
+        return ParsedCommand(
+            intent=Intent.SELECT_DEPARTMENT,
+            text=data,
+            callback_target=rest[0],
+            callback_revision=revision,
+        )
     return ParsedCommand(
         intent=mapping.get(action, Intent.UNKNOWN),
         text=data,

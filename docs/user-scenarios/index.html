@@ -382,7 +382,7 @@
 
       <article id="scenario-INP-03" class="scenario-card"
         data-category="input"
-        data-priority="critical" data-search="inp-03 фото оригинальной таблицы заказа добавление товаров отправляет фотографию распечатанной или заполненной таблицы. берёт количество только из заполненных колонок заказа, сохраняет комментарии и игнорирует распознанного с фото поставщика, фасовку, остатки и справочные числа. пользователь подключён к активному заведению. товар количество единица поставщик комментарий распечатанная таблица с количеством в колонке «бар» таблица с заполненными «зал» и «кухня» фото, где у товара указан комментарий поставщику">
+        data-priority="critical" data-search="inp-03 фото оригинальной таблицы заказа добавление товаров отправляет фотографию распечатанной или заполненной таблицы. берёт количество только из заполненных колонок заказа, сохраняет комментарии и игнорирует распознанного с фото поставщика, фасовку, остатки и справочные числа. перед записью показывает найденное распределение и просит его подтвердить либо выбрать одно подразделение. пользователь подключён к активному заведению. товар количество единица поставщик комментарий распечатанная таблица с количеством в колонке «бар» таблица с заполненными «зал» и «кухня» фото, где у товара указан комментарий поставщику">
         <div class="card-top">
           <span class="scenario-id">INP-03</span>
           <span class="badges">
@@ -396,8 +396,8 @@
         <dl>
           <div><dt>Перед началом</dt><dd>На фотографии есть таблица заказа с колонками «Зал», «Бар» или «Кухня».</dd></div>
           <div><dt>Пользователь</dt><dd>Отправляет фотографию распечатанной или заполненной таблицы.</dd></div>
-          <div><dt>Бот</dt><dd>Берёт количество только из заполненных колонок заказа, сохраняет комментарии и игнорирует распознанного с фото поставщика, фасовку, остатки и справочные числа.</dd></div>
-          <div class="result"><dt>Итог</dt><dd>Количество записывается в соответствующие колонки «Зал», «Бар» и «Кухня», а поставщик определяется по найденной строке актуального каталога. Строки без заказа не добавляются.</dd></div>
+          <div><dt>Бот</dt><dd>Берёт количество только из заполненных колонок заказа, сохраняет комментарии и игнорирует распознанного с фото поставщика, фасовку, остатки и справочные числа. Перед записью показывает найденное распределение и просит его подтвердить либо выбрать одно подразделение.</dd></div>
+          <div class="result"><dt>Итог</dt><dd>После выбора «Оставить как на фото» все количества одновременно записываются в соответствующие колонки «Зал», «Бар» и «Кухня». Выбор одного подразделения переносит туда весь заказ без дублей. Строки без заказа не добавляются.</dd></div>
           <div><dt>Статус проверки</dt><dd><code>AUTOMATED_PARTIAL</code> — Основной контракт подтверждён, но реальный внешний контур не проверен</dd></div>
           <div><dt>Ручная проверка</dt><dd>Нужен live-прогон с фотографией реальной печатной таблицы и vision-провайдером.</dd></div>
         </dl>
@@ -407,7 +407,7 @@
             <div><dt>Доступ</dt><dd>Пользователь подключён к активному заведению.</dd></div>
             <div><dt>Распознаём</dt><dd>товар, количество, единица, поставщик, комментарий</dd></div>
             <div><dt>Подтверждение</dt><dd>Не нужно для понятной позиции: товар добавляется только в черновик. Неоднозначность требует уточнения.</dd></div>
-            <div><dt>Что изменится</dt><dd>Количество записывается в соответствующие колонки «Зал», «Бар» и «Кухня», а поставщик определяется по найденной строке актуального каталога. Строки без заказа не добавляются.</dd></div>
+            <div><dt>Что изменится</dt><dd>После выбора «Оставить как на фото» все количества одновременно записываются в соответствующие колонки «Зал», «Бар» и «Кухня». Выбор одного подразделения переносит туда весь заказ без дублей. Строки без заказа не добавляются.</dd></div>
             <div><dt>Если произошла ошибка</dt><dd>Сохранить уже распознанные позиции и попросить повторить только непонятную часть.</dd></div>
           </dl>
         </details>
@@ -416,14 +416,14 @@
           <ul><li>«Распечатанная таблица с количеством в колонке «Бар»»</li><li>«Таблица с заполненными «Зал» и «Кухня»»</li><li>«Фото, где у товара указан комментарий поставщику»</li></ul>
         </details>
         <details>
-          <summary>Связанные pytest-тесты · 6</summary>
-          <ul class="tests"><li><a href="../../tests/ai/test_photo_ingestion.py">tests/ai/test_photo_ingestion.py</a><span>test_client_sheet_drops_blank_row_without_transferring_neighbor_quantity</span></li><li><a href="../../tests/ai/test_photo_ingestion.py">tests/ai/test_photo_ingestion.py</a><span>test_mocked_photo_pipeline_converges_into_existing_cart_pipeline</span></li><li><a href="../../tests/ai/test_ai_media.py">tests/ai/test_ai_media.py</a><span>test_client_order_sheet_uses_the_selected_department_quantity</span></li><li><a href="../../tests/ai/test_ai_media.py">tests/ai/test_ai_media.py</a><span>test_client_order_sheet_sums_only_filled_department_order_cells</span></li><li><a href="../../tests/ai/test_ai_media.py">tests/ai/test_ai_media.py</a><span>test_client_order_sheet_ignores_supplier_recognized_from_a_neighbouring_row</span></li><li><a href="../../tests/ai/test_photo_prompt_contract.py">tests/ai/test_photo_prompt_contract.py</a><span>test_photo_prompt_excludes_packaging_and_stock_from_order_quantity</span></li></ul>
+          <summary>Связанные pytest-тесты · 8</summary>
+          <ul class="tests"><li><a href="../../tests/ai/test_photo_ingestion.py">tests/ai/test_photo_ingestion.py</a><span>test_client_sheet_drops_blank_row_without_transferring_neighbor_quantity</span></li><li><a href="../../tests/ai/test_photo_ingestion.py">tests/ai/test_photo_ingestion.py</a><span>test_mocked_photo_pipeline_converges_into_existing_cart_pipeline</span></li><li><a href="../../tests/ai/test_ai_media.py">tests/ai/test_ai_media.py</a><span>test_client_order_sheet_uses_the_selected_department_quantity</span></li><li><a href="../../tests/ai/test_ai_media.py">tests/ai/test_ai_media.py</a><span>test_client_order_sheet_sums_only_filled_department_order_cells</span></li><li><a href="../../tests/ai/test_ai_media.py">tests/ai/test_ai_media.py</a><span>test_client_order_sheet_ignores_supplier_recognized_from_a_neighbouring_row</span></li><li><a href="../../tests/ai/test_photo_prompt_contract.py">tests/ai/test_photo_prompt_contract.py</a><span>test_photo_prompt_excludes_packaging_and_stock_from_order_quantity</span></li><li><a href="../../tests/conversation/test_conversation_handlers.py">tests/conversation/test_conversation_handlers.py</a><span>test_department_selection_can_preserve_photo_distribution</span></li><li><a href="../../tests/conversation/test_conversation_handlers.py">tests/conversation/test_conversation_handlers.py</a><span>test_department_selection_reassigns_entire_photo_order</span></li></ul>
         </details>
       </article>
 
       <article id="scenario-INP-04" class="scenario-card"
         data-category="input"
-        data-priority="important" data-search="inp-04 фото рукописного списка добавление товаров отправляет фотографию списка, написанного от руки. использует только явно указанные количества и сопоставляет названия с каталогом. пользователь подключён к активному заведению. товар количество единица поставщик комментарий сироп роза — 6 шт говядина — 5 кг курица — 1 кг">
+        data-priority="important" data-search="inp-04 фото рукописного списка добавление товаров отправляет фотографию списка, написанного от руки. использует только явно указанные количества, сопоставляет названия с каталогом и перед записью просит выбрать «зал», «бар» или «кухня». пользователь подключён к активному заведению. товар количество единица поставщик комментарий сироп роза — 6 шт говядина — 5 кг курица — 1 кг">
         <div class="card-top">
           <span class="scenario-id">INP-04</span>
           <span class="badges">
@@ -437,8 +437,8 @@
         <dl>
           <div><dt>Перед началом</dt><dd>На фотографии нет стандартной таблицы, но видны названия и явно написанные количества.</dd></div>
           <div><dt>Пользователь</dt><dd>Отправляет фотографию списка, написанного от руки.</dd></div>
-          <div><dt>Бот</dt><dd>Использует только явно указанные количества и сопоставляет названия с каталогом.</dd></div>
-          <div class="result"><dt>Итог</dt><dd>Позиции с количеством попадают в черновик; бот не придумывает отсутствующие значения.</dd></div>
+          <div><dt>Бот</dt><dd>Использует только явно указанные количества, сопоставляет названия с каталогом и перед записью просит выбрать «Зал», «Бар» или «Кухня».</dd></div>
+          <div class="result"><dt>Итог</dt><dd>Позиции с количеством попадают в черновик и только после явного выбора — в нужное подразделение; бот не придумывает отсутствующие значения.</dd></div>
           <div><dt>Статус проверки</dt><dd><code>AUTOMATED_PARTIAL</code> — Основной контракт подтверждён, но реальный внешний контур не проверен</dd></div>
           <div><dt>Ручная проверка</dt><dd>Нужен live-прогон с несколькими реальными рукописными списками.</dd></div>
         </dl>
@@ -448,7 +448,7 @@
             <div><dt>Доступ</dt><dd>Пользователь подключён к активному заведению.</dd></div>
             <div><dt>Распознаём</dt><dd>товар, количество, единица, поставщик, комментарий</dd></div>
             <div><dt>Подтверждение</dt><dd>Не нужно для понятной позиции: товар добавляется только в черновик. Неоднозначность требует уточнения.</dd></div>
-            <div><dt>Что изменится</dt><dd>Позиции с количеством попадают в черновик; бот не придумывает отсутствующие значения.</dd></div>
+            <div><dt>Что изменится</dt><dd>Позиции с количеством попадают в черновик и только после явного выбора — в нужное подразделение; бот не придумывает отсутствующие значения.</dd></div>
             <div><dt>Если произошла ошибка</dt><dd>Сохранить уже распознанные позиции и попросить повторить только непонятную часть.</dd></div>
           </dl>
         </details>
@@ -1120,7 +1120,7 @@
 
       <article id="scenario-SUB-01" class="scenario-card"
         data-category="submission"
-        data-priority="critical" data-search="sub-01 переход к финальной проверке проверка и запись заявки просит оформить или отправить заявку. сначала проверяет незавершённые позиции и показывает итоговую карточку. большая заявка разбивается на страницы с кнопками «назад» и «далее». пользователь подключён к заведению и видит только заявки своего заведения. заявка поставщик сумма статус дата поставки оформи заявку я всё добавил перейти к проверке заявки следующая страница предыдущая страница">
+        data-priority="critical" data-search="sub-01 переход к финальной проверке проверка и запись заявки просит оформить или отправить заявку. сначала проверяет незавершённые позиции, просит выбрать «зал», «бар» или «кухня» и затем показывает итоговую карточку. для фото с распознанными колонками можно подтвердить вариант «оставить как на фото». большая заявка разбивается на страницы с кнопками «назад» и «далее». пользователь подключён к заведению и видит только заявки своего заведения. заявка поставщик сумма статус дата поставки оформи заявку я всё добавил перейти к проверке заявки следующая страница предыдущая страница">
         <div class="card-top">
           <span class="scenario-id">SUB-01</span>
           <span class="badges">
@@ -1134,8 +1134,8 @@
         <dl>
           <div><dt>Перед началом</dt><dd>В черновике есть товары.</dd></div>
           <div><dt>Пользователь</dt><dd>Просит оформить или отправить заявку.</dd></div>
-          <div><dt>Бот</dt><dd>Сначала проверяет незавершённые позиции и показывает итоговую карточку. Большая заявка разбивается на страницы с кнопками «Назад» и «Далее».</dd></div>
-          <div class="result"><dt>Итог</dt><dd>До явного финального подтверждения запись в таблицу заказа не запускается; пользователь может просмотреть все страницы заявки.</dd></div>
+          <div><dt>Бот</dt><dd>Сначала проверяет незавершённые позиции, просит выбрать «Зал», «Бар» или «Кухня» и затем показывает итоговую карточку. Для фото с распознанными колонками можно подтвердить вариант «Оставить как на фото». Большая заявка разбивается на страницы с кнопками «Назад» и «Далее».</dd></div>
+          <div class="result"><dt>Итог</dt><dd>До выбора подразделения и явного финального подтверждения запись в таблицу заказа не запускается; пользователь видит распределение по подразделениям и может просмотреть все страницы заявки.</dd></div>
           <div><dt>Статус проверки</dt><dd><code>AUTOMATED_PASS</code> — Контракт полностью подтверждён локальными автоматическими тестами</dd></div>
           <div><dt>Ручная проверка</dt><dd>Не требуется для подтверждения локального контракта; общий Telegram smoke выполняется перед пилотом.</dd></div>
         </dl>
@@ -1154,14 +1154,14 @@
           <ul><li>«Оформи заявку»</li><li>«Я всё добавил»</li><li>«Перейти к проверке заявки»</li><li>«Следующая страница»</li><li>«Предыдущая страница»</li></ul>
         </details>
         <details>
-          <summary>Связанные pytest-тесты · 3</summary>
-          <ul class="tests"><li><a href="../../tests/conversation/test_state_transitions.py">tests/conversation/test_state_transitions.py</a><span>test_submit_request_opens_final_review_without_enqueuing</span></li><li><a href="../../tests/submission/test_submission_guards.py">tests/submission/test_submission_guards.py</a><span>test_submit_request_stops_on_first_unresolved_item</span></li><li><a href="../../tests/telegram/test_telegram_commands.py">tests/telegram/test_telegram_commands.py</a><span>test_voice_pagination_stays_in_large_final_review</span></li></ul>
+          <summary>Связанные pytest-тесты · 4</summary>
+          <ul class="tests"><li><a href="../../tests/conversation/test_state_transitions.py">tests/conversation/test_state_transitions.py</a><span>test_submit_request_opens_final_review_without_enqueuing</span></li><li><a href="../../tests/submission/test_submission_guards.py">tests/submission/test_submission_guards.py</a><span>test_submit_request_stops_on_first_unresolved_item</span></li><li><a href="../../tests/telegram/test_telegram_commands.py">tests/telegram/test_telegram_commands.py</a><span>test_voice_pagination_stays_in_large_final_review</span></li><li><a href="../../tests/conversation/test_conversation_handlers.py">tests/conversation/test_conversation_handlers.py</a><span>test_final_review_requires_department_for_new_items</span></li></ul>
         </details>
       </article>
 
       <article id="scenario-SUB-02" class="scenario-card"
         data-category="submission"
-        data-priority="important" data-search="sub-02 не набрана минимальная сумма поставщика проверка и запись заявки открывает предупреждение и выбирает: добавить товары либо принять риск. показывает поставщика и недостающую сумму, предлагает понятные действия. пользователь подключён к заведению и видит только заявки своего заведения. заявка поставщик сумма статус дата поставки проверь минималку добавить товары поставщика отправить как есть">
+        data-priority="important" data-search="sub-02 не набрана минимальная сумма поставщика проверка и запись заявки открывает предупреждение и выбирает: добавить товары либо принять риск. показывает поставщика и недостающую сумму, предлагает понятные действия. пользователь подключён к заведению и видит только заявки своего заведения. заявка поставщик сумма статус дата поставки проверь минималку добавить товары поставщика записать как есть">
         <div class="card-top">
           <span class="scenario-id">SUB-02</span>
           <span class="badges">
@@ -1176,7 +1176,7 @@
           <div><dt>Перед началом</dt><dd>Хотя бы у одного поставщика сумма заказа меньше минимальной.</dd></div>
           <div><dt>Пользователь</dt><dd>Открывает предупреждение и выбирает: добавить товары либо принять риск.</dd></div>
           <div><dt>Бот</dt><dd>Показывает поставщика и недостающую сумму, предлагает понятные действия.</dd></div>
-          <div class="result"><dt>Итог</dt><dd>Пользователь осознанно дополняет заявку или отправляет её как есть.</dd></div>
+          <div class="result"><dt>Итог</dt><dd>Пользователь осознанно дополняет заявку или записывает её как есть. На финальном экране обычная кнопка записи не показывается, пока предупреждение не открыто.</dd></div>
           <div><dt>Статус проверки</dt><dd><code>AUTOMATED_PASS</code> — Контракт полностью подтверждён локальными автоматическими тестами</dd></div>
           <div><dt>Ручная проверка</dt><dd>Не требуется для подтверждения локального контракта; общий Telegram smoke выполняется перед пилотом.</dd></div>
         </dl>
@@ -1185,14 +1185,14 @@
           <dl class="contract">
             <div><dt>Доступ</dt><dd>Пользователь подключён к заведению и видит только заявки своего заведения.</dd></div>
             <div><dt>Распознаём</dt><dd>заявка, поставщик, сумма, статус, дата поставки</dd></div>
-            <div><dt>Подтверждение</dt><dd>Нужно выбрать «Добавить товары» либо «Отправить как есть» для каждого предупреждения.</dd></div>
+            <div><dt>Подтверждение</dt><dd>Нужно выбрать «Добавить товары» либо «Записать как есть» для каждого предупреждения.</dd></div>
             <div><dt>Что изменится</dt><dd>Черновик либо возвращается к добавлению товаров, либо продолжает финальную проверку.</dd></div>
             <div><dt>Если произошла ошибка</dt><dd>До записи разрешить безопасный повтор; после неоднозначного результата не создавать возможный дубль.</dd></div>
           </dl>
         </details>
         <details>
           <summary>Примеры фраз</summary>
-          <ul><li>«Проверь минималку»</li><li>«Добавить товары поставщика»</li><li>«Отправить как есть»</li></ul>
+          <ul><li>«Проверь минималку»</li><li>«Добавить товары поставщика»</li><li>«Записать как есть»</li></ul>
         </details>
         <details>
           <summary>Связанные pytest-тесты · 1</summary>

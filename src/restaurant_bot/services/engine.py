@@ -78,6 +78,7 @@ from restaurant_bot.domain.models import (
     CatalogProduct,
     CommentSource,
     ConversationState,
+    DepartmentQuantities,
     DialogueResponse,
     EngineResult,
     ExtractedItem,
@@ -119,7 +120,6 @@ from restaurant_bot.presentation.telegram.progression import render_progression
 from restaurant_bot.presentation.telegram.replies import (
     added_items_question_reply,
     comment_scope_clarification_reply,
-    final_review_reply,
     issue_reply,
     multiple_quantity_choice_reply,
     new_order_confirmation_reply,
@@ -129,6 +129,7 @@ from restaurant_bot.presentation.telegram.replies import (
     photo_without_quantities_reply,
     product_add_requests_reply,
     product_add_sending_reply,
+    review_or_department_reply,
     start_adding_supplier_reply,
     submission_retry_reply,
     supplier_warning_choose_reply,
@@ -297,7 +298,7 @@ class ConversationEngine:
             not new_order_interrupted
             and submit_confirm_decision.action is CompatibilityAction.AMBIGUOUS
         ):
-            return EngineResult(state=state, reply=final_review_reply(state))
+            return EngineResult(state=state, reply=review_or_department_reply(state))
         if (
             not new_order_interrupted
             and submit_confirm_decision.action is CompatibilityAction.INTERRUPT
@@ -309,7 +310,7 @@ class ConversationEngine:
             and submit_confirm_decision.action is CompatibilityAction.CONTINUE
         ):
             if command.dialogue_response is DialogueResponse.UNCERTAIN:
-                return EngineResult(state=state, reply=final_review_reply(state))
+                return EngineResult(state=state, reply=review_or_department_reply(state))
             if command.dialogue_response is DialogueResponse.AFFIRM or command.intent in {
                 Intent.CONFIRM,
                 Intent.SUBMIT_REQUEST,
@@ -896,6 +897,9 @@ class ConversationEngine:
                 state.search_scope,
                 supplier_hint=selected_supplier,
             )
+            if items_to_add:
+                state.department_confirmation_required = True
+                state.department_confirmed = False
             for extracted in items_to_add:
                 if selected_supplier:
                     extracted = extracted.model_copy(update={"supplier_hint": selected_supplier})
@@ -1263,7 +1267,7 @@ class ConversationEngine:
         if state.stage is SessionStage.AWAIT_ADD_MORE_CONFIRM:
             return EngineResult(state=state, reply=self._repeat_add_more_prompt(state))
         if state.stage is SessionStage.AWAIT_SUBMIT_CONFIRM:
-            return EngineResult(state=state, reply=final_review_reply(state))
+            return EngineResult(state=state, reply=review_or_department_reply(state))
         if state.stage is SessionStage.AWAIT_PRODUCT_ADD_DETAILS:
             index = state.pending_product_add_item_index
             item = state.cart[index] if index is not None and 0 <= index < len(state.cart) else None
@@ -1312,6 +1316,8 @@ class ConversationEngine:
                 item.quantity = authorization.quantity
                 item.unit = authorization.unit
                 item.quantity_user_edited = True
+                item.department_quantities = DepartmentQuantities()
+                state.department_confirmed = False
                 if extracted.quantity_source:
                     item.quantity_source = extracted.quantity_source
         self.catalog_resolution.apply_catalog(item, outcome.candidate, catalog)
@@ -1351,6 +1357,8 @@ class ConversationEngine:
         if item.suggested_quantity is not None:
             item.quantity = item.suggested_quantity
             item.quantity_user_edited = True
+            item.department_quantities = DepartmentQuantities()
+            state.department_confirmed = False
         item.status = ItemStatus.MATCHED if item.quantity else ItemStatus.MISSING_QTY
         return self._advance_multiple_quantity_choice(state)
 
@@ -1403,7 +1411,7 @@ class ConversationEngine:
         item = select_multiple_warning(state)
         if item is None:
             state.current_issue_item_id = ""
-            return EngineResult(state=state, reply=final_review_reply(state))
+            return EngineResult(state=state, reply=review_or_department_reply(state))
         state.stage = SessionStage.AWAIT_SUBMIT_CONFIRM
         state.status = "await_multiple_choice"
         return EngineResult(state=state, reply=multiple_quantity_choice_reply(item))
@@ -1418,7 +1426,7 @@ class ConversationEngine:
             return EngineResult(state=state, reply=multiple_quantity_choice_reply(next_item))
         state.stage = SessionStage.AWAIT_SUBMIT_CONFIRM
         state.status = "await_submit_confirm"
-        return EngineResult(state=state, reply=final_review_reply(state))
+        return EngineResult(state=state, reply=review_or_department_reply(state))
 
     def _skip_current(self, state: ConversationState) -> EngineResult:
         """Пропускает текущую позицию."""
@@ -1560,11 +1568,15 @@ class ConversationEngine:
         ):
             item.quantity = quantity
             item.quantity_user_edited = True
+            item.department_quantities = DepartmentQuantities()
+            state.department_confirmed = False
             item.unit = normalize_unit(command.edit_unit)
             item.status = ItemStatus.UNIT_MISMATCH
             return self._advance(state)
         item.quantity = quantity
         item.quantity_user_edited = True
+        item.department_quantities = DepartmentQuantities()
+        state.department_confirmed = False
         item.unit = item.catalog_unit or command.edit_unit or item.unit
         if item.catalog_product_id:
             item.status = ItemStatus.MATCHED
@@ -1656,7 +1668,7 @@ class ConversationEngine:
         )
         return EngineResult(
             state=state,
-            reply=BotReply(text=f"{progress} <b>{order_no}</b>..."),
+            reply=BotReply(text=f"{progress}..."),
             enqueue_submission=True,
         )
 

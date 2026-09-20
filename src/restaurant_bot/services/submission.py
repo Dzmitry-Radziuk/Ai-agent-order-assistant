@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+from collections import defaultdict
 from datetime import UTC, datetime
+from math import isclose
 from time import perf_counter
 from typing import Any
 
@@ -11,6 +13,7 @@ from redis import Redis
 
 from restaurant_bot.config import Settings
 from restaurant_bot.conversation.state.transitions import normalize_cart_page
+from restaurant_bot.domain.departments import normalize_department
 from restaurant_bot.domain.models import (
     BotReply,
     Button,
@@ -32,6 +35,7 @@ from restaurant_bot.integrations.google_sheets import (
     OrderSubmissionResult,
 )
 from restaurant_bot.integrations.telegram import TelegramAPIError, TelegramClient
+from restaurant_bot.parsing.numeric import to_float
 from restaurant_bot.persistence.database import SessionLocal
 from restaurant_bot.persistence.models import SubmissionRecord
 from restaurant_bot.presentation.telegram.formatting import escape, heading
@@ -1875,8 +1879,8 @@ class SubmissionService:
         )
         return False
 
-    @staticmethod
     def _catalog_plan_validation_error(
+        self,
         plan: Any,
         pending: PendingSubmission,
         record: SubmissionRecord,
@@ -1896,6 +1900,39 @@ class SubmissionService:
             return "Номер заявки в плане каталога не совпадает с заявкой."
         if plan["spreadsheet_id"] != pending.spreadsheet_id:
             return "Таблица в плане каталога не совпадает с таблицей заведения."
+        expected: dict[tuple[str, str], float] = defaultdict(float)
+        allowed_departments = {"Зал", "Бар", "Кухня"}
+        for row in pending.rows:
+            quantity = to_float(row.get("Кол-во", row.get("Количество"))) or 0
+            if quantity <= 0:
+                continue
+            product_id = str(row.get("ID товара") or "").strip()
+            if not product_id:
+                return "В строке заявки с количеством отсутствует ID товара."
+            department = normalize_department(row.get("_department")) or normalize_department(
+                getattr(self.settings, "default_department", "Кухня")
+            )
+            if department not in allowed_departments:
+                return "В строке заявки указано неизвестное подразделение."
+            expected[(product_id, department)] += quantity
+        if not expected:
+            return ""
+
+        actual: dict[tuple[str, str], float] = defaultdict(float)
+        for mutation in plan["mutations"]:
+            if mutation["kind"] != "quantity":
+                continue
+            department = normalize_department(mutation.get("department"))
+            if department not in allowed_departments:
+                return "План изменения каталога содержит неизвестное подразделение."
+            actual[(str(mutation["product_id"]), department)] += float(mutation["increment"])
+        if set(actual) != set(expected):
+            return "План изменения каталога покрывает не все позиции и подразделения заявки."
+        if any(
+            not isclose(actual[key], quantity, rel_tol=1e-9, abs_tol=1e-9)
+            for key, quantity in expected.items()
+        ):
+            return "Количество в плане изменения каталога не совпадает с заявкой."
         return ""
 
     def _persist_catalog_started(

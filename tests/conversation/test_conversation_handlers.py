@@ -4,6 +4,7 @@ from restaurant_bot.domain.models import (
     Candidate,
     CartItem,
     ConversationState,
+    DepartmentQuantities,
     ExtractedItem,
     InputKind,
     Intent,
@@ -158,6 +159,90 @@ def test_final_review_handler_owns_review_pagination() -> None:
     assert outcome.result is not None
     assert state.final_review_page == 2
     assert state.stage is SessionStage.AWAIT_SUBMIT_CONFIRM
+
+
+def test_final_review_requires_department_for_new_items() -> None:
+    """Не показывает кнопку записи до явного выбора подразделения."""
+    state = ConversationState(
+        cart=[
+            CartItem(
+                id="matched",
+                source_query="Сироп Роза",
+                quantity=5,
+                unit="шт",
+                status=ItemStatus.MATCHED,
+                catalog_product_id="rose",
+            )
+        ],
+        department_confirmation_required=True,
+    )
+
+    outcome = FinalReviewHandler().handle(
+        ParsedCommand(intent=Intent.SHOW_FINAL_REVIEW),
+        state,
+    )
+
+    assert outcome is not None and outcome.result is not None
+    assert "К какому подразделению" in outcome.result.reply.text
+    assert all(
+        button.callback_data != "v2:submit" for row in outcome.result.reply.rows for button in row
+    )
+
+
+def test_department_selection_can_preserve_photo_distribution() -> None:
+    """Сохраняет одновременно Зал и Бар после явного подтверждения фото."""
+    item = CartItem(
+        id="matched",
+        source_query="Горчица",
+        quantity=5,
+        unit="шт",
+        status=ItemStatus.MATCHED,
+        catalog_product_id="mustard",
+        department_quantities=DepartmentQuantities(hall=2, bar=3),
+    )
+    state = ConversationState(
+        cart=[item],
+        department_confirmation_required=True,
+    )
+
+    outcome = FinalReviewHandler().handle(
+        ParsedCommand(intent=Intent.SELECT_DEPARTMENT, callback_target="preserve"),
+        state,
+    )
+
+    assert outcome is not None and outcome.result is not None
+    assert state.department_confirmed is True
+    assert item.department_quantities.hall == 2
+    assert item.department_quantities.bar == 3
+    assert "Зал 2 шт, Бар 3 шт" in outcome.result.reply.text
+
+
+def test_department_selection_reassigns_entire_photo_order() -> None:
+    """Заменяет распределение фото одним явно выбранным подразделением."""
+    item = CartItem(
+        id="matched",
+        source_query="Горчица",
+        quantity=5,
+        unit="шт",
+        status=ItemStatus.MATCHED,
+        catalog_product_id="mustard",
+        department_quantities=DepartmentQuantities(hall=2, bar=3),
+    )
+    state = ConversationState(
+        cart=[item],
+        department_confirmation_required=True,
+    )
+
+    outcome = FinalReviewHandler().handle(
+        ParsedCommand(intent=Intent.SELECT_DEPARTMENT, callback_target="kitchen"),
+        state,
+    )
+
+    assert outcome is not None and outcome.result is not None
+    assert state.department == "Кухня"
+    assert item.department == "Кухня"
+    assert item.department_quantities == DepartmentQuantities()
+    assert "5 шт · Кухня" in outcome.result.reply.text
 
 
 def test_passive_intent_handler_uses_explicit_dispatch_table() -> None:

@@ -595,6 +595,45 @@ def test_empty_catalog_plan_completes_without_external_write() -> None:
     service.sheets.apply_catalog_mutation.assert_not_called()
 
 
+def test_empty_catalog_plan_is_rejected_for_positive_order_rows() -> None:
+    """Не сообщает об успехе, если план потерял товар из заявки."""
+    service = object.__new__(SubmissionService)
+    service.settings = SimpleNamespace(default_department="Кухня")
+    service.sheets = MagicMock()
+    plan = _catalog_plan(mutations=[])
+    service.sheets.prepare_catalog_mutation.return_value = plan
+    service._mark_catalog_conflict = MagicMock()  # type: ignore[method-assign]
+    service._send_catalog_conflict_reply = MagicMock()  # type: ignore[method-assign]
+    pending = PendingSubmission(
+        order_no="ORDER-1",
+        spreadsheet_id="venue-sheet",
+        rows=[{"ID товара": "rose", "Кол-во": 5, "_department": "Кухня"}],
+    )
+
+    assert service._run_catalog_update("chat-1", pending, _record()) is False
+    service._mark_catalog_conflict.assert_called_once()
+    service.sheets.apply_catalog_mutation.assert_not_called()
+
+
+def test_partial_catalog_plan_is_rejected_for_two_departments() -> None:
+    """Не допускает потерю Зала или Бара из одной фотографии."""
+    service = object.__new__(SubmissionService)
+    service.settings = SimpleNamespace(default_department="Кухня")
+    plan = _catalog_plan()
+    pending = PendingSubmission(
+        order_no="ORDER-1",
+        spreadsheet_id="venue-sheet",
+        rows=[
+            {"ID товара": "rose", "Кол-во": 5, "_department": "Кухня"},
+            {"ID товара": "rose", "Кол-во": 2, "_department": "Бар"},
+        ],
+    )
+
+    error = service._catalog_plan_validation_error(plan, pending, _record())
+
+    assert "не все позиции и подразделения" in error
+
+
 def test_catalog_checkpoint_failure_keeps_started_gate_for_next_retry() -> None:
     """После сбоя checkpoint следующий retry не повторяет внешний write."""
     service = object.__new__(SubmissionService)
