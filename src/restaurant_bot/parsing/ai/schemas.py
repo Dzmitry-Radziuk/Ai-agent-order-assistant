@@ -54,6 +54,10 @@ class PhotoRowObservation(BaseModel):
     hall_quantity: float | None = None
     bar_quantity: float | None = None
     kitchen_quantity: float | None = None
+    sheet_column_n_quantity: float | None = None
+    sheet_column_o_quantity: float | None = None
+    sheet_column_p_quantity: float | None = None
+    sheet_column_q_comment: str = ""
     explicit_order_quantity: float | None = None
     explicit_order_unit: str = ""
     order_entry_text: str = ""

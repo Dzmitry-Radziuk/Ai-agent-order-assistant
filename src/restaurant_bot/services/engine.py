@@ -78,7 +78,6 @@ from restaurant_bot.domain.models import (
     CatalogProduct,
     CommentSource,
     ConversationState,
-    DepartmentQuantities,
     DialogueResponse,
     EngineResult,
     ExtractedItem,
@@ -719,6 +718,14 @@ class ConversationEngine:
         if command.comment_clarification and not (
             command.intent is Intent.ADD_ITEMS and command.items
         ):
+            if not has_active_draft_items(state):
+                return EngineResult(
+                    state=state,
+                    reply=cart_reply(
+                        state,
+                        notice="Сначала добавьте товар в черновик, затем укажите комментарий",
+                    ),
+                )
             state.pending_comment_items = [item.model_copy(deep=True) for item in command.items]
             state.pending_comment_existing_item_ids = [
                 item.id for item in state.cart if item.status != ItemStatus.SKIPPED
@@ -856,6 +863,14 @@ class ConversationEngine:
 
         if command.intent == Intent.ADD_ITEMS:
             if command.global_comment and not command.items:
+                if not has_active_draft_items(state):
+                    return EngineResult(
+                        state=state,
+                        reply=cart_reply(
+                            state,
+                            notice="Сначала добавьте товар в черновик, затем укажите комментарий",
+                        ),
+                    )
                 apply_global_comment(state, command.global_comment)
             if command.global_comment and not command.items:
                 return EngineResult(
@@ -1316,8 +1331,7 @@ class ConversationEngine:
                 item.quantity = authorization.quantity
                 item.unit = authorization.unit
                 item.quantity_user_edited = True
-                item.department_quantities = DepartmentQuantities()
-                state.department_confirmed = False
+                state.refresh_department_after_quantity_change(item)
                 if extracted.quantity_source:
                     item.quantity_source = extracted.quantity_source
         self.catalog_resolution.apply_catalog(item, outcome.candidate, catalog)
@@ -1357,8 +1371,7 @@ class ConversationEngine:
         if item.suggested_quantity is not None:
             item.quantity = item.suggested_quantity
             item.quantity_user_edited = True
-            item.department_quantities = DepartmentQuantities()
-            state.department_confirmed = False
+            state.refresh_department_after_quantity_change(item)
         item.status = ItemStatus.MATCHED if item.quantity else ItemStatus.MISSING_QTY
         return self._advance_multiple_quantity_choice(state)
 
@@ -1451,6 +1464,14 @@ class ConversationEngine:
         self, command: ParsedCommand, state: ConversationState
     ) -> EngineResult:
         """Изменяет комментарий только у однозначно найденного товара черновика."""
+        if command.comment_action == "add" and not has_active_draft_items(state):
+            return EngineResult(
+                state=state,
+                reply=cart_reply(
+                    state,
+                    notice="Сначала добавьте товар в черновик, затем укажите комментарий",
+                ),
+            )
         target = clean_command_target(command.comment_target_query)
         comment = " ".join(command.comment_text.split()).strip(" .,;:-—–")
         if command.comment_scope_action == "items":
@@ -1568,15 +1589,13 @@ class ConversationEngine:
         ):
             item.quantity = quantity
             item.quantity_user_edited = True
-            item.department_quantities = DepartmentQuantities()
-            state.department_confirmed = False
+            state.refresh_department_after_quantity_change(item)
             item.unit = normalize_unit(command.edit_unit)
             item.status = ItemStatus.UNIT_MISMATCH
             return self._advance(state)
         item.quantity = quantity
         item.quantity_user_edited = True
-        item.department_quantities = DepartmentQuantities()
-        state.department_confirmed = False
+        state.refresh_department_after_quantity_change(item)
         item.unit = item.catalog_unit or command.edit_unit or item.unit
         if item.catalog_product_id:
             item.status = ItemStatus.MATCHED

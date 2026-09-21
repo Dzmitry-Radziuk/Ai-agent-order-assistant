@@ -107,10 +107,21 @@ def _department_parts(item: CartItem) -> list[tuple[str, float]]:
     return [(department, value) for department, value in values if value and value > 0]
 
 
+def _position_range_label(start: int, end: int, total: int) -> str:
+    """Формирует заголовок списка позиций с правильным числом для одной позиции."""
+    if total == 1:
+        return "Позиция 1 из 1"
+    return f"Позиции {start}–{end} из {total}"
+
+
 def department_selection_reply(state: ConversationState) -> BotReply:
     """Просит явно подтвердить подразделение перед финальной проверкой."""
     distributed_items = [item for item in _active_items(state) if _department_parts(item)]
     has_photo_distribution = bool(distributed_items)
+    total_pages = page_count(len(distributed_items), CART_PAGE_SIZE)
+    page = min(max(0, state.department_selection_page), total_pages - 1)
+    start = page * CART_PAGE_SIZE
+    end = min(start + CART_PAGE_SIZE, len(distributed_items))
 
     lines = [
         f"🏷 {heading('К какому подразделению относится заказ?')}",
@@ -120,6 +131,8 @@ def department_selection_reply(state: ConversationState) -> BotReply:
     if has_photo_distribution:
         lines += [
             "На фото распознано распределение:",
+            _position_range_label(start + 1, end, len(distributed_items)) + ":",
+            "",
             *[
                 f"• {product_name(_item_name(item))}: "
                 + ", ".join(
@@ -127,14 +140,20 @@ def department_selection_reply(state: ConversationState) -> BotReply:
                     f"{escape(_item_unit(item) or 'шт')}"
                     for department, quantity in _department_parts(item)
                 )
-                for item in distributed_items[:8]
+                for item in distributed_items[start:end]
             ],
+            "",
             "Если колонки прочитаны верно, сохраните распределение с фото. "
             "Если весь заказ относится к одному подразделению, выберите его ниже.",
         ]
-        if len(distributed_items) > 8:
-            lines.insert(-1, f"…и ещё {len(distributed_items) - 8} позиций.")
         rows.append([Button(text="Оставить как на фото", callback_data="v2:dept:preserve")])
+        navigation: list[Button] = []
+        if page > 0:
+            navigation.append(Button(text="← Назад", callback_data=f"v2:deptpage:{page - 1}"))
+        if page < total_pages - 1:
+            navigation.append(Button(text="Далее →", callback_data=f"v2:deptpage:{page + 1}"))
+        if navigation:
+            rows.append(navigation)
     else:
         lines.append("Выберите подразделение. Я применю его ко всем позициям этой заявки.")
     rows += [
@@ -735,7 +754,7 @@ def _issue_reply_body(item: CartItem, item_index: int | None = None) -> BotReply
                 [Button(text="Не добавлять повторно", callback_data=f"v2:skip:{index}")],
             ],
         )
-    if item.status == ItemStatus.AMBIGUOUS:
+    if item.status == ItemStatus.AMBIGUOUS and item.candidates:
         if len(item.candidates) == 1:
             lines = [
                 f"🔎 {heading('Точного совпадения не найдено')}",

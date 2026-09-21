@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+
+from restaurant_bot.domain.models import DepartmentQuantities
 
 
 @dataclass(frozen=True, slots=True)
@@ -15,6 +17,7 @@ class ReviewItem:
     unit: str
     quantity: float
     comment: str = ""
+    department_quantities: DepartmentQuantities = field(default_factory=DepartmentQuantities)
 
 
 @dataclass(frozen=True, slots=True)

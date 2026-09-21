@@ -7,7 +7,11 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from typing import Any, Protocol
 
+import structlog
+
 from restaurant_bot.config import Settings
+
+logger = structlog.get_logger(__name__)
 
 
 class Observation(Protocol):
@@ -44,6 +48,14 @@ class Tracer:
                 secret_key=settings.langfuse_secret_key.get_secret_value(),
                 base_url=settings.langfuse_base_url,
                 environment=settings.langfuse_tracing_environment,
+                flush_at=settings.langfuse_flush_at,
+                flush_interval=settings.langfuse_flush_interval_seconds,
+            )
+            logger.info(
+                "langfuse_client_initialized",
+                environment=settings.langfuse_tracing_environment,
+                flush_at=settings.langfuse_flush_at,
+                flush_interval_seconds=settings.langfuse_flush_interval_seconds,
             )
 
     @contextmanager
@@ -58,13 +70,25 @@ class Tracer:
         if self.client is None:
             yield NoopObservation()
             return
-        with self.client.start_as_current_observation(
-            name=name,
-            as_type="span",
-            input=input,
-            metadata=metadata,
-        ) as observation:
-            yield observation
+        try:
+            with self.client.start_as_current_observation(
+                name=name,
+                as_type="span",
+                input=input,
+                metadata=metadata,
+            ) as observation:
+                yield observation
+        finally:
+            self.flush()
+
+    def flush(self) -> None:
+        """Дожидается отправки завершённых наблюдений, не ломая бизнес-запрос."""
+        if self.client is None:
+            return
+        try:
+            self.client.flush()
+        except Exception:
+            logger.exception("langfuse_flush_failed")
 
     @contextmanager
     def generation(

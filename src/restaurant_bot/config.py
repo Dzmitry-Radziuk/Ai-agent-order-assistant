@@ -42,7 +42,7 @@ class Settings(BaseSettings):
     openai_text_model: str = "gpt-4o-mini"
     openai_text_timeout_seconds: float = Field(default=30.0, ge=3.0, le=60.0)
     openai_text_max_retries: int = Field(default=1, ge=0, le=2)
-    openai_vision_model: str = "gpt-5-mini"
+    openai_vision_model: str = "gpt-5.4-mini-2026-03-17"
     openai_vision_timeout_seconds: float = Field(default=180.0, ge=30.0, le=600.0)
     openai_match_model: str = "gpt-4o-mini"
     openai_transcribe_model: str = "gpt-4o-transcribe"
@@ -84,6 +84,8 @@ class Settings(BaseSettings):
     langfuse_secret_key: SecretStr | None = None
     langfuse_base_url: str | None = None
     langfuse_tracing_environment: str = "production"
+    langfuse_flush_at: int = Field(default=32, ge=1, le=512)
+    langfuse_flush_interval_seconds: float = Field(default=2.0, ge=0.1, le=60.0)
 
     @field_validator("public_base_url")
     @classmethod

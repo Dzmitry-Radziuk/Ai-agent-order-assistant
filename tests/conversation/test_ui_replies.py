@@ -1,9 +1,16 @@
 """Проверяет поведение, связанное с модулем «test ui replies»."""
 
-from restaurant_bot.domain.models import Candidate, CartItem, ConversationState, ItemStatus
+from restaurant_bot.domain.models import (
+    Candidate,
+    CartItem,
+    ConversationState,
+    DepartmentQuantities,
+    ItemStatus,
+)
 from restaurant_bot.presentation.telegram.formatting import heading, product_name
 from restaurant_bot.presentation.telegram.replies import (
     cart_reply,
+    department_selection_reply,
     final_review_reply,
     help_reply,
     issue_reply,
@@ -15,6 +22,103 @@ def test_product_names_and_headings_escape_before_formatting() -> None:
     """Экранирует пользовательский текст до добавления HTML-выделения."""
     assert product_name("Сыр <премиум> & соус") == "<b>Сыр &lt;премиум&gt; &amp; соус</b>"
     assert heading("Проверка <заявки>") == "<b><u>Проверка &lt;заявки&gt;</u></b>"
+
+
+def test_department_selection_reply_paginates_all_distributed_items() -> None:
+    """Показывает все распознанные позиции на страницах без скрытого хвоста."""
+    state = ConversationState(
+        cart=[
+            CartItem(
+                id=f"photo-{index}",
+                source_query=f"Товар {index}",
+                quantity=1,
+                unit="шт",
+                status=ItemStatus.MATCHED,
+                department_quantities=DepartmentQuantities(
+                    hall=index if index % 3 == 0 else None,
+                    bar=index if index % 3 == 1 else None,
+                    kitchen=index if index % 3 == 2 else None,
+                ),
+            )
+            for index in range(1, 42)
+        ],
+        department_selection_page=0,
+    )
+
+    first_page = department_selection_reply(state)
+    first_callbacks = {button.callback_data for row in first_page.rows for button in row}
+
+    assert "Позиции 1–10 из 41" in first_page.text
+    assert all(f"Товар {index}" in first_page.text for index in range(1, 11))
+    assert "Товар 11" not in first_page.text
+    assert "ещё" not in first_page.text
+    assert "v2:deptpage:1" in first_callbacks
+    assert "v2:dept:preserve" in first_callbacks
+
+    state.department_selection_page = 1
+    second_page = department_selection_reply(state)
+    second_callbacks = {button.callback_data for row in second_page.rows for button in row}
+
+    assert "Позиции 11–20 из 41" in second_page.text
+    assert all(f"Товар {index}" in second_page.text for index in range(11, 21))
+    assert "v2:deptpage:0" in second_callbacks
+    assert "v2:deptpage:2" in second_callbacks
+
+    state.department_selection_page = 4
+    last_page = department_selection_reply(state)
+    last_callbacks = {button.callback_data for row in last_page.rows for button in row}
+
+    assert "Позиции 41–41 из 41" in last_page.text
+    assert "Товар 41" in last_page.text
+    assert "v2:deptpage:3" in last_callbacks
+    assert "v2:deptpage:5" not in last_callbacks
+
+
+def test_department_selection_reply_uses_singular_and_spacing_for_one_position() -> None:
+    """Показывает одну позицию отдельным блоком с понятным заголовком."""
+    state = ConversationState(
+        cart=[
+            CartItem(
+                id="bread",
+                source_query="Хлеб Бородинский",
+                quantity=3,
+                unit="шт",
+                status=ItemStatus.MATCHED,
+                department_quantities=DepartmentQuantities(bar=3),
+            )
+        ]
+    )
+
+    reply = department_selection_reply(state)
+
+    assert "Позиция 1 из 1:\n\n• <b>Хлеб Бородинский</b>: Бар 3 шт\n\nЕсли" in reply.text
+    assert "Позиции 1–1 из 1" not in reply.text
+
+
+def test_cart_and_final_review_limit_product_pages_to_ten_items() -> None:
+    """Ограничивает карточки черновика и проверки десятью товарами на странице."""
+    state = ConversationState(
+        cart=[
+            CartItem(
+                id=f"item-{index}",
+                source_query=f"Товар {index}",
+                quantity=1,
+                unit="шт",
+                status=ItemStatus.MATCHED,
+            )
+            for index in range(11)
+        ]
+    )
+
+    draft = cart_reply(state)
+    final = final_review_reply(state)
+
+    assert "Страница 1 из 2" in draft.text
+    assert "Товар 9" in draft.text
+    assert "Товар 10" not in draft.text
+    assert "Страница 1 из 2" in final.text
+    assert "Товар 9" in final.text
+    assert "Товар 10" not in final.text
 
 
 def test_help_explains_how_to_include_product_and_order_comments() -> None:
@@ -87,6 +191,25 @@ def test_ambiguous_card_shows_only_catalog_choices_and_safe_recovery() -> None:
         "Не добавлять",
     ]
     assert "Ввести иначе" not in labels
+
+
+def test_empty_ambiguous_card_uses_not_found_recovery_copy() -> None:
+    """Не называет выбором карточку без вариантов для выбора."""
+    item = CartItem(
+        id="empty-ambiguous",
+        source_query="Неизвестный товар",
+        status=ItemStatus.AMBIGUOUS,
+    )
+
+    reply = issue_reply(item, 0)
+
+    assert "Найдено несколько вариантов товара." not in reply.text
+    assert "Товар не найден" in reply.text
+    assert [button.text for row in reply.rows for button in row] == [
+        "Отправить запрос снабженцу",
+        "Изменить название",
+        "Не добавлять",
+    ]
 
 
 def test_single_ambiguous_candidate_is_presented_only_as_a_similar_product() -> None:

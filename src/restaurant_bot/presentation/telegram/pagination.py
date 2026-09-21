@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
-CART_PAGE_SIZE = 20
-FINAL_REVIEW_PAGE_SIZE = 20
+PRODUCTS_PAGE_SIZE = 10
+CART_PAGE_SIZE = PRODUCTS_PAGE_SIZE
+FINAL_REVIEW_PAGE_SIZE = PRODUCTS_PAGE_SIZE
 
 
 def page_count(item_count: int, page_size: int) -> int:

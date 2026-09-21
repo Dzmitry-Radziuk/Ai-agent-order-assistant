@@ -6,6 +6,22 @@ from restaurant_bot.domain.models import Intent
 from restaurant_bot.parsing.commands.api import infer_intent
 
 
+def _assert_intent_without_items(phrase: str, expected: Intent) -> None:
+    """Проверяет намерение без создания товарных позиций."""
+    command = infer_intent(phrase)
+
+    assert command.intent is expected
+    assert command.items == []
+
+
+def _assert_product_command(phrase: str) -> None:
+    """Проверяет, что товарная фраза остаётся командой добавления товара."""
+    command = infer_intent(phrase)
+
+    assert command.intent is Intent.ADD_ITEMS
+    assert command.items
+
+
 def test_voice_add_more_command_with_transcriber_terminal_punctuation() -> None:
     """Проверяет, что голосовая команда добавления ещё одного товара учитывает конечную пунктуацию транскрипта."""
     command = infer_intent("Добавить еще товары.")
@@ -66,10 +82,7 @@ def test_voice_add_more_command_with_transcriber_terminal_punctuation() -> None:
 )
 def test_live_voice_wording_routes_before_product_parsing(phrase: str, intent: Intent) -> None:
     """Проверяет, что реальная голос формулировка маршрутизирует до товар parsing."""
-    command = infer_intent(phrase)
-
-    assert command.intent is intent
-    assert command.items == []
+    _assert_intent_without_items(phrase, intent)
 
 
 @pytest.mark.parametrize(
@@ -127,10 +140,7 @@ def test_free_form_voice_navigation_ignores_fillers_and_word_order(
     phrase: str, intent: Intent
 ) -> None:
     """Распознаёт живые команды без перечисления каждой полной фразы."""
-    command = infer_intent(phrase)
-
-    assert command.intent is intent
-    assert command.items == []
+    _assert_intent_without_items(phrase, intent)
 
 
 @pytest.mark.parametrize(
@@ -143,10 +153,7 @@ def test_free_form_voice_navigation_ignores_fillers_and_word_order(
 )
 def test_free_form_navigation_does_not_consume_real_product_names(phrase: str) -> None:
     """Не принимает конкретный товар за переход к экрану добавления."""
-    command = infer_intent(phrase)
-
-    assert command.intent is Intent.ADD_ITEMS
-    assert command.items
+    _assert_product_command(phrase)
 
 
 @pytest.mark.parametrize(
@@ -236,10 +243,7 @@ def test_common_text_and_voice_phrasings_are_deterministic(
     intent: Intent,
 ) -> None:
     """Понимает частые живые формулировки до товарного парсинга."""
-    command = infer_intent(phrase)
-
-    assert command.intent is intent
-    assert command.items == []
+    _assert_intent_without_items(phrase, intent)
 
 
 @pytest.mark.parametrize(
@@ -254,7 +258,4 @@ def test_common_text_and_voice_phrasings_are_deterministic(
 )
 def test_command_words_inside_product_lines_remain_products(phrase: str) -> None:
     """Не превращает товар с количеством в навигацию или выбор кнопки."""
-    command = infer_intent(phrase)
-
-    assert command.intent is Intent.ADD_ITEMS
-    assert command.items
+    _assert_product_command(phrase)

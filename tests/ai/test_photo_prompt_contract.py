@@ -18,7 +18,7 @@ def test_photo_prompt_prioritizes_filled_department_cells() -> None:
     """Проверяет приоритет заполненных ячеек и явную диагностику непривязанных строк."""
     prompt = f"{_PHOTO_SYSTEM}\n{_PHOTO_OBSERVATION_CONTRACT}"
 
-    assert "заполненные ячейки" in prompt
+    assert "визуально заполненные ячейки" in prompt
     assert "hall_quantity" in prompt
     assert "bar_quantity" in prompt
     assert "kitchen_quantity" in prompt
@@ -26,10 +26,27 @@ def test_photo_prompt_prioritizes_filled_department_cells() -> None:
     assert "не заменяй его только на explicit_order_quantity" in prompt
     assert "браузер" in prompt
     assert "скриншот" in prompt
-    assert "панели чата" in prompt
+    assert "панели программы, браузера, чата" in prompt
     assert "соседнюю строку" in prompt
     assert "order_area_complete=false" in prompt
     assert "uncertain_order_row_count" in prompt
+
+
+def test_photo_prompt_reads_fixed_department_columns_when_labels_are_hidden() -> None:
+    """Закрепляет буквенное сопоставление видимой строки столбцов Google Sheets."""
+    prompt = f"{_PHOTO_SYSTEM}\n{_PHOTO_OBSERVATION_CONTRACT}"
+
+    assert "N — Зал" in prompt
+    assert "O — Бар" in prompt
+    assert "P — Кухня" in prompt
+    assert "Q — Комментарий" in prompt
+    assert "sheet_column_n_quantity" in prompt
+    assert "sheet_column_o_quantity" in prompt
+    assert "sheet_column_p_quantity" in prompt
+    assert "sheet_column_q_comment" in prompt
+    assert "в верхней отдельной полосе Google Sheets" in prompt
+    assert "отдельным элементом detected_columns" in prompt
+    assert "только в этой полосе над таблицей" in prompt
 
 
 def test_photo_prompt_uses_filled_rows_without_losing_table_geometry() -> None:

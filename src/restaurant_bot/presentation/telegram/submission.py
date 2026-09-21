@@ -565,8 +565,26 @@ def _append_legacy_order_status(lines: list[str], order_rows: list[dict[str, Any
         lines.append(product_line)
 
 
-_STATUS_DETAIL_PRODUCTS_PER_BLOCK = 8
-_STATUS_DETAIL_BLOCKS_PER_PAGE = 3
+_STATUS_DETAIL_PRODUCTS_PER_BLOCK = 10
+
+
+def _status_detail_product_count(block: list[str]) -> int:
+    """Считает товары в блоке истории без учёта служебных строк."""
+    product_header = next(
+        (index for index, line in enumerate(block) if line in {"Товары:", "Товары (продолжение):"}),
+        None,
+    )
+    if product_header is None:
+        return 0
+    end = next(
+        (
+            index
+            for index in range(product_header + 1, len(block))
+            if block[index].startswith("Контакт поставщика:")
+        ),
+        len(block),
+    )
+    return end - product_header - 1
 
 
 def _tracked_status_groups(
@@ -740,9 +758,23 @@ def _build_order_status_detail_pages(
             )
     if not blocks:
         return []
+    if len(blocks) > 1:
+        blocks = [blocks[0] + blocks[1], *blocks[2:]]
     pages: list[str] = []
-    for offset in range(0, len(blocks), _STATUS_DETAIL_BLOCKS_PER_PAGE):
-        page_blocks = blocks[offset : offset + _STATUS_DETAIL_BLOCKS_PER_PAGE]
+    page_blocks: list[list[str]] = []
+    page_product_count = 0
+    for block in blocks:
+        product_count = _status_detail_product_count(block)
+        if page_blocks and page_product_count + product_count > _STATUS_DETAIL_PRODUCTS_PER_BLOCK:
+            pages.append(
+                f"{heading('Мои заявки')}\n\n"
+                + "\n\n".join("\n".join(page) for page in page_blocks)
+            )
+            page_blocks = []
+            page_product_count = 0
+        page_blocks.append(block)
+        page_product_count += product_count
+    if page_blocks:
         pages.append(
             f"{heading('Мои заявки')}\n\n" + "\n\n".join("\n".join(block) for block in page_blocks)
         )

@@ -42,6 +42,8 @@ _ORDER_HEADERS = {
     "quantity_decimal",
 }
 _COMMENT_HEADERS = {"комментарий", "комментарии", "comment", "comments", "примечание"}
+_SHEET_DEPARTMENT_COLUMN_LETTERS = {"n", "o", "p"}
+_SHEET_COMMENT_COLUMN_LETTER = "q"
 _REFERENCE_HEADERS = {
     "фасовка",
     "упаковка",
@@ -108,7 +110,32 @@ def canonical_photo_identity(value: str) -> str:
     return re.sub(r"\s+", " ", text).strip()
 
 
-def classify_photo_document(observation: PhotoDocumentObservation) -> str:
+def uses_lettered_department_columns(
+    observation: PhotoDocumentObservation,
+    columns: set[str] | None = None,
+) -> bool:
+    """Разрешает схему N/O/P только для таблицы без видимых названий отделов."""
+    detected = columns or {
+        canonical_photo_identity(column)
+        for column in observation.detected_columns
+        if clean_text(column)
+    }
+    has_named_department = has_named_department_columns(detected)
+    return (
+        observation.has_table_structure
+        and not has_named_department
+        and _SHEET_DEPARTMENT_COLUMN_LETTERS.issubset(detected)
+    )
+
+
+def has_named_department_columns(columns: set[str]) -> bool:
+    """Определяет, распознаны ли в таблице слова с названиями отделов."""
+    return any(header in columns for aliases in _DEPARTMENT_HEADERS.values() for header in aliases)
+
+
+def classify_photo_document(
+    observation: PhotoDocumentObservation,
+) -> str:
     """Классифицирует документ по структурным признакам, а не только по proposal модели."""
     if observation.extraction_confidence < 0.5:
         return "unknown"
@@ -117,8 +144,12 @@ def classify_photo_document(observation: PhotoDocumentObservation) -> str:
         for column in observation.detected_columns
         if clean_text(column)
     }
-    has_departments = all(
+    has_named_departments = all(
         any(header in columns for header in aliases) for aliases in _DEPARTMENT_HEADERS.values()
+    )
+    has_departments = has_named_departments or uses_lettered_department_columns(
+        observation,
+        columns,
     )
     has_order_column = any(column in _ORDER_HEADERS for column in columns)
     has_comment_column = bool(columns & _COMMENT_HEADERS)
@@ -130,6 +161,11 @@ def classify_photo_document(observation: PhotoDocumentObservation) -> str:
         and row.row_alignment_confidence >= 0.9
         and row.quantity_confidence >= 0.9
         for row in rows
+    )
+    has_unlabelled_table_order_cells = (
+        observation.has_table_structure
+        and not has_departments
+        and any(_unlabelled_order_cell_quantities(row) for row in rows)
     )
 
     if (
@@ -148,6 +184,8 @@ def classify_photo_document(observation: PhotoDocumentObservation) -> str:
     if observation.has_table_structure and has_order_column and rows:
         if has_reference_column and any(_row_has_order_evidence(row) for row in rows):
             return "printed_order_form"
+        return "order_table"
+    if has_unlabelled_table_order_cells:
         return "order_table"
     if (
         observation.has_table_structure
@@ -180,6 +218,21 @@ def normalize_photo_observation(
 ) -> PhotoNormalizationResult:
     """Проверяет строки фотографии и превращает только разрешённые строки в ParsedCommand."""
     document_type = classify_photo_document(observation)
+    columns = {
+        canonical_photo_identity(column)
+        for column in observation.detected_columns
+        if clean_text(column)
+    }
+    lettered_department_columns = uses_lettered_department_columns(
+        observation,
+        columns,
+    )
+    sheet_department_columns = lettered_department_columns
+    uses_lettered_comment_column = (
+        lettered_department_columns
+        and _SHEET_COMMENT_COLUMN_LETTER in columns
+        and not bool(columns & _COMMENT_HEADERS)
+    )
     integrity = photo_order_area_integrity(
         observation,
         document_type,
@@ -220,7 +273,12 @@ def normalize_photo_observation(
         )
     if document_type == "client_order_sheet":
         unresolved_rows = [
-            row for row in observation.rows if _client_sheet_quantity_without_department(row)
+            row
+            for row in observation.rows
+            if _client_sheet_quantity_without_department(
+                row,
+                uses_sheet_department_columns=sheet_department_columns,
+            )
         ]
         if unresolved_rows:
             logger.warning(
@@ -272,6 +330,8 @@ def normalize_photo_observation(
             row,
             document_type,
             settings.default_department,
+            uses_sheet_department_columns=sheet_department_columns,
+            uses_lettered_comment_column=uses_lettered_comment_column,
             sheet_row_number_authoritative=authoritative_sheet_rows,
         )
         decision = "admitted" if item is not None else "dropped"
@@ -301,7 +361,10 @@ def normalize_photo_observation(
         else:
             items.append(item)
 
-    global_comment = _authorized_document_comment(observation)
+    global_comment = _authorized_document_comment(
+        observation,
+        uses_lettered_comment_column=uses_lettered_comment_column,
+    )
     return PhotoNormalizationResult(
         command=ParsedCommand(
             intent=Intent.ADD_ITEMS,
@@ -412,6 +475,8 @@ def _authorize_row(
     default_department: str,
     *,
     sheet_row_number_authoritative: bool = False,
+    uses_sheet_department_columns: bool = False,
+    uses_lettered_comment_column: bool = False,
 ) -> ExtractedItem | None:
     """Авторизует одну строку без использования соседних строк или fuzzy-данных."""
     product_text = clean_text(row.product_text)
@@ -419,10 +484,18 @@ def _authorize_row(
         return None
 
     if document_type == "client_order_sheet":
-        quantities = DepartmentQuantities(
-            hall=_positive_or_none(row.hall_quantity),
-            bar=_positive_or_none(row.bar_quantity),
-            kitchen=_positive_or_none(row.kitchen_quantity),
+        quantities = (
+            DepartmentQuantities(
+                hall=_positive_or_none(row.sheet_column_n_quantity),
+                bar=_positive_or_none(row.sheet_column_o_quantity),
+                kitchen=_positive_or_none(row.sheet_column_p_quantity),
+            )
+            if uses_sheet_department_columns
+            else DepartmentQuantities(
+                hall=_positive_or_none(row.hall_quantity),
+                bar=_positive_or_none(row.bar_quantity),
+                kitchen=_positive_or_none(row.kitchen_quantity),
+            )
         )
         positive = [
             value for value in (quantities.hall, quantities.bar, quantities.kitchen) if value
@@ -440,17 +513,23 @@ def _authorize_row(
     else:
         if row.quantity_confidence < 0.5:
             return None
-        resolved = _resolve_row_quantity(row)
+        resolved = _resolve_row_quantity(
+            row,
+            allow_unlabelled_table_cells=document_type == "order_table",
+        )
         if resolved is None:
             return None
         quantity, unit, quantity_source = resolved
         quantities = DepartmentQuantities()
         exact_provenance = ""
 
-    row_comment = clean_text(row.comment_text)
+    sheet_column_comment = (
+        clean_text(row.sheet_column_q_comment) if uses_lettered_comment_column else ""
+    )
+    row_comment = sheet_column_comment or clean_text(row.comment_text)
     comment = (
         row_comment
-        if row.comment_source in {"explicit_marker", "user_note"}
+        if (sheet_column_comment or row.comment_source in {"explicit_marker", "user_note"})
         and _GLOBAL_COMMENT_RE.search(row_comment) is None
         else ""
     )
@@ -482,7 +561,11 @@ def _authorize_row(
     )
 
 
-def _resolve_row_quantity(row: PhotoRowObservation) -> tuple[float, str, str] | None:
+def _resolve_row_quantity(
+    row: PhotoRowObservation,
+    *,
+    allow_unlabelled_table_cells: bool = False,
+) -> tuple[float, str, str] | None:
     """Разрешает quantity только из текущей строки и применяет правило исправления."""
     crossed = _single_number(row.crossed_out_quantity_text)
     corrected = _single_number(row.corrected_quantity_text)
@@ -506,6 +589,10 @@ def _resolve_row_quantity(row: PhotoRowObservation) -> tuple[float, str, str] | 
         quantity = _single_number(row.order_entry_text) or _single_number(
             row.handwritten_quantity_text
         )
+    if quantity is None and allow_unlabelled_table_cells:
+        unlabelled_cells = _unlabelled_order_cell_quantities(row)
+        if unlabelled_cells:
+            return sum(unlabelled_cells), _row_unit(row), "unlabelled_table_cells"
     if quantity is None or not math.isfinite(quantity) or quantity <= 0:
         return None
     source = row.order_entry_type or (
@@ -579,6 +666,22 @@ def _aligned_table_order_quantities(row: PhotoRowObservation) -> list[float]:
     return quantities
 
 
+def _unlabelled_order_cell_quantities(row: PhotoRowObservation) -> list[float]:
+    """Собирает ячейки количества без доказанного соответствия подразделениям."""
+    return [
+        value
+        for value in (
+            _positive_or_none(row.hall_quantity),
+            _positive_or_none(row.bar_quantity),
+            _positive_or_none(row.kitchen_quantity),
+            _positive_or_none(row.sheet_column_n_quantity),
+            _positive_or_none(row.sheet_column_o_quantity),
+            _positive_or_none(row.sheet_column_p_quantity),
+        )
+        if value is not None
+    ]
+
+
 def _row_has_order_evidence(row: PhotoRowObservation) -> bool:
     """Проверяет положительное evidence заказа в самой строке."""
     return (
@@ -586,6 +689,14 @@ def _row_has_order_evidence(row: PhotoRowObservation) -> bool:
         or bool(clean_text(row.order_entry_text))
         or bool(clean_text(row.handwritten_quantity_text))
         or bool(clean_text(row.corrected_quantity_text))
+        or any(
+            _positive_or_none(value) is not None
+            for value in (
+                row.sheet_column_n_quantity,
+                row.sheet_column_o_quantity,
+                row.sheet_column_p_quantity,
+            )
+        )
     )
 
 
@@ -593,26 +704,56 @@ def photo_row_has_potential_order_evidence(row: PhotoRowObservation) -> bool:
     """Проверяет department и обычные order evidence одной визуальной строки."""
     return any(
         _positive_or_none(value) is not None
-        for value in (row.hall_quantity, row.bar_quantity, row.kitchen_quantity)
+        for value in (
+            row.hall_quantity,
+            row.bar_quantity,
+            row.kitchen_quantity,
+            row.sheet_column_n_quantity,
+            row.sheet_column_o_quantity,
+            row.sheet_column_p_quantity,
+        )
     ) or _row_has_order_evidence(row)
 
 
-def _client_sheet_quantity_without_department(row: PhotoRowObservation) -> bool:
+def _client_sheet_quantity_without_department(
+    row: PhotoRowObservation,
+    *,
+    uses_sheet_department_columns: bool = False,
+) -> bool:
     """Находит quantity evidence клиентского листа без подтверждённой колонки отдела."""
+    lettered_quantities = (
+        (row.sheet_column_n_quantity, row.sheet_column_o_quantity, row.sheet_column_p_quantity)
+        if uses_sheet_department_columns
+        else ()
+    )
     has_department_quantity = any(
         _positive_or_none(value) is not None
-        for value in (row.hall_quantity, row.bar_quantity, row.kitchen_quantity)
+        for value in (
+            row.hall_quantity,
+            row.bar_quantity,
+            row.kitchen_quantity,
+            *lettered_quantities,
+        )
     )
     return _row_has_order_evidence(row) and not has_department_quantity
 
 
-def _authorized_document_comment(observation: PhotoDocumentObservation) -> str:
+def _authorized_document_comment(
+    observation: PhotoDocumentObservation,
+    *,
+    uses_lettered_comment_column: bool = False,
+) -> str:
     """Извлекает явно общий комментарий из документа или любой видимой строки."""
     candidates = [clean_text(observation.document_comment)]
     candidates.extend(
-        clean_text(row.comment_text)
+        clean_text(row.sheet_column_q_comment)
+        if uses_lettered_comment_column and clean_text(row.sheet_column_q_comment)
+        else clean_text(row.comment_text)
         for row in observation.rows
-        if row.comment_source in {"explicit_marker", "user_note"}
+        if (
+            row.comment_source in {"explicit_marker", "user_note"}
+            or (uses_lettered_comment_column and clean_text(row.sheet_column_q_comment))
+        )
     )
     for comment in candidates:
         if not comment:

@@ -11,7 +11,6 @@ from restaurant_bot.conversation.routing.item_resolution import has_named_produc
 from restaurant_bot.domain.models import (
     CartItem,
     ConversationState,
-    DepartmentQuantities,
     InputKind,
     Intent,
     ItemStatus,
@@ -161,8 +160,7 @@ class PendingQuantityHandler:
             return PendingQuantityAction.NOT_HANDLED
         item.quantity = quantity
         item.quantity_user_edited = True
-        item.department_quantities = DepartmentQuantities()
-        state.department_confirmed = False
+        state.refresh_department_after_quantity_change(item)
         item.unit = unit or item.catalog_unit or item.unit
         short_quantity, short_unit = self.spoken_unit_only_quantity(text)
         if (

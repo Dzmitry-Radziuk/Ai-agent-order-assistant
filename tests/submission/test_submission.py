@@ -75,14 +75,14 @@ def test_large_draft_has_navigation_without_hiding_items() -> None:
     )
 
     first = cart_reply(state)
-    state.cart_page = 2
+    state.cart_page = 4
     last = cart_reply(state)
 
-    assert "Страница 1 из 3" in first.text
+    assert "Страница 1 из 5" in first.text
     assert "Товар 0" in first.text
-    assert "Товар 20" not in first.text
+    assert "Товар 10" not in first.text
     assert any(button.callback_data == "v2:cartpage:1" for row in first.rows for button in row)
-    assert "Страница 3 из 3" in last.text
+    assert "Страница 5 из 5" in last.text
     assert "Товар 44" in last.text
 
 
@@ -105,6 +105,7 @@ def test_large_status_detail_has_pages() -> None:
 
     assert "Страница 1 из" in first
     assert "Товар 0" in first
+    assert "Товар 10" not in first
     assert "Товар 24" in last
 
 

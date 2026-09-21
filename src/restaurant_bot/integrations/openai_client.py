@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import json
+import math
 import re
 import time
+from dataclasses import replace
 from pathlib import Path
 from typing import Any, cast
 
@@ -20,10 +22,12 @@ from restaurant_bot.domain.models import ExtractedItem, Intent, ParsedCommand
 from restaurant_bot.domain.text import clean_text, normalize_text
 from restaurant_bot.domain.units import UNIT_ALIASES, normalize_unit
 from restaurant_bot.input.photo_ingestion import (
+    canonical_photo_identity,
     classify_photo_document,
     normalize_photo_observation,
     photo_row_has_potential_order_evidence,
     photo_sheet_row_mapping_is_authoritative,
+    uses_lettered_department_columns,
 )
 from restaurant_bot.input.photo_views import PhotoImagePreparation, prepare_photo_views
 from restaurant_bot.integrations.openai_prompts import (
@@ -93,6 +97,24 @@ __all__ = [
 
 _LARGE_ORDER_LIST_MIN_LINES = 10
 _LARGE_ORDER_LIST_CHUNK_SIZE = 8
+_LETTERED_DEPARTMENT_COLUMN_FIELDS = (
+    ("n", "sheet_column_n_quantity"),
+    ("o", "sheet_column_o_quantity"),
+    ("p", "sheet_column_p_quantity"),
+)
+
+
+def _vision_image_detail(model: str) -> str:
+    """Выбирает исходную детализацию только для моделей, которые её поддерживают."""
+    match = re.match(r"gpt-(\d+)\.(\d+)", model.casefold())
+    return "original" if match and (int(match[1]), int(match[2])) >= (5, 4) else "high"
+
+
+def _vision_reasoning_effort(model: str) -> str:
+    """Возвращает допустимый минимальный уровень рассуждения для семейства модели."""
+    match = re.match(r"gpt-(\d+)\.(\d+)", model.casefold())
+    return "none" if match and (int(match[1]), int(match[2])) >= (5, 4) else "minimal"
+
 
 logger = structlog.get_logger(__name__)
 
@@ -102,7 +124,9 @@ def _photo_observation_matches_preprocessed_count(
     expected_filled_order_row_count: int | None,
 ) -> bool:
     """Сверяет vision-строки с независимым пиксельным подсчётом order-строк."""
-    if expected_filled_order_row_count is None:
+    if not expected_filled_order_row_count:
+        # Ноль от пиксельного анализатора означает отсутствие уверенного
+        # сигнала, но не доказывает, что в таблице нет чисел заказа.
         return True
     observed_order_row_count = sum(
         photo_row_has_potential_order_evidence(row) for row in observation.rows
@@ -179,6 +203,378 @@ def _photo_observation_is_complete(
     )
 
 
+def _lettered_department_reads_match(
+    first: PhotoDocumentObservation,
+    second: PhotoDocumentObservation,
+) -> bool:
+    """Подтверждает одинаковый порядок товаров и значения N/O/P в двух чтениях."""
+    if not uses_lettered_department_columns(first) or not uses_lettered_department_columns(second):
+        return False
+    first_rows = [
+        row
+        for row in first.rows
+        if photo_row_has_potential_order_evidence(row)
+        or clean_text(row.sheet_column_q_comment)
+        or clean_text(row.comment_text)
+    ]
+    second_rows = [
+        row
+        for row in second.rows
+        if photo_row_has_potential_order_evidence(row)
+        or clean_text(row.sheet_column_q_comment)
+        or clean_text(row.comment_text)
+    ]
+    if not first_rows or len(first_rows) != len(second_rows):
+        return False
+
+    department_fields = tuple(field for _, field in _LETTERED_DEPARTMENT_COLUMN_FIELDS)
+    for first_row, second_row in zip(first_rows, second_rows, strict=True):
+        if (
+            not first_row.product_text
+            or not second_row.product_text
+            or canonical_photo_identity(first_row.product_text)
+            != canonical_photo_identity(second_row.product_text)
+        ):
+            return False
+        if any(
+            not _optional_quantities_match(
+                getattr(first_row, field_name),
+                getattr(second_row, field_name),
+            )
+            for field_name in department_fields
+        ):
+            return False
+        if not _optional_quantities_match(
+            first_row.explicit_order_quantity,
+            second_row.explicit_order_quantity,
+        ):
+            return False
+        if normalize_unit(first_row.explicit_order_unit) != normalize_unit(
+            second_row.explicit_order_unit
+        ):
+            return False
+        if canonical_photo_identity(first_row.sheet_column_q_comment) != canonical_photo_identity(
+            second_row.sheet_column_q_comment
+        ) or canonical_photo_identity(first_row.comment_text) != canonical_photo_identity(
+            second_row.comment_text
+        ):
+            return False
+    return (
+        canonical_photo_identity(first.document_comment)
+        == canonical_photo_identity(second.document_comment)
+        and first.document_comment_scope == second.document_comment_scope
+    )
+
+
+def _optional_quantities_match(first: float | None, second: float | None) -> bool:
+    """Сверяет пустую ячейку или числовое значение без допуска к сдвигу строки."""
+    if first is None or second is None:
+        return first is second
+    return math.isclose(first, second, rel_tol=0, abs_tol=1e-9)
+
+
+def _read_lettered_department_column_values(
+    baseline: PhotoDocumentObservation,
+    column_read: PhotoDocumentObservation | None,
+    *,
+    department_field: str,
+    expected_quantity_cell_count: int | None,
+) -> tuple[dict[int, float] | None, str | None]:
+    """Связывает распознанные количества отдельной колонки со строками чернового чтения."""
+    if column_read is None:
+        return None, "missing_column_read"
+    if expected_quantity_cell_count is None:
+        return None, "missing_visual_quantity_count"
+    target_rows = [row for row in column_read.rows if getattr(row, department_field) is not None]
+    if len(target_rows) != expected_quantity_cell_count:
+        return None, "quantity_cell_count_mismatch"
+    if len(target_rows) > len(baseline.rows):
+        return None, "too_many_rows"
+
+    baseline_sheet_rows: dict[int, int] = {}
+    baseline_products: dict[str, list[int]] = {}
+    duplicate_sheet_rows: set[int] = set()
+    for index, row in enumerate(baseline.rows):
+        if row.sheet_row_number is not None and row.sheet_row_number_confidence >= 0.8:
+            if row.sheet_row_number in baseline_sheet_rows:
+                duplicate_sheet_rows.add(row.sheet_row_number)
+            else:
+                baseline_sheet_rows[row.sheet_row_number] = index
+        identity = canonical_photo_identity(row.product_text)
+        if identity:
+            baseline_products.setdefault(identity, []).append(index)
+    for row_number in duplicate_sheet_rows:
+        baseline_sheet_rows.pop(row_number, None)
+    aligned_rows = _complete_photo_row_alignment(baseline, column_read)
+
+    values: dict[int, float] = {}
+    for column_index, column_row in enumerate(column_read.rows):
+        department_quantity = getattr(column_row, department_field)
+        if department_quantity is None:
+            continue
+        if (
+            not column_row.product_text
+            or column_row.product_confidence < 0.5
+            or column_row.row_alignment_confidence < 0.5
+        ):
+            return None, "low_row_confidence"
+        if column_row.quantity_confidence < 0.5:
+            return None, "low_quantity_confidence"
+        if not math.isfinite(department_quantity) or department_quantity <= 0:
+            return None, "invalid_quantity"
+
+        sheet_row_number = column_row.sheet_row_number
+        sheet_row_index = (
+            baseline_sheet_rows.get(sheet_row_number)
+            if sheet_row_number is not None and column_row.sheet_row_number_confidence >= 0.8
+            else None
+        )
+
+        identity = canonical_photo_identity(column_row.product_text)
+        product_indexes = baseline_products.get(identity, [])
+        if sheet_row_index is not None:
+            row_index = sheet_row_index
+            if product_indexes and row_index not in product_indexes:
+                return None, "conflicting_row_identity"
+        elif len(product_indexes) == 1:
+            row_index = product_indexes[0]
+        elif aligned_rows is not None and column_index in aligned_rows:
+            row_index = aligned_rows[column_index]
+        else:
+            return None, "ambiguous_row_identity"
+
+        baseline_row = baseline.rows[row_index]
+        if (
+            not baseline_row.product_text
+            or baseline_row.product_confidence < 0.5
+            or baseline_row.row_alignment_confidence < 0.5
+        ):
+            return None, "low_baseline_row_confidence"
+        if row_index in values:
+            return None, "duplicate_row_identity"
+        values[row_index] = department_quantity
+    return values, None
+
+
+def _complete_photo_row_alignment(
+    baseline: PhotoDocumentObservation,
+    candidate: PhotoDocumentObservation,
+) -> dict[int, int] | None:
+    """Выравнивает только полные списки строк с подтверждённым порядком изображения."""
+    if not baseline.rows or len(baseline.rows) != len(candidate.rows):
+        return None
+    row_count = len(baseline.rows)
+    baseline_visual_indexes = [row.visual_row_index for row in baseline.rows]
+    candidate_visual_indexes = [row.visual_row_index for row in candidate.rows]
+    expected_indexes = set(range(row_count))
+    has_complete_visual_indexes = (
+        all(index is not None for index in baseline_visual_indexes)
+        and all(index is not None for index in candidate_visual_indexes)
+        and set(cast(list[int], baseline_visual_indexes)) == expected_indexes
+        and set(cast(list[int], candidate_visual_indexes)) == expected_indexes
+    )
+    if has_complete_visual_indexes:
+        baseline_by_visual_index = {
+            cast(int, row.visual_row_index): index for index, row in enumerate(baseline.rows)
+        }
+        candidate_by_visual_index = {
+            cast(int, row.visual_row_index): index for index, row in enumerate(candidate.rows)
+        }
+        row_pairs = [
+            (baseline_by_visual_index[index], candidate_by_visual_index[index])
+            for index in range(row_count)
+        ]
+    else:
+        row_pairs = [(index, index) for index in range(row_count)]
+
+    aligned: dict[int, int] = {}
+    for baseline_index, candidate_index in row_pairs:
+        baseline_row = baseline.rows[baseline_index]
+        candidate_row = candidate.rows[candidate_index]
+        if (
+            not baseline_row.product_text
+            or not candidate_row.product_text
+            or baseline_row.product_confidence < 0.5
+            or candidate_row.product_confidence < 0.5
+            or baseline_row.row_alignment_confidence < 0.5
+            or candidate_row.row_alignment_confidence < 0.5
+        ):
+            return None
+        same_sheet_row = (
+            baseline_row.sheet_row_number is not None
+            and candidate_row.sheet_row_number is not None
+            and baseline_row.sheet_row_number_confidence >= 0.8
+            and candidate_row.sheet_row_number_confidence >= 0.8
+            and baseline_row.sheet_row_number == candidate_row.sheet_row_number
+        )
+        same_product = canonical_photo_identity(
+            baseline_row.product_text
+        ) == canonical_photo_identity(candidate_row.product_text)
+        if (
+            not same_sheet_row
+            and not same_product
+            and (
+                not has_complete_visual_indexes
+                or min(
+                    baseline_row.row_alignment_confidence,
+                    candidate_row.row_alignment_confidence,
+                )
+                < 0.9
+            )
+        ):
+            return None
+        if (
+            baseline_row.sheet_row_number is not None
+            and candidate_row.sheet_row_number is not None
+            and baseline_row.sheet_row_number_confidence >= 0.8
+            and candidate_row.sheet_row_number_confidence >= 0.8
+            and baseline_row.sheet_row_number != candidate_row.sheet_row_number
+        ):
+            return None
+        aligned[candidate_index] = baseline_index
+    return aligned
+
+
+def _reconcile_department_observations(
+    baseline: PhotoDocumentObservation,
+    candidate: PhotoDocumentObservation,
+) -> PhotoDocumentObservation | None:
+    """Сверяет общие строки и сохраняет полное чтение при пропуске строк в повторе."""
+    if (
+        classify_photo_document(baseline) != "client_order_sheet"
+        or classify_photo_document(candidate) != "client_order_sheet"
+    ):
+        return None
+    department_fields = (
+        ("hall_quantity", "bar_quantity", "kitchen_quantity")
+        if not uses_lettered_department_columns(baseline)
+        else (
+            "sheet_column_n_quantity",
+            "sheet_column_o_quantity",
+            "sheet_column_p_quantity",
+        )
+    )
+    candidate_fields = (
+        ("hall_quantity", "bar_quantity", "kitchen_quantity")
+        if not uses_lettered_department_columns(candidate)
+        else (
+            "sheet_column_n_quantity",
+            "sheet_column_o_quantity",
+            "sheet_column_p_quantity",
+        )
+    )
+    if len(baseline.rows) == len(candidate.rows):
+        aligned_rows = _complete_photo_row_alignment(baseline, candidate)
+        if aligned_rows is None:
+            return None
+        row_pairs = [
+            (baseline.rows[baseline_index], candidate.rows[candidate_index])
+            for candidate_index, baseline_index in aligned_rows.items()
+        ]
+        selected = baseline
+    else:
+        row_keys = _department_observation_row_keys(baseline, candidate)
+        if row_keys is None:
+            return None
+        baseline_keys, candidate_keys = row_keys
+        common_keys = baseline_keys.keys() & candidate_keys.keys()
+        if not common_keys:
+            return None
+        if baseline_keys.keys() <= candidate_keys.keys():
+            selected = candidate
+        elif candidate_keys.keys() <= baseline_keys.keys():
+            selected = baseline
+        else:
+            return None
+        row_pairs = [(baseline_keys[key], candidate_keys[key]) for key in common_keys]
+
+    for baseline_row, candidate_row in row_pairs:
+        if canonical_photo_identity(baseline_row.product_text) != canonical_photo_identity(
+            candidate_row.product_text
+        ):
+            return None
+        for baseline_field, candidate_field in zip(
+            department_fields,
+            candidate_fields,
+            strict=True,
+        ):
+            baseline_quantity = getattr(baseline_row, baseline_field)
+            candidate_quantity = getattr(candidate_row, candidate_field)
+            if baseline_quantity is None or candidate_quantity is None:
+                if baseline_quantity is not candidate_quantity:
+                    return None
+            elif not math.isclose(baseline_quantity, candidate_quantity, rel_tol=0, abs_tol=1e-9):
+                return None
+    return selected
+
+
+def _department_observation_row_keys(
+    baseline: PhotoDocumentObservation,
+    candidate: PhotoDocumentObservation,
+) -> tuple[dict[tuple[str, int | str], PhotoRowObservation], ...] | None:
+    """Строит однозначные ключи строк для двух чтений разной длины."""
+    observations = (baseline, candidate)
+    relevant_rows = [
+        [
+            row
+            for row in observation.rows
+            if clean_text(row.product_text) or photo_row_has_potential_order_evidence(row)
+        ]
+        for observation in observations
+    ]
+    if any(not rows for rows in relevant_rows):
+        return None
+    has_authoritative_numbers = all(
+        all(
+            row.sheet_row_number is not None and row.sheet_row_number_confidence >= 0.9
+            for row in rows
+        )
+        and len({row.sheet_row_number for row in rows}) == len(rows)
+        for rows in relevant_rows
+    )
+    keyed_observations: list[dict[tuple[str, int | str], PhotoRowObservation]] = []
+    for rows in relevant_rows:
+        keyed_rows: dict[tuple[str, int | str], PhotoRowObservation] = {}
+        for row in rows:
+            if not clean_text(row.product_text) or row.product_confidence < 0.5:
+                return None
+            key: tuple[str, int | str]
+            if has_authoritative_numbers:
+                sheet_row_number = row.sheet_row_number
+                if sheet_row_number is None:
+                    return None
+                key = ("sheet_row", sheet_row_number)
+            else:
+                identity = canonical_photo_identity(row.product_text)
+                if not identity or row.row_alignment_confidence < 0.5:
+                    return None
+                key = ("product", identity)
+            if key in keyed_rows:
+                return None
+            keyed_rows[key] = row
+        keyed_observations.append(keyed_rows)
+    return keyed_observations[0], keyed_observations[1]
+
+
+def _merge_lettered_department_column_reads(
+    baseline: PhotoDocumentObservation,
+    column_values: dict[str, dict[int, float]],
+) -> PhotoDocumentObservation | None:
+    """Собирает отделы только из трёх успешно сверенных чтений отдельных колонок."""
+    if set(column_values) != {letter for letter, _ in _LETTERED_DEPARTMENT_COLUMN_FIELDS}:
+        return None
+    cleared_fields = {field_name: None for _, field_name in _LETTERED_DEPARTMENT_COLUMN_FIELDS}
+    merged_rows = [row.model_copy(update=cleared_fields) for row in baseline.rows]
+    for letter, field_name in _LETTERED_DEPARTMENT_COLUMN_FIELDS:
+        for index, value in column_values[letter].items():
+            if not 0 <= index < len(merged_rows):
+                return None
+            if value is not None and (not math.isfinite(value) or value <= 0):
+                return None
+            merged_rows[index] = merged_rows[index].model_copy(update={field_name: value})
+    return baseline.model_copy(update={"rows": merged_rows})
+
+
 class OpenAIService:
     """Выполняет распознавание, анализ фото и сопоставление товаров."""
 
@@ -194,7 +590,7 @@ class OpenAIService:
         self.vision_client = OpenAI(
             api_key=settings.openai_api_key.get_secret_value(),
             timeout=settings.openai_vision_timeout_seconds,
-            max_retries=0,
+            max_retries=1,
         )
 
     @staticmethod
@@ -887,6 +1283,7 @@ class OpenAIService:
         preparation = prepare_photo_views(
             path,
             mime_type,
+            include_original=True,
             prefer_filled_order_rows=True,
         )
         expected_filled_order_row_count = preparation.detected_filled_order_row_count
@@ -903,21 +1300,6 @@ class OpenAIService:
             detected_filled_order_row_count=expected_filled_order_row_count,
         )
         input_text = caption or "Распознай заявку на фото"
-        if preparation.dense_table_views_used:
-            input_text = (
-                f"{input_text}\n\n"
-                "В запросе показан один канонический reading view исходного документа: он может "
-                "содержать весь кадр или только безопасно выделенную область таблицы. "
-                "Это может быть фотография бумажного документа, прямой скриншот таблицы или "
-                "скриншот экрана/чата, внутри которого видна таблица. Игнорируй браузер, вкладки, "
-                "панели чата, уменьшенные превью и сводные колонки; извлекай данные из самой "
-                "крупной читаемой области документа. "
-                "Используй таблицу как единственный источник геометрии: сначала установи полосы "
-                "строк сверху вниз, не начинай с первой заполненной цифры, не переноси верхнюю "
-                "заполненную ячейку на строку выше и не пропускай первую видимую товарную строку. "
-                "Сопоставляй товар, количество и комментарий только внутри одной визуальной строки "
-                "и соблюдай контракт PhotoDocumentObservation."
-            )
         if preparation.spreadsheet_layout_detected:
             input_text = (
                 f"{input_text}\n\n"
@@ -934,21 +1316,113 @@ class OpenAIService:
             input_text,
             pass_number=1,
         )
-        if observation is None:
-            logger.warning("photo_ai_empty_result", mime_type=mime_type)
-            return ParsedCommand(intent=Intent.ADD_ITEMS, photo_outcome="incomplete_photo_read")
-        if not response_complete:
-            logger.warning("photo_ai_incomplete_result", mime_type=mime_type)
-            return ParsedCommand(intent=Intent.ADD_ITEMS, photo_outcome="incomplete_photo_read")
+        retry_preparation: PhotoImagePreparation | None = None
+        initial_retry_selected = False
+        if observation is None or not response_complete:
+            logger.warning(
+                "photo_ai_first_read_incomplete",
+                result_present=observation is not None,
+                mime_type=mime_type,
+            )
+            retry_preparation = prepare_photo_views(
+                path,
+                mime_type,
+                include_original=True,
+                prefer_filled_order_rows=True,
+                include_department_column_check=True,
+            )
+            expected_filled_order_row_count = retry_preparation.detected_filled_order_row_count
+            retry_observation, retry_complete = self._request_photo_observation(
+                path,
+                mime_type,
+                caption,
+                retry_preparation,
+                (
+                    f"{input_text}\n\n"
+                    "Повторно внимательно прочитай всё изображение. Используй увеличенный вид и "
+                    "исходное фото вместе: не пропускай видимые строки, не выдумывай нечитаемые "
+                    "данные и сохраняй порядок товаров сверху вниз."
+                ),
+                pass_number=2,
+            )
+            if (
+                retry_observation is None
+                or not retry_complete
+                or not _photo_observation_is_complete(
+                    retry_observation,
+                    expected_filled_order_row_count=expected_filled_order_row_count,
+                )
+            ):
+                logger.warning(
+                    "photo_ai_retry_read_incomplete",
+                    result_present=retry_observation is not None,
+                    expected_filled_order_row_count=expected_filled_order_row_count,
+                )
+                return ParsedCommand(intent=Intent.ADD_ITEMS, photo_outcome="incomplete_photo_read")
+            observation = retry_observation
+            initial_retry_selected = True
+            logger.info("photo_ai_retry_read_selected", row_count=len(observation.rows))
 
         authoritative_sheet_rows = photo_sheet_row_mapping_is_authoritative(
             observation,
             require_sheet_row_numbers=True,
         )
-        if _photo_observation_needs_second_pass(
+        lettered_department_columns = uses_lettered_department_columns(observation)
+        department_column_read_required = lettered_department_columns
+        department_order_sheet = classify_photo_document(observation) == "client_order_sheet"
+        missing_unlabelled_order_values = (
+            not lettered_department_columns
+            and not department_order_sheet
+            and expected_filled_order_row_count is not None
+            and expected_filled_order_row_count > 0
+            and not _photo_observation_matches_preprocessed_count(
+                observation,
+                expected_filled_order_row_count,
+            )
+        )
+        order_column_read_required = (
+            department_column_read_required or missing_unlabelled_order_values
+        )
+        department_column_views_available = False
+        if order_column_read_required and retry_preparation is None:
+            retry_preparation = prepare_photo_views(
+                path,
+                mime_type,
+                include_original=True,
+                prefer_filled_order_rows=True,
+                include_department_column_check=True,
+            )
+            if expected_filled_order_row_count is None:
+                expected_filled_order_row_count = retry_preparation.detected_filled_order_row_count
+        if order_column_read_required and retry_preparation is not None:
+            retry_view_names = {view.name for view in retry_preparation.views}
+            department_column_views_available = all(
+                f"department_column_{letter}" in retry_view_names
+                for letter, _ in _LETTERED_DEPARTMENT_COLUMN_FIELDS
+            )
+        needs_second_pass = _photo_observation_needs_second_pass(
             observation,
             expected_filled_order_row_count=expected_filled_order_row_count,
+        ) or (
+            department_column_read_required
+            and not department_column_views_available
+            and not preparation.spreadsheet_layout_detected
+        )
+        logger.info(
+            "photo_department_read_plan",
+            document_type="client_order_sheet" if department_order_sheet else "other",
+            lettered_department_columns=lettered_department_columns,
+            column_views_available=department_column_views_available,
+            missing_unlabelled_order_values=missing_unlabelled_order_values,
+            needs_second_pass=needs_second_pass,
+        )
+        if needs_second_pass or (
+            department_column_read_required and department_column_views_available
         ):
+            first_observation_complete = _photo_observation_is_complete(
+                observation,
+                expected_filled_order_row_count=expected_filled_order_row_count,
+            )
             preprocess_count_matches = _photo_observation_matches_preprocessed_count(
                 observation,
                 expected_filled_order_row_count,
@@ -956,7 +1430,14 @@ class OpenAIService:
             logger.info(
                 "photo_ai_second_pass_started",
                 reason=(
-                    "order_area_uncertain"
+                    "department_column_geometry_verification"
+                    if department_column_read_required
+                    and department_column_views_available
+                    and first_observation_complete
+                    and not needs_second_pass
+                    else "department_column_full_read_confirmation"
+                    if department_column_read_required and not department_column_views_available
+                    else "order_area_uncertain"
                     if preprocess_count_matches
                     else "preprocessed_filled_row_count_mismatch"
                 ),
@@ -964,61 +1445,269 @@ class OpenAIService:
                 uncertain_order_row_count=observation.uncertain_order_row_count,
                 require_sheet_row_numbers=False,
             )
-            retry_preparation = prepare_photo_views(
-                path,
-                mime_type,
-                include_original=True,
-                prefer_filled_order_rows=True,
-            )
-            retry_text = (
-                f"{input_text}\n\n"
-                "Повтори проверку по оригиналу и увеличенному виду. "
-                "Считай неопределённость только для видимой заполненной ячейки, "
-                "которую нельзя привязать к строке товара. Пустые ячейки не являются "
-                "ошибкой и не требуют пометки неполной области. Если слева видны номера "
-                "строк таблицы, прочитай номер каждой возвращаемой строки по изображению; "
-                "не вычисляй его из позиции строки в массиве. Если номер строки и прочитанное "
-                "название могли попасть из разных горизонтальных полос, заново прочитай всю "
-                "строку слева направо и не переноси количество или комментарий между строками."
-            )
-            retry_observation, retry_complete = self._request_photo_observation(
-                path,
-                mime_type,
-                caption,
-                retry_preparation,
-                retry_text,
-                pass_number=2,
-            )
+            generic_retry_selected = initial_retry_selected
             if (
-                retry_complete
-                and retry_observation is not None
-                and _photo_observation_is_complete(
-                    retry_observation,
-                    expected_filled_order_row_count=expected_filled_order_row_count,
-                )
+                not department_column_read_required
+                or not first_observation_complete
+                or not department_column_views_available
             ):
-                observation = retry_observation
-                authoritative_sheet_rows = photo_sheet_row_mapping_is_authoritative(
+                if retry_preparation is None:
+                    retry_preparation = prepare_photo_views(
+                        path,
+                        mime_type,
+                        include_original=True,
+                        prefer_filled_order_rows=True,
+                    )
+                retry_text = (
+                    f"{input_text}\n\n"
+                    "Повтори проверку по оригиналу и увеличенному виду. "
+                    "Считай неопределённость только для видимой заполненной ячейки, "
+                    "которую нельзя привязать к строке товара. Пустые ячейки не являются "
+                    "ошибкой и не требуют пометки неполной области. Если слева видны номера "
+                    "строк таблицы, прочитай номер каждой возвращаемой строки по изображению; "
+                    "не вычисляй его из позиции строки в массиве. Если номер строки и прочитанное "
+                    "название могли попасть из разных горизонтальных полос, заново прочитай всю "
+                    "строку слева направо и не переноси количество или комментарий между строками."
+                )
+                if department_column_views_available:
+                    retry_text += (
+                        "\n\nДополнительно приложены три контрольных вида с отдельной колонкой "
+                        "заказа и тем же товарным фрагментом слева. "
+                    )
+                    if department_column_read_required:
+                        retry_text += (
+                            "Для обычного листа сверху вниз это N — Зал, O — Бар, P — Кухня. "
+                            "Проверяй значение только внутри отмеченной колонки; "
+                            "сопоставляй его с товаром в той же строке и перенеси в соответствующее "
+                            "поле sheet_column_n_quantity, sheet_column_o_quantity или "
+                            "sheet_column_p_quantity. Комментарии бери только из основного вида."
+                        )
+                    else:
+                        retry_text += (
+                            "Названия колонок на этом кадре не видны. Прочитай все положительные "
+                            "значения для одной товарной строки в контрольных видах, сложи их и "
+                            "запиши сумму только в explicit_order_quantity. Не заполняй поля "
+                            "подразделений и не делай вывод, к какому подразделению относится заказ."
+                        )
+                retry_observation, retry_complete = self._request_photo_observation(
+                    path,
+                    mime_type,
+                    caption,
+                    retry_preparation,
+                    retry_text,
+                    pass_number=(3 if initial_retry_selected else 2),
+                )
+                full_read_confirmation_matches = (
+                    not lettered_department_columns
+                    or department_column_views_available
+                    or (
+                        retry_observation is not None
+                        and _lettered_department_reads_match(observation, retry_observation)
+                    )
+                )
+                if (
+                    retry_complete
+                    and retry_observation is not None
+                    and full_read_confirmation_matches
+                    and _photo_observation_is_complete(
+                        retry_observation,
+                        expected_filled_order_row_count=expected_filled_order_row_count,
+                    )
+                ):
+                    observation = retry_observation
+                    generic_retry_selected = True
+                    authoritative_sheet_rows = photo_sheet_row_mapping_is_authoritative(
+                        observation,
+                        require_sheet_row_numbers=True,
+                    )
+                    logger.info(
+                        "photo_ai_second_pass_selected",
+                        row_count=len(observation.rows),
+                        uncertain_order_row_count=observation.uncertain_order_row_count,
+                        order_area_complete=observation.order_area_complete,
+                        sheet_row_numbers_visible=observation.sheet_row_numbers_visible,
+                    )
+                else:
+                    logger.warning(
+                        "photo_ai_second_pass_not_selected",
+                        expected_filled_order_row_count=expected_filled_order_row_count,
+                        lettered_read_confirmation_matches=full_read_confirmation_matches,
+                    )
+                    if lettered_department_columns and not department_column_views_available:
+                        return ParsedCommand(
+                            intent=Intent.ADD_ITEMS,
+                            photo_outcome="incomplete_photo_read",
+                        )
+                    if expected_filled_order_row_count is not None and not (
+                        department_order_sheet and first_observation_complete
+                    ):
+                        return ParsedCommand(
+                            intent=Intent.ADD_ITEMS,
+                            photo_outcome="incomplete_photo_read",
+                        )
+            if (
+                department_column_read_required
+                and department_column_views_available
+                and observation.rows
+            ):
+                if not _photo_observation_is_complete(
                     observation,
-                    require_sheet_row_numbers=True,
-                )
-                logger.info(
-                    "photo_ai_second_pass_selected",
-                    row_count=len(observation.rows),
-                    uncertain_order_row_count=observation.uncertain_order_row_count,
-                    order_area_complete=observation.order_area_complete,
-                    sheet_row_numbers_visible=observation.sheet_row_numbers_visible,
-                )
-            else:
-                logger.warning(
-                    "photo_ai_second_pass_not_selected",
                     expected_filled_order_row_count=expected_filled_order_row_count,
-                )
-                if expected_filled_order_row_count is not None:
+                ):
                     return ParsedCommand(
                         intent=Intent.ADD_ITEMS,
                         photo_outcome="incomplete_photo_read",
                     )
+                if retry_preparation is None:
+                    retry_preparation = prepare_photo_views(
+                        path,
+                        mime_type,
+                        include_original=True,
+                        prefer_filled_order_rows=True,
+                        include_department_column_check=True,
+                    )
+                views_by_name = {view.name: view for view in retry_preparation.views}
+                column_values: dict[str, dict[int, float]] = {}
+                full_read_fallback_selected = False
+                pass_number = 3 if generic_retry_selected else 2
+                for index, (letter, field_name) in enumerate(_LETTERED_DEPARTMENT_COLUMN_FIELDS):
+                    view = views_by_name.get(f"department_column_{letter}")
+                    if view is None:
+                        fallback_observation = self._retry_full_department_read(
+                            path,
+                            mime_type,
+                            caption,
+                            observation,
+                            input_text,
+                            expected_filled_order_row_count=expected_filled_order_row_count,
+                            pass_number=pass_number + index + 1,
+                        )
+                        if fallback_observation is not None:
+                            observation = fallback_observation
+                            authoritative_sheet_rows = photo_sheet_row_mapping_is_authoritative(
+                                observation,
+                                require_sheet_row_numbers=True,
+                            )
+                        full_read_fallback_selected = True
+                        break
+                    column_text = (
+                        f"{input_text}\n\n"
+                        "Это один увеличенный фрагмент таблицы: слева товарные строки, справа "
+                        f"только колонка {letter.upper()}. "
+                        "Прочитай значение в этой колонке "
+                        f"для каждой строки и заполни только поле {field_name}. Пустую ячейку "
+                        "оставь пустой. Не переноси число на соседнюю строку или в другую "
+                        "колонку; сохраняй порядок товаров сверху вниз."
+                    )
+                    column_preparation = replace(retry_preparation, views=(view,))
+                    column_read, column_read_complete = self._request_photo_observation(
+                        path,
+                        mime_type,
+                        caption,
+                        column_preparation,
+                        column_text,
+                        pass_number=pass_number + index,
+                    )
+                    if not column_read_complete or column_read is None:
+                        logger.warning(
+                            "photo_ai_department_column_read_rejected",
+                            column=letter.upper(),
+                            row_count=len(column_read.rows) if column_read else 0,
+                            expected_row_count=len(observation.rows),
+                            reason="incomplete_response",
+                        )
+                        fallback_observation = self._retry_full_department_read(
+                            path,
+                            mime_type,
+                            caption,
+                            observation,
+                            input_text,
+                            expected_filled_order_row_count=expected_filled_order_row_count,
+                            pass_number=pass_number + index + 1,
+                        )
+                        if fallback_observation is not None:
+                            observation = fallback_observation
+                            authoritative_sheet_rows = photo_sheet_row_mapping_is_authoritative(
+                                observation,
+                                require_sheet_row_numbers=True,
+                            )
+                        full_read_fallback_selected = True
+                        break
+                    values, rejection_reason = _read_lettered_department_column_values(
+                        observation,
+                        column_read,
+                        department_field=field_name,
+                        expected_quantity_cell_count=view.expected_quantity_cell_count,
+                    )
+                    if rejection_reason is not None or values is None:
+                        logger.warning(
+                            "photo_ai_department_column_read_rejected",
+                            column=letter.upper(),
+                            row_count=len(column_read.rows),
+                            quantity_row_count=sum(
+                                getattr(row, field_name) is not None for row in column_read.rows
+                            ),
+                            expected_row_count=len(observation.rows),
+                            expected_quantity_count=view.expected_quantity_cell_count,
+                            scan_complete=column_read.scan_complete,
+                            order_area_complete=column_read.order_area_complete,
+                            uncertain_order_row_count=column_read.uncertain_order_row_count,
+                            reason=rejection_reason or "unmapped_column_values",
+                        )
+                        fallback_observation = self._retry_full_department_read(
+                            path,
+                            mime_type,
+                            caption,
+                            observation,
+                            input_text,
+                            expected_filled_order_row_count=expected_filled_order_row_count,
+                            pass_number=pass_number + index + 1,
+                        )
+                        if fallback_observation is not None:
+                            observation = fallback_observation
+                            authoritative_sheet_rows = photo_sheet_row_mapping_is_authoritative(
+                                observation,
+                                require_sheet_row_numbers=True,
+                            )
+                        full_read_fallback_selected = True
+                        break
+                    column_values[letter] = values
+                if full_read_fallback_selected:
+                    authoritative_sheet_rows = photo_sheet_row_mapping_is_authoritative(
+                        observation,
+                        require_sheet_row_numbers=True,
+                    )
+                else:
+                    merged_observation = _merge_lettered_department_column_reads(
+                        observation,
+                        column_values,
+                    )
+                    if merged_observation is None:
+                        fallback_observation = self._retry_full_department_read(
+                            path,
+                            mime_type,
+                            caption,
+                            observation,
+                            input_text,
+                            expected_filled_order_row_count=expected_filled_order_row_count,
+                            pass_number=pass_number + len(_LETTERED_DEPARTMENT_COLUMN_FIELDS),
+                        )
+                        if fallback_observation is not None:
+                            observation = fallback_observation
+                            authoritative_sheet_rows = photo_sheet_row_mapping_is_authoritative(
+                                observation,
+                                require_sheet_row_numbers=True,
+                            )
+                    else:
+                        observation = merged_observation
+                        logger.info(
+                            "photo_ai_department_columns_verified",
+                            column_count=len(column_values),
+                            row_count=len(observation.rows),
+                            mapped_quantity_count=sum(
+                                len(values) for values in column_values.values()
+                            ),
+                        )
 
         logger.info(
             "photo_ai_parsed",
@@ -1048,6 +1737,70 @@ class OpenAIService:
         )
         return normalized
 
+    def _retry_full_department_read(
+        self,
+        path: Path,
+        mime_type: str,
+        caption: str,
+        baseline: PhotoDocumentObservation,
+        input_text: str,
+        *,
+        expected_filled_order_row_count: int | None,
+        pass_number: int,
+    ) -> PhotoDocumentObservation | None:
+        """Подтверждает спорное распределение независимым чтением полного кадра."""
+        preparation = prepare_photo_views(
+            path,
+            mime_type,
+            include_original=True,
+            prefer_filled_order_rows=True,
+        )
+        retry_text = (
+            f"{input_text}\n\n"
+            "Повторно прочитай весь документ по увеличенному и исходному изображению. "
+            "Сохраняй порядок строк и проверяй количество в своём столбце отдела; не "
+            "переноси его на соседнюю строку."
+        )
+        observation, response_complete = self._request_photo_observation(
+            path,
+            mime_type,
+            caption,
+            preparation,
+            retry_text,
+            pass_number=pass_number,
+        )
+        if (
+            observation is None
+            or not response_complete
+            or not _photo_observation_is_complete(
+                observation,
+                expected_filled_order_row_count=expected_filled_order_row_count,
+            )
+        ):
+            logger.warning(
+                "photo_ai_department_full_read_fallback_rejected",
+                pass_number=pass_number,
+                result_present=observation is not None,
+                response_complete=response_complete,
+            )
+            return None
+        reconciled_observation = _reconcile_department_observations(baseline, observation)
+        if reconciled_observation is None:
+            logger.warning(
+                "photo_ai_department_full_read_fallback_rejected",
+                pass_number=pass_number,
+                result_present=True,
+                response_complete=True,
+                reason="department_rows_disagree",
+            )
+            return None
+        logger.info(
+            "photo_ai_department_full_read_fallback_selected",
+            pass_number=pass_number,
+            row_count=len(reconciled_observation.rows),
+        )
+        return reconciled_observation
+
     def _request_photo_observation(
         self,
         path: Path,
@@ -1069,7 +1822,7 @@ class OpenAIService:
                 {
                     "type": "input_image",
                     "image_url": f"data:{view.mime_type};base64,{encoded}",
-                    "detail": "high",
+                    "detail": _vision_image_detail(self.settings.openai_vision_model),
                 }
             )
         with self.tracer.generation(
@@ -1100,7 +1853,10 @@ class OpenAIService:
                 "max_output_tokens": (6000 if preparation.spreadsheet_layout_detected else 8000),
             }
             if self.settings.openai_vision_model.casefold().startswith("gpt-5"):
-                request["reasoning"] = {"effort": "minimal"}
+                reasoning_effort = _vision_reasoning_effort(self.settings.openai_vision_model)
+                request["reasoning"] = {"effort": reasoning_effort}
+                if reasoning_effort == "none":
+                    request["temperature"] = 0
                 request["text"] = {"verbosity": "low"}
             response = self.vision_client.responses.parse(
                 **cast(Any, request),

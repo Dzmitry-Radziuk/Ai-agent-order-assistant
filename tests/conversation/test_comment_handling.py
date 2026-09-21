@@ -37,6 +37,34 @@ def test_catalog_and_user_comments_are_joined_once_in_source_order(settings) -> 
     )
 
 
+@pytest.mark.parametrize("comment_case", ["global", "clarification", "edit"])
+def test_comment_is_rejected_before_any_product_is_added(settings, comment_case: str) -> None:  # type: ignore[no-untyped-def]
+    """Не сохраняет комментарий в пустом черновике и объясняет следующий шаг."""
+    command = {
+        "global": ParsedCommand(
+            intent=Intent.ADD_ITEMS,
+            global_comment="привезти утром",
+        ),
+        "clarification": ParsedCommand(
+            intent=Intent.UNKNOWN,
+            comment_clarification="привезти утром",
+        ),
+        "edit": ParsedCommand(
+            intent=Intent.EDIT_COMMENT,
+            comment_scope="order",
+            comment_action="add",
+            comment_text="привезти утром",
+        ),
+    }[comment_case]
+
+    state = ConversationState()
+    result = ConversationEngine(settings).handle(_event(), command, state, [])
+
+    assert state.cart == []
+    assert state.pending_comment_text == ""
+    assert "Сначала добавьте товар в черновик" in result.reply.text
+
+
 def test_comment_is_not_part_of_product_name_and_reaches_submission_row(settings) -> None:  # type: ignore[no-untyped-def]
     """Передаёт поставщику пожелание пользователя без примечания каталога."""
     engine = ConversationEngine(settings)

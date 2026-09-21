@@ -46,6 +46,14 @@ class FinalReviewHandler:
     ) -> FinalReviewOutcome | None:
         """Обрабатывает только intent финальной проверки и подтверждения."""
         if command.intent is Intent.SELECT_DEPARTMENT:
+            if command.callback_target.startswith("page:"):
+                if self._needs_department_confirmation(state):
+                    requested_page = command.callback_target.partition(":")[2]
+                    if requested_page.isdecimal():
+                        state.department_selection_page = int(requested_page)
+                return FinalReviewOutcome(
+                    result=EngineResult(state=state, reply=department_selection_reply(state))
+                )
             if not self._apply_department_selection(command.callback_target, state):
                 return FinalReviewOutcome(
                     result=EngineResult(state=state, reply=department_selection_reply(state))
@@ -135,6 +143,7 @@ class FinalReviewHandler:
             ):
                 return False
             state.department_confirmed = True
+            state.department_selection_page = 0
             return True
         departments = {"hall": "Зал", "bar": "Бар", "kitchen": "Кухня"}
         department = departments.get(target)
@@ -147,6 +156,7 @@ class FinalReviewHandler:
             item.department = department
             item.department_quantities = DepartmentQuantities()
         state.department_confirmed = True
+        state.department_selection_page = 0
         return True
 
     @staticmethod

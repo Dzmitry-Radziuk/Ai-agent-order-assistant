@@ -217,6 +217,42 @@ def test_department_selection_can_preserve_photo_distribution() -> None:
     assert "Зал 2 шт, Бар 3 шт" in outcome.result.reply.text
 
 
+def test_department_selection_page_callback_only_changes_preview_page() -> None:
+    """Переключает страницу проверки фото, не подтверждая и не меняя отделы."""
+    items = [
+        CartItem(
+            id=f"photo-{index}",
+            source_query=f"Товар {index}",
+            quantity=1,
+            unit="шт",
+            status=ItemStatus.MATCHED,
+            catalog_product_id=f"product-{index}",
+            department_quantities=DepartmentQuantities(kitchen=1),
+        )
+        for index in range(1, 22)
+    ]
+    state = ConversationState(
+        cart=items,
+        department_confirmation_required=True,
+        department_selection_page=0,
+    )
+
+    outcome = FinalReviewHandler().handle(
+        ParsedCommand(intent=Intent.SELECT_DEPARTMENT, callback_target="page:2"),
+        state,
+    )
+
+    assert outcome is not None and outcome.result is not None
+    assert state.department_selection_page == 2
+    assert state.department_confirmed is False
+    assert "Позиции 21 из 21" not in outcome.result.reply.text
+    assert "Позиции 21–21 из 21" in outcome.result.reply.text
+    assert "Товар 21" in outcome.result.reply.text
+    assert "v2:dept:preserve" in [
+        button.callback_data for row in outcome.result.reply.rows for button in row
+    ]
+
+
 def test_department_selection_reassigns_entire_photo_order() -> None:
     """Заменяет распределение фото одним явно выбранным подразделением."""
     item = CartItem(

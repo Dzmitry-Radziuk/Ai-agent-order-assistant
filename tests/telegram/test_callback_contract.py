@@ -42,6 +42,15 @@ def test_pagination_callbacks_have_explicit_targets() -> None:
     assert detail.callback_target == "detail:4"
 
 
+def test_department_page_callback_has_page_target() -> None:
+    """Разбирает переход страницы проверки распределения по отделам."""
+    department_page = parse_callback("v2:deptpage:2:r4")
+
+    assert department_page.intent is Intent.SELECT_DEPARTMENT
+    assert department_page.callback_target == "page:2"
+    assert department_page.callback_revision == 4
+
+
 def test_submission_check_callback_uses_read_only_status_route() -> None:
     """Проверка отправки использует read-only маршрут статуса заявки."""
     detail = parse_callback("v2:check_submission:r4")

@@ -195,7 +195,7 @@ def test_voice_pagination_stays_in_large_draft(
 
     assert result.enqueue_order_status is False
     assert result.state.cart_page == expected_page
-    assert f"Страница {expected_page + 1} из 2" in result.reply.text
+    assert f"Страница {expected_page + 1} из 3" in result.reply.text
 
 
 @pytest.mark.parametrize(
@@ -237,7 +237,7 @@ def test_voice_pagination_stays_in_large_final_review(
 
     assert result.enqueue_order_status is False
     assert result.state.final_review_page == expected_page
-    assert f"Страница {expected_page + 1} из 2" in result.reply.text
+    assert f"Страница {expected_page + 1} из 3" in result.reply.text
 
 
 def test_voice_short_new_order_transcription_does_not_become_product(settings) -> None:  # type: ignore[no-untyped-def]

@@ -13,6 +13,21 @@ def format_quantity(value: float) -> str:
     return str(int(value)) if value.is_integer() else f"{value:.3f}".rstrip("0").rstrip(".")
 
 
+def format_department_quantities(item: ReviewItem) -> str:
+    """Показывает ненулевые количества позиции по подразделениям."""
+    departments = (
+        ("Зал", item.department_quantities.hall),
+        ("Бар", item.department_quantities.bar),
+        ("Кухня", item.department_quantities.kitchen),
+    )
+    values = [
+        f"{department}: {format_quantity(quantity)} {escape(item.unit)}"
+        for department, quantity in departments
+        if quantity is not None and quantity > 0
+    ]
+    return "; ".join(values) or f"{format_quantity(item.quantity)} {escape(item.unit)}"
+
+
 def preview_reply(
     snapshot: ReviewSnapshot,
     token: str,
@@ -49,9 +64,7 @@ def preview_reply(
     for supplier, items in grouped.items():
         supplier_header = f"<b>{escape(supplier)}</b>"
         for item_index, item in enumerate(items):
-            item_lines = [
-                f"• {product_name(item.name)} — {format_quantity(item.quantity)} {escape(item.unit)}"
-            ]
+            item_lines = [f"• {product_name(item.name)} — {format_department_quantities(item)}"]
             if item.comment:
                 item_lines.append(format_item_comment(item.comment))
             item_block = "\n".join(item_lines)

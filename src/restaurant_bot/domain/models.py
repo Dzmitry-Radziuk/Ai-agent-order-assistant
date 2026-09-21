@@ -510,6 +510,7 @@ class ConversationState(BaseModel):
     order_status_order_numbers: list[str] = Field(default_factory=list)
     cart_page: int = 0
     final_review_page: int = 0
+    department_selection_page: int = 0
     review_token: str = ""
     review_snapshot_hash: str = ""
     review_venue_code: str = ""
@@ -525,6 +526,27 @@ class ConversationState(BaseModel):
         if self.current_issue_item_id:
             return next((item for item in self.cart if item.id == self.current_issue_item_id), None)
         return None
+
+    def refresh_department_after_quantity_change(self, item: CartItem) -> None:
+        """Сохраняет единый выбор отдела и сбрасывает устаревшее распределение с фото."""
+        active_items = [
+            cart_item for cart_item in self.cart if cart_item.status is not ItemStatus.SKIPPED
+        ]
+        has_photo_distribution = any(
+            quantity is not None and quantity > 0
+            for cart_item in active_items
+            for quantity in cart_item.department_quantities.model_dump().values()
+        )
+        keep_single_department = (
+            self.department_confirmed
+            and not has_photo_distribution
+            and all(cart_item.department == self.department for cart_item in active_items)
+        )
+        item.department_quantities = DepartmentQuantities()
+        if keep_single_department:
+            item.department = self.department
+        else:
+            self.department_confirmed = False
 
 
 class Button(BaseModel):

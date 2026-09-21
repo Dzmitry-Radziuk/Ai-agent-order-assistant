@@ -38,8 +38,8 @@ class _Transcriptions:
         return SimpleNamespace(text=self.responses.pop(0))
 
 
-def test_vision_client_uses_long_timeout_without_hidden_retries(settings, mocker) -> None:  # type: ignore[no-untyped-def]
-    """Даёт большому фото время на один ответ без повторной отправки."""
+def test_vision_client_uses_one_bounded_transport_retry(settings, mocker) -> None:  # type: ignore[no-untyped-def]
+    """Повторяет один vision-запрос при кратковременном обрыве соединения."""
     client_factory = mocker.patch.object(openai_client, "OpenAI")
 
     OpenAIService(settings)
@@ -47,7 +47,7 @@ def test_vision_client_uses_long_timeout_without_hidden_retries(settings, mocker
     assert client_factory.call_args_list[1].kwargs == {
         "api_key": settings.openai_api_key.get_secret_value(),
         "timeout": settings.openai_vision_timeout_seconds,
-        "max_retries": 0,
+        "max_retries": 1,
     }
 
 
@@ -308,13 +308,14 @@ def test_photo_parser_passes_caption_and_high_detail_image_as_structured_input(
     assert content[0] == {"type": "input_text", "text": "заказ кухни"}
     assert content[1]["type"] == "input_image"
     assert content[1]["image_url"].startswith("data:image/jpeg;base64,")
-    assert content[1]["detail"] == "high"
+    assert content[1]["detail"] == "original"
+    assert call["temperature"] == 0
 
 
-def test_dense_photo_parser_sends_one_canonical_view_in_one_vision_request(
+def test_photo_parser_sends_the_full_source_at_original_detail_in_one_request(
     settings, tmp_path: Path
 ) -> None:  # type: ignore[no-untyped-def]
-    """Передаёт один полный table-focus одним structured vision запросом."""
+    """Передаёт полный кадр без обрезки и апскейла в одном structured vision запросе."""
     responses = _Responses(PhotoDocumentObservation())
     service = _service(settings, SimpleNamespace(responses=responses))
     photo = tmp_path / "dense-table.png"
@@ -327,16 +328,70 @@ def test_dense_photo_parser_sends_one_canonical_view_in_one_vision_request(
     content = call["input"][0]["content"]  # type: ignore[index]
     images = [part for part in content if part["type"] == "input_image"]
     assert len(images) == 1
-    assert all(part["detail"] == "high" for part in images)
-    assert "один канонический reading view исходного документа" in content[0]["text"]
-    assert "не начинай с первой заполненной цифры" in content[0]["text"]
-    assert "не переноси верхнюю заполненную ячейку на строку выше" in content[0]["text"]
-    assert "PhotoDocumentObservation" in content[0]["text"]
-    assert call["reasoning"] == {"effort": "minimal"}
+    assert all(part["detail"] == "original" for part in images)
+    assert content[0]["text"] == "Распознай заявку на фото"
+    assert "всего рабочего стола или экрана" in call["instructions"]
+    assert "Не предполагай заранее тип документа по размеру" in call["instructions"]
+    assert "не начинай с первой заполненной цифры" in str(call["instructions"]).casefold()
+    assert call["reasoning"] == {"effort": "none"}
     assert call["text"] == {"verbosity": "low"}
     assert "verbosity" not in call
     assert call["text_format"] is PhotoDocumentObservation
     assert "visible_filled_order_row_count" in call["text_format"].model_fields
+    assert call["temperature"] == 0
+
+
+def test_photo_parser_includes_detected_table_focus_and_original_together(
+    settings,
+    tmp_path: Path,
+    mocker,
+) -> None:  # type: ignore[no-untyped-def]
+    """Передаёт увеличенную таблицу и исходный кадр в одном запросе."""
+    responses = _Responses(
+        PhotoDocumentObservation(
+            document_type_proposal="client_order_sheet",
+            detected_columns=["Товар", "Зал", "Бар", "Кухня"],
+            has_table_structure=True,
+            order_area_complete=True,
+            rows=[
+                PhotoRowObservation(product_text="Товар один", hall_quantity=1),
+                PhotoRowObservation(product_text="Товар два", bar_quantity=1),
+            ],
+        )
+    )
+    service = _service(settings, SimpleNamespace(responses=responses))
+    photo = tmp_path / "sheet.png"
+    photo.write_bytes(b"image")
+    preparation = PhotoImagePreparation(
+        views=(
+            PhotoImageView("table_focus", b"focus", "image/png", 900, 500),
+            PhotoImageView("original", b"source", "image/png", 1600, 900),
+        ),
+        original_width=1600,
+        original_height=900,
+        upscale_factor=2,
+        dense_table_views_used=True,
+        spreadsheet_layout_detected=True,
+        detected_filled_order_row_count=2,
+    )
+    prepare = mocker.patch.object(
+        openai_client,
+        "prepare_photo_views",
+        return_value=preparation,
+    )
+
+    service.parse_photo(photo, "image/png")
+
+    prepare.assert_called_once_with(
+        photo,
+        "image/png",
+        include_original=True,
+        prefer_filled_order_rows=True,
+    )
+    content = responses.calls[0]["input"][0]["content"]  # type: ignore[index]
+    images = [part for part in content if part["type"] == "input_image"]
+    assert len(images) == 2
+    assert all(part["detail"] == "original" for part in images)
 
 
 def test_photo_parser_prefers_rows_with_order_or_comment(
@@ -369,8 +424,28 @@ def test_photo_parser_prefers_rows_with_order_or_comment(
     prepare.assert_called_once_with(
         photo,
         "image/png",
+        include_original=True,
         prefer_filled_order_rows=True,
     )
+
+
+@pytest.mark.parametrize(
+    "model,expected_detail,expected_reasoning",
+    [
+        ("gpt-5-mini", "high", "minimal"),
+        ("gpt-5.2", "high", "minimal"),
+        ("gpt-5.4-mini", "original", "none"),
+        ("gpt-5.4-mini-2026-03-17", "original", "none"),
+    ],
+)
+def test_vision_options_follow_model_capabilities(
+    model: str,
+    expected_detail: str,
+    expected_reasoning: str,
+) -> None:
+    """Выбирает допустимые детализацию изображения и уровень рассуждений."""
+    assert openai_client._vision_image_detail(model) == expected_detail
+    assert openai_client._vision_reasoning_effort(model) == expected_reasoning
 
 
 def test_preprocessed_order_count_ignores_comment_only_rows() -> None:
@@ -388,6 +463,15 @@ def test_preprocessed_order_count_ignores_comment_only_rows() -> None:
 
     assert openai_client._photo_observation_matches_preprocessed_count(observation, 1)
     assert not openai_client._photo_observation_matches_preprocessed_count(observation, 2)
+
+
+def test_zero_preprocessed_order_count_is_not_evidence_of_an_empty_order() -> None:
+    """Не отменяет vision-число только потому, что пиксельный детектор не увидел его."""
+    observation = PhotoDocumentObservation(
+        rows=[PhotoRowObservation(product_text="Горчица", explicit_order_quantity=2)]
+    )
+
+    assert openai_client._photo_observation_matches_preprocessed_count(observation, 0)
 
 
 def test_reported_order_count_ignores_comment_only_rows() -> None:

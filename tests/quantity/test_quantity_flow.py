@@ -4,6 +4,7 @@ from restaurant_bot.domain.models import (
     CartItem,
     CatalogProduct,
     ConversationState,
+    DepartmentQuantities,
     ExtractedItem,
     InputKind,
     Intent,
@@ -62,6 +63,153 @@ def test_repeating_same_missing_item_does_not_create_duplicate(settings) -> None
 
     assert len(repeated.state.cart) == 1
     assert repeated.state.cart[0].status is ItemStatus.MISSING_QTY
+
+
+def test_department_choice_survives_quantity_change_and_supplier_warning(settings) -> None:  # type: ignore[no-untyped-def]
+    """Сохраняет выбранный отдел после исправления количества перед предупреждением поставщика."""
+    engine = ConversationEngine(settings)
+    item = CartItem(
+        id="mustard",
+        source_query="Горчица",
+        catalog_product_id="mustard",
+        catalog_name="Горчица",
+        catalog_unit="шт",
+        unit="шт",
+        quantity=4,
+        price=100,
+        supplier="Тестовый поставщик",
+        supplier_minimum_amount=5000,
+        minimum_multiple=3,
+        suggested_quantity=6,
+        status=ItemStatus.MATCHED,
+    )
+    state = ConversationState(
+        cart=[item],
+        current_issue_item_id=item.id,
+        department_confirmation_required=True,
+    )
+    department_prompt = engine.handle(
+        _event(),
+        ParsedCommand(intent=Intent.SUBMIT_REQUEST),
+        state,
+        [],
+    )
+
+    selected = engine.handle(
+        TelegramEvent(update_id=2, chat_id="123456", input_type=InputKind.CALLBACK),
+        ParsedCommand(intent=Intent.SELECT_DEPARTMENT, callback_target="bar"),
+        department_prompt.state,
+        [],
+    )
+    assert "Проверьте количество" in selected.reply.text
+    corrected = engine.handle(
+        TelegramEvent(
+            update_id=3,
+            chat_id="123456",
+            input_type=InputKind.TEXT,
+            text="3 шт",
+        ),
+        ParsedCommand(intent=Intent.EDIT_QUANTITY, edit_quantity=3, edit_unit="шт"),
+        selected.state,
+        [],
+    )
+    reviewed = engine.handle(
+        _event(),
+        ParsedCommand(intent=Intent.SHOW_FINAL_REVIEW),
+        corrected.state,
+        [],
+    )
+
+    callbacks = [button.callback_data for row in reviewed.reply.rows for button in row]
+    assert corrected.state.department_confirmed is True
+    assert corrected.state.cart[0].department == "Бар"
+    assert corrected.state.cart[0].department_quantities == DepartmentQuantities()
+    assert "v2:minsum" in callbacks
+    assert "v2:dept:bar" not in callbacks
+    assert "Минимальная сумма поставщика" in reviewed.reply.text
+
+
+def test_accepting_suggested_quantity_keeps_single_department(settings) -> None:  # type: ignore[no-untyped-def]
+    """Сохраняет выбранный отдел, когда сотрудник принимает предложенное количество."""
+    engine = ConversationEngine(settings)
+    item = CartItem(
+        id="mustard",
+        source_query="Горчица",
+        quantity=4,
+        suggested_quantity=6,
+        department="Бар",
+        status=ItemStatus.MATCHED,
+    )
+    state = ConversationState(
+        cart=[item],
+        current_issue_item_id=item.id,
+        department="Бар",
+        department_confirmation_required=True,
+        department_confirmed=True,
+    )
+
+    accepted = engine.handle(
+        _event(),
+        ParsedCommand(intent=Intent.ACCEPT_SUGGESTED_QUANTITY),
+        state,
+        [],
+    )
+
+    assert accepted.state.cart[0].quantity == 6
+    assert accepted.state.cart[0].department == "Бар"
+    assert accepted.state.department_confirmed is True
+    assert "v2:dept:bar" not in [
+        button.callback_data for row in accepted.reply.rows for button in row
+    ]
+
+
+def test_quantity_change_reconfirms_preserved_photo_distribution(settings) -> None:  # type: ignore[no-untyped-def]
+    """Повторно просит проверить распределение по отделам после изменения количества с фото."""
+    engine = ConversationEngine(settings)
+    item = CartItem(
+        id="mustard",
+        source_query="Горчица",
+        catalog_product_id="mustard",
+        catalog_name="Горчица",
+        catalog_unit="шт",
+        unit="шт",
+        quantity=4,
+        department_quantities=DepartmentQuantities(hall=2, kitchen=2),
+        status=ItemStatus.MATCHED,
+    )
+    state = ConversationState(
+        cart=[item],
+        current_issue_item_id=item.id,
+        department_confirmation_required=True,
+    )
+    selected = engine.handle(
+        TelegramEvent(update_id=2, chat_id="123456", input_type=InputKind.CALLBACK),
+        ParsedCommand(intent=Intent.SELECT_DEPARTMENT, callback_target="preserve"),
+        state,
+        [],
+    )
+
+    corrected = engine.handle(
+        TelegramEvent(
+            update_id=3,
+            chat_id="123456",
+            input_type=InputKind.TEXT,
+            text="5 шт",
+        ),
+        ParsedCommand(intent=Intent.EDIT_QUANTITY, edit_quantity=5, edit_unit="шт"),
+        selected.state,
+        [],
+    )
+    reviewed = engine.handle(
+        _event(),
+        ParsedCommand(intent=Intent.SHOW_FINAL_REVIEW),
+        corrected.state,
+        [],
+    )
+
+    assert corrected.state.department_confirmed is False
+    assert corrected.state.cart[0].department_quantities == DepartmentQuantities()
+    assert "v2:dept:hall" in [button.callback_data for row in reviewed.reply.rows for button in row]
 
 
 def _matched_syrup(

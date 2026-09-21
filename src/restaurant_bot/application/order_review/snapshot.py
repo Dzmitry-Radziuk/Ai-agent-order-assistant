@@ -36,6 +36,7 @@ def build_review_snapshot(
                 unit=product.unit or "шт",
                 quantity=quantity,
                 comment=product.comment,
+                department_quantities=product.department_quantities.model_copy(deep=True),
             )
         )
     payload = [
@@ -45,6 +46,7 @@ def build_review_snapshot(
             "supplier": item.supplier,
             "unit": item.unit,
             "quantity": item.quantity,
+            "department_quantities": item.department_quantities.model_dump(),
             "comment": item.comment,
         }
         for item in items

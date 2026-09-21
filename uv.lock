@@ -776,7 +776,7 @@ redis = [
 
 [[package]]
 name = "langfuse"
-version = "4.15.0"
+version = "4.14.4"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "backoff" },
@@ -786,12 +786,11 @@ dependencies = [
     { name = "opentelemetry-sdk" },
     { name = "packaging" },
     { name = "pydantic" },
-    { name = "typing-extensions" },
     { name = "wrapt" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/b2/f0/e05ee31998ad89a408da256e0aea589e60c4b84192ab94344ba08f304700/langfuse-4.15.0.tar.gz", hash = "sha256:cc2491fa34421d7424cba9c3e579811cf5d0e1d0730840f67d23190874eca8ee", size = 431955, upload-time = "2026-08-27T15:37:02.168Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/dd/3f/d3387db1f472d2fd4b5de40eb6abedc2f59c9da2224e9d0a79d054a90b81/langfuse-4.14.4.tar.gz", hash = "sha256:48c4bdefc290f61a42881b8048a904ab6b81d37e02496473166836e71ee0ab3a", size = 389680, upload-time = "2026-08-11T17:03:20.472Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/d4/00/4ab00ff8ed9020aa87151539a7a4d224ccc81048255e9363292f145654c8/langfuse-4.15.0-py3-none-any.whl", hash = "sha256:3612197b162838a90f3e6f9d994758d1388db2664c5a5d0a4411da5988f823eb", size = 789633, upload-time = "2026-08-27T15:37:03.574Z" },
+    { url = "https://files.pythonhosted.org/packages/d9/1b/a198adc52aa4ffd0886ca0d4e9bb97d45f4f326db206d2395bac67677f5d/langfuse-4.14.4-py3-none-any.whl", hash = "sha256:78692a1d4785a8c255bf6ea967e673e1ee30ce078d646e7b5f7ff44549d45cce", size = 688351, upload-time = "2026-08-11T17:03:21.881Z" },
 ]
 
 [[package]]
@@ -1635,7 +1634,7 @@ requires-dist = [
     { name = "google-auth", specifier = ">=2.40,<3" },
     { name = "google-auth-httplib2", specifier = ">=0.2,<1" },
     { name = "httpx", specifier = ">=0.28,<1" },
-    { name = "langfuse", specifier = ">=4.7,<5" },
+    { name = "langfuse", specifier = "==4.14.4" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.17,<2" },
     { name = "openai", specifier = ">=2.45,<3" },
     { name = "pillow", specifier = ">=11.3,<12" },

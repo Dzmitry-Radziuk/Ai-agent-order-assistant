@@ -279,6 +279,9 @@ def test_live_catalog_headers_fill_submission_metadata(settings) -> None:  # typ
                 "Наименование у Поставщика": "Сироп Роза, 1л",
                 "Ед.Изм. для заказа": "шт",
                 "Основной поставщик (Условное наз-ие)": "Сиропы",
+                "Зал": "2",
+                "Бар": "1",
+                "Кухня": "5",
                 "Цена за Ед,Изм, для заказа": "125",
                 "Минимальная Кратность в заказе": "2",
                 "Полез. V или М Нетто Ед.Изм.в Заказ": "1",
@@ -300,6 +303,7 @@ def test_live_catalog_headers_fill_submission_metadata(settings) -> None:  # typ
     assert product.supplier_minimum_amount == 5000
     assert product.restaurant == "Кафе"
     assert product.supplier_current_sum == 250
+    assert product.department_quantities == DepartmentQuantities(hall=2, bar=1, kitchen=5)
 
 
 def test_catalog_update_writes_quantity_and_merged_comment(settings) -> None:  # type: ignore[no-untyped-def]

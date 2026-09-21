@@ -8,6 +8,11 @@ from restaurant_bot.parsing.commands.item_commands import has_unrepresented_orde
 from restaurant_bot.parsing.products import parse_product_lines
 
 
+def _assert_intent(phrase: str, expected: Intent) -> None:
+    """Проверяет результат детерминированной маршрутизации фразы."""
+    assert infer_intent(phrase).intent is expected
+
+
 def test_parses_quantity_and_unit_after_product_name() -> None:
     """Проверяет, что парсер разбирает количество и единицу измерения после названия товара."""
     item = parse_product_lines("Сироп роза 10 штук")[0]
@@ -259,7 +264,7 @@ def test_negated_actions_never_become_mutating_commands(
     expected: Intent,
 ) -> None:
     """Отрицание не должно превращаться в противоположное действие."""
-    assert infer_intent(phrase).intent is expected
+    _assert_intent(phrase, expected)
 
 
 @pytest.mark.parametrize(
@@ -277,7 +282,7 @@ def test_positive_actions_remain_available_after_negation_guard(
     expected: Intent,
 ) -> None:
     """Защита от отрицаний не блокирует явные положительные команды."""
-    assert infer_intent(phrase).intent is expected
+    _assert_intent(phrase, expected)
 
 
 def test_spoken_product_list_keeps_each_local_comment() -> None:

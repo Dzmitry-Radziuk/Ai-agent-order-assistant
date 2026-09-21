@@ -11,9 +11,11 @@
 - [`regression/`](regression/) — старые отчёты о регрессиях и конкуренции.
 - [`diagnostics/`](diagnostics/) — forensic-снимки ручной приёмки.
 
-Актуальные документы находятся на уровень выше:
-[`CURRENT_ARCHITECTURE.md`](../CURRENT_ARCHITECTURE.md),
-[`TESTING_READINESS.md`](../TESTING_READINESS.md),
-[`USER_SCENARIOS.md`](../USER_SCENARIOS.md),
-[`CHANNEL_EXTENSION_GUIDE.md`](../CHANNEL_EXTENSION_GUIDE.md) и
-[`INDEPENDENT_ENGINEERING_AUDIT.md`](../INDEPENDENT_ENGINEERING_AUDIT.md).
+Текущая карта проекта и процесс разработки находятся в
+[`../../.agents/PROJECT_MAP.md`](../../.agents/PROJECT_MAP.md) и
+[`../../.agents/DEVELOPMENT_PROCESS.md`](../../.agents/DEVELOPMENT_PROCESS.md).
+Текущее состояние задачи — в [`../../PROJECT_HANDOFF.md`](../../PROJECT_HANDOFF.md),
+а пользовательские сценарии — в [`../USER_SCENARIOS.md`](../USER_SCENARIOS.md).
+
+Отдельные исторические снимки аудита и проверок перечислены в
+[`../README.md`](../README.md); их оценки не следует принимать за текущий статус.

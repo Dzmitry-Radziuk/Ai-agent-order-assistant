@@ -63,8 +63,10 @@ def test_snapshot_reads_every_department_quantity_and_ignores_empty_rows(setting
         ("Сливки 33%", 3),
     ]
     assert snapshot.supplier_count == 2
+    assert snapshot.items[0].department_quantities == DepartmentQuantities(kitchen=5)
+    assert snapshot.items[1].department_quantities == DepartmentQuantities(hall=2, bar=1)
     assert (
-        snapshot.fingerprint == "2cf4923d6b54886fbbfed4e62af8e0311598acdcf420aaa3881dbf7173e18ea2"
+        snapshot.fingerprint == "4c73ebb1863e422389021cf8b21b2d6ee5e004e85fd75c78572e45312c3d104d"
     )
 
 
@@ -79,8 +81,8 @@ def test_preview_lists_each_product_and_has_confirmation_buttons(settings) -> No
     reply = preview_reply(service.snapshot(_context()), "token")
 
     assert "Товаров: 2" in reply.text
-    assert "• <b>Сироп роза, 1 л</b> — 5 шт" in reply.text
-    assert "• <b>Сливки 33%</b> — 3 л" in reply.text
+    assert "• <b>Сироп роза, 1 л</b> — Кухня: 5 шт" in reply.text
+    assert "• <b>Сливки 33%</b> — Зал: 2 л; Бар: 1 л" in reply.text
     assert [button.text for row in reply.rows for button in row] == [
         "Отправить заявку",
         "Отмена",

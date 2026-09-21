@@ -15,9 +15,13 @@ from restaurant_bot.catalog.evidence import (
     query_evidence_tokens,
     remove_phrase_overlap,
     tokens,
+    unverified_product_terms,
 )
 from restaurant_bot.catalog.resolver import CatalogDecision, CatalogResolver
-from restaurant_bot.catalog.safety import has_compatible_numeric_characteristics
+from restaurant_bot.catalog.safety import (
+    has_compatible_numeric_characteristics,
+    has_conflicting_catalog_qualifiers,
+)
 from restaurant_bot.catalog.search import CatalogSearch, ListCatalogSearch
 from restaurant_bot.conversation.comments import (
     merge_comments,
@@ -701,7 +705,7 @@ class CatalogResolutionService:
         if row_number is not None and item.photo_sheet_row_number_confidence >= 0.9:
             row_matches = products_by_row.get(row_number, [])
             if item.photo_sheet_row_number_authoritative and len(row_matches) == 1:
-                if has_sufficient_photo_identity(item.source_query, row_matches[0].name):
+                if _has_verified_photo_identity(item.source_query, row_matches[0].name):
                     return self._select_photo_identity_product(
                         item,
                         row_matches[0],
@@ -717,16 +721,19 @@ class CatalogResolutionService:
                 )
                 item.photo_sheet_row_number_authoritative = False
             if item.photo_sheet_row_number_authoritative:
-                item.status = ItemStatus.AMBIGUOUS
+                # Номер строки может относиться к другому представлению листа,
+                # поэтому отсутствие однозначной строки каталога не является
+                # вариантом товара для выбора. Продолжаем безопасный поиск по
+                # прочитанному названию, а не создаём пустую карточку выбора.  # noqa: RUF003
+                item.photo_sheet_row_number_authoritative = False
                 logger.info(
                     "photo_venue_catalog_identity",
-                    resolution_method="unsafe",
+                    resolution_method="fallback",
                     sheet_row_number=row_number,
                     candidate_count=len(row_matches),
-                    reason="authoritative_row_missing_or_duplicate",
+                    reason="authoritative_row_missing_or_duplicate_fallback_to_name",
                 )
-                return True
-            if len(row_matches) == 1 and has_sufficient_photo_identity(
+            if len(row_matches) == 1 and _has_verified_photo_identity(
                 item.source_query, row_matches[0].name
             ):
                 return self._select_photo_identity_product(
@@ -766,7 +773,7 @@ class CatalogResolutionService:
         ocr_matches = [
             product
             for product in catalog
-            if has_sufficient_photo_identity(item.source_query, product.name)
+            if _has_verified_photo_identity(item.source_query, product.name)
         ]
         if len(ocr_matches) == 1:
             return self._select_photo_identity_product(
@@ -1061,3 +1068,12 @@ class CatalogResolutionService:
         elif item.quantity is not None:
             item.quantity = None
             item.unit = ""
+
+
+def _has_verified_photo_identity(query: str, product_name: str) -> bool:
+    """Подтверждает фото-товар без потери существенного признака названия."""
+    return (
+        has_sufficient_photo_identity(query, product_name)
+        and not unverified_product_terms(query, product_name)
+        and not has_conflicting_catalog_qualifiers(query, product_name)
+    )
