@@ -41,6 +41,7 @@ from restaurant_bot.conversation.product_add import clear_product_add_pending
 from restaurant_bot.conversation.progression import ProgressionKind
 from restaurant_bot.conversation.progression import advance as advance_progression
 from restaurant_bot.conversation.quantity_resolution import (
+    is_multiple_warning,
     multiple_warnings,
     select_multiple_warning,
     suggested_quantity_for_multiple,
@@ -774,13 +775,13 @@ class ConversationEngine:
         if command.intent == Intent.FIX_MULTIPLE:
             return self._show_multiple_quantity_choice(state)
         if command.intent == Intent.ACCEPT_SUGGESTED_QUANTITY:
-            select_multiple_warning(state)
+            self._select_multiple_warning_for_callback(command, state)
             return self._accept_suggested_quantity(state)
         if command.intent in {Intent.KEEP_CURRENT_QUANTITY, Intent.KEEP_MULTIPLE}:
-            select_multiple_warning(state)
+            self._select_multiple_warning_for_callback(command, state)
             return self._keep_current_quantity(state)
         if command.intent in {Intent.ENTER_OTHER_QUANTITY, Intent.EDIT_MULTIPLE}:
-            select_multiple_warning(state)
+            self._select_multiple_warning_for_callback(command, state)
             return self._enter_other_quantity(state)
         if command.intent == Intent.SKIP_CURRENT:
             return self._skip_current(state)
@@ -1430,6 +1431,20 @@ class ConversationEngine:
                 ],
             ),
         )
+
+    @staticmethod
+    def _select_multiple_warning_for_callback(
+        command: ParsedCommand,
+        state: ConversationState,
+    ) -> CartItem | None:
+        """Привязывает кнопку выбора количества к конкретной позиции черновика."""
+        target = command.callback_target
+        if target:
+            item = next((item for item in state.cart if item.id == target), None)
+            if item is not None and is_multiple_warning(item):
+                state.current_issue_item_id = item.id
+                return item
+        return select_multiple_warning(state)
 
     def _show_multiple_quantity_choice(self, state: ConversationState) -> EngineResult:
         """Открывает варианты количества без автоматического изменения."""

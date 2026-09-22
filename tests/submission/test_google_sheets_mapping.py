@@ -814,3 +814,107 @@ def test_registration_upsert_rejects_missing_identity_header(settings) -> None: 
         gateway.upsert_venue_registration(
             {"channel": "telegram", "code": "6461W6", "chat_id": "77", "user_id": "77"}
         )
+
+
+def test_condiments_department_is_written_to_kitchen(settings) -> None:  # type: ignore[no-untyped-def]
+    """Нормализует техническую категорию condiments в колонку «Кухня»."""
+    gateway = GoogleSheetsGateway(settings)
+    gateway.service = MagicMock()
+    gateway.load_catalog = MagicMock(  # type: ignore[method-assign]
+        return_value=[
+            CatalogProduct(
+                product_id="mustard",
+                name="Горчица острая",
+                unit="шт",
+                department_quantities=DepartmentQuantities(kitchen=2),
+                row_number=8,
+            )
+        ]
+    )
+    gateway._get_values = MagicMock(  # type: ignore[method-assign]
+        return_value=[["ID товара", "Зал", "Бар", "Кухня", "Комментарий"]]
+    )
+
+    plan = gateway.prepare_catalog_mutation(
+        [
+            {
+                "ID товара": "mustard",
+                "Наименование у поставщика": "Горчица острая",
+                "Кол-во": 3,
+                "_department": "condiments",
+            }
+        ],
+        VENUE_SPREADSHEET_ID,
+        operation_id="catalog:ORDER-MUSTARD",
+        order_no="ORDER-MUSTARD",
+    )
+
+    assert plan["mutations"][0]["department"] == "Кухня"
+    assert plan["mutations"][0]["range"] == f"'{settings.google_catalog_sheet}'!D8"
+
+
+def test_catalog_mutation_rejects_duplicate_product_id(settings) -> None:  # type: ignore[no-untyped-def]
+    """Не пишет другой товар, если ID каталога оказался неуникальным."""
+    gateway = GoogleSheetsGateway(settings)
+    gateway.service = MagicMock()
+    gateway.load_catalog = MagicMock(  # type: ignore[method-assign]
+        return_value=[
+            CatalogProduct(product_id="mustard", name="Горчица дижонская", row_number=8),
+            CatalogProduct(
+                product_id="mustard",
+                name="Горчица дижонская большое зерно",
+                row_number=9,
+            ),
+        ]
+    )
+    gateway._get_values = MagicMock(  # type: ignore[method-assign]
+        return_value=[["ID товара", "Зал", "Бар", "Кухня", "Комментарий"]]
+    )
+
+    with pytest.raises(GoogleSheetsError, match="missing or duplicated"):
+        gateway.prepare_catalog_mutation(
+            [
+                {
+                    "ID товара": "mustard",
+                    "Наименование у поставщика": "Горчица дижонская",
+                    "Кол-во": 3,
+                    "_department": "Кухня",
+                }
+            ],
+            VENUE_SPREADSHEET_ID,
+            operation_id="catalog:ORDER-DIJON",
+            order_no="ORDER-DIJON",
+        )
+
+
+def test_catalog_mutation_rejects_changed_product_identity(settings) -> None:  # type: ignore[no-untyped-def]
+    """Не пишет по ID, если выбранное название уже указывает на другую строку."""
+    gateway = GoogleSheetsGateway(settings)
+    gateway.service = MagicMock()
+    gateway.load_catalog = MagicMock(  # type: ignore[method-assign]
+        return_value=[
+            CatalogProduct(
+                product_id="mustard",
+                name="Горчица дижонская большое зерно",
+                row_number=9,
+            )
+        ]
+    )
+    gateway._get_values = MagicMock(  # type: ignore[method-assign]
+        return_value=[["ID товара", "Зал", "Бар", "Кухня", "Комментарий"]]
+    )
+
+    with pytest.raises(GoogleSheetsError, match="identity changed"):
+        gateway.prepare_catalog_mutation(
+            [
+                {
+                    "ID товара": "mustard",
+                    "Наименование у поставщика": "Горчица дижонская",
+                    "Кол-во": 3,
+                    "_department": "Кухня",
+                }
+            ],
+            VENUE_SPREADSHEET_ID,
+            operation_id="catalog:ORDER-DIJON",
+            order_no="ORDER-DIJON",
+        )

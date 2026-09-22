@@ -582,17 +582,25 @@ def test_catalog_success_marks_completed_after_one_exact_plan_apply() -> None:
     service._checkpoint.assert_called_once_with("ORDER-1", "catalog_updated")
 
 
-def test_empty_catalog_plan_completes_without_external_write() -> None:
-    """Завершает пустой план без вызова Google Sheets."""
+def test_empty_catalog_plan_for_nonempty_order_fails_closed() -> None:
+    """Не подтверждает успех, если реальная заявка не породила quantity mutation."""
     service = object.__new__(SubmissionService)
     service.sheets = MagicMock()
     plan = _catalog_plan(mutations=[])
     service.sheets.prepare_catalog_mutation.return_value = plan
+    service._mark_catalog_conflict = MagicMock()  # type: ignore[method-assign]
+    service._send_catalog_conflict_reply = MagicMock()  # type: ignore[method-assign]
     service._persist_catalog_completed = MagicMock()  # type: ignore[method-assign]
-    pending = PendingSubmission(order_no="ORDER-1", spreadsheet_id="venue-sheet", rows=[])
+    pending = PendingSubmission(
+        order_no="ORDER-1",
+        spreadsheet_id="venue-sheet",
+        rows=[{"ID товара": "mustard", "Кол-во": 3, "_department": "Кухня"}],
+    )
 
-    assert service._run_catalog_update("chat-1", pending, _record()) is True
-    service._persist_catalog_completed.assert_called_once_with("ORDER-1", plan)
+    assert service._run_catalog_update("chat-1", pending, _record()) is False
+    service._mark_catalog_conflict.assert_called_once()
+    service._send_catalog_conflict_reply.assert_called_once()
+    service._persist_catalog_completed.assert_not_called()
     service.sheets.apply_catalog_mutation.assert_not_called()
 
 
