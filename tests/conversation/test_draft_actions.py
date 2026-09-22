@@ -2,6 +2,8 @@
 
 from copy import deepcopy
 
+import pytest
+
 from restaurant_bot.conversation.draft_actions import (
     DraftActionOutcome,
     confirm_duplicate_item,
@@ -11,6 +13,7 @@ from restaurant_bot.conversation.draft_actions import (
 from restaurant_bot.domain.models import (
     CartItem,
     ConversationState,
+    DepartmentQuantities,
     ExtractedItem,
     ItemStatus,
     ParsedCommand,
@@ -60,6 +63,41 @@ def test_confirm_duplicate_keeps_unit_mismatch_unmerged() -> None:
 
     assert result.outcome is DraftActionOutcome.ADVANCE
     assert state.model_dump() == before
+
+
+@pytest.mark.parametrize("second_assigned", [True, False])
+def test_duplicate_confirmation_preserves_allocations_or_requires_selection(
+    second_assigned: bool,
+) -> None:
+    """Суммирует распределения двух фото и не оставляет старые отделы для новой суммы."""
+    existing = CartItem(
+        id="first",
+        source_query="Молоко",
+        quantity=2,
+        status=ItemStatus.MATCHED,
+        department_quantities=DepartmentQuantities(hall=2),
+    )
+    duplicate = CartItem(
+        id="second",
+        source_query="Молоко",
+        quantity=3,
+        status=ItemStatus.DUPLICATE_PENDING,
+        issue_message=existing.id,
+        department_quantities=DepartmentQuantities(bar=3)
+        if second_assigned
+        else DepartmentQuantities(),
+    )
+    state = ConversationState(cart=[existing, duplicate], current_issue_item_id=duplicate.id)
+    confirm_duplicate_item(state)
+    assert existing.quantity == 5
+    assert duplicate.status is ItemStatus.SKIPPED
+    assert existing.department_quantities == (
+        DepartmentQuantities(hall=2, bar=3) if second_assigned else DepartmentQuantities()
+    )
+    assert existing.has_department_assignment() is second_assigned
+    assert state.department_confirmation_required and not state.department_confirmed
+    confirm_duplicate_item(state)
+    assert existing.quantity == 5
 
 
 def test_remove_item_reports_active_and_pending_outcomes() -> None:

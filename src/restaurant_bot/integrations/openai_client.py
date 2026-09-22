@@ -6,6 +6,7 @@ import json
 import math
 import re
 import time
+from collections import Counter
 from dataclasses import replace
 from pathlib import Path
 from typing import Any, cast
@@ -25,6 +26,7 @@ from restaurant_bot.input.photo_ingestion import (
     canonical_photo_identity,
     classify_photo_document,
     normalize_photo_observation,
+    photo_row_department_quantities,
     photo_row_has_potential_order_evidence,
     photo_sheet_row_mapping_is_authoritative,
     uses_lettered_department_columns,
@@ -227,7 +229,6 @@ def _lettered_department_reads_match(
     if not first_rows or len(first_rows) != len(second_rows):
         return False
 
-    department_fields = tuple(field for _, field in _LETTERED_DEPARTMENT_COLUMN_FIELDS)
     for first_row, second_row in zip(first_rows, second_rows, strict=True):
         if (
             not first_row.product_text
@@ -236,13 +237,9 @@ def _lettered_department_reads_match(
             != canonical_photo_identity(second_row.product_text)
         ):
             return False
-        if any(
-            not _optional_quantities_match(
-                getattr(first_row, field_name),
-                getattr(second_row, field_name),
-            )
-            for field_name in department_fields
-        ):
+        first_quantities = photo_row_department_quantities(first_row, lettered_columns=True)
+        second_quantities = photo_row_department_quantities(second_row, lettered_columns=True)
+        if first_quantities is None or first_quantities != second_quantities:
             return False
         if not _optional_quantities_match(
             first_row.explicit_order_quantity,
@@ -271,6 +268,55 @@ def _optional_quantities_match(first: float | None, second: float | None) -> boo
     if first is None or second is None:
         return first is second
     return math.isclose(first, second, rel_tol=0, abs_tol=1e-9)
+
+
+def _confirmed_partial_photo_command(
+    first: PhotoDocumentObservation,
+    second: PhotoDocumentObservation | None,
+    settings: Settings,
+) -> ParsedCommand:
+    """Сохраняет только совпавшие в двух чтениях позиции с предупреждением о пропусках."""
+    if second is None:
+        return ParsedCommand(intent=Intent.ADD_ITEMS, photo_outcome="incomplete_photo_read")
+    first_command = normalize_photo_observation(first, settings).command
+    second_command = normalize_photo_observation(second, settings).command
+    if first_command.global_comment != second_command.global_comment:
+        return ParsedCommand(intent=Intent.ADD_ITEMS, photo_outcome="incomplete_photo_read")
+
+    def identity(item: ExtractedItem) -> str:
+        """Сравнивает факты заказа независимо от формы исходного OCR-текста."""
+        return json.dumps(
+            {
+                "product": canonical_photo_identity(item.product_query),
+                "quantity": item.quantity,
+                "unit": normalize_unit(item.unit),
+                "departments": item.department_quantities.model_dump(),
+                "comment": clean_text(item.comment),
+                "supplier": canonical_photo_identity(item.supplier_hint),
+                "sheet_row": item.photo_sheet_row_number,
+            },
+            sort_keys=True,
+        )
+
+    remaining = Counter(identity(item) for item in second_command.items)
+    items: list[ExtractedItem] = []
+    for item in first_command.items:
+        key = identity(item)
+        if remaining[key] > 0:
+            items.append(item)
+            remaining[key] -= 1
+    logger.info(
+        "photo_partial_read_reconciled",
+        first_item_count=len(first_command.items),
+        second_item_count=len(second_command.items),
+        confirmed_item_count=len(items),
+    )
+    return ParsedCommand(
+        intent=Intent.ADD_ITEMS,
+        items=items,
+        global_comment=first_command.global_comment if items else "",
+        photo_outcome="partial_photo_read" if items else "incomplete_photo_read",
+    )
 
 
 def _read_lettered_department_column_values(
@@ -564,6 +610,8 @@ def _merge_lettered_department_column_reads(
     if set(column_values) != {letter for letter, _ in _LETTERED_DEPARTMENT_COLUMN_FIELDS}:
         return None
     cleared_fields = {field_name: None for _, field_name in _LETTERED_DEPARTMENT_COLUMN_FIELDS}
+    # Проверенные колонки заменяют предварительные значения отделов.
+    cleared_fields.update(hall_quantity=None, bar_quantity=None, kitchen_quantity=None)
     merged_rows = [row.model_copy(update=cleared_fields) for row in baseline.rows]
     for letter, field_name in _LETTERED_DEPARTMENT_COLUMN_FIELDS:
         for index, value in column_values[letter].items():
@@ -1534,16 +1582,18 @@ class OpenAIService:
                         lettered_read_confirmation_matches=full_read_confirmation_matches,
                     )
                     if lettered_department_columns and not department_column_views_available:
-                        return ParsedCommand(
-                            intent=Intent.ADD_ITEMS,
-                            photo_outcome="incomplete_photo_read",
+                        return _confirmed_partial_photo_command(
+                            observation,
+                            retry_observation if retry_complete else None,
+                            self.settings,
                         )
                     if expected_filled_order_row_count is not None and not (
                         department_order_sheet and first_observation_complete
                     ):
-                        return ParsedCommand(
-                            intent=Intent.ADD_ITEMS,
-                            photo_outcome="incomplete_photo_read",
+                        return _confirmed_partial_photo_command(
+                            observation,
+                            retry_observation if retry_complete else None,
+                            self.settings,
                         )
             if (
                 department_column_read_required

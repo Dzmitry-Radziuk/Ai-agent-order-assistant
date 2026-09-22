@@ -478,14 +478,19 @@
       ],
       "precondition": "На фотографии есть таблица заказа с колонками «Зал», «Бар» или «Кухня».",
       "user_action": "Отправляет фотографию распечатанной или заполненной таблицы.",
-      "bot_response": "Берёт количество только из заполненных колонок заказа, сохраняет комментарии и игнорирует распознанного с фото поставщика, фасовку, остатки и справочные числа. Перед записью показывает найденное распределение по страницам, чтобы можно было проверить все позиции, и просит его подтвердить либо выбрать одно подразделение.",
-      "result": "Для таблицы Google Sheets без названий отделов, но с видимыми буквами N/O/P, бот сопоставляет N с залом, O с баром, P с кухней и Q с комментарием. После выбора «Оставить как на фото» количества записываются в соответствующие колонки. Выбор одного подразделения переносит туда весь заказ без дублей. Строки без заказа не добавляются.",
+      "bot_response": "Берёт количество только из заполненных колонок заказа, сохраняет комментарии и игнорирует распознанного с фото поставщика, фасовку, остатки и справочные числа. Достаточно названий подразделений либо букв N/O/P. Перед записью показывает все позиции, включая товары без подразделения, по 10 на странице. Если два чтения согласовали только часть позиций, показывает предупреждение о неполном фото в черновике и финальной проверке; спорные количества не добавляет.",
+      "result": "Для таблицы Google Sheets без названий отделов, но с видимыми буквами N/O/P, бот сопоставляет N с залом, O с баром, P с кухней и Q с комментарием. «Оставить как на фото» доступно только когда у всех активных товаров есть распределение или подтверждённый отдел. При смешанном черновике выбор подразделения применяется только к неразмеченным товарам, сохраняя ранее заданные отделы. Если неразмеченных товаров нет, выбор одного подразделения переносит весь заказ. Строки без заказа не добавляются.",
       "examples": [
         "Распечатанная таблица с количеством в колонке «Бар»",
         "Таблица с заполненными «Зал» и «Кухня»",
         "Фото, где у товара указан комментарий поставщику"
       ],
       "test_refs": [
+        "tests/conversation/test_engine.py::test_second_input_requires_own_department_without_reassigning_first",
+        "tests/conversation/test_engine.py::test_partial_photo_warning_survives_state_and_final_review",
+        "tests/ai/test_photo_ingestion.py::test_photo_department_headers_and_letters_are_independent_evidence",
+        "tests/ai/test_photo_ingestion.py::test_lettered_sheet_accepts_equivalent_department_field_representations",
+        "tests/ai/test_photo_ingestion.py::test_preprocessed_row_count_returns_confirmed_partial_read_with_warning",
         "tests/ai/test_photo_ingestion.py::test_client_sheet_drops_blank_row_without_transferring_neighbor_quantity",
         "tests/ai/test_photo_ingestion.py::test_mocked_photo_pipeline_converges_into_existing_cart_pipeline",
         "tests/ai/test_ai_media.py::test_client_order_sheet_uses_the_selected_department_quantity",

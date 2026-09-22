@@ -133,6 +133,31 @@ def has_named_department_columns(columns: set[str]) -> bool:
     return any(header in columns for aliases in _DEPARTMENT_HEADERS.values() for header in aliases)
 
 
+def photo_row_department_quantities(
+    row: PhotoRowObservation,
+    *,
+    lettered_columns: bool,
+) -> DepartmentQuantities | None:
+    """Согласует два представления N/O/P, отклоняя противоречащие количества."""
+    named = DepartmentQuantities(
+        hall=_positive_or_none(row.hall_quantity),
+        bar=_positive_or_none(row.bar_quantity),
+        kitchen=_positive_or_none(row.kitchen_quantity),
+    )
+    if not lettered_columns:
+        return named
+    lettered = DepartmentQuantities(
+        hall=_positive_or_none(row.sheet_column_n_quantity),
+        bar=_positive_or_none(row.sheet_column_o_quantity),
+        kitchen=_positive_or_none(row.sheet_column_p_quantity),
+    )
+    has_named = any(value is not None for value in named.model_dump().values())
+    has_lettered = any(value is not None for value in lettered.model_dump().values())
+    if has_named and has_lettered and named != lettered:
+        return None
+    return lettered if has_lettered else named
+
+
 def classify_photo_document(
     observation: PhotoDocumentObservation,
 ) -> str:
@@ -144,9 +169,7 @@ def classify_photo_document(
         for column in observation.detected_columns
         if clean_text(column)
     }
-    has_named_departments = all(
-        any(header in columns for header in aliases) for aliases in _DEPARTMENT_HEADERS.values()
-    )
+    has_named_departments = has_named_department_columns(columns)
     has_departments = has_named_departments or uses_lettered_department_columns(
         observation,
         columns,
@@ -272,6 +295,19 @@ def normalize_photo_observation(
             reason=integrity.reason,
         )
     if document_type == "client_order_sheet":
+        if any(
+            photo_row_department_quantities(row, lettered_columns=sheet_department_columns) is None
+            for row in observation.rows
+        ):
+            return PhotoNormalizationResult(
+                command=ParsedCommand(
+                    intent=Intent.ADD_ITEMS, photo_outcome="incomplete_photo_read"
+                ),
+                document_type="incomplete",
+                admitted_rows=0,
+                dropped_rows=len(observation.rows),
+                reason="conflicting_department_quantities",
+            )
         unresolved_rows = [
             row
             for row in observation.rows
@@ -484,19 +520,11 @@ def _authorize_row(
         return None
 
     if document_type == "client_order_sheet":
-        quantities = (
-            DepartmentQuantities(
-                hall=_positive_or_none(row.sheet_column_n_quantity),
-                bar=_positive_or_none(row.sheet_column_o_quantity),
-                kitchen=_positive_or_none(row.sheet_column_p_quantity),
-            )
-            if uses_sheet_department_columns
-            else DepartmentQuantities(
-                hall=_positive_or_none(row.hall_quantity),
-                bar=_positive_or_none(row.bar_quantity),
-                kitchen=_positive_or_none(row.kitchen_quantity),
-            )
+        quantities = photo_row_department_quantities(
+            row, lettered_columns=uses_sheet_department_columns
         )
+        if quantities is None:
+            return None
         positive = [
             value for value in (quantities.hall, quantities.bar, quantities.kitchen) if value
         ]

@@ -3,6 +3,7 @@
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
 from PIL import Image, ImageDraw
 
 from restaurant_bot.application.conversation.contracts import ConversationInput
@@ -27,6 +28,7 @@ from restaurant_bot.input.photo_ingestion import (
 from restaurant_bot.input.photo_views import PhotoImagePreparation, PhotoImageView
 from restaurant_bot.integrations.openai_client import (
     OpenAIService,
+    _confirmed_partial_photo_command,
     _lettered_department_reads_match,
     _read_lettered_department_column_values,
 )
@@ -49,6 +51,102 @@ def _photo_event() -> TelegramEvent:
         file_id="photo",
         mime_type="image/jpeg",
     )
+
+
+@pytest.mark.parametrize("named_fields", [True, False])
+def test_lettered_sheet_accepts_equivalent_department_field_representations(
+    settings, named_fields
+) -> None:  # type: ignore[no-untyped-def]
+    """Не теряет количества, когда модель использует имена отделов при видимых N/O/P."""
+    first = PhotoDocumentObservation(
+        has_table_structure=True,
+        detected_columns=["Товар", "N", "O", "P"],
+        rows=[
+            _row(
+                "Молоко",
+                **(
+                    {"hall_quantity": 2, "bar_quantity": 3}
+                    if named_fields
+                    else {
+                        "sheet_column_n_quantity": 2,
+                        "sheet_column_o_quantity": 3,
+                    }
+                ),
+            )
+        ],
+    )
+    second = first.model_copy(
+        update={
+            "rows": [
+                _row(
+                    "Молоко",
+                    sheet_column_n_quantity=2,
+                    sheet_column_o_quantity=3,
+                )
+            ]
+        }
+    )
+    assert _lettered_department_reads_match(first, second)
+    command = normalize_photo_observation(first, settings).command
+    assert len(command.items) == 1
+    assert command.items[0].quantity == 5
+    assert command.items[0].department_quantities == DepartmentQuantities(hall=2, bar=3)
+
+
+def test_conflicting_department_field_representations_are_not_accepted(settings) -> None:  # type: ignore[no-untyped-def]
+    """Не выбирает произвольно отдел при противоречии полей одного наблюдения."""
+    observation = PhotoDocumentObservation(
+        has_table_structure=True,
+        detected_columns=["Товар", "N", "O", "P"],
+        rows=[_row("Молоко", hall_quantity=2, sheet_column_o_quantity=2)],
+    )
+    command = normalize_photo_observation(observation, settings).command
+    assert command.items == []
+    assert command.photo_outcome == "incomplete_photo_read"
+
+
+@pytest.mark.parametrize(
+    "columns,fields,expected",
+    [
+        (["Товар", "Зал", "Бар", "Кухня"], {"hall_quantity": 2}, DepartmentQuantities(hall=2)),
+        (["Товар", "Бар"], {"bar_quantity": 3}, DepartmentQuantities(bar=3)),
+        (["Товар", "N", "O", "P"], {"sheet_column_p_quantity": 4}, DepartmentQuantities(kitchen=4)),
+        (["Товар"], {"explicit_order_quantity": 5}, DepartmentQuantities()),
+    ],
+)
+def test_photo_department_headers_and_letters_are_independent_evidence(
+    settings, columns, fields, expected
+) -> None:  # type: ignore[no-untyped-def]
+    """Распознаёт отдел по названиям либо N/O/P и не угадывает его без заголовков."""
+    observation = PhotoDocumentObservation(
+        has_table_structure=True,
+        detected_columns=columns,
+        rows=[_row("Молоко", **fields)],
+    )
+    command = normalize_photo_observation(observation, settings).command
+    assert len(command.items) == 1
+    assert command.items[0].department_quantities == expected
+
+
+def test_partial_photo_keeps_only_agreed_items_without_multiplying_duplicates(settings) -> None:  # type: ignore[no-untyped-def]
+    """Исключает спорные количества и лишние повторения из частичного результата."""
+    first = PhotoDocumentObservation(
+        rows=[
+            _row("Хлеб", explicit_order_quantity=3),
+            _row("Хлеб", explicit_order_quantity=3),
+            _row("Молоко", explicit_order_quantity=2),
+        ]
+    )
+    second = PhotoDocumentObservation(
+        rows=[
+            _row("Хлеб", explicit_order_quantity=3),
+            _row("Молоко", explicit_order_quantity=8),
+        ]
+    )
+    command = _confirmed_partial_photo_command(first, second, settings)
+    assert command.photo_outcome == "partial_photo_read"
+    assert [(item.product_query, item.quantity) for item in command.items] == [("Хлеб", 3)]
+    assert _confirmed_partial_photo_command(first, None, settings).items == []
 
 
 def _save_light_order_sheet(path: Path) -> None:
@@ -1591,10 +1689,10 @@ def test_preprocessed_row_count_retries_shifted_photo_and_selects_aligned_rows(
     assert len([part for part in retry_content if part["type"] == "input_image"]) == 2
 
 
-def test_preprocessed_row_count_fails_closed_after_second_incomplete_read(
+def test_preprocessed_row_count_returns_confirmed_partial_read_with_warning(
     settings, tmp_path: Path
 ) -> None:  # type: ignore[no-untyped-def]
-    """Не создаёт частичную заявку, если оба vision-прохода пропустили заполненную строку."""
+    """Помечает совпавшую часть как неполную, если счётчик указывает на пропуск строки."""
     shifted = PhotoDocumentObservation(
         document_type_proposal="client_order_sheet",
         detected_columns=["Товар", "Зал", "Бар", "Кухня", "Комментарий"],
@@ -1613,8 +1711,10 @@ def test_preprocessed_row_count_fails_closed_after_second_incomplete_read(
     result = service.parse_photo(photo, "image/png")
 
     assert len(responses.calls) == 2
-    assert result.photo_outcome == "incomplete_photo_read"
-    assert result.items == []
+    assert result.photo_outcome == "partial_photo_read"
+    assert [(item.product_query, item.quantity) for item in result.items] == [
+        ("Судак Филе охл 500+ Крупный", 6)
+    ]
 
 
 def test_uncertain_photo_observation_retries_with_full_frame_when_no_safe_crop_exists(

@@ -319,7 +319,11 @@ class ParsedCommand(BaseModel):
     comment_target_indexes: list[int] = Field(default_factory=list)
     confidence: float | None = None
     photo_outcome: Literal[
-        "", "no_order_quantities", "incomplete_photo_read", "unsupported_photo"
+        "",
+        "no_order_quantities",
+        "incomplete_photo_read",
+        "partial_photo_read",
+        "unsupported_photo",
     ] = ""
     callback_revision: int | None = None
     callback_target: str = ""
@@ -384,6 +388,8 @@ class CartItem(BaseModel):
     unit: str = ""
     department: str = "Кухня"
     department_quantities: DepartmentQuantities = Field(default_factory=DepartmentQuantities)
+    department_confirmed: bool = False
+
     supplier_hint: str = ""
     supplier_search_locked: bool = False
     rename_attempted: bool = False
@@ -409,6 +415,13 @@ class CartItem(BaseModel):
     duplicate_existing_quantity: float = 0
     duplicate_existing_unit: str = ""
     product_add_request_id: str = ""
+
+    def has_department_assignment(self) -> bool:
+        """Отличает подтверждённый отдел и распределение фото от значения по умолчанию."""
+        return self.department_confirmed or any(
+            value is not None and value > 0
+            for value in self.department_quantities.model_dump().values()
+        )
 
     @field_validator(
         "source_query",
@@ -479,6 +492,7 @@ class ConversationState(BaseModel):
     department: str = "Кухня"
     department_confirmation_required: bool = False
     department_confirmed: bool = False
+    photo_read_incomplete: bool = False
     ui_revision: int = 0
     ui_message_text: str = ""
     visible_actions: list[dict[str, str]] = Field(default_factory=list)
@@ -546,6 +560,7 @@ class ConversationState(BaseModel):
         if keep_single_department:
             item.department = self.department
         else:
+            item.department_confirmed = False
             self.department_confirmed = False
 
 

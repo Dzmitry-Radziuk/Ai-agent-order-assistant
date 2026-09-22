@@ -7,7 +7,12 @@ from enum import StrEnum
 
 from restaurant_bot.conversation.comments import prune_pending_comment_item_ids
 from restaurant_bot.conversation.selection import contains_score, find_cart_item
-from restaurant_bot.domain.models import ConversationState, ItemStatus, ParsedCommand
+from restaurant_bot.domain.models import (
+    ConversationState,
+    DepartmentQuantities,
+    ItemStatus,
+    ParsedCommand,
+)
 from restaurant_bot.domain.text import normalize_text
 from restaurant_bot.domain.units import normalize_unit
 from restaurant_bot.parsing.commands.item_commands import clean_command_target
@@ -52,7 +57,26 @@ def confirm_duplicate_item(state: ConversationState) -> DraftActionResult:
         ):
             return DraftActionResult(DraftActionOutcome.ADVANCE)
         if existing:
+            combined = DepartmentQuantities()
+            assigned = existing.has_department_assignment() and item.has_department_assignment()
+            if assigned:
+                for field, department in (("hall", "Зал"), ("bar", "Бар"), ("kitchen", "Кухня")):
+                    values = []
+                    for source in (existing, item):
+                        distribution = source.department_quantities.model_dump()
+                        if any(distribution.values()) and not source.quantity_user_edited:
+                            values.append(distribution[field] or 0)
+                        else:
+                            values.append(
+                                (source.quantity or 0) if source.department == department else 0
+                            )
+                    setattr(combined, field, sum(values) or None)
             existing.quantity = (existing.quantity or 0) + (item.quantity or 0)
+            existing.department_quantities = combined
+            existing.department_confirmed = assigned
+            existing.quantity_user_edited = False
+            state.department_confirmation_required = True
+            state.department_confirmed = False
             item.status = ItemStatus.SKIPPED
         state.current_issue_item_id = ""
     return DraftActionResult(DraftActionOutcome.ADVANCE)

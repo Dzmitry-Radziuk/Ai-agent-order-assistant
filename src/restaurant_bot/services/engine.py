@@ -913,8 +913,15 @@ class ConversationEngine:
                 supplier_hint=selected_supplier,
             )
             if items_to_add:
+                if state.department_confirmed:
+                    for existing in state.cart:
+                        if existing.status is not ItemStatus.SKIPPED:
+                            existing.department_confirmed = True
                 state.department_confirmation_required = True
                 state.department_confirmed = False
+                state.department_selection_page = 0
+                if command.photo_outcome == "partial_photo_read":
+                    state.photo_read_incomplete = True
             for extracted in items_to_add:
                 if selected_supplier:
                     extracted = extracted.model_copy(update={"supplier_hint": selected_supplier})
@@ -938,6 +945,11 @@ class ConversationEngine:
                     # а не новой строкой в черновике.  # noqa: RUF003
                     if item.quantity is not None:
                         same_missing.quantity = item.quantity
+                        same_missing.department = item.department
+                        same_missing.department_quantities = item.department_quantities.model_copy(
+                            deep=True
+                        )
+                        same_missing.department_confirmed = item.department_confirmed
                         same_missing.unit = item.unit or same_missing.catalog_unit
                         same_missing.suggested_quantity = suggested_quantity_for_multiple(
                             same_missing

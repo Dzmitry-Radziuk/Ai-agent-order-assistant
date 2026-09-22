@@ -129,18 +129,15 @@ class FinalReviewHandler:
 
     @staticmethod
     def _apply_department_selection(target: str, state: ConversationState) -> bool:
-        """Подтверждает распределение с фото или назначает весь заказ одному отделу."""
+        """Назначает отдел неразмеченным товарам, сохраняя уже известное распределение."""
         if not state.department_confirmation_required or state.department_confirmed:
             return False
+        active_items = [item for item in state.cart if item.status is not ItemStatus.SKIPPED]
+        unassigned_items = [item for item in active_items if not item.has_department_assignment()]
+        if not active_items:
+            return False
         if target == "preserve":
-            if not any(
-                any(
-                    value is not None and value > 0
-                    for value in item.department_quantities.model_dump().values()
-                )
-                for item in state.cart
-                if item.status is not ItemStatus.SKIPPED
-            ):
+            if unassigned_items:
                 return False
             state.department_confirmed = True
             state.department_selection_page = 0
@@ -150,11 +147,10 @@ class FinalReviewHandler:
         if department is None:
             return False
         state.department = department
-        for item in state.cart:
-            if item.status is ItemStatus.SKIPPED:
-                continue
+        for item in unassigned_items or active_items:
             item.department = department
             item.department_quantities = DepartmentQuantities()
+            item.department_confirmed = True
         state.department_confirmed = True
         state.department_selection_page = 0
         return True

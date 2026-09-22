@@ -116,46 +116,67 @@ def _position_range_label(start: int, end: int, total: int) -> str:
 
 def department_selection_reply(state: ConversationState) -> BotReply:
     """Просит явно подтвердить подразделение перед финальной проверкой."""
-    distributed_items = [item for item in _active_items(state) if _department_parts(item)]
+    items = _active_items(state)
+    distributed_items = [item for item in items if _department_parts(item)]
     has_photo_distribution = bool(distributed_items)
-    total_pages = page_count(len(distributed_items), CART_PAGE_SIZE)
+    unassigned_items = [item for item in items if not item.has_department_assignment()]
+    mixed_assignment = bool(unassigned_items) and len(unassigned_items) < len(items)
+    total_pages = page_count(len(items), CART_PAGE_SIZE)
     page = min(max(0, state.department_selection_page), total_pages - 1)
     start = page * CART_PAGE_SIZE
-    end = min(start + CART_PAGE_SIZE, len(distributed_items))
+    end = min(start + CART_PAGE_SIZE, len(items))
 
     lines = [
         f"🏷 {heading('К какому подразделению относится заказ?')}",
         "",
     ]
+    if state.photo_read_incomplete:
+        lines += [_PARTIAL_PHOTO_NOTICE, ""]
     rows: list[list[Button]] = []
-    if has_photo_distribution:
+    if items:
         lines += [
-            "На фото распознано распределение:",
-            _position_range_label(start + 1, end, len(distributed_items)) + ":",
+            "На фото распознано распределение:" if has_photo_distribution else "Товары заявки:",
+            _position_range_label(start + 1, end, len(items)) + ":",
             "",
-            *[
-                f"• {product_name(_item_name(item))}: "
-                + ", ".join(
+        ]
+        for item in items[start:end]:
+            parts = _department_parts(item)
+            assignment = (
+                ", ".join(
                     f"{escape(department)} {format_number(quantity)} "
                     f"{escape(_item_unit(item) or 'шт')}"
-                    for department, quantity in _department_parts(item)
+                    for department, quantity in parts
                 )
-                for item in distributed_items[start:end]
-            ],
-            "",
+                if parts
+                else f"{escape(item.department)} {format_number(item.quantity)} "
+                f"{escape(_item_unit(item) or 'шт')}"
+                if item.department_confirmed
+                else f"{format_number(item.quantity)} {escape(_item_unit(item) or 'шт')} "
+                "— подразделение не указано"
+            )
+            lines.append(f"• {product_name(_item_name(item))}: " + assignment)
+        lines.append("")
+    if mixed_assignment:
+        lines.append(
+            "Выберите подразделение для позиций, где оно не указано. "
+            "Распределение остальных товаров сохранится."
+        )
+    elif has_photo_distribution:
+        lines.append(
             "Если колонки прочитаны верно, сохраните распределение с фото. "
-            "Если весь заказ относится к одному подразделению, выберите его ниже.",
-        ]
-        rows.append([Button(text="Оставить как на фото", callback_data="v2:dept:preserve")])
-        navigation: list[Button] = []
-        if page > 0:
-            navigation.append(Button(text="← Назад", callback_data=f"v2:deptpage:{page - 1}"))
-        if page < total_pages - 1:
-            navigation.append(Button(text="Далее →", callback_data=f"v2:deptpage:{page + 1}"))
-        if navigation:
-            rows.append(navigation)
+            "Если весь заказ относится к одному подразделению, выберите его ниже."
+        )
     else:
         lines.append("Выберите подразделение. Я применю его ко всем позициям этой заявки.")
+    if items and not unassigned_items:
+        rows.append([Button(text="Оставить как на фото", callback_data="v2:dept:preserve")])
+    navigation: list[Button] = []
+    if page > 0:
+        navigation.append(Button(text="← Назад", callback_data=f"v2:deptpage:{page - 1}"))
+    if page < total_pages - 1:
+        navigation.append(Button(text="Далее →", callback_data=f"v2:deptpage:{page + 1}"))
+    if navigation:
+        rows.append(navigation)
     rows += [
         [Button(text="Зал", callback_data="v2:dept:hall")],
         [Button(text="Бар", callback_data="v2:dept:bar")],
@@ -510,6 +531,12 @@ def product_add_requests_reply(state: ConversationState) -> BotReply:
     return BotReply(text="\n".join(lines), rows=rows)
 
 
+_PARTIAL_PHOTO_NOTICE = (
+    "⚠️ Фото распознано не полностью. Добавлены только подтверждённые позиции. "
+    "Сверьте список с фото и добавьте недостающие товары перед отправкой заявки."
+)
+
+
 def cart_reply(
     state: ConversationState,
     title: str = "Черновик заявки",
@@ -530,6 +557,8 @@ def cart_reply(
         page_ready = ready
         page_issues = issues
     lines = [f"🧾 {heading(title)}", ""]
+    if state.photo_read_incomplete:
+        lines.extend([_PARTIAL_PHOTO_NOTICE, ""])
     if notice:
         lines.extend([f"<i>{escape(notice)}</i>", ""])
     if paginated:
@@ -867,6 +896,8 @@ def final_review_reply(state: ConversationState) -> BotReply:
     page_items = items[page * FINAL_REVIEW_PAGE_SIZE : (page + 1) * FINAL_REVIEW_PAGE_SIZE]
     paginated = total_pages > 1
     lines = [f"📦 {heading('Финальная проверка')}", ""]
+    if state.photo_read_incomplete:
+        lines.extend([_PARTIAL_PHOTO_NOTICE, ""])
     if paginated:
         lines.extend([f"Страница {page + 1} из {total_pages}", ""])
     for index, item in enumerate(

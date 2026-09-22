@@ -1,8 +1,11 @@
 """Проверяет поведение, связанное с модулем «test engine»."""
 
+import pytest
+
 from restaurant_bot.domain.models import (
     CatalogProduct,
     ConversationState,
+    DepartmentQuantities,
     ExtractedItem,
     InputKind,
     Intent,
@@ -37,6 +40,117 @@ def _catalog() -> list[CatalogProduct]:
             product_id="milk", name="Молоко 3,2%", supplier="Молочный двор", unit="л", price=80
         )
     ]
+
+
+@pytest.mark.parametrize("second_kind", [InputKind.PHOTO, InputKind.TEXT, InputKind.VOICE])
+@pytest.mark.parametrize("confirm_first", [False, True])
+def test_second_input_requires_own_department_without_reassigning_first(
+    settings, second_kind, confirm_first
+) -> None:  # type: ignore[no-untyped-def]
+    """Показывает обе позиции и сохраняет отдел первого фото при выборе для второго ввода."""
+    engine = ConversationEngine(settings)
+    catalog = [
+        *_catalog(),
+        CatalogProduct(product_id="bread", name="Хлеб", supplier="Пекарня", unit="шт"),
+    ]
+    state = engine.handle(
+        _photo_event(),
+        ParsedCommand(
+            intent=Intent.ADD_ITEMS,
+            items=[
+                ExtractedItem(
+                    product_query="Молоко 3,2%",
+                    quantity=2,
+                    unit="л",
+                    department_quantities=DepartmentQuantities(hall=2),
+                )
+            ],
+        ),
+        ConversationState(),
+        catalog,
+    ).state
+    if confirm_first:
+        engine.handle(_event(), ParsedCommand(intent=Intent.SUBMIT_REQUEST), state, catalog)
+        engine.handle(
+            _event(),
+            ParsedCommand(intent=Intent.SELECT_DEPARTMENT, callback_target="preserve"),
+            state,
+            catalog,
+        )
+        assert state.department_confirmed
+    state = ConversationState.model_validate_json(state.model_dump_json())
+    second = engine.handle(
+        TelegramEvent(update_id=3, chat_id="123456", input_type=second_kind),
+        ParsedCommand(
+            intent=Intent.ADD_ITEMS,
+            items=[
+                ExtractedItem(
+                    product_query="Хлеб",
+                    quantity=3,
+                    unit="шт",
+                )
+            ],
+        ),
+        state,
+        catalog,
+    )
+    review = engine.handle(
+        _event(), ParsedCommand(intent=Intent.SUBMIT_REQUEST), second.state, catalog
+    )
+    assert "Молоко 3,2%" in review.reply.text and "Хлеб" in review.reply.text
+    assert "подразделение не указано" in review.reply.text
+    assert "v2:dept:preserve" not in [b.callback_data for row in review.reply.rows for b in row]
+    stale = engine.handle(
+        _event(),
+        ParsedCommand(intent=Intent.SELECT_DEPARTMENT, callback_target="preserve"),
+        review.state,
+        catalog,
+    )
+    assert not stale.state.department_confirmed
+    selected = engine.handle(
+        _event(),
+        ParsedCommand(intent=Intent.SELECT_DEPARTMENT, callback_target="bar"),
+        stale.state,
+        catalog,
+    )
+    first, second_item = selected.state.cart
+    assert selected.state.department_confirmed
+    assert engine._submission_department_quantities(first) == [("Зал", 2)]
+    assert engine._submission_department_quantities(second_item) == [("Бар", 3)]
+    repeated = engine.handle(
+        _event(),
+        ParsedCommand(intent=Intent.SELECT_DEPARTMENT, callback_target="kitchen"),
+        selected.state,
+        catalog,
+    )
+    assert engine._submission_department_quantities(repeated.state.cart[1]) == [("Бар", 3)]
+
+
+def test_partial_photo_warning_survives_state_and_final_review(settings) -> None:  # type: ignore[no-untyped-def]
+    """Сохраняет предупреждение о неполном фото до явного подтверждения заявки."""
+    engine = ConversationEngine(settings)
+    result = engine.handle(
+        _photo_event(),
+        ParsedCommand(
+            intent=Intent.ADD_ITEMS,
+            photo_outcome="partial_photo_read",
+            items=[ExtractedItem(product_query="Молоко 3,2%", quantity=2, unit="л")],
+        ),
+        ConversationState(),
+        _catalog(),
+    )
+    assert "Фото распознано не полностью" in result.reply.text
+    state = ConversationState.model_validate_json(result.state.model_dump_json())
+    prompt = engine.handle(_event(), ParsedCommand(intent=Intent.SUBMIT_REQUEST), state, _catalog())
+    assert "Фото распознано не полностью" in prompt.reply.text
+    review = engine.handle(
+        _event(),
+        ParsedCommand(intent=Intent.SELECT_DEPARTMENT, callback_target="bar"),
+        state,
+        _catalog(),
+    )
+    assert "Фото распознано не полностью" in review.reply.text
+    assert not review.enqueue_submission
 
 
 def test_add_exact_product_to_draft(settings) -> None:  # type: ignore[no-untyped-def]

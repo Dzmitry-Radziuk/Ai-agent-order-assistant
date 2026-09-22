@@ -157,7 +157,7 @@ class InputRecognitionService:
         progress_text = (
             "📋 <b>Фото прочитано частично</b>\n\n"
             "Проверяю, можно ли надёжно использовать распознанные строки…"
-            if parsed.photo_outcome == "incomplete_photo_read"
+            if parsed.photo_outcome in {"incomplete_photo_read", "partial_photo_read"}
             else "📋 <b>Фото распознано</b>\n\nСверяю товары с каталогом…"
         )
         self.update_processing(event.chat_id, processing_message_id, progress_text)

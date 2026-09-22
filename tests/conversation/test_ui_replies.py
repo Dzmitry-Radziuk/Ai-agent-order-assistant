@@ -95,6 +95,30 @@ def test_department_selection_reply_uses_singular_and_spacing_for_one_position()
     assert "Позиции 1–1 из 1" not in reply.text
 
 
+def test_department_selection_paginates_mixed_items_and_blocks_partial_preserve() -> None:
+    """Показывает неразмеченный товар на следующей странице и не подтверждает его чужим отделом."""
+    state = ConversationState(
+        cart=[
+            CartItem(
+                id=str(index),
+                source_query=f"Товар {index}",
+                quantity=1,
+                status=ItemStatus.MATCHED,
+                department_quantities=DepartmentQuantities(bar=1),
+            )
+            for index in range(10)
+        ]
+        + [CartItem(id="last", source_query="Новый товар", quantity=2, status=ItemStatus.MATCHED)]
+    )
+    first = department_selection_reply(state)
+    assert "Позиции 1–10 из 11" in first.text
+    assert "v2:dept:preserve" not in [b.callback_data for row in first.rows for b in row]
+    state.department_selection_page = 1
+    last = department_selection_reply(state)
+    assert "Новый товар" in last.text and "подразделение не указано" in last.text
+    assert "Позиции 11–11 из 11" in last.text
+
+
 def test_cart_and_final_review_limit_product_pages_to_ten_items() -> None:
     """Ограничивает карточки черновика и проверки десятью товарами на странице."""
     state = ConversationState(
