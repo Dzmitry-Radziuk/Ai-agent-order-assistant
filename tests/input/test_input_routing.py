@@ -98,6 +98,113 @@ def test_standalone_final_review_word_is_state_aware_for_text_and_voice() -> Non
     provider.parse_text.assert_not_called()
 
 
+def test_add_and_check_voice_phrase_is_final_review_not_product() -> None:
+    """Не превращает голосовой аналог кнопки проверки в товар «и проверить»."""
+    provider = MagicMock()
+    provider.parse_text.return_value = ParsedCommand(
+        intent=Intent.ADD_ITEMS,
+        items=[ExtractedItem(product_query="и проверить")],
+    )
+    interpreter = TelegramInputInterpreter(
+        provider, lambda: MagicMock(), StateCompatibilityPolicy()
+    )
+
+    for phrase in (
+        "Добавить и проверить",
+        "Добавить в корзину и проверить",
+        "Пожалуйста, добавь товары и посмотри итог",
+    ):
+        command = interpreter.interpret_text(phrase, ConversationState())
+        assert command.intent is Intent.SHOW_FINAL_REVIEW
+        assert command.items == []
+
+    provider.parse_text.assert_not_called()
+
+
+def test_department_phrases_are_deterministic_for_text_and_voice_transcript() -> None:
+    """Маршрутизирует варианты выбора подразделения, не отправляя их в каталог."""
+    provider = MagicMock()
+    provider.parse_text.return_value = ParsedCommand(
+        intent=Intent.ADD_ITEMS,
+        items=[ExtractedItem(product_query="зал")],
+    )
+
+    class TranscriptRecognizer:
+        """Передаёт голосовую расшифровку в тот же текстовый маршрут."""
+
+        def recognize_media(
+            self,
+            event: TelegramEvent,
+            current_state: ConversationState,
+            parse_text: Callable[[str, ConversationState], ParsedCommand],
+            processing_message_id: int | None = None,
+        ) -> ParsedCommand:
+            """Использует канонический разбор расшифрованной фразы."""
+            return parse_text(event.text, current_state)
+
+    interpreter = TelegramInputInterpreter(
+        provider,
+        lambda: TranscriptRecognizer(),
+        StateCompatibilityPolicy(),
+    )
+    state = ConversationState(stage=SessionStage.REVIEW)
+    expected = {
+        "зал": "hall",
+        "бар": "bar",
+        "кухня": "kitchen",
+        "на зал": "hall",
+        "добавить на зал": "hall",
+        "пожалуйста, добавь на зал": "hall",
+        "подразделение зал": "hall",
+        "отдел зал": "hall",
+        "в отдел кухни": "kitchen",
+        "назначить отдел бар": "bar",
+        "выбери подразделение бар": "bar",
+        "назначить кухню": "kitchen",
+        "для кухни": "kitchen",
+    }
+
+    for phrase, target in expected.items():
+        text_command = interpreter.interpret(
+            TelegramEvent(update_id=1, chat_id="chat", input_type=InputKind.TEXT, text=phrase),
+            state,
+        )
+        voice_command = interpreter.interpret(
+            TelegramEvent(update_id=2, chat_id="chat", input_type=InputKind.VOICE, text=phrase),
+            state,
+        )
+        assert text_command.intent is voice_command.intent is Intent.SELECT_DEPARTMENT
+        assert text_command.callback_target == voice_command.callback_target == target
+        assert text_command.items == voice_command.items == []
+
+    provider.parse_text.assert_not_called()
+
+
+def test_inline_department_is_not_forwarded_to_ai_as_comment() -> None:
+    """Защищает отдел в строке товара от ошибочной AI-привязки к комментарию."""
+    provider = MagicMock()
+    provider.parse_text.return_value = ParsedCommand(
+        intent=Intent.ADD_ITEMS,
+        items=[ExtractedItem(product_query="горчица зернистая", comment="на зал")],
+    )
+    interpreter = TelegramInputInterpreter(
+        provider, lambda: MagicMock(), StateCompatibilityPolicy()
+    )
+
+    command = interpreter.interpret_text(
+        "горчица зернистая 10 шт на зал",
+        ConversationState(),
+    )
+
+    assert command.intent is Intent.ADD_ITEMS
+    assert command.items[0].product_query == "горчица зернистая"
+    assert command.items[0].quantity == 10
+    assert command.items[0].unit == "шт"
+    assert command.items[0].department == "Зал"
+    assert command.items[0].comment == ""
+    provider.parse_text.assert_not_called()
+
+
 def test_direct_commands_bypass_catalog_but_product_operations_read_it() -> None:
     """Проверяет, что direct команды обходит каталог but товар operations чтение it."""
     assert not UpdateOrchestrator._needs_catalog(ParsedCommand(intent=Intent.SHOW_CART))

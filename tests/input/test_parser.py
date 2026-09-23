@@ -21,6 +21,87 @@ def test_parses_quantity_and_unit_after_product_name() -> None:
     assert item.unit == "шт"
 
 
+@pytest.mark.parametrize(
+    ("phrase", "expected_query", "expected_department"),
+    [
+        ("Горчица зернистая 10 шт на зал", "Горчица зернистая", "Зал"),
+        ("Горчица10штназал", "Горчица", "Зал"),
+        ("Горчица 10шт на зал", "Горчица", "Зал"),
+        ("накухнюГорчица10шт", "Горчица", "Кухня"),
+        ("Горчица зернистая 10 шт зал", "Горчица зернистая", "Зал"),
+        ("Добавить горчицу 10 шт в отдел кухни", "горчицу", "Кухня"),
+        ("Горчица зернистая 10 шт подразделение бара", "Горчица зернистая", "Бар"),
+        ("На кухню горчица зернистая 10 шт", "горчица зернистая", "Кухня"),
+    ],
+)
+def test_parses_inline_department_as_item_assignment(
+    phrase: str,
+    expected_query: str,
+    expected_department: str,
+) -> None:
+    """Отдел в строке товара не превращается в комментарий или часть названия."""
+    command = infer_intent(phrase)
+
+    assert command.intent is Intent.ADD_ITEMS
+    assert len(command.items) == 1
+    item = command.items[0]
+    assert item.product_query == expected_query
+    assert item.department == expected_department
+    assert item.source_department == expected_department
+    assert item.comment == ""
+
+
+def test_catalog_product_phrase_for_kitchen_is_not_inline_department() -> None:
+    """Сохраняет «для кухни» в названии, если это не явное назначение отдела."""
+    command = infer_intent("Вино белое для кухни")
+
+    assert command.intent is Intent.ADD_ITEMS
+    assert command.items[0].product_query == "Вино белое для кухни"
+    assert command.items[0].department == ""
+
+
+@pytest.mark.parametrize(
+    ("phrase", "expected_departments", "expected_quantities"),
+    [
+        (
+            "Горчица зернистая 10 шт на зал, Хлеб Бородинский 2 шт на кухню",
+            ["Зал", "Кухня"],
+            [10, 2],
+        ),
+        ("На зал горчица зернистая 10 шт; в бар молоко 3 л", ["Зал", "Бар"], [10, 3]),
+        (
+            "Горчица зернистая 10 шт на отдел зала и Хлеб Бородинский 2 шт в отдел кухни",
+            ["Зал", "Кухня"],
+            [10, 2],
+        ),
+        ("Горчица10штназал,Хлеб2штнакухню", ["Зал", "Кухня"], [10, 2]),
+    ],
+)
+def test_parses_multiple_products_with_independent_departments(
+    phrase: str,
+    expected_departments: list[str],
+    expected_quantities: list[int],
+) -> None:
+    """Не объединяет позиции, если отдел указан у каждой товарной части."""
+    command = infer_intent(phrase)
+
+    assert command.intent is Intent.ADD_ITEMS
+    assert [item.department for item in command.items] == expected_departments
+    assert [item.quantity for item in command.items] == expected_quantities
+    assert [item.comment for item in command.items] == ["", ""]
+
+
+def test_logged_mixed_department_message_keeps_second_quantity_pending() -> None:
+    """Разделяет реальную смешанную фразу, даже если количество второй позиции не указано."""
+    command = infer_intent("горчица зернистая 10 шт на зал, хдеб бородинский на кухню")
+
+    assert [(item.product_query, item.department) for item in command.items] == [
+        ("горчица зернистая", "Зал"),
+        ("хдеб бородинский", "Кухня"),
+    ]
+    assert [item.quantity for item in command.items] == [10, None]
+
+
 def test_terminal_punctuation_is_not_a_supplier_comment() -> None:
     """Не превращает точку расшифровки голоса в комментарий."""
     item = parse_product_lines("Сыр швейцарский Сыробогатов 10 штук.")[0]

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import re
-from collections import defaultdict
 from copy import deepcopy
 from datetime import UTC, datetime
 
@@ -40,12 +39,7 @@ from restaurant_bot.conversation.item_intake import build_cart_item
 from restaurant_bot.conversation.product_add import clear_product_add_pending
 from restaurant_bot.conversation.progression import ProgressionKind
 from restaurant_bot.conversation.progression import advance as advance_progression
-from restaurant_bot.conversation.quantity_resolution import (
-    is_multiple_warning,
-    multiple_warnings,
-    select_multiple_warning,
-    suggested_quantity_for_multiple,
-)
+from restaurant_bot.conversation.quantity_resolution import suggested_quantity_for_multiple
 from restaurant_bot.conversation.routing.contextual_commands import ContextualCommandPolicy
 from restaurant_bot.conversation.routing.contracts import (
     CompatibilityAction,
@@ -60,7 +54,6 @@ from restaurant_bot.conversation.routing.state_compatibility import (
 )
 from restaurant_bot.conversation.selection import (
     CandidateReferenceStatus,
-    find_cart_item,
     resolve_candidate_reference,
 )
 from restaurant_bot.conversation.state.queries import (
@@ -71,7 +64,6 @@ from restaurant_bot.conversation.state.transitions import (
     clear_transient_dialog_state,
     normalize_cart_page,
 )
-from restaurant_bot.domain.departments import normalize_department
 from restaurant_bot.domain.models import (
     BotReply,
     Button,
@@ -86,13 +78,10 @@ from restaurant_bot.domain.models import (
     Intent,
     ItemStatus,
     ParsedCommand,
-    PendingSubmission,
     SearchScope,
     SessionStage,
 )
 from restaurant_bot.domain.text import normalize_text
-from restaurant_bot.domain.unit_conversion import convert_quantity
-from restaurant_bot.domain.units import normalize_unit
 from restaurant_bot.input.telegram_visible_actions import (
     available_cart_pages,
     available_final_review_pages,
@@ -121,7 +110,6 @@ from restaurant_bot.presentation.telegram.replies import (
     added_items_question_reply,
     comment_scope_clarification_reply,
     issue_reply,
-    multiple_quantity_choice_reply,
     new_order_confirmation_reply,
     new_order_started_reply,
     no_current_manual_reply,
@@ -131,7 +119,6 @@ from restaurant_bot.presentation.telegram.replies import (
     product_add_sending_reply,
     review_or_department_reply,
     start_adding_supplier_reply,
-    submission_retry_reply,
     supplier_warning_choose_reply,
     supplier_warning_details_reply,
     unknown_intent_reply,
@@ -158,6 +145,10 @@ from restaurant_bot.services.conversation_handlers.navigation import (
 from restaurant_bot.services.conversation_handlers.pending_quantity import (
     PendingQuantityAction,
     PendingQuantityHandler,
+)
+from restaurant_bot.services.engine_quantity_flow import EngineQuantityFlowService
+from restaurant_bot.services.engine_submission_preparation import (
+    EngineSubmissionPreparationService,
 )
 
 
@@ -981,6 +972,10 @@ class ConversationEngine:
                     ItemStatus.AI_PENDING,
                 }:
                     newly_unresolved_ids.append(item.id)
+            active_items = [item for item in state.cart if item.status is not ItemStatus.SKIPPED]
+            state.department_confirmed = bool(active_items) and all(
+                item.department_confirmed for item in active_items
+            )
             if selected_supplier:
                 state.supplier_hint_context = ""
             if command.global_comment:
@@ -1178,7 +1173,15 @@ class ConversationEngine:
                 previous_submission_pending=(
                     state.stage is SessionStage.SUBMISSION_FAILED
                     and state.pending_submission is not None
-                )
+                ),
+                previous_dispatch_uncertain=(
+                    state.pending_submission is not None
+                    and state.pending_submission.failed_stage == "dispatch_uncertain"
+                ),
+                previous_recalculation_pending=(
+                    state.pending_submission is not None
+                    and state.pending_submission.failed_stage == "recalculation_uncertain"
+                ),
             ),
             invalidate_catalog=invalidate_catalog,
         )
@@ -1341,10 +1344,14 @@ class ConversationEngine:
                 product_query=extracted.product_query,
             )
             if authorization.provenance is QuantityProvenance.ORDER:
+                previous_quantity = item.quantity
                 item.quantity = authorization.quantity
                 item.unit = authorization.unit
                 item.quantity_user_edited = True
-                state.refresh_department_after_quantity_change(item)
+                state.refresh_department_after_quantity_change(
+                    item,
+                    previous_quantity=previous_quantity,
+                )
                 if extracted.quantity_source:
                     item.quantity_source = extracted.quantity_source
         self.catalog_resolution.apply_catalog(item, outcome.candidate, catalog)
@@ -1364,109 +1371,51 @@ class ConversationEngine:
         return self._advance(state)
 
     def _use_catalog_unit(self, state: ConversationState) -> EngineResult:
-        """Принимает единицу измерения из каталога."""
-        item = state.current_item()
-        if item is None:
-            return EngineResult(state=state, reply=cart_reply(state))
-        if item.catalog_unit:
-            converted = convert_quantity(item.quantity or 0, item.unit, item.catalog_unit)
-            if converted is not None:
-                item.quantity = converted
-            item.unit = item.catalog_unit
-        item.status = ItemStatus.MATCHED if item.quantity else ItemStatus.MISSING_QTY
-        return self._advance(state)
+        """Передаёт принятие единицы специализированному потоку количества."""
+        return EngineQuantityFlowService(self, cart_renderer=cart_reply).use_catalog_unit(state)
 
     def _accept_suggested_quantity(self, state: ConversationState) -> EngineResult:
-        """Принимает рекомендуемое количество товара."""
-        item = state.current_item()
-        if item is None:
-            return EngineResult(state=state, reply=cart_reply(state))
-        if item.suggested_quantity is not None:
-            item.quantity = item.suggested_quantity
-            item.quantity_user_edited = True
-            state.refresh_department_after_quantity_change(item)
-        item.status = ItemStatus.MATCHED if item.quantity else ItemStatus.MISSING_QTY
-        return self._advance_multiple_quantity_choice(state)
+        """Передаёт принятие рекомендации специализированному потоку количества."""
+        return EngineQuantityFlowService(
+            self,
+            cart_renderer=cart_reply,
+        ).accept_suggested_quantity(state)
 
     def _keep_current_quantity(self, state: ConversationState) -> EngineResult:
-        """Сохраняет текущее количество позиции."""
-        item = state.current_item()
-        if item is None:
-            return EngineResult(state=state, reply=cart_reply(state))
-        item.suggested_quantity = None
-        item.status = ItemStatus.MATCHED if item.quantity else ItemStatus.MISSING_QTY
-        return self._advance_multiple_quantity_choice(state)
+        """Передаёт сохранение текущего количества специализированному потоку."""
+        return EngineQuantityFlowService(
+            self,
+            cart_renderer=cart_reply,
+        ).keep_current_quantity(state)
 
     def _enter_other_quantity(self, state: ConversationState) -> EngineResult:
-        """Переводит диалог к ручному вводу количества."""
-        item = state.current_item()
-        if item is None:
-            return EngineResult(state=state, reply=cart_reply(state))
-        state.stage = (
-            SessionStage.AWAIT_UNIT_QUANTITY
-            if item.status == ItemStatus.UNIT_MISMATCH
-            else SessionStage.AWAIT_MULTIPLE_QUANTITY
-        )
-        expected_unit = item.catalog_unit or item.unit
-        if item.status == ItemStatus.UNIT_MISMATCH and expected_unit:
-            prompt = (
-                f"Укажите количество в {expected_unit} одним сообщением. "
-                f"Например: 5 {expected_unit}."
-            )
-        else:
-            example = f"5 {expected_unit}".strip()
-            prompt = f"Укажите другое количество одним сообщением. Например: {example}."
-        return EngineResult(
-            state=state,
-            reply=BotReply(
-                text=prompt,
-                rows=[
-                    [Button(text="Вернуться к вариантам", callback_data="v2:resolve")],
-                    [
-                        Button(
-                            text="Не добавлять",
-                            callback_data=f"v2:skip:{state_item_index(state, item)}",
-                        )
-                    ],
-                ],
-            ),
-        )
+        """Передаёт ручной ввод количества специализированному потоку."""
+        return EngineQuantityFlowService(
+            self,
+            cart_renderer=cart_reply,
+        ).enter_other_quantity(state)
 
     @staticmethod
     def _select_multiple_warning_for_callback(
         command: ParsedCommand,
         state: ConversationState,
     ) -> CartItem | None:
-        """Привязывает кнопку выбора количества к конкретной позиции черновика."""
-        target = command.callback_target
-        if target:
-            item = next((item for item in state.cart if item.id == target), None)
-            if item is not None and is_multiple_warning(item):
-                state.current_issue_item_id = item.id
-                return item
-        return select_multiple_warning(state)
+        """Передаёт привязку callback специализированному потоку количества."""
+        return EngineQuantityFlowService.select_multiple_warning_for_callback(command, state)
 
     def _show_multiple_quantity_choice(self, state: ConversationState) -> EngineResult:
-        """Открывает варианты количества без автоматического изменения."""
-        item = select_multiple_warning(state)
-        if item is None:
-            state.current_issue_item_id = ""
-            return EngineResult(state=state, reply=review_or_department_reply(state))
-        state.stage = SessionStage.AWAIT_SUBMIT_CONFIRM
-        state.status = "await_multiple_choice"
-        return EngineResult(state=state, reply=multiple_quantity_choice_reply(item))
+        """Передаёт открытие вариантов специализированному потоку количества."""
+        return EngineQuantityFlowService(
+            self,
+            cart_renderer=cart_reply,
+        ).show_multiple_quantity_choice(state)
 
     def _advance_multiple_quantity_choice(self, state: ConversationState) -> EngineResult:
-        """Показывает следующий выбор количества или финальную проверку."""
-        state.current_issue_item_id = ""
-        next_item = select_multiple_warning(state)
-        if next_item is not None:
-            state.stage = SessionStage.AWAIT_SUBMIT_CONFIRM
-            state.status = "await_multiple_choice"
-            return EngineResult(state=state, reply=multiple_quantity_choice_reply(next_item))
-        state.stage = SessionStage.AWAIT_SUBMIT_CONFIRM
-        state.status = "await_submit_confirm"
-        return EngineResult(state=state, reply=review_or_department_reply(state))
+        """Передаёт следующий выбор специализированному потоку количества."""
+        return EngineQuantityFlowService(
+            self,
+            cart_renderer=cart_reply,
+        ).advance_multiple_quantity_choice(state)
 
     def _skip_current(self, state: ConversationState) -> EngineResult:
         """Пропускает текущую позицию."""
@@ -1480,11 +1429,25 @@ class ConversationEngine:
 
     def _remove_item(self, command: ParsedCommand, state: ConversationState) -> EngineResult:
         """Удаляет выбранную позицию из черновика."""
-        outcome = remove_draft_item(command, state).outcome
-        if outcome is DraftActionOutcome.ADVANCE:
+        result = remove_draft_item(command, state)
+        if result.outcome is DraftActionOutcome.ADVANCE:
             return self._advance(state)
-        if outcome is DraftActionOutcome.REMOVED:
+        if result.outcome is DraftActionOutcome.REMOVED:
             return EngineResult(state=state, reply=cart_reply(state, notice="Позиция удалена"))
+        if result.outcome is DraftActionOutcome.AMBIGUOUS:
+            names = result.candidate_names[:5]
+            choices = "\n".join(f"• {name}" for name in names)
+            if len(result.candidate_names) > len(names):
+                choices += f"\n• и ещё {len(result.candidate_names) - len(names)}"
+            return EngineResult(
+                state=state,
+                reply=BotReply(
+                    text=(
+                        "Нашёл несколько похожих позиций в черновике. Уточните, какую удалить:\n"
+                        f"{choices}"
+                    )
+                ),
+            )
         return EngineResult(state=state, reply=BotReply(text="Не нашёл такую позицию в черновике."))
 
     def _edit_existing_comment(
@@ -1593,130 +1556,20 @@ class ConversationEngine:
         return EngineResult(state=state, reply=cart_reply(state, notice=notice))
 
     def _edit_quantity(self, command: ParsedCommand, state: ConversationState) -> EngineResult:
-        """Изменяет количество выбранной позиции."""
-        if command.edit_quantity is None:
-            return EngineResult(state=state, reply=BotReply(text="Укажите новое количество."))
-        target = normalize_text(command.target_query)
-        item = state.current_item()
-        if target:
-            item = find_cart_item(state, command.target_query)
-        if item is None:
-            return EngineResult(
-                state=state, reply=BotReply(text="Позиция для изменения не найдена.")
-            )
-        was_multiple_choice = item in multiple_warnings(state) and state.stage in {
-            SessionStage.AWAIT_SUBMIT_CONFIRM,
-            SessionStage.AWAIT_MULTIPLE_QUANTITY,
-        }
-        quantity = command.edit_quantity
-        if (
-            command.edit_unit
-            and item.catalog_unit
-            and normalize_unit(command.edit_unit) != normalize_unit(item.catalog_unit)
-        ):
-            item.quantity = quantity
-            item.quantity_user_edited = True
-            state.refresh_department_after_quantity_change(item)
-            item.unit = normalize_unit(command.edit_unit)
-            item.status = ItemStatus.UNIT_MISMATCH
-            return self._advance(state)
-        item.quantity = quantity
-        item.quantity_user_edited = True
-        state.refresh_department_after_quantity_change(item)
-        item.unit = item.catalog_unit or command.edit_unit or item.unit
-        if item.catalog_product_id:
-            item.status = ItemStatus.MATCHED
-            item.suggested_quantity = suggested_quantity_for_multiple(item)
-        if was_multiple_choice:
-            return self._advance_multiple_quantity_choice(state)
-        return self._advance(state)
+        """Передаёт изменение количества специализированному потоку."""
+        return EngineQuantityFlowService(
+            self,
+            cart_renderer=cart_reply,
+        ).edit_quantity(command, state)
 
     def _prepare_submission(
         self, event: ConversationInteraction, state: ConversationState
     ) -> EngineResult:
-        """Фиксирует черновик для надёжной отправки."""
-        if (
-            state.pending_submission
-            and state.pending_submission.failed_stage == "dispatch_uncertain"
-        ):
-            return EngineResult(
-                state=state,
-                reply=submission_dispatch_uncertain_reply(
-                    state,
-                    state.pending_submission.order_no,
-                ),
-            )
-        if (
-            state.pending_submission
-            and state.pending_submission.order_no
-            and state.pending_submission.rows
-        ):
-            state.pending_submission.last_attempt_at = datetime.now(UTC)
-            state.pending_submission.last_error = ""
-            state.stage = SessionStage.SUBMITTING
-            state.status = "submitting"
-            return EngineResult(
-                state=state,
-                reply=submission_retry_reply(state.pending_submission.order_no),
-                enqueue_submission=True,
-            )
-        matched = [item for item in state.cart if item.status == ItemStatus.MATCHED]
-        if not matched:
-            return EngineResult(state=state, reply=cart_reply(state))
-        now = datetime.now(UTC)
-        order_no = f"{now:%Y%m%d-%H%M%S}-{event.conversation_id[-4:]}"
-        supplier_totals: dict[str, float] = defaultdict(float)
-        for item in matched:
-            supplier_totals[item.supplier] += item.amount
-        rows = []
-        for item in matched:
-            for department, quantity in self._submission_department_quantities(item):
-                amount = quantity * item.price if item.price is not None else 0.0
-                rows.append(
-                    {
-                        "Время создания заявки": now.isoformat(),
-                        "Время изменения": now.isoformat(),
-                        "ID заявки": f"{item.supplier}|{state.restaurant}|{order_no}",
-                        "№ Заявки": order_no,
-                        "Условное название поставщика": item.supplier,
-                        "Условное наз-ие заведения": state.restaurant,
-                        "Роль": department,
-                        "ID товара": item.catalog_product_id,
-                        "Наименование у поставщика": item.catalog_name,
-                        "Ед.Изм. для заказа": item.catalog_unit,
-                        "Минимальная Кратность в заказе": item.minimum_multiple or "",
-                        "Полезный V, m Нетто Ед.Изм.для Заказа": item.useful_volume or "",
-                        "Цена за Ед.Изм. для заказа": item.price or "",
-                        "Кол-во": quantity or "",
-                        "Мин сумма Заказа по Поставщику": item.supplier_minimum_amount or "",
-                        "Комментарий": item.comment,
-                        "Сумма по товару в заказе": amount,
-                        "Сумма по заявке к поставщику": supplier_totals[item.supplier],
-                        "Стадия": "Новая заявка",
-                        "Стадия от Заведения": "",
-                        "_department": department,
-                    }
-                )
-        state.pending_submission = PendingSubmission(
-            order_no=order_no,
-            trace_id=state.order_trace_id,
-            telegram_user_id=event.actor_id or event.conversation_id,
-            telegram_chat_id=event.conversation_id,
-            rows=rows,
-            spreadsheet_id=state.spreadsheet_id,
-            venue_code=state.venue_code,
-        )
-        state.stage = SessionStage.SUBMITTING
-        progress = (
-            "Отправляю заявку"
-            if self.settings.google_order_submission_enabled
-            else "Подготавливаю заявку"
-        )
-        return EngineResult(
-            state=state,
-            reply=BotReply(text=f"{progress}..."),
-            enqueue_submission=True,
-        )
+        """Передаёт подготовку снимка заявки специализированному сервису."""
+        return EngineSubmissionPreparationService(
+            self,
+            cart_renderer=cart_reply,
+        ).prepare(event, state)
 
     def _handle_submission_failed_recovery(
         self,
@@ -1782,17 +1635,5 @@ class ConversationEngine:
 
     @staticmethod
     def _submission_department_quantities(item: CartItem) -> list[tuple[str, float]]:
-        """Возвращает количества позиции по отделам для записи в таблицу."""
-        if item.quantity_user_edited:
-            return [(normalize_department(item.department) or "Кухня", item.quantity or 0)]
-        department_values = (
-            ("Зал", item.department_quantities.hall),
-            ("Бар", item.department_quantities.bar),
-            ("Кухня", item.department_quantities.kitchen),
-        )
-        rows = [
-            (department, value) for department, value in department_values if value and value > 0
-        ]
-        if rows:
-            return rows
-        return [(normalize_department(item.department) or "Кухня", item.quantity or 0)]
+        """Передаёт распределение количества специализированному сервису."""
+        return EngineSubmissionPreparationService.department_quantities(item)

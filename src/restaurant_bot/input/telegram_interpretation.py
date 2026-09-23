@@ -222,10 +222,18 @@ class TelegramInputInterpreter:
                 return ParsedCommand(intent=Intent.UNKNOWN, text=text)
         deterministic = self._normalize_explicit_comment(text, infer_intent(text), state)
         deterministic = self._authorize_candidate_command(deterministic, state, text)
-        if deterministic.intent is Intent.ORDER_STATUS:
+        if deterministic.intent in {
+            Intent.ORDER_STATUS,
+            Intent.SELECT_DEPARTMENT,
+            Intent.SHOW_FINAL_REVIEW,
+        }:
             return deterministic
         delivery_wish = has_delivery_wish_shape(text)
         proven_mutation = self._is_proven_mutation(deterministic)
+        if deterministic.intent is Intent.ADD_ITEMS and any(
+            item.department for item in deterministic.items
+        ):
+            return deterministic
         if deterministic.intent is Intent.EDIT_COMMENT and proven_mutation:
             return deterministic
         parsed = self.provider.parse_text(text)

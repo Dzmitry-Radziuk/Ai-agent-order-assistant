@@ -63,6 +63,7 @@ def build_cart_item(
         unit=unit,
         department=normalize_department(extracted.department) or default_department,
         department_quantities=extracted.department_quantities.model_copy(deep=True),
+        department_confirmed=bool(extracted.source_department),
         supplier_hint=extracted.supplier_hint,
         comment=merge_comments(item_comment, global_comment),
         order_comment_fragments=normalized_comment_fragments(global_comment),

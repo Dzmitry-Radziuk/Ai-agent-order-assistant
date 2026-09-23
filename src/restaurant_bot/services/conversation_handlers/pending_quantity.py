@@ -158,9 +158,13 @@ class PendingQuantityHandler:
         quantity, unit = self.spoken_quantity(text)
         if quantity is None:
             return PendingQuantityAction.NOT_HANDLED
+        previous_quantity = item.quantity
         item.quantity = quantity
         item.quantity_user_edited = True
-        state.refresh_department_after_quantity_change(item)
+        state.refresh_department_after_quantity_change(
+            item,
+            previous_quantity=previous_quantity,
+        )
         item.unit = unit or item.catalog_unit or item.unit
         short_quantity, short_unit = self.spoken_unit_only_quantity(text)
         if (

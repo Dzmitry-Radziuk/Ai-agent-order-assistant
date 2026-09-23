@@ -65,6 +65,17 @@ def submission_local_saved_reply(state: Any, order_no: str) -> BotReply:
     )
 
 
+def submission_recalculation_recovered_reply(order_no: str) -> BotReply:
+    """Сообщает, что сохранённая заявка завершила фоновое обновление расчётов."""
+    return BotReply(
+        text=(
+            f"<i>Предыдущая заявка обработана</i>\n\nНомер заявки: {escape(order_no)}\n\n"
+            "Товары сохранены в таблице, расчёты обновлены. Поставщикам заявку передаст "
+            "ответственный сотрудник. Текущий черновик не изменён."
+        )
+    )
+
+
 def submission_failure_reply(state: Any, order_no: str) -> BotReply:
     """Формирует безопасную карточку незавершённой отправки."""
     return BotReply(

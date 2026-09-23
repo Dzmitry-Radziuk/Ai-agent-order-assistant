@@ -13,6 +13,7 @@ from restaurant_bot.domain.models import (
     SessionStage,
     TelegramEvent,
 )
+from restaurant_bot.parsing.commands.api import infer_intent
 from restaurant_bot.services.conversation_handlers.candidate_selection import (
     CandidateSelectionHandler,
 )
@@ -279,6 +280,32 @@ def test_department_selection_reassigns_entire_photo_order() -> None:
     assert item.department == "Кухня"
     assert item.department_quantities == DepartmentQuantities()
     assert "5 шт · Кухня" in outcome.result.reply.text
+
+
+def test_text_department_command_uses_existing_selection_flow() -> None:
+    """Применяет текст «добавить на зал» как выбор подразделения заявки."""
+    item = CartItem(
+        id="matched",
+        source_query="Горчица",
+        quantity=5,
+        unit="шт",
+        status=ItemStatus.MATCHED,
+        catalog_product_id="mustard",
+    )
+    state = ConversationState(
+        cart=[item],
+        department_confirmation_required=True,
+    )
+
+    command = infer_intent("добавить на зал")
+    outcome = FinalReviewHandler().handle(command, state)
+
+    assert command.intent is Intent.SELECT_DEPARTMENT
+    assert command.callback_target == "hall"
+    assert outcome is not None and outcome.result is not None
+    assert state.department_confirmed is True
+    assert item.department == "Зал"
+    assert "5 шт · Зал" in outcome.result.reply.text
 
 
 def test_passive_intent_handler_uses_explicit_dispatch_table() -> None:

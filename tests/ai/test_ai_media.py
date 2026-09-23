@@ -768,6 +768,19 @@ def test_simple_single_product_with_terminal_punctuation_skips_ai(settings) -> N
     assert command.items[0].comment == ""
 
 
+def test_inline_department_skips_ai_and_is_not_a_comment(settings) -> None:  # type: ignore[no-untyped-def]
+    """Разбирает отдел внутри строки локально и не отправляет его как комментарий."""
+    service = _service(settings, SimpleNamespace(responses=_FailingResponses()))
+
+    command = service.parse_text("Горчица зернистая 10 шт на зал")
+
+    assert command.intent is Intent.ADD_ITEMS
+    assert len(command.items) == 1
+    assert command.items[0].product_query == "Горчица зернистая"
+    assert command.items[0].department == "Зал"
+    assert command.items[0].comment == ""
+
+
 def test_single_product_with_comment_still_uses_semantic_ai(settings) -> None:  # type: ignore[no-untyped-def]
     """Оставляет ИИ сообщения с пользовательским комментарием."""
     text = "Сыр швейцарский Сыробогатов 10 штук обязательно свежий"

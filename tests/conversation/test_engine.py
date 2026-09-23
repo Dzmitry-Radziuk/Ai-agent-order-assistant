@@ -3,6 +3,7 @@
 import pytest
 
 from restaurant_bot.domain.models import (
+    CartItem,
     CatalogProduct,
     ConversationState,
     DepartmentQuantities,
@@ -13,6 +14,7 @@ from restaurant_bot.domain.models import (
     ParsedCommand,
     TelegramEvent,
 )
+from restaurant_bot.parsing.commands.router import parse_text_command
 from restaurant_bot.parsing.products import parse_product_lines
 from restaurant_bot.services.engine import ConversationEngine
 
@@ -40,6 +42,78 @@ def _catalog() -> list[CatalogProduct]:
             product_id="milk", name="Молоко 3,2%", supplier="Молочный двор", unit="л", price=80
         )
     ]
+
+
+def test_partial_remove_query_shows_similar_draft_items_without_mutating(settings) -> None:  # type: ignore[no-untyped-def]
+    """Просит уточнение вместо ложного «не найдено» при нескольких товарах."""
+    engine = ConversationEngine(settings)
+    state = ConversationState(
+        cart=[
+            CartItem(
+                id="wine-kitchen",
+                source_query="Вино красное",
+                catalog_name="Вино красное ДЛЯ КУХНИ",
+                status=ItemStatus.MATCHED,
+            ),
+            CartItem(
+                id="wine-table",
+                source_query="Вино красное",
+                catalog_name="Вино красное столовое сухое",
+                status=ItemStatus.MATCHED,
+            ),
+        ]
+    )
+
+    command = parse_text_command("Убери Вино красное -20")
+    assert command.intent is Intent.REMOVE_ITEM
+    result = engine.handle(_event(command.text), command, state, [])
+
+    assert "Нашёл несколько похожих позиций" in result.reply.text
+    assert "Вино красное ДЛЯ КУХНИ" in result.reply.text
+    assert "Вино красное столовое сухое" in result.reply.text
+    assert [item.status for item in result.state.cart] == [
+        ItemStatus.MATCHED,
+        ItemStatus.MATCHED,
+    ]
+
+
+def test_partial_quantity_edit_shows_similar_draft_items_without_mutating(
+    settings,
+) -> None:  # type: ignore[no-untyped-def]
+    """Не меняет количество, если частичное название совпало с разными товарами."""
+    engine = ConversationEngine(settings)
+    state = ConversationState(
+        cart=[
+            CartItem(
+                id="wine-kitchen",
+                source_query="Вино красное",
+                catalog_name="Вино красное ДЛЯ КУХНИ",
+                quantity=1,
+                status=ItemStatus.MATCHED,
+            ),
+            CartItem(
+                id="wine-table",
+                source_query="Вино красное",
+                catalog_name="Вино красное столовое сухое",
+                quantity=2,
+                status=ItemStatus.MATCHED,
+            ),
+        ]
+    )
+
+    result = engine.handle(
+        _event("Измени количество у Вино красное -20 на 3"),
+        ParsedCommand(
+            intent=Intent.EDIT_QUANTITY,
+            target_query="Вино красное -20",
+            edit_quantity=3,
+        ),
+        state,
+        [],
+    )
+
+    assert "Нашёл несколько похожих позиций" in result.reply.text
+    assert [item.quantity for item in result.state.cart] == [1, 2]
 
 
 @pytest.mark.parametrize("second_kind", [InputKind.PHOTO, InputKind.TEXT, InputKind.VOICE])
@@ -124,6 +198,37 @@ def test_second_input_requires_own_department_without_reassigning_first(
         catalog,
     )
     assert engine._submission_department_quantities(repeated.state.cart[1]) == [("Бар", 3)]
+
+
+def test_inline_department_is_confirmed_without_extra_selection(settings) -> None:  # type: ignore[no-untyped-def]
+    """Показывает явно указанный в строке товара отдел как подтверждённый."""
+    catalog = _catalog()
+    command = ParsedCommand(
+        intent=Intent.ADD_ITEMS,
+        items=[
+            ExtractedItem(
+                product_query="Молоко 3,2%",
+                quantity=2,
+                unit="л",
+                department="Бар",
+                source_department="Бар",
+            )
+        ],
+    )
+
+    engine = ConversationEngine(settings)
+    state = engine.handle(_event(), command, ConversationState(), catalog).state
+    review = engine.handle(
+        _event(),
+        ParsedCommand(intent=Intent.SUBMIT_REQUEST),
+        state,
+        catalog,
+    )
+
+    assert state.department_confirmed is True
+    assert state.cart[0].department_confirmed is True
+    assert "2 л · Бар" in review.reply.text
+    assert "подразделение не указано" not in review.reply.text
 
 
 def test_partial_photo_warning_survives_state_and_final_review(settings) -> None:  # type: ignore[no-untyped-def]

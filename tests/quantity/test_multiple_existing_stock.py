@@ -252,12 +252,17 @@ def test_fix_multiple_button_opens_choice_without_changing_quantity(settings) ->
     assert choice.state.current_issue_item_id == "beef"
     assert "Выберите количество" in choice.reply.text
     assert [row[0].callback_data for row in choice.reply.rows[:3]] == [
-        "v2:accept_multiple",
-        "v2:enter_quantity",
-        "v2:keep_current",
+        "v2:accept_multiple:beef",
+        "v2:enter_quantity:beef",
+        "v2:keep_current:beef",
     ]
 
-    accepted = engine.handle(_event(), parse_callback("v2:accept_multiple"), choice.state, [])
+    accepted = engine.handle(
+        _event(),
+        parse_callback("v2:accept_multiple:beef"),
+        choice.state,
+        [],
+    )
 
     assert accepted.state.cart[0].quantity == 20
     assert "Финальная проверка" in accepted.reply.text

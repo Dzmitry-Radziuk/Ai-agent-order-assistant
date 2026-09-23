@@ -165,6 +165,85 @@ def test_accepting_suggested_quantity_keeps_single_department(settings) -> None:
     ]
 
 
+def test_accepting_photo_quantities_keeps_each_line_department(settings) -> None:  # type: ignore[no-untyped-def]
+    """Сохраняет отделы фото при последовательном принятии допустимых количеств."""
+    engine = ConversationEngine(settings)
+    items = [
+        CartItem(
+            id="kitchen",
+            source_query="Куриное филе",
+            quantity=6,
+            department="Кухня",
+            department_quantities=DepartmentQuantities(kitchen=6),
+            status=ItemStatus.MATCHED,
+        ),
+        CartItem(
+            id="hall",
+            source_query="Куриное филе",
+            quantity=20,
+            department="Зал",
+            department_quantities=DepartmentQuantities(hall=20),
+            minimum_multiple=7,
+            suggested_quantity=21,
+            status=ItemStatus.MATCHED,
+        ),
+        CartItem(
+            id="bar",
+            source_query="Куриное филе",
+            quantity=2,
+            department="Бар",
+            department_quantities=DepartmentQuantities(bar=2),
+            minimum_multiple=3,
+            suggested_quantity=3,
+            status=ItemStatus.MATCHED,
+        ),
+    ]
+    state = ConversationState(
+        stage=SessionStage.AWAIT_SUBMIT_CONFIRM,
+        cart=items,
+        current_issue_item_id="hall",
+        department_confirmation_required=True,
+        department_confirmed=True,
+    )
+
+    accepted_hall = engine.handle(
+        TelegramEvent(
+            update_id=1,
+            chat_id="123456",
+            input_type=InputKind.CALLBACK,
+            callback_data="v2:accept_multiple:hall",
+        ),
+        parse_callback("v2:accept_multiple:hall"),
+        state,
+        [],
+    )
+    accepted_bar = engine.handle(
+        TelegramEvent(
+            update_id=2,
+            chat_id="123456",
+            input_type=InputKind.CALLBACK,
+            callback_data="v2:accept_multiple:bar",
+        ),
+        parse_callback("v2:accept_multiple:bar"),
+        accepted_hall.state,
+        [],
+    )
+
+    assert accepted_hall.state.cart[1].department_quantities == DepartmentQuantities(hall=21)
+    assert accepted_bar.state.cart[2].department_quantities == DepartmentQuantities(bar=3)
+    assert accepted_bar.state.department_confirmed is True
+    assert [engine._submission_department_quantities(item) for item in accepted_bar.state.cart] == [
+        [("Кухня", 6)],
+        [("Зал", 21)],
+        [("Бар", 3)],
+    ]
+    assert not any(
+        button.callback_data.startswith("v2:dept:")
+        for row in accepted_bar.reply.rows
+        for button in row
+    )
+
+
 def test_quantity_change_reconfirms_preserved_photo_distribution(settings) -> None:  # type: ignore[no-untyped-def]
     """Повторно просит проверить распределение по отделам после изменения количества с фото."""
     engine = ConversationEngine(settings)
@@ -318,7 +397,9 @@ def test_quantity_edit_keeps_shared_short_name_ambiguous(settings) -> None:  # t
     )
 
     assert [item.quantity for item in result.state.cart] == [3, 2]
-    assert result.reply.text == "Позиция для изменения не найдена."
+    assert "Нашёл несколько похожих позиций" in result.reply.text
+    assert "Горчица дижонская" in result.reply.text
+    assert "Горчица дижонская большое зерно" in result.reply.text
 
 
 def test_voice_removal_ignores_draft_location_in_product_name(settings) -> None:  # type: ignore[no-untyped-def]
@@ -484,4 +565,4 @@ def test_accept_multiple_then_shows_supplier_minimum_warning(settings) -> None: 
 
     assert result.state.cart[0].quantity == 3
     assert "Минимальная сумма поставщика" in result.reply.text
-    assert "300 ₽ из 5 000 ₽" in result.reply.text
+    assert "300 ₽ из 5000 ₽" in result.reply.text

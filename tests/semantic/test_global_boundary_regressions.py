@@ -3,6 +3,7 @@
 from restaurant_bot.catalog.evidence import numeric_evidence
 from restaurant_bot.catalog.resolver import CatalogResolver
 from restaurant_bot.config import Settings
+from restaurant_bot.conversation.item_intake import build_cart_item
 from restaurant_bot.domain.models import (
     CartItem,
     CatalogProduct,
@@ -210,6 +211,26 @@ def test_catalog_proof_does_not_split_a_complete_long_catalog_name() -> None:
     assert result == [item]
 
 
+def test_logged_glued_names_split_only_with_complete_catalog_proof(settings: Settings) -> None:
+    """Восстанавливает два склеенных имени из лога, не заказывая числа фасовки."""
+    names = ["Булка Бриошь 400гр", "Горчица Зернистая CHATEL, ведро, 1 кг, 6 шт/кор, Франция"]
+    source = "".join(names)
+    catalog = [
+        CatalogProduct(product_id=str(i), name=name, unit="шт") for i, name in enumerate(names)
+    ]
+    command = ParsedCommand(
+        intent=Intent.ADD_ITEMS, items=[ExtractedItem(product_query=source, source_line=source)]
+    )
+    result = ConversationEngine(settings).handle(
+        TelegramEvent(update_id=873, chat_id="glued-names", input_type=InputKind.TEXT, text=source),
+        command,
+        ConversationState(),
+        catalog,
+    )
+    assert [i.catalog_product_id for i in result.state.cart] == ["0", "1"]
+    assert all(i.quantity is None and i.status is ItemStatus.MISSING_QTY for i in result.state.cart)
+
+
 def test_multword_quantity_item_is_not_merged_into_catalog_identity_tail() -> None:
     """Не объединяет самостоятельный многословный товар с предыдущей позицией."""
     items = [
@@ -317,6 +338,94 @@ def test_ai_query_with_packaging_tail_is_reconciled_to_canonical_product() -> No
     assert item["product_query"] == "лук зелёный"
     assert item["comment"] == "в упаковках пластиковых или в контейнер"
     assert item["packaging_role"] == "user_preference"
+
+
+def test_logged_ai_departments_are_confirmed_from_each_source_span() -> None:
+    """Сохраняет два явно названных отдела после сверки ИИ и создания черновика."""
+    source = "Куриное филе (12 кг уп) КИТАЙ 19 кг не урпных на зал и утка 5 кг на бар не жирной"
+    payload = {
+        "intent": Intent.ADD_ITEMS.value,
+        "items": [
+            {
+                "product_query": "Куриное филе (12 кг уп) КИТАЙ 19 кг не урпных",
+                "quantity": 19,
+                "unit": "кг",
+                "department": "зал",
+                "source_line": "Куриное филе (12 кг уп) КИТАЙ 19 кг не урпных",
+            },
+            {
+                "product_query": "утка",
+                "quantity": 5,
+                "unit": "кг",
+                "department": "бар",
+                "comment": "не жирной",
+                "source_line": "утка 5 кг на бар не жирной",
+            },
+        ],
+    }
+
+    items = recover_omitted_explicit_items(payload, source)["items"]
+    cart = [
+        build_cart_item(ExtractedItem.model_validate(item), default_department="Кухня")
+        for item in items
+    ]
+
+    assert [(item.department, item.department_confirmed) for item in cart] == [
+        ("Зал", True),
+        ("Бар", True),
+    ]
+
+
+def test_ai_department_must_match_its_local_source_not_neighbor() -> None:
+    """Не подтверждает переставленные моделью отделы соседних товаров."""
+    source = "Хлеб 2 шт на зал и молоко 3 л на бар"
+    payload = {
+        "intent": Intent.ADD_ITEMS.value,
+        "items": [
+            {
+                "product_query": "Хлеб",
+                "quantity": 2,
+                "unit": "шт",
+                "department": "Бар",
+                "source_line": "Хлеб 2 шт на зал",
+            },
+            {
+                "product_query": "молоко",
+                "quantity": 3,
+                "unit": "л",
+                "department": "Зал",
+                "source_line": "молоко 3 л на бар",
+            },
+        ],
+    }
+
+    items = recover_omitted_explicit_items(payload, source)["items"]
+
+    assert all(not item.get("source_department") for item in items)
+
+
+def test_ai_department_is_not_confirmed_by_untrusted_or_product_purpose_text() -> None:
+    """Не принимает поле модели или назначение товара за явный выбор отдела."""
+    for source, query in [
+        ("Утка 5 кг", "Утка"),
+        ("Вино белое для кухни 2 л", "Вино белое для кухни"),
+    ]:
+        payload = {
+            "intent": Intent.ADD_ITEMS.value,
+            "items": [
+                {
+                    "product_query": query,
+                    "quantity": 5,
+                    "department": "Бар" if query == "Утка" else "Кухня",
+                    "source_department": "Бар" if query == "Утка" else "Кухня",
+                    "source_line": source,
+                }
+            ],
+        }
+
+        item = recover_omitted_explicit_items(payload, source)["items"][0]
+
+        assert not item.get("source_department")
 
 
 def test_action_prefix_is_not_retained_in_product_query() -> None:

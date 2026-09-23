@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 
 from restaurant_bot.conversation.comments import prune_pending_comment_item_ids
-from restaurant_bot.conversation.selection import contains_score, find_cart_item
+from restaurant_bot.conversation.selection import contains_score, find_cart_item_candidates
 from restaurant_bot.domain.models import (
     ConversationState,
     DepartmentQuantities,
@@ -23,6 +23,7 @@ class DraftActionOutcome(StrEnum):
 
     ADVANCE = "advance"
     REMOVED = "removed"
+    AMBIGUOUS = "ambiguous"
     NOT_FOUND = "not_found"
 
 
@@ -31,6 +32,7 @@ class DraftActionResult:
     """Возвращает результат мутации без Telegram-представления."""
 
     outcome: DraftActionOutcome
+    candidate_names: tuple[str, ...] = ()
 
 
 def skip_current_item(state: ConversationState) -> DraftActionResult:
@@ -91,7 +93,11 @@ def remove_item(command: ParsedCommand, state: ConversationState) -> DraftAction
         prune_pending_comment_item_ids(state)
         return DraftActionResult(DraftActionOutcome.ADVANCE)
 
-    item = find_cart_item(state, target_query)
+    matches = find_cart_item_candidates(state, target_query)
+    if len(matches) > 1:
+        names = tuple(dict.fromkeys(item.catalog_name or item.source_query for item in matches))
+        return DraftActionResult(DraftActionOutcome.AMBIGUOUS, candidate_names=names)
+    item = matches[0] if matches else None
     if item is not None:
         was_current = item.id == state.current_issue_item_id
         item.status = ItemStatus.SKIPPED

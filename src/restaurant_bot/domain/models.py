@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 from datetime import UTC, datetime
 from enum import StrEnum
+from math import isclose
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field, field_validator, model_validator
@@ -541,11 +542,27 @@ class ConversationState(BaseModel):
             return next((item for item in self.cart if item.id == self.current_issue_item_id), None)
         return None
 
-    def refresh_department_after_quantity_change(self, item: CartItem) -> None:
-        """Сохраняет единый выбор отдела и сбрасывает устаревшее распределение с фото."""
+    def refresh_department_after_quantity_change(
+        self,
+        item: CartItem,
+        *,
+        previous_quantity: float | None,
+    ) -> None:
+        """Сохраняет доказанное подразделение строки при изменении количества."""
         active_items = [
             cart_item for cart_item in self.cart if cart_item.status is not ItemStatus.SKIPPED
         ]
+        values = item.department_quantities.model_dump()
+        assigned = [
+            (department, quantity)
+            for department, quantity in (
+                ("Зал", values["hall"]),
+                ("Бар", values["bar"]),
+                ("Кухня", values["kitchen"]),
+            )
+            if quantity is not None and quantity > 0
+        ]
+        distribution_total = sum(quantity for _, quantity in assigned)
         has_photo_distribution = any(
             quantity is not None and quantity > 0
             for cart_item in active_items
@@ -556,9 +573,38 @@ class ConversationState(BaseModel):
             and not has_photo_distribution
             and all(cart_item.department == self.department for cart_item in active_items)
         )
+        distribution_matches_previous = previous_quantity is not None and isclose(
+            distribution_total,
+            previous_quantity,
+            rel_tol=1e-9,
+            abs_tol=1e-9,
+        )
+        if assigned and distribution_matches_previous:
+            if len(assigned) == 1:
+                department = assigned[0][0]
+                value = item.quantity
+                item.department = department
+                item.department_quantities = DepartmentQuantities(
+                    hall=value if department == "Зал" else None,
+                    bar=value if department == "Бар" else None,
+                    kitchen=value if department == "Кухня" else None,
+                )
+                return
+            if isclose(
+                item.quantity or 0,
+                previous_quantity or 0,
+                rel_tol=1e-9,
+                abs_tol=1e-9,
+            ):
+                return
         item.department_quantities = DepartmentQuantities()
         if keep_single_department:
             item.department = self.department
+        elif item.department_confirmed and not has_photo_distribution:
+            # Явное назначение конкретной позиции не зависит от единого отдела заявки.
+            self.department_confirmed = all(
+                cart_item.department_confirmed for cart_item in active_items
+            )
         else:
             item.department_confirmed = False
             self.department_confirmed = False

@@ -182,8 +182,9 @@ def test_reset_starts_new_order_without_deleting_uncertain_submission(
         assert result.state.cart == []
         assert result.state.pending_submission is None
         assert result.state.spreadsheet_id == ""
-        assert "Предыдущая заявка ещё проверяется" in result.reply.text
+        assert "проверяется отправка" in result.reply.text
         assert "не оформляйте её повторно" in result.reply.text.lower()
+        assert "поставщики могли уже получить заказ" in result.reply.text.lower()
 
 
 def test_reset_keeps_retry_and_dispatch_status_routes_separate(settings: Settings) -> None:
@@ -195,6 +196,22 @@ def test_reset_keeps_retry_and_dispatch_status_routes_separate(settings: Setting
     assert uncertain.state.stage is SessionStage.COLLECTING
     assert retryable.enqueue_submission is False
     assert uncertain.enqueue_submission is False
+
+
+def test_reset_distinguishes_background_recalculation_from_uncertain_dispatch(
+    settings: Settings,
+) -> None:
+    """Не утверждает, что поставщики могли получить заявку до начала отправки."""
+    state = _state()
+    assert state.pending_submission is not None
+    state.pending_submission.failed_stage = "recalculation_uncertain"
+    result = _run(settings, state, "/reset")
+
+    assert "бот завершит обработку автоматически" in result.reply.text.lower()
+    assert "поставщики могли уже получить" not in result.reply.text.lower()
+
+    dispatch_result = _run(settings, _state(uncertain=True), "/reset")
+    assert "поставщики могли уже получить заказ" in dispatch_result.reply.text.lower()
 
 
 def test_missing_pending_submission_has_safe_broken_state_fallback(settings: Settings) -> None:

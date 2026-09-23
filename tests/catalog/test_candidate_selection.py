@@ -49,6 +49,69 @@ def test_explicit_candidate_selection_uses_selected_catalog_row(settings) -> Non
     assert result.state.cart[0].catalog_product_id == "feijoa"
 
 
+def test_explicit_department_survives_candidate_and_quantity_choice(settings) -> None:  # type: ignore[no-untyped-def]
+    """Сохраняет Бар после выбора товара и уточнения несовпадающей единицы."""
+    engine = ConversationEngine(settings)
+    product = CatalogProduct(product_id="duck", name="Утка Очара 110гр", unit="шт")
+    item = CartItem(
+        id="duck-choice",
+        source_query="утка",
+        quantity=5,
+        unit="кг",
+        department="Бар",
+        department_confirmed=True,
+        status=ItemStatus.AMBIGUOUS,
+        candidates=[Candidate(product_id="duck", name=product.name, unit=product.unit)],
+    )
+    chicken = CartItem(
+        id="chicken-choice",
+        source_query="куриное филе",
+        quantity=19,
+        unit="кг",
+        department="Зал",
+        department_confirmed=True,
+        status=ItemStatus.MATCHED,
+    )
+    state = ConversationState(
+        cart=[chicken, item],
+        current_issue_item_id=item.id,
+        department_confirmed=True,
+    )
+    event = TelegramEvent(update_id=2, chat_id="1", input_type=InputKind.CALLBACK)
+
+    selected = engine.handle(
+        event,
+        ParsedCommand(intent=Intent.SELECT_CANDIDATE, selected_index=1, callback_target="1"),
+        state,
+        [product],
+    )
+    selected_item = selected.state.cart[1].model_copy(deep=True)
+    corrected = engine.handle(
+        event,
+        ParsedCommand(intent=Intent.EDIT_QUANTITY, edit_quantity=46),
+        selected.state,
+        [product],
+    )
+
+    assert selected_item.status is ItemStatus.UNIT_MISMATCH
+    assert selected_item.department == "Бар" and selected_item.department_confirmed
+    assert corrected.state.department_confirmed is True
+    assert corrected.state.cart[1].quantity == 46
+    assert corrected.state.cart[1].status is ItemStatus.MATCHED
+    assert [(entry.department, entry.department_confirmed) for entry in corrected.state.cart] == [
+        ("Зал", True),
+        ("Бар", True),
+    ]
+    review = engine.handle(
+        event,
+        ParsedCommand(intent=Intent.SHOW_FINAL_REVIEW),
+        corrected.state,
+        [product],
+    )
+    assert "подразделение не указано" not in review.reply.text
+    assert "46 шт · Бар" in review.reply.text
+
+
 def test_unique_partial_candidate_name_selects_only_that_candidate(settings) -> None:  # type: ignore[no-untyped-def]
     """Проверяет, что unique partial кандидат название выбирает только что кандидат."""
     engine = ConversationEngine(settings)

@@ -59,6 +59,59 @@ def test_recalculation_uncertain_reply_explains_background_recovery() -> None:
     assert "повторно оформлять" in reply.text
 
 
+def test_detached_local_recalculation_notifies_user_without_changing_new_draft(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Уведомляет о завершении старой заявки после reset и фиксирует контрольную точку."""
+    record = SimpleNamespace(
+        order_no="ORDER-RESET",
+        finalized=False,
+        recalc_done=True,
+        dispatch_started=False,
+        completion_notified=False,
+        completion_notification_status="pending",
+        completion_notification_started_at=None,
+        completion_notification_completed_at=None,
+        last_error="temporary failure",
+    )
+    db = SimpleNamespace(scalar=MagicMock(return_value=record))
+
+    class FakeSessionLocal:
+        """Подменяет транзакцию базы данных одной тестовой записью."""
+
+        @staticmethod
+        def begin():
+            """Возвращает контекст транзакции без подключения к базе."""
+            return nullcontext(db)
+
+    monkeypatch.setattr(submission_module, "SessionLocal", FakeSessionLocal)
+    service = object.__new__(SubmissionService)
+    service.settings = SimpleNamespace(google_order_submission_enabled=False)
+    service.telegram = MagicMock()
+    service._append_submission_event = MagicMock()
+    service._mark_completion_notification_completed = MagicMock()
+    service._mark_completion_notification_uncertain = MagicMock()
+    pending = PendingSubmission(
+        order_no="ORDER-RESET",
+        telegram_user_id="user-7",
+        telegram_chat_id="chat-7",
+    )
+
+    service._finalize_detached_local_recalculation(pending)
+
+    service.telegram.send_reply.assert_called_once()
+    chat_id, reply = service.telegram.send_reply.call_args.args
+    assert chat_id == "chat-7"
+    assert "ORDER-RESET" in reply.text
+    assert "расчёты обновлены" in reply.text
+    assert "Текущий черновик не изменён" in reply.text
+    assert reply.rows == []
+    assert record.finalized is True
+    assert record.completion_notification_status == "started"
+    service._mark_completion_notification_completed.assert_called_once_with("ORDER-RESET")
+    service._mark_completion_notification_uncertain.assert_not_called()
+
+
 def test_large_draft_has_navigation_without_hiding_items() -> None:
     """Показывает большой черновик частями и даёт перейти к следующей странице."""
     state = ConversationState(

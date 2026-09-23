@@ -178,12 +178,21 @@ def _has_same_lexical_identity(query: str, candidate: str) -> bool:
 
 def find_cart_item(state: ConversationState, target_query: str) -> CartItem | None:
     """Находит только одну однозначно названную активную позицию черновика."""
+    matches = find_cart_item_candidates(state, target_query)
+    return matches[0] if len(matches) == 1 else None
+
+
+def find_cart_item_candidates(
+    state: ConversationState,
+    target_query: str,
+) -> tuple[CartItem, ...]:
+    """Возвращает все равнозначные позиции для безопасного уточнения пользователем."""
     if not target_query:
-        return None
+        return ()
     active_rows = [row for row in state.cart if row.status is not ItemStatus.SKIPPED]
     by_id = next((row for row in active_rows if row.id == target_query), None)
     if by_id is not None:
-        return by_id
+        return (by_id,)
 
     target = normalize_text(target_query)
     complete_matches = [
@@ -197,10 +206,10 @@ def find_cart_item(state: ConversationState, target_query: str) -> CartItem | No
             )
         )
     ]
-    if len(complete_matches) == 1:
-        return complete_matches[0]
     if len(complete_matches) > 1:
-        return None
+        return tuple(complete_matches)
+    if complete_matches:
+        return (complete_matches[0],)
 
     scored = sorted(
         (
@@ -217,10 +226,23 @@ def find_cart_item(state: ConversationState, target_query: str) -> CartItem | No
         reverse=True,
     )
     if not scored or scored[0][0] <= 0:
-        return None
-    if len(scored) > 1 and scored[0][0] == scored[1][0]:
-        return None
-    return scored[0][1]
+        return ()
+    best_score = scored[0][0]
+    query_tokens = _lexical_reference_text(target).split()
+    if not query_tokens:
+        return ()
+    matches = tuple(
+        row
+        for score, row in scored
+        if score == best_score
+        and _lexical_match_count(
+            target,
+            normalize_text(row.catalog_name or row.source_query),
+        )
+        * 3
+        >= len(query_tokens) * 2
+    )
+    return matches
 
 
 def resolve_candidate_selection(

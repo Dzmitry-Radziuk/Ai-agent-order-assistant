@@ -30,6 +30,7 @@ from restaurant_bot.parsing.ai.quantity_reconciliation import (
     restore_explicit_order_terms,
 )
 from restaurant_bot.parsing.ai.shadow_items import _collapse_shadow_item_projections
+from restaurant_bot.parsing.commands.department import confirm_inline_department
 from restaurant_bot.parsing.commands.item_commands import (
     has_explicit_add_items,
     has_unrepresented_order_quantity_evidence,
@@ -332,6 +333,10 @@ def recover_omitted_explicit_items(payload: dict[str, Any], source_text: str) ->
     spans = _resolve_item_source_spans(
         items, source_text, clean_text(payload.get("global_comment"))
     )
+    for item, span in zip(items, spans, strict=True):
+        item["source_department"] = (
+            confirm_inline_department(span.text, item.get("department")) if span is not None else ""
+        )
     remove_unsupported_query_qualifiers(items, source_text)
     global_comment = _strip_global_comment_scope(clean_text(payload.get("global_comment")))
     if is_comment_control_text(global_comment):

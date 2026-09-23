@@ -128,3 +128,33 @@ def test_remove_item_does_not_mutate_for_unknown_target() -> None:
 
     assert result.outcome is DraftActionOutcome.NOT_FOUND
     assert state.model_dump() == before
+
+
+def test_partial_target_reports_ambiguous_draft_items_without_removing_them() -> None:
+    """Не называет несколько совпавших позиций отсутствующими и не удаляет их."""
+    state = ConversationState(
+        cart=[
+            CartItem(
+                id="wine-kitchen",
+                source_query="Вино красное",
+                catalog_name="Вино красное ДЛЯ КУХНИ",
+                status=ItemStatus.MATCHED,
+            ),
+            CartItem(
+                id="wine-table",
+                source_query="Вино красное",
+                catalog_name="Вино красное столовое сухое",
+                status=ItemStatus.MATCHED,
+            ),
+        ]
+    )
+    before = deepcopy(state.model_dump())
+
+    result = remove_item(ParsedCommand(target_query="Вино красное -20"), state)
+
+    assert result.outcome is DraftActionOutcome.AMBIGUOUS
+    assert result.candidate_names == (
+        "Вино красное ДЛЯ КУХНИ",
+        "Вино красное столовое сухое",
+    )
+    assert state.model_dump() == before

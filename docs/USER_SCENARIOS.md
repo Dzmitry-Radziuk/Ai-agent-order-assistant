@@ -38,10 +38,10 @@
 
 | Показатель | Значение |
 |---|---:|
-| Всего сценариев | 41 |
-| Связаны с pytest | 41 |
+| Всего сценариев | 42 |
+| Связаны с pytest | 42 |
 | Критические | 26 |
-| Важные | 12 |
+| Важные | 13 |
 | Защитные | 3 |
 
 ## Основные маршруты
@@ -439,7 +439,7 @@ stateDiagram-v2
 
 **Действие пользователя:** Отправляет фотографию распечатанной или заполненной таблицы.
 
-**Ответ бота:** Берёт количество только из заполненных колонок заказа, сохраняет комментарии и игнорирует распознанного с фото поставщика, фасовку, остатки и справочные числа. Достаточно названий подразделений либо букв N/O/P. Перед записью показывает все позиции, включая товары без подразделения, по 10 на странице. Если два чтения согласовали только часть позиций, показывает предупреждение о неполном фото в черновике и финальной проверке; спорные количества не добавляет.
+**Ответ бота:** Берёт количество только из заполненных колонок заказа, сохраняет комментарии и игнорирует распознанного с фото поставщика, фасовку, остатки и справочные числа. Достаточно названий подразделений либо букв N/O/P. Перед записью показывает все позиции, включая товары без подразделения, по 10 на странице; если два полных чтения подтвердили каждую заполненную строку, предупреждение о неполном фото не показывается. Если подтвердились только часть позиций, предупреждает об этом и не добавляет спорные количества.
 
 **Результат:** Для таблицы Google Sheets без названий отделов, но с видимыми буквами N/O/P, бот сопоставляет N с залом, O с баром, P с кухней и Q с комментарием. «Оставить как на фото» доступно только когда у всех активных товаров есть распределение или подтверждённый отдел. При смешанном черновике выбор подразделения применяется только к неразмеченным товарам, сохраняя ранее заданные отделы. Если неразмеченных товаров нет, выбор одного подразделения переносит весь заказ. Строки без заказа не добавляются.
 
@@ -469,10 +469,12 @@ stateDiagram-v2
 - [`tests/conversation/test_engine.py`](../tests/conversation/test_engine.py) → `test_second_input_requires_own_department_without_reassigning_first`
 - [`tests/conversation/test_engine.py`](../tests/conversation/test_engine.py) → `test_partial_photo_warning_survives_state_and_final_review`
 - [`tests/ai/test_photo_ingestion.py`](../tests/ai/test_photo_ingestion.py) → `test_photo_department_headers_and_letters_are_independent_evidence`
+- [`tests/ai/test_photo_ingestion.py`](../tests/ai/test_photo_ingestion.py) → `test_reconciled_complete_photo_reads_do_not_keep_partial_warning`
 - [`tests/ai/test_photo_ingestion.py`](../tests/ai/test_photo_ingestion.py) → `test_lettered_sheet_accepts_equivalent_department_field_representations`
 - [`tests/ai/test_photo_ingestion.py`](../tests/ai/test_photo_ingestion.py) → `test_preprocessed_row_count_returns_confirmed_partial_read_with_warning`
 - [`tests/ai/test_photo_ingestion.py`](../tests/ai/test_photo_ingestion.py) → `test_client_sheet_drops_blank_row_without_transferring_neighbor_quantity`
 - [`tests/ai/test_photo_ingestion.py`](../tests/ai/test_photo_ingestion.py) → `test_mocked_photo_pipeline_converges_into_existing_cart_pipeline`
+- [`tests/conversation/test_ui_replies.py`](../tests/conversation/test_ui_replies.py) → `test_final_review_does_not_repeat_quantity_for_single_department`
 - [`tests/ai/test_ai_media.py`](../tests/ai/test_ai_media.py) → `test_client_order_sheet_uses_the_selected_department_quantity`
 - [`tests/ai/test_ai_media.py`](../tests/ai/test_ai_media.py) → `test_client_order_sheet_sums_only_filled_department_order_cells`
 - [`tests/ai/test_ai_media.py`](../tests/ai/test_ai_media.py) → `test_client_order_sheet_ignores_supplier_recognized_from_a_neighbouring_row`
@@ -1178,6 +1180,45 @@ stateDiagram-v2
 - [`tests/conversation/test_new_order_flow.py`](../tests/conversation/test_new_order_flow.py) → `test_new_order_after_submission_starts_empty_draft_and_preserves_history`
 - [`tests/conversation/test_new_order_flow.py`](../tests/conversation/test_new_order_flow.py) → `test_success_card_new_order_callback_preserves_tracking`
 
+#### DRF-06 · Уточнение похожей позиции черновика
+
+**Приоритет:** Важный<br>
+**Статус:** Работает сейчас<br>
+**Канал:** Текст, Голос<br>
+**Предусловие:** В черновике есть несколько похожих товаров.
+
+**Действие пользователя:** Просит удалить товар или изменить его количество по части названия.
+
+**Ответ бота:** Показывает подходящие позиции и просит уточнить, какую изменить или удалить.
+
+**Результат:** Пока пользователь не уточнил товар, черновик не меняется; неоднозначный поиск не называется отсутствием товара.
+
+**Статус проверки:** `AUTOMATED_PASS` — Контракт полностью подтверждён локальными автоматическими тестами
+
+**Ручная проверка:** Не требуется для локального поведения; общий Telegram smoke выполняется перед пилотом.
+
+<details>
+<summary><strong>Что важно для системы</strong></summary>
+
+- **Доступ:** Пользователь подключён к заведению; доступен только черновик текущего чата.
+- **Распознаваем:** черновик, позиция, номер варианта, команда управления
+- **Подтверждение:** Уточнение требуется только когда названию соответствуют несколько позиций.
+- **Изменение состояния:** До уточнения количество и состав черновика остаются без изменений.
+- **Восстановление:** При отказе и непонятной команде оставить черновик без изменений.
+
+</details>
+
+**Примеры фраз:**
+
+- «Убери Вино красное -20»
+- «Измени количество у Вино красное -20 на 3»
+
+**Автоматическая проверка:**
+
+- [`tests/conversation/test_draft_actions.py`](../tests/conversation/test_draft_actions.py) → `test_partial_target_reports_ambiguous_draft_items_without_removing_them`
+- [`tests/conversation/test_engine.py`](../tests/conversation/test_engine.py) → `test_partial_remove_query_shows_similar_draft_items_without_mutating`
+- [`tests/conversation/test_engine.py`](../tests/conversation/test_engine.py) → `test_partial_quantity_edit_shows_similar_draft_items_without_mutating`
+
 ### Проверка и запись заявки
 
 Минимальная сумма, подтверждение, запись в таблицу заказа и просмотр статуса.
@@ -1196,7 +1237,7 @@ stateDiagram-v2
 
 **Действие пользователя:** Просит оформить или отправить заявку.
 
-**Ответ бота:** Сначала проверяет незавершённые позиции, просит выбрать «Зал», «Бар» или «Кухня» и затем показывает итоговую карточку. Для фото с распознанными колонками можно подтвердить вариант «Оставить как на фото». Если после выбора одного подразделения изменить количество, выбор сохранится; изменение количества в распределении с фото потребует повторного выбора. Большая заявка разбивается на страницы с кнопками «Назад» и «Далее».
+**Ответ бота:** Сначала проверяет незавершённые позиции, просит выбрать «Зал», «Бар» или «Кухня» и затем показывает итоговую карточку. Для фото с распознанными колонками можно подтвердить вариант «Оставить как на фото». Подразделение можно выбрать кнопкой или короткой фразой: «Зал», «на зал», «добавить на зал», «подразделение зал» и аналогично для Бара и Кухни. Если отдел указан прямо в строке товара — например, «Горчица 10 шт на зал» или «Горчица 10 шт в отдел кухни», — он назначается этой позиции, а не записывается в комментарий. Две позиции с явно указанными отделами разделяются и без запятой; если количество не названо, бот попросит его уточнить. Если товар пришлось уточнять через список вариантов, подтверждённый исходной фразой отдел сохраняется и после изменения количества. Неоднозначное «для кухни» сохраняется частью названия товара, если это может быть его признаком. Если после выбора одного подразделения изменить количество, выбор сохранится; изменение количества в распределении с фото потребует повторного выбора. Большая заявка разбивается на страницы с кнопками «Назад» и «Далее».
 
 **Результат:** До выбора подразделения и явного финального подтверждения запись в таблицу заказа не запускается; пользователь видит распределение по подразделениям и может просмотреть все страницы заявки.
 
@@ -1218,7 +1259,20 @@ stateDiagram-v2
 **Примеры фраз:**
 
 - «Оформи заявку»
+- «Добавить и проверить»
 - «Я всё добавил»
+- «Добавить на зал»
+- «Подразделение кухня»
+- «Горчица 10 шт на зал»
+- «Горчица 10 шт в отдел кухни»
+- «Горчица 10 шт на зал, хлеб 2 шт на кухню»
+- «Горчица10штназал,Хлеб2штнакухню»
+- «Горчица острая 5 зал, Биттер Люксардо 0,75 л6бар»
+- «Хрен столовый Домашний 10 шт на бар Горчица Дижонская CHATEL 5 на зал»
+- «Курица Бедро Филе Без Шкуры на бар Икра красная (кг) зал»
+- «Куриное филе (12 кг уп) КИТАЙ 19 кг не урпных на зал и утка 5 кг на бар не жирной»
+- «Булка Бриошь 400гр 5 зал, Горчица Зернистая CHATEL, ведро, 1 кг, 6 шт/кор, Франция 6 бар»
+- «Хлеб на зал 2 шт; молоко 3 л»
 - «Перейти к проверке заявки»
 - «Следующая страница»
 - «Предыдущая страница»
@@ -1229,8 +1283,32 @@ stateDiagram-v2
 - [`tests/submission/test_submission_guards.py`](../tests/submission/test_submission_guards.py) → `test_submit_request_stops_on_first_unresolved_item`
 - [`tests/telegram/test_telegram_commands.py`](../tests/telegram/test_telegram_commands.py) → `test_voice_pagination_stays_in_large_final_review`
 - [`tests/conversation/test_conversation_handlers.py`](../tests/conversation/test_conversation_handlers.py) → `test_final_review_requires_department_for_new_items`
+- [`tests/conversation/test_conversation_handlers.py`](../tests/conversation/test_conversation_handlers.py) → `test_text_department_command_uses_existing_selection_flow`
+- [`tests/input/test_input_routing.py`](../tests/input/test_input_routing.py) → `test_add_and_check_voice_phrase_is_final_review_not_product`
+- [`tests/input/test_input_routing.py`](../tests/input/test_input_routing.py) → `test_department_phrases_are_deterministic_for_text_and_voice_transcript`
+- [`tests/input/test_input_routing.py`](../tests/input/test_input_routing.py) → `test_inline_department_is_not_forwarded_to_ai_as_comment`
+- [`tests/input/test_parser.py`](../tests/input/test_parser.py) → `test_parses_inline_department_as_item_assignment`
+- [`tests/input/test_parser.py`](../tests/input/test_parser.py) → `test_catalog_product_phrase_for_kitchen_is_not_inline_department`
+- [`tests/input/test_parser.py`](../tests/input/test_parser.py) → `test_parses_multiple_products_with_independent_departments`
+- [`tests/input/test_parser.py`](../tests/input/test_parser.py) → `test_logged_mixed_department_message_keeps_second_quantity_pending`
+- [`tests/input/test_department_items.py`](../tests/input/test_department_items.py) → `test_catalog_commas_and_packaging_keep_order_fields`
+- [`tests/input/test_department_items.py`](../tests/input/test_department_items.py) → `test_department_markers_split_logged_items_without_punctuation`
+- [`tests/input/test_department_items.py`](../tests/input/test_department_items.py) → `test_department_markers_keep_two_items_without_quantities`
+- [`tests/input/test_department_items.py`](../tests/input/test_department_items.py) → `test_unseparated_logged_items_reach_draft_without_ai`
+- [`tests/semantic/test_global_boundary_regressions.py`](../tests/semantic/test_global_boundary_regressions.py) → `test_logged_ai_departments_are_confirmed_from_each_source_span`
+- [`tests/semantic/test_global_boundary_regressions.py`](../tests/semantic/test_global_boundary_regressions.py) → `test_ai_department_must_match_its_local_source_not_neighbor`
+- [`tests/semantic/test_global_boundary_regressions.py`](../tests/semantic/test_global_boundary_regressions.py) → `test_ai_department_is_not_confirmed_by_untrusted_or_product_purpose_text`
+- [`tests/catalog/test_candidate_selection.py`](../tests/catalog/test_candidate_selection.py) → `test_explicit_department_survives_candidate_and_quantity_choice`
+- [`tests/input/test_department_items.py`](../tests/input/test_department_items.py) → `test_order_count_after_product_size_keeps_each_department_and_name`
+- [`tests/input/test_department_items.py`](../tests/input/test_department_items.py) → `test_compact_department_count_reaches_cart_without_ai_comment_pollution`
+- [`tests/input/test_department_items.py`](../tests/input/test_department_items.py) → `test_mixed_assignments_do_not_share_department`
+- [`tests/input/test_department_items.py`](../tests/input/test_department_items.py) → `test_department_does_not_turn_packaging_into_quantity`
+- [`tests/input/test_department_items.py`](../tests/input/test_department_items.py) → `test_department_cannot_override_another_action`
+- [`tests/input/test_department_items.py`](../tests/input/test_department_items.py) → `test_logged_catalog_items_reach_draft_with_local_evidence`
+- [`tests/semantic/test_global_boundary_regressions.py`](../tests/semantic/test_global_boundary_regressions.py) → `test_logged_glued_names_split_only_with_complete_catalog_proof`
 - [`tests/quantity/test_quantity_flow.py`](../tests/quantity/test_quantity_flow.py) → `test_department_choice_survives_quantity_change_and_supplier_warning`
 - [`tests/quantity/test_quantity_flow.py`](../tests/quantity/test_quantity_flow.py) → `test_accepting_suggested_quantity_keeps_single_department`
+- [`tests/quantity/test_quantity_flow.py`](../tests/quantity/test_quantity_flow.py) → `test_accepting_photo_quantities_keeps_each_line_department`
 - [`tests/quantity/test_quantity_flow.py`](../tests/quantity/test_quantity_flow.py) → `test_quantity_change_reconfirms_preserved_photo_distribution`
 
 #### SUB-02 · Не набрана минимальная сумма поставщика
@@ -1295,7 +1373,7 @@ stateDiagram-v2
 - **Распознаваем:** заявка, поставщик, сумма, статус, дата поставки
 - **Подтверждение:** Обязательно перед началом записи в таблицу заказа.
 - **Изменение состояния:** Заявка записывается и пересчитывается в таблице заведения. Технический номер остаётся только во внутренних данных.
-- **Восстановление:** Если запись точно не началась, можно повторить. Неопределённый перерасчёт бот повторяет в фоне до успеха, а после /reset не меняет новый черновик.
+- **Восстановление:** Если запись точно не началась, можно повторить. Неопределённый перерасчёт бот повторяет в фоне до успеха; после /reset сообщает о завершении старой заявки, не меняя новый черновик.
 
 </details>
 
@@ -1363,7 +1441,7 @@ stateDiagram-v2
 
 **Действие пользователя:** При сбое может повторить безопасный этап или выполнить `/reset`, чтобы начать новую заявку; система сама проверяет незавершённые этапы.
 
-**Ответ бота:** До центрального POST безопасно повторяет незавершённый этап. Неопределённый перерасчёт повторяется в фоне до успеха, а после начала POST история проверяется без повторной отправки заявки. После /reset бот предупреждает, что старая заявка ещё проверяется и её не нужно оформлять повторно.
+**Ответ бота:** До центрального POST безопасно повторяет незавершённый этап. Неопределённый перерасчёт повторяется в фоне до успеха; после /reset бот сообщает отдельно о ходе перерасчёта, а поставщиков упоминает только если отправка уже могла начаться. После восстановления он подтверждает завершение старой заявки, не меняя новый черновик. После начала POST история проверяется без повторной отправки заявки.
 
 **Результат:** Сбой старой заявки не блокирует новый черновик; таблица не получает новых колонок, а неоднозначный сетевой ответ не приводит к автоматическому дублю заказа поставщикам.
 
@@ -1396,6 +1474,8 @@ stateDiagram-v2
 - [`tests/submission/test_submission.py`](../tests/submission/test_submission.py) → `test_redelivery_after_started_dispatch_does_not_send_second_post`
 - [`tests/submission/test_submission_guards.py`](../tests/submission/test_submission_guards.py) → `test_submission_retry_is_blocked_after_uncertain_dispatch`
 - [`tests/conversation/test_submission_failed_routing.py`](../tests/conversation/test_submission_failed_routing.py) → `test_reset_starts_new_order_without_deleting_uncertain_submission`
+- [`tests/conversation/test_submission_failed_routing.py`](../tests/conversation/test_submission_failed_routing.py) → `test_reset_distinguishes_background_recalculation_from_uncertain_dispatch`
+- [`tests/submission/test_submission.py`](../tests/submission/test_submission.py) → `test_detached_local_recalculation_notifies_user_without_changing_new_draft`
 - [`tests/submission/test_submission.py`](../tests/submission/test_submission.py) → `test_pending_submission_checker_retries_active_snapshot_and_checks_dispatch`
 - [`tests/quantity/test_multiple_existing_stock.py`](../tests/quantity/test_multiple_existing_stock.py) → `test_accepted_multiple_quantity_is_written_instead_of_stale_department_value`
 

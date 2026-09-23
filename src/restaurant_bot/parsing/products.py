@@ -266,7 +266,7 @@ def _split_comma_product_list(line: str, unit_pattern: str) -> list[str]:
 def _build_product_line_patterns(unit_pattern: str) -> _ProductLinePatterns:
     """Строит regex-шаблоны для последовательного разбора строки."""
     trailing = re.compile(
-        rf"^(.*?)(?:(?:\s+|[-—–:])(?P<qty>\d+(?:[,.]\d+)?)\s*(?P<unit>{unit_pattern})|"
+        rf"^(.*?)(?:(?:\s+|[-—–:]|(?<=[^\d\s]))(?P<qty>\d+(?:[,.]\d+)?)\s*(?P<unit>{unit_pattern})|"
         rf"[-—–:]\s*(?P<bare_qty>\d+(?:[,.]\d+)?))\s*$",
         re.I,
     )
@@ -817,6 +817,74 @@ def _parse_product_line(
             )
         ]
     return []
+
+
+def parse_assigned_product(text: str) -> list[ExtractedItem]:
+    """Разбирает товарную часть явного назначения отдела без подмены фасовки заказом."""
+    source = clean_text(text).strip(" .,;:!?—–-")
+    unit_pattern = _build_unit_pattern()
+    if not _has_independent_product_evidence(source, unit_pattern):
+        return []
+    trailing = re.search(
+        rf"(?<![\d.,/])(?P<qty>\d+(?:[,.]\d+)?)(?P<gap>\s*)"
+        rf"(?P<unit>{unit_pattern})?\s*$",
+        source,
+        flags=re.I,
+    )
+    if trailing is not None:
+        prefix = source[: trailing.start()]
+        name = prefix.strip(" ,;:—–-")
+        unit = normalize_unit(trailing.group("unit") or "")
+        bare_is_separate = bool(unit or (prefix and prefix[-1].isspace()))
+        is_compact_measure = unit in {"г", "кг", "мл", "л"} and not trailing.group("gap")
+        prefix_items = parse_product_lines(name) if not unit and bare_is_separate else []
+        count_follows_catalog_measure = (
+            not unit
+            and bare_is_separate
+            and len(prefix_items) == 1
+            and (
+                (
+                    prefix_items[0].quantity is not None
+                    and normalize_unit(prefix_items[0].unit) in {"г", "кг", "мл", "л"}
+                )
+                or prefix_items[0].packaging_role == "catalog_attribute"
+            )
+        )
+        is_reference = any(
+            start < trailing.end() and trailing.start() < end
+            for start, end in numeric_range_spans(source)
+        ) or bool(re.search(r"(?:\b(?:арт\w*|номер|модель|размер)|[№/])\s*$", prefix, re.I))
+        if (
+            count_follows_catalog_measure
+            and not is_reference
+            and _has_independent_product_evidence(name, unit_pattern)
+        ):
+            return [
+                ExtractedItem(
+                    product_query=name,
+                    quantity=float(trailing.group("qty").replace(",", ".")),
+                    source_line=source,
+                    quantity_source="text_order_entry",
+                )
+            ]
+        if (
+            bare_is_separate
+            and not is_compact_measure
+            and not is_reference
+            and not _is_packaging_reference_prefix(prefix)
+            and _has_independent_product_evidence(name, unit_pattern)
+            and not any(i.quantity is not None for i in prefix_items if i.unit)
+        ):
+            return [
+                ExtractedItem(
+                    product_query=name,
+                    quantity=float(trailing.group("qty").replace(",", ".")),
+                    unit=unit,
+                    source_line=source,
+                    quantity_source="text_order_entry",
+                )
+            ]
+    return parse_product_lines(source)
 
 
 def parse_product_lines(text: str) -> list[ExtractedItem]:

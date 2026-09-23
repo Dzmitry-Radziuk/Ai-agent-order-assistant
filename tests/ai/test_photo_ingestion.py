@@ -149,6 +149,31 @@ def test_partial_photo_keeps_only_agreed_items_without_multiplying_duplicates(se
     assert _confirmed_partial_photo_command(first, None, settings).items == []
 
 
+def test_reconciled_complete_photo_reads_do_not_keep_partial_warning(settings) -> None:  # type: ignore[no-untyped-def]
+    """Считает фото полным, когда оба завершённых чтения подтверждают каждую позицию."""
+    first = PhotoDocumentObservation(
+        document_type_proposal="client_order_sheet",
+        detected_columns=["Товар", "N", "O", "P"],
+        has_table_structure=True,
+        visible_product_row_count=1,
+        visible_filled_order_row_count=1,
+        rows=[_row("Хлеб", sheet_column_p_quantity=3)],
+    )
+    second = first.model_copy(deep=True)
+
+    confirmed = _confirmed_partial_photo_command(first, second, settings)
+    pixel_count_conflict = _confirmed_partial_photo_command(
+        first,
+        second,
+        settings,
+        expected_filled_order_row_count=2,
+    )
+
+    assert confirmed.photo_outcome == ""
+    assert [(item.product_query, item.quantity) for item in confirmed.items] == [("Хлеб", 3)]
+    assert pixel_count_conflict.photo_outcome == "partial_photo_read"
+
+
 def _save_light_order_sheet(path: Path) -> None:
     """Создаёт таблицу, где пиксельная геометрия доказывает две order-строки."""
     image = Image.new("RGB", (1000, 500), "white")
@@ -1714,6 +1739,218 @@ def test_preprocessed_row_count_returns_confirmed_partial_read_with_warning(
     assert result.photo_outcome == "partial_photo_read"
     assert [(item.product_query, item.quantity) for item in result.items] == [
         ("Судак Филе охл 500+ Крупный", 6)
+    ]
+
+
+def test_lettered_department_count_mismatch_gets_full_recovery_read(
+    settings, tmp_path: Path, mocker
+) -> None:  # type: ignore[no-untyped-def]
+    """Повторяет N/O/P-чтение, если пиксели нашли строку, пропущенную vision."""
+    columns = ["Наименование", "N", "O", "P", "Q"]
+    first = PhotoDocumentObservation(
+        document_type_proposal="order_table",
+        detected_columns=columns,
+        has_table_structure=True,
+        rows=[
+            _row("Товар 1", sheet_column_n_quantity=1),
+            _row("Товар 2", sheet_column_o_quantity=2),
+            _row("Товар 3", sheet_column_p_quantity=3),
+        ],
+    )
+    recovered = PhotoDocumentObservation(
+        document_type_proposal="order_table",
+        detected_columns=columns,
+        has_table_structure=True,
+        rows=[
+            _row("Товар 1", sheet_column_n_quantity=1),
+            _row("Товар 2", sheet_column_o_quantity=2),
+            _row("Товар 3", sheet_column_p_quantity=3),
+            _row("Товар 4", sheet_column_p_quantity=4),
+        ],
+    )
+    column_reads = [
+        PhotoDocumentObservation(
+            document_type_proposal="order_table",
+            detected_columns=columns,
+            has_table_structure=True,
+            rows=[_row("Товар 1", sheet_column_n_quantity=1)],
+        ),
+        PhotoDocumentObservation(
+            document_type_proposal="order_table",
+            detected_columns=columns,
+            has_table_structure=True,
+            rows=[_row("Товар 2", sheet_column_o_quantity=2)],
+        ),
+        PhotoDocumentObservation(
+            document_type_proposal="order_table",
+            detected_columns=columns,
+            has_table_structure=True,
+            rows=[
+                _row("Товар 3", sheet_column_p_quantity=3),
+                _row("Товар 4", sheet_column_p_quantity=4),
+            ],
+        ),
+    ]
+    responses = _SequenceVisionResponses(
+        [first, first.model_copy(deep=True), recovered, *column_reads]
+    )
+    service = object.__new__(OpenAIService)
+    service.settings = settings
+    service.tracer = Tracer(settings)
+    service.vision_client = SimpleNamespace(responses=responses)
+    photo = tmp_path / "lettered-count-mismatch.png"
+    photo.write_bytes(b"image")
+    focus = PhotoImageView("table_focus", b"focus", "image/png", 800, 400)
+    checks = tuple(
+        PhotoImageView(
+            f"department_column_{letter}",
+            b"check",
+            "image/png",
+            400,
+            300,
+            expected_quantity_cell_count=count,
+        )
+        for letter, count in (("n", 1), ("o", 1), ("p", 2))
+    )
+    mocker.patch(
+        "restaurant_bot.integrations.openai_client.prepare_photo_views",
+        side_effect=[
+            PhotoImagePreparation(
+                views=(focus,),
+                original_width=1000,
+                original_height=500,
+                upscale_factor=2,
+                dense_table_views_used=True,
+                spreadsheet_layout_detected=True,
+                detected_filled_order_row_count=4,
+            ),
+            PhotoImagePreparation(
+                views=(focus, *checks, PhotoImageView("original", b"raw", "image/png", 1000, 500)),
+                original_width=1000,
+                original_height=500,
+                upscale_factor=2,
+                dense_table_views_used=True,
+                spreadsheet_layout_detected=True,
+                detected_filled_order_row_count=4,
+            ),
+        ],
+    )
+
+    result = service.parse_photo(photo, "image/png")
+
+    assert len(responses.calls) == 6
+    assert [(item.product_query, item.quantity) for item in result.items] == [
+        ("Товар 1", 1),
+        ("Товар 2", 2),
+        ("Товар 3", 3),
+        ("Товар 4", 4),
+    ]
+    assert [item.department_quantities for item in result.items] == [
+        DepartmentQuantities(hall=1),
+        DepartmentQuantities(bar=2),
+        DepartmentQuantities(kitchen=3),
+        DepartmentQuantities(kitchen=4),
+    ]
+
+
+def test_lettered_count_recovery_keeps_only_rows_confirmed_by_both_retries(
+    settings, tmp_path: Path, mocker
+) -> None:  # type: ignore[no-untyped-def]
+    """Оставляет согласованные строки как частичный результат при ложном счётчике."""
+    columns = ["Наименование", "N", "O", "P", "Q"]
+    first = PhotoDocumentObservation(
+        document_type_proposal="order_table",
+        detected_columns=columns,
+        has_table_structure=True,
+        rows=[
+            _row("Товар 1", sheet_column_n_quantity=1),
+            _row("Товар 2", sheet_column_o_quantity=2),
+            _row("Товар 3", sheet_column_p_quantity=3),
+            _row("Лишняя строка", sheet_column_p_quantity=4),
+            _row("Ещё одна лишняя строка", sheet_column_n_quantity=5),
+        ],
+    )
+    retry_rows = [
+        _row("Товар 1", sheet_column_n_quantity=1),
+        _row("Товар 2", sheet_column_o_quantity=2),
+        _row("Товар 3", sheet_column_p_quantity=3),
+    ]
+    retry = PhotoDocumentObservation(
+        document_type_proposal="order_table",
+        detected_columns=columns,
+        has_table_structure=True,
+        rows=retry_rows,
+    )
+    recovery = retry.model_copy(deep=True)
+    responses = _SequenceVisionResponses([first, retry, recovery])
+    service = object.__new__(OpenAIService)
+    service.settings = settings
+    service.tracer = Tracer(settings)
+    service.vision_client = SimpleNamespace(responses=responses)
+    photo = tmp_path / "lettered-count-false-positive.png"
+    photo.write_bytes(b"image")
+    focus = PhotoImageView("table_focus", b"focus", "image/png", 800, 400)
+    checks = tuple(
+        PhotoImageView(
+            f"department_column_{letter}",
+            b"check",
+            "image/png",
+            400,
+            300,
+            expected_quantity_cell_count=1,
+        )
+        for letter in "nop"
+    )
+    mocker.patch(
+        "restaurant_bot.integrations.openai_client.prepare_photo_views",
+        side_effect=[
+            PhotoImagePreparation(
+                views=(focus,),
+                original_width=1000,
+                original_height=500,
+                upscale_factor=2,
+                dense_table_views_used=True,
+                spreadsheet_layout_detected=True,
+                detected_filled_order_row_count=4,
+            ),
+            PhotoImagePreparation(
+                views=(focus, *checks, PhotoImageView("original", b"raw", "image/png", 1000, 500)),
+                original_width=1000,
+                original_height=500,
+                upscale_factor=2,
+                dense_table_views_used=True,
+                spreadsheet_layout_detected=True,
+                detected_filled_order_row_count=4,
+            ),
+        ],
+    )
+
+    result = service.parse_photo(photo, "image/png")
+
+    assert len(responses.calls) == 3
+    assert result.photo_outcome == "partial_photo_read"
+    assert [(item.product_query, item.quantity) for item in result.items] == [
+        ("Товар 1", 1),
+        ("Товар 2", 2),
+        ("Товар 3", 3),
+    ]
+    assert [item.department_quantities for item in result.items] == [
+        DepartmentQuantities(hall=1),
+        DepartmentQuantities(bar=2),
+        DepartmentQuantities(kitchen=3),
+    ]
+    dissenting_read = recovery.model_copy(
+        update={
+            "rows": [
+                *retry_rows[:2],
+                _row("Товар 3", sheet_column_p_quantity=9),
+            ]
+        }
+    )
+    disputed_result = _confirmed_partial_photo_command(retry, dissenting_read, settings)
+    assert [(item.product_query, item.quantity) for item in disputed_result.items] == [
+        ("Товар 1", 1),
+        ("Товар 2", 2),
     ]
 
 

@@ -53,7 +53,17 @@ from restaurant_bot.parsing.quantities import has_explicit_order_marker
 
 logger = structlog.get_logger(__name__)
 
+# Обычный путь оставляет прежние границы токенов: это важно для устойчивого
+# сопоставления результатов vision с каталогом.  # noqa: RUF003
+# Отдельный шаблон включается
+# только для действительно склеенных OCR-фрагментов вроде «400грГорчица».  # noqa: RUF003
 _SOURCE_TOKEN_RE = re.compile(r"[a-zа-яё0-9%]+", flags=re.IGNORECASE)
+_COMPACT_SOURCE_TOKEN_RE = re.compile(
+    r"[A-ZА-ЯЁ]?[a-zа-яё]+|[A-ZА-ЯЁ]+(?![a-zа-яё])|\d+|%",
+)
+_COMPACT_SOURCE_MARKER_RE = re.compile(
+    r"(?<=[a-zа-яё])(?=[A-ZА-ЯЁ])|(?<![A-Za-zА-Яа-яЁё])\d+[A-Za-zА-Яа-яЁё]+",
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -193,12 +203,20 @@ def _looks_like_unanchored_gibberish(query: str) -> bool:
 
 def _ordered_text_tokens(value: str) -> list[str]:
     """Возвращает все нормализованные токены в исходном порядке."""
-    return [normalize_text(match.group()) for match in _SOURCE_TOKEN_RE.finditer(value)]
+    pattern = _source_token_pattern(value)
+    return [normalize_text(match.group()) for match in pattern.finditer(value)]
 
 
 def _source_token_matches(value: str) -> list[re.Match[str]]:
     """Возвращает токены исходной строки вместе с исходными границами."""
-    return list(_SOURCE_TOKEN_RE.finditer(value))
+    return list(_source_token_pattern(value).finditer(value))
+
+
+def _source_token_pattern(value: str) -> re.Pattern[str]:
+    """Выбирает специальную токенизацию только для склеенного OCR-текста."""
+    if _COMPACT_SOURCE_MARKER_RE.search(value):
+        return _COMPACT_SOURCE_TOKEN_RE
+    return _SOURCE_TOKEN_RE
 
 
 def _specific_catalog_name_tokens(product: CatalogProduct) -> tuple[str, ...]:

@@ -95,6 +95,38 @@ def test_department_selection_reply_uses_singular_and_spacing_for_one_position()
     assert "Позиции 1–1 из 1" not in reply.text
 
 
+def test_final_review_does_not_repeat_quantity_for_single_department() -> None:
+    """Показывает одно количество у товара, но сохраняет распределение по отделам."""
+    state = ConversationState(
+        cart=[
+            CartItem(
+                id="kitchen",
+                source_query="Сыр",
+                catalog_name="Сыр",
+                quantity=6,
+                unit="шт",
+                status=ItemStatus.MATCHED,
+                department_quantities=DepartmentQuantities(kitchen=6),
+            ),
+            CartItem(
+                id="split",
+                source_query="Хлеб",
+                catalog_name="Хлеб",
+                quantity=6,
+                unit="шт",
+                status=ItemStatus.MATCHED,
+                department_quantities=DepartmentQuantities(hall=2, bar=4),
+            ),
+        ]
+    )
+
+    reply = final_review_reply(state)
+
+    assert "1. <b>Сыр</b> — 6 шт · Кухня" in reply.text
+    assert "Кухня 6 шт" not in reply.text
+    assert "2. <b>Хлеб</b> — 6 шт · Зал 2 шт, Бар 4 шт" in reply.text
+
+
 def test_department_selection_paginates_mixed_items_and_blocks_partial_preserve() -> None:
     """Показывает неразмеченный товар на следующей странице и не подтверждает его чужим отделом."""
     state = ConversationState(

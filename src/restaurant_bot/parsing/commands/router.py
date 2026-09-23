@@ -4,10 +4,14 @@ from __future__ import annotations
 
 import re
 
-from restaurant_bot.domain.models import Intent, ParsedCommand
+from restaurant_bot.domain.models import ExtractedItem, Intent, ParsedCommand
 from restaurant_bot.domain.text import clean_text, normalize_text
 from restaurant_bot.domain.units import UNIT_ALIASES
 from restaurant_bot.parsing.commands.comment_commands import _parse_edit_comment
+from restaurant_bot.parsing.commands.department import (
+    extract_inline_departments,
+    parse_department_command,
+)
 from restaurant_bot.parsing.commands.item_commands import (
     _AFFIRM_NEW_ORDER_RE,
     _REMOVE_RE,
@@ -34,7 +38,11 @@ from restaurant_bot.parsing.commands.normalization import (
 from restaurant_bot.parsing.commands.patterns import _COMMANDS, _NATURAL_COMMANDS
 from restaurant_bot.parsing.comment_scope import _extract_global_comment
 from restaurant_bot.parsing.history import parse_history_query, requires_history_context
-from restaurant_bot.parsing.products import has_multiple_explicit_order_items, parse_product_lines
+from restaurant_bot.parsing.products import (
+    has_multiple_explicit_order_items,
+    parse_assigned_product,
+    parse_product_lines,
+)
 from restaurant_bot.parsing.semantic_routing import classify_bot_conversation
 from restaurant_bot.parsing.venue_query import is_venue_status_query
 
@@ -130,6 +138,9 @@ def parse_text_command(text: str) -> ParsedCommand:
         if pattern.fullmatch(normalized):
             return ParsedCommand(intent=intent, text=text)
 
+    if department_command := parse_department_command(text):
+        return department_command
+
     if is_explicit_item_rejection(normalized):
         return ParsedCommand(intent=Intent.SKIP_CURRENT, text=text)
 
@@ -157,6 +168,9 @@ def parse_text_command(text: str) -> ParsedCommand:
 
     if free_form_intent := _infer_free_form_navigation(normalized):
         return ParsedCommand(intent=free_form_intent, text=text)
+
+    if not has_negation(normalized) and (inline_department := _parse_inline_department_items(text)):
+        return inline_department
 
     if re.fullmatch(
         r"(?:да\s*,?\s*)?добавляй|пусть\s+будет\s+вместе",
@@ -231,3 +245,49 @@ def parse_text_command(text: str) -> ParsedCommand:
             global_comment=global_comment,
         )
     return ParsedCommand(intent=Intent.UNKNOWN, text=text)
+
+
+def _parse_inline_department_items(text: str) -> ParsedCommand | None:
+    """Разбирает товары с отделами до обращения к ИИ."""
+    product_text, global_comment = _extract_global_comment(text)
+    # Сохраняем переносы: удаление вводной команды не должно склеить товарные строки.
+    source = "\n".join(explicit_add_item_target(line) or line for line in product_text.splitlines())
+    explicit_target = explicit_add_item_target(product_text)
+    inline_departments = extract_inline_departments(source)
+    if not inline_departments:
+        return None
+
+    assigned_items: list[ExtractedItem] = []
+    for inline in inline_departments:
+        items = (
+            parse_assigned_product(inline.product_text)
+            if inline.department
+            else parse_product_lines(inline.product_text)
+        )
+        retained_full_query = len(items) == 1 and normalize_text(
+            items[0].product_query
+        ) == normalize_text(inline.product_text)
+        if not items or (
+            not retained_full_query
+            and has_unrepresented_order_quantity_evidence(inline.product_text, items)
+        ):
+            return None
+        assigned_items.extend(
+            item.model_copy(
+                update={
+                    "department": inline.department,
+                    "source_department": inline.department,
+                    "source_line": inline.product_text,
+                }
+            )
+            for item in items
+        )
+    if not assigned_items:
+        return None
+    return ParsedCommand(
+        intent=Intent.ADD_ITEMS,
+        explicit_add_items=bool(explicit_target),
+        text=text,
+        items=assigned_items,
+        global_comment=global_comment,
+    )

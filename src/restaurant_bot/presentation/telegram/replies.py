@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from math import isclose
+
 from restaurant_bot.conversation.quantity_resolution import multiple_warnings
 from restaurant_bot.conversation.state.queries import unresolved_items
 from restaurant_bot.domain.models import (
@@ -250,14 +252,30 @@ def new_order_confirmation_reply(state: ConversationState) -> BotReply:
     )
 
 
-def new_order_started_reply(*, previous_submission_pending: bool = False) -> BotReply:
+def new_order_started_reply(
+    *,
+    previous_submission_pending: bool = False,
+    previous_dispatch_uncertain: bool = False,
+    previous_recalculation_pending: bool = False,
+) -> BotReply:
     """Показывает пустой экран новой заявки с предупреждением о старой отправке."""
-    warning = (
-        "⚠️ Предыдущая заявка ещё проверяется. Не оформляйте её повторно — поставщики "
-        "могли уже получить этот заказ. Эта заявка будет создана отдельно.\n\n"
-        if previous_submission_pending
-        else ""
-    )
+    warning = ""
+    if previous_submission_pending:
+        if previous_dispatch_uncertain:
+            warning = (
+                "⚠️ По предыдущей заявке ещё проверяется отправка. Не оформляйте её повторно — "
+                "поставщики могли уже получить заказ. Новая заявка будет отдельной.\n\n"
+            )
+        elif previous_recalculation_pending:
+            warning = (
+                "⚠️ Предыдущая заявка ещё проходит проверку. Не создавайте её заново — "
+                "бот завершит обработку автоматически. Новая заявка будет отдельной.\n\n"
+            )
+        else:
+            warning = (
+                "⚠️ Предыдущая заявка ещё обрабатывается. Не начинайте её повторно. "
+                "Новая заявка будет отдельной.\n\n"
+            )
     return BotReply(text=f"{warning}{_NEW_ORDER_MESSAGE}")
 
 
@@ -914,6 +932,8 @@ def final_review_reply(state: ConversationState) -> BotReply:
             if departments
             else f"{escape(item.department)}"
         )
+        if len(departments) == 1 and isclose(departments[0][1], item.quantity or 0):
+            department_text = escape(departments[0][0])
         lines.append(
             f"{index}. {product_name(_item_name(item))} — {format_number(item.quantity)} {unit} · {department_text}"
         )

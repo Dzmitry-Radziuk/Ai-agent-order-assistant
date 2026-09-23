@@ -255,9 +255,10 @@ class GoogleSheetsGateway:
                 expected_name = normalize_text(row.get("Наименование у поставщика"))
                 if expected_name:
                     expected_names[product_id].add(expected_name)
-                product = by_id.get(product_id)
+                comment_product = by_id.get(product_id)
                 comments[product_id] = self._merge_comment(
-                    comments.get(product_id) or (product.comment if product else ""),
+                    comments.get(product_id)
+                    or (comment_product.comment if comment_product else ""),
                     clean_text(row.get("Комментарий")),
                 )
 
@@ -310,19 +311,19 @@ class GoogleSheetsGateway:
         comment_column = header_index.get("Комментарий")
         if comment_column:
             for product_id, comment in comments.items():
-                product = by_id.get(product_id)
-                if not product or not product.row_number or not comment:
+                comment_product = by_id.get(product_id)
+                if not comment_product or not comment_product.row_number or not comment:
                     continue
                 cell = (
                     f"'{self.settings.google_catalog_sheet}'!"
-                    f"{self._column_letter(comment_column)}{product.row_number}"
+                    f"{self._column_letter(comment_column)}{comment_product.row_number}"
                 )
                 mutations.append(
                     {
                         "kind": "comment",
                         "range": cell,
                         "product_id": product_id,
-                        "before": product.comment,
+                        "before": comment_product.comment,
                         "expected_after": comment,
                     }
                 )
