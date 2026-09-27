@@ -20,11 +20,11 @@ from restaurant_bot.domain.models import (
     PendingSubmission,
     SessionStage,
 )
-from restaurant_bot.presentation.telegram.replies import submission_retry_reply
 from restaurant_bot.orders.supplier_schedules import (
     supplier_schedule_fingerprint,
     supplier_schedule_warnings,
 )
+from restaurant_bot.presentation.telegram.replies import submission_retry_reply
 from restaurant_bot.presentation.telegram.submission import (
     submission_dispatch_uncertain_reply,
     supplier_schedule_warning_reply,

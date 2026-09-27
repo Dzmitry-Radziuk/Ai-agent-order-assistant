@@ -51,12 +51,13 @@ def test_product_typo_is_never_interpreted_as_skip_command() -> None:
     assert command.items[0].quantity == 5
 
 
-def test_bare_quantity_product_is_not_rewritten_into_draft_edit_by_ai() -> None:
+@pytest.mark.parametrize("text", ["Вино красное - 20", "Вино красное -20"])
+def test_bare_quantity_product_is_not_rewritten_into_draft_edit_by_ai(text: str) -> None:
     """Сохраняет «товар - число» как добавление, даже если ИИ предлагает изменение черновика."""
     provider = MagicMock()
     provider.parse_text.return_value = ParsedCommand(
         intent=Intent.EDIT_QUANTITY,
-        text="Вино красное - 20",
+        text=text,
         target_query="Вино красное",
         edit_quantity=20,
     )
@@ -66,7 +67,7 @@ def test_bare_quantity_product_is_not_rewritten_into_draft_edit_by_ai() -> None:
         StateCompatibilityPolicy(),
     )
 
-    command = interpreter.interpret_text("Вино красное - 20", ConversationState())
+    command = interpreter.interpret_text(text, ConversationState())
 
     assert command.intent is Intent.ADD_ITEMS
     assert len(command.items) == 1

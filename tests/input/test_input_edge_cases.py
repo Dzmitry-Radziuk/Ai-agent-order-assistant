@@ -24,9 +24,10 @@ def test_packaging_and_trailing_order_quantity_are_not_split() -> None:
     assert (item.product_query, item.quantity, item.unit) == ("Сироп Роза 1 л", 12, "")
 
 
-def test_bare_quantity_after_separator_is_marked_as_explicit_order_entry() -> None:
+@pytest.mark.parametrize("text", ["Вино красное - 20", "Вино красное -20"])
+def test_bare_quantity_after_separator_is_marked_as_explicit_order_entry(text: str) -> None:
     """Считает число после разделителя явным количеством заказа без единицы."""
-    item = parse_product_lines("Вино красное - 20")[0]
+    item = parse_product_lines(text)[0]
 
     assert (item.product_query, item.quantity, item.unit) == ("Вино красное", 20, "")
     assert item.quantity_source == "text_order_entry"
