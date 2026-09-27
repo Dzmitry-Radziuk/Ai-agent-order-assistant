@@ -306,6 +306,37 @@ def test_live_catalog_headers_fill_submission_metadata(settings) -> None:  # typ
     assert product.department_quantities == DepartmentQuantities(hall=2, bar=1, kitchen=5)
 
 
+def test_real_order_sheet_numbered_headers_fill_supplier_constraints(settings) -> None:  # type: ignore[no-untyped-def]
+    """Читает служебные поля из фактических пронумерованных заголовков листа «Заявка»."""
+    gateway = GoogleSheetsGateway(settings)
+    gateway.read_rows = MagicMock(  # type: ignore[method-assign]
+        return_value=[
+            {
+                "ID товара": "mustard",
+                "Наименование у Поставщика": "Горчица дижонская",
+                "Ед.Изм. для заказа": "шт",
+                "Ед.Изм. для заказа 2": "0,17",
+                "Ед.Изм. для заказа 3": "3",
+                "Ед.Изм. для заказа 4": "323",
+                "Ед.Изм. для заказа 5": "Тестовый поставщик",
+                "Мин сумма для заказа поставщику": "5000",
+                "График заказов": "Пн, Вт, Ср, Чт, Вс",
+                "График доставки": "Вт, Ср, Чт, Пт, Сб",
+                "__row_number": 8,
+            }
+        ]
+    )
+
+    product = gateway.load_catalog(VENUE_SPREADSHEET_ID)[0]
+
+    assert product.supplier == "Тестовый поставщик"
+    assert product.useful_volume == 0.17
+    assert product.minimum_multiple == 3
+    assert product.price == 323
+    assert product.supplier_minimum_amount == 5000
+    assert product.supplier_schedule == "Пн, Вт, Ср, Чт, Вс"
+
+
 def test_catalog_update_writes_quantity_and_merged_comment(settings) -> None:  # type: ignore[no-untyped-def]
     """Проверяет, что каталог update записывает количество и merged комментарий."""
     gateway = GoogleSheetsGateway(settings)
