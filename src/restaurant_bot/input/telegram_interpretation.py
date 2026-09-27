@@ -448,7 +448,8 @@ class TelegramInputInterpreter:
         if command.intent is not Intent.ADD_ITEMS:
             return False
         return command.explicit_add_items or any(
-            item.quantity is not None and bool(item.unit) for item in command.items
+            item.quantity is not None and (bool(item.unit) or bool(item.quantity_source))
+            for item in command.items
         )
 
     @staticmethod

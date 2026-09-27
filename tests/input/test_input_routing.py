@@ -51,6 +51,30 @@ def test_product_typo_is_never_interpreted_as_skip_command() -> None:
     assert command.items[0].quantity == 5
 
 
+def test_bare_quantity_product_is_not_rewritten_into_draft_edit_by_ai() -> None:
+    """Сохраняет «товар - число» как добавление, даже если ИИ предлагает изменение черновика."""
+    provider = MagicMock()
+    provider.parse_text.return_value = ParsedCommand(
+        intent=Intent.EDIT_QUANTITY,
+        text="Вино красное - 20",
+        target_query="Вино красное",
+        edit_quantity=20,
+    )
+    interpreter = TelegramInputInterpreter(
+        provider,
+        lambda: MagicMock(),
+        StateCompatibilityPolicy(),
+    )
+
+    command = interpreter.interpret_text("Вино красное - 20", ConversationState())
+
+    assert command.intent is Intent.ADD_ITEMS
+    assert len(command.items) == 1
+    assert command.items[0].product_query == "Вино красное"
+    assert command.items[0].quantity == 20
+    assert command.items[0].quantity_source == "text_order_entry"
+
+
 def test_standalone_final_review_word_is_state_aware_for_text_and_voice() -> None:
     """Маршрутизирует «итог» в финальную проверку для текста и голоса."""
     provider = MagicMock()

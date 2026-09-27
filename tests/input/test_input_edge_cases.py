@@ -24,6 +24,14 @@ def test_packaging_and_trailing_order_quantity_are_not_split() -> None:
     assert (item.product_query, item.quantity, item.unit) == ("Сироп Роза 1 л", 12, "")
 
 
+def test_bare_quantity_after_separator_is_marked_as_explicit_order_entry() -> None:
+    """Считает число после разделителя явным количеством заказа без единицы."""
+    item = parse_product_lines("Вино красное - 20")[0]
+
+    assert (item.product_query, item.quantity, item.unit) == ("Вино красное", 20, "")
+    assert item.quantity_source == "text_order_entry"
+
+
 def test_word_quantity_with_comma_stays_with_the_product() -> None:
     """Не превращает словесное количество после запятой во вторую позицию."""
     items = parse_product_lines("Яйцо куриное цветное, три короба.")
