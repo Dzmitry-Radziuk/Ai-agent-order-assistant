@@ -30,5 +30,5 @@ def test_scoped_catalog_search_accepts_bounded_provider_without_full_catalog_arg
     )
 
     assert requested_scopes == [SearchScope.SUPPLIER_ONLY]
-    assert len(result.candidates) <= 5
+    assert len(result.candidates) <= 10
     assert any(candidate.product_id == "product-42" for candidate in result.candidates)

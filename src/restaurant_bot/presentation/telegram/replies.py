@@ -817,9 +817,9 @@ def _issue_reply_body(item: CartItem, item_index: int | None = None) -> BotReply
                 "",
             ]
         rows: list[list[Button]] = []
-        for candidate_index, candidate in enumerate(item.candidates[:5]):
+        for candidate_index, candidate in enumerate(item.candidates):
             lines.append(f"{candidate_index + 1}. {product_name(candidate.name)}")
-            if candidate_index < len(item.candidates[:5]) - 1:
+            if candidate_index < len(item.candidates) - 1:
                 lines.append("")
             rows.append(
                 [
@@ -847,7 +847,7 @@ def _issue_reply_body(item: CartItem, item_index: int | None = None) -> BotReply
             f"По запросу: {escape(item.source_query)}",
         ]
         supplier_rows: list[list[Button]] = []
-        suggestions = item.candidates[:5]
+        suggestions = item.candidates
         if suggestions:
             lines += ["", "<b>Похожие товары у других поставщиков:</b>", ""]
             for candidate_index, candidate in enumerate(suggestions):

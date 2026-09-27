@@ -36,9 +36,9 @@ def rank_candidates(
     query: str,
     catalog: list[CatalogProduct],
     supplier_hint: str = "",
-    limit: int = 5,
+    limit: int = 10,
 ) -> list[Candidate]:
-    """Ранжирует кандидатов из каталога."""
+    """Ранжирует до десяти кандидатов из каталога."""
     supplier_matches = [
         product for product in catalog if supplier_matches_hint(product.supplier, supplier_hint)
     ]
@@ -79,9 +79,9 @@ def rank_similar_candidates(
     query: str,
     catalog: list[CatalogProduct],
     supplier_hint: str = "",
-    limit: int = 5,
+    limit: int = 10,
 ) -> list[Candidate]:
-    """Возвращает только безопасные похожие варианты для уточнения пользователем."""
+    """Возвращает до десяти безопасных похожих вариантов для уточнения."""
     query_tokens = _product_identity_tokens(query)
     if not query_tokens:
         return []

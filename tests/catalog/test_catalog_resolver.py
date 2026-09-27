@@ -63,6 +63,26 @@ def test_any_supplier_scope_can_find_the_same_product() -> None:
     assert result.candidates[0].product_id == "corn"
 
 
+def test_keyword_search_keeps_more_than_five_catalog_options() -> None:
+    """Не обрезает релевантный поиск по ключевому слову первыми пятью строками."""
+    catalog = [
+        CatalogProduct(
+            product_id=f"oil-{index}",
+            name=f"Масло вариант {index}",
+            supplier="Поставщик",
+            unit="шт",
+        )
+        for index in range(8)
+    ]
+
+    result = CatalogResolver().search("масло", catalog)
+
+    assert len(result.candidates) == 8
+    assert [candidate.product_id for candidate in result.candidates] == [
+        f"oil-{index}" for index in range(8)
+    ]
+
+
 def test_equal_products_from_different_suppliers_require_clarification() -> None:
     """Не выбирает первую из одинаковых строк разных поставщиков."""
     resolver = CatalogResolver()
