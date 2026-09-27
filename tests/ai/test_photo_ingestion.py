@@ -1282,6 +1282,50 @@ def test_named_multi_department_row_requires_matching_second_read(
     assert result.items[0].department_quantities == DepartmentQuantities(bar=2, kitchen=3)
 
 
+def test_named_department_sheet_rechecks_even_when_first_read_misses_second_department(
+    settings,
+    tmp_path: Path,
+    mocker,
+) -> None:  # type: ignore[no-untyped-def]
+    """Не принимает строку молча, если второе чтение нашло ещё один отдел."""
+    first = PhotoDocumentObservation(
+        document_type_proposal="client_order_sheet",
+        detected_columns=["Товар", "Зал", "Бар", "Кухня"],
+        has_table_structure=True,
+        rows=[_row("Горчица острая", kitchen_quantity=3)],
+    )
+    second = PhotoDocumentObservation(
+        document_type_proposal="client_order_sheet",
+        detected_columns=["Товар", "Зал", "Бар", "Кухня"],
+        has_table_structure=True,
+        rows=[_row("Горчица острая", bar_quantity=2, kitchen_quantity=3)],
+    )
+    responses = _SequenceVisionResponses([first, second])
+    service = object.__new__(OpenAIService)
+    service.settings = settings
+    service.tracer = Tracer(settings)
+    service.vision_client = SimpleNamespace(responses=responses)
+    photo = tmp_path / "named-department-missed-cell.png"
+    photo.write_bytes(b"image")
+    mocker.patch(
+        "restaurant_bot.integrations.openai_client.prepare_photo_views",
+        return_value=PhotoImagePreparation(
+            views=(PhotoImageView("original", b"raw", "image/png", 960, 518),),
+            original_width=960,
+            original_height=518,
+            upscale_factor=1,
+            dense_table_views_used=False,
+            spreadsheet_layout_detected=False,
+        ),
+    )
+
+    result = service.parse_photo(photo, "image/png")
+
+    assert len(responses.calls) == 2
+    assert result.items == []
+    assert result.photo_outcome == "incomplete_photo_read"
+
+
 def test_named_multi_department_row_disagreement_is_not_silently_accepted(
     settings,
     tmp_path: Path,
