@@ -3,6 +3,8 @@
 from collections.abc import Callable
 from unittest.mock import MagicMock
 
+import pytest
+
 from restaurant_bot.application.order_review.contracts import ReviewSnapshot
 from restaurant_bot.conversation.routing.state_compatibility import StateCompatibilityPolicy
 from restaurant_bot.domain.models import (
