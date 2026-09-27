@@ -1236,7 +1236,8 @@ def test_incomplete_first_photo_read_retries_with_enlarged_and_original_views(
     retry_preparation = read.call_args_list[1].args[3]
     assert [view.name for view in retry_preparation.views] == ["table_focus", "original"]
     assert read.call_args_list[1].kwargs["pass_number"] == 2
-    assert len(read.call_args_list) == 2
+    assert len(read.call_args_list) == 3
+    assert read.call_args_list[2].kwargs["pass_number"] == 3
     assert "Повторно внимательно прочитай" in read.call_args_list[1].args[4]
 
 
