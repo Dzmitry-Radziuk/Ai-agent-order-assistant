@@ -581,9 +581,7 @@ def _numeric_quantity_item(
                 quantity=float((match.group("qty") or match.group("bare_qty")).replace(",", ".")),
                 unit=normalize_unit(match.group("unit") or ""),
                 source_line=source_line,
-                quantity_source=(
-                    "text_order_entry" if match.group("bare_qty") is not None else ""
-                ),
+                quantity_source=("text_order_entry" if match.group("bare_qty") is not None else ""),
             )
     match = leading.match(stripped)
     if match:

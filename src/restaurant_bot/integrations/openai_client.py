@@ -1073,18 +1073,15 @@ class OpenAIService:
                     else None
                 )
                 full_read_confirmation_matches = (
-                    (
-                        not lettered_department_columns
-                        or department_column_views_available
-                        or (
-                            retry_observation is not None
-                            and _lettered_department_reads_match(observation, retry_observation)
-                        )
+                    not lettered_department_columns
+                    or department_column_views_available
+                    or (
+                        retry_observation is not None
+                        and _lettered_department_reads_match(observation, retry_observation)
                     )
-                    and (
-                        not named_department_confirmation_required
-                        or named_department_reconciled is not None
-                    )
+                ) and (
+                    not named_department_confirmation_required
+                    or named_department_reconciled is not None
                 )
                 if (
                     retry_complete
