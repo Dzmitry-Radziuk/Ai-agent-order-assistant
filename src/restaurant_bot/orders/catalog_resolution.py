@@ -864,6 +864,9 @@ class CatalogResolutionService:
         item.useful_volume = product.useful_volume
         item.supplier_minimum_amount = product.supplier_minimum_amount
         item.supplier_current_sum = product.supplier_current_sum
+        if not item.has_department_assignment() and product.default_department:
+            item.department = product.default_department
+            item.department_confirmed = True
         item.existing_quantity = product.department_quantities.for_department(item.department) or 0
         self._reconcile_quantity_with_catalog_name(item, product.name)
         user_comment = item.comment
@@ -909,12 +912,18 @@ class CatalogResolutionService:
             product = products_by_id.get(item.catalog_product_id)
             if product is None:
                 continue
+            item.supplier = product.supplier
+            item.price = product.price
+            item.useful_volume = product.useful_volume
             item.supplier_current_sum = product.supplier_current_sum
+            item.supplier_minimum_amount = product.supplier_minimum_amount
+            item.minimum_multiple = product.minimum_multiple
+            if not item.has_department_assignment() and product.default_department:
+                item.department = product.default_department
+                item.department_confirmed = True
             item.existing_quantity = (
                 product.department_quantities.for_department(item.department) or 0
             )
-            item.supplier_minimum_amount = product.supplier_minimum_amount
-            item.minimum_multiple = product.minimum_multiple
             item.suggested_quantity = suggested_quantity_for_multiple(item)
             item.catalog_comment = product.comment
             item.catalog_comment_source = (

@@ -314,6 +314,7 @@ def test_real_order_sheet_numbered_headers_fill_supplier_constraints(settings) -
             {
                 "ID товара": "mustard",
                 "Наименование у Поставщика": "Горчица дижонская",
+                "Подразделение": "Кухня",
                 "Ед.Изм. для заказа": "шт",
                 "Ед.Изм. для заказа 2": "0,17",
                 "Ед.Изм. для заказа 3": "3",
@@ -334,6 +335,7 @@ def test_real_order_sheet_numbered_headers_fill_supplier_constraints(settings) -
     assert product.minimum_multiple == 3
     assert product.price == 323
     assert product.supplier_minimum_amount == 5000
+    assert product.default_department == "Кухня"
     assert product.supplier_schedule == "Пн, Вт, Ср, Чт, Вс"
 
 

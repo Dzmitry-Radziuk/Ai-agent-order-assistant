@@ -344,6 +344,7 @@ class CatalogProduct(BaseModel):
     useful_volume: float | None = None
     supplier_minimum_amount: float | None = None
     restaurant: str = ""
+    default_department: str = ""
     supplier_schedule: str = ""
     department_quantities: DepartmentQuantities = Field(default_factory=DepartmentQuantities)
     supplier_current_sum: float | None = None

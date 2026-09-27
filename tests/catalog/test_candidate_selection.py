@@ -112,6 +112,51 @@ def test_explicit_department_survives_candidate_and_quantity_choice(settings) ->
     assert "46 шт · Бар" in review.reply.text
 
 
+def test_catalog_department_fills_unassigned_item_without_overriding_user_choice(settings) -> None:  # type: ignore[no-untyped-def]
+    """Берёт одиночное подразделение из каталога, но сохраняет явный выбор пользователя."""
+    engine = ConversationEngine(settings)
+    catalog = [
+        CatalogProduct(
+            product_id="bitter",
+            name="Биттер Люксардо 0,75 л",
+            supplier="Тестовый поставщик",
+            unit="шт",
+            default_department="Бар",
+        )
+    ]
+
+    automatic = engine.handle(
+        TelegramEvent(update_id=3, chat_id="1", input_type=InputKind.TEXT),
+        ParsedCommand(
+            intent=Intent.ADD_ITEMS,
+            items=[ExtractedItem(product_query="Биттер Люксардо 0,75 л", quantity=11)],
+        ),
+        ConversationState(),
+        catalog,
+    )
+    explicit = engine.handle(
+        TelegramEvent(update_id=4, chat_id="2", input_type=InputKind.TEXT),
+        ParsedCommand(
+            intent=Intent.ADD_ITEMS,
+            items=[
+                ExtractedItem(
+                    product_query="Биттер Люксардо 0,75 л",
+                    quantity=11,
+                    department="Зал",
+                    source_department="Зал",
+                )
+            ],
+        ),
+        ConversationState(),
+        catalog,
+    )
+
+    assert automatic.state.cart[0].department == "Бар"
+    assert automatic.state.cart[0].department_confirmed is True
+    assert explicit.state.cart[0].department == "Зал"
+    assert explicit.state.cart[0].department_confirmed is True
+
+
 def test_unique_partial_candidate_name_selects_only_that_candidate(settings) -> None:  # type: ignore[no-untyped-def]
     """Проверяет, что unique partial кандидат название выбирает только что кандидат."""
     engine = ConversationEngine(settings)

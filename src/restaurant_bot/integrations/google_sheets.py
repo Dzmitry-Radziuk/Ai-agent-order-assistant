@@ -206,6 +206,16 @@ class GoogleSheetsGateway:
                     restaurant=self._first(
                         row, "Заведения", "Условное наз-ие заведения", "Заведение", "Ресторан"
                     ),
+                    default_department=(
+                        department
+                        if (
+                            department := normalize_department(
+                                self._first(row, "Подразделение", "Отдел")
+                            )
+                        )
+                        in {"Зал", "Бар", "Кухня"}
+                        else ""
+                    ),
                     supplier_schedule=self._first(
                         row, "График заказов", "График доставки", "График поставщика"
                     ),
