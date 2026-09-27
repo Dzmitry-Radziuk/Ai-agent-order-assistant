@@ -918,8 +918,15 @@ class OpenAIService:
         )
         observed_document_type = classify_photo_document(observation)
         lettered_department_columns = uses_lettered_department_columns(observation)
-        department_column_read_required = lettered_department_columns
         department_order_sheet = observed_document_type == "client_order_sheet"
+        named_department_grid_verification = (
+            department_order_sheet
+            and preparation.spreadsheet_layout_detected
+            and not lettered_department_columns
+        )
+        department_column_read_required = (
+            lettered_department_columns or named_department_grid_verification
+        )
         deterministic_order_layout_unconfirmed = (
             preparation.spreadsheet_layout_detected
             and expected_filled_order_row_count is not None
@@ -980,6 +987,7 @@ class OpenAIService:
             "photo_department_read_plan",
             document_type="client_order_sheet" if department_order_sheet else "other",
             lettered_department_columns=lettered_department_columns,
+            named_department_grid_verification=named_department_grid_verification,
             column_views_available=department_column_views_available,
             missing_unlabelled_order_values=missing_unlabelled_order_values,
             deterministic_order_layout_unconfirmed=deterministic_order_layout_unconfirmed,

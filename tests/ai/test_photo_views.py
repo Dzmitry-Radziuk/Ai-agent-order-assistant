@@ -82,6 +82,22 @@ def _save_lettered_department_sheet(path: Path) -> None:
     image.save(path, format="PNG")
 
 
+def _save_named_department_sheet_cropped_after_kitchen(path: Path) -> None:
+    """Создаёт таблицу, обрезанную сразу после третьей order-колонки."""
+    image = Image.new("RGB", (570, 320), "white")
+    draw = ImageDraw.Draw(image)
+    for x in (300, 390, 480, 569):
+        draw.line((x, 40, x, 280), fill=(185, 185, 185))
+    for y in range(40, 281, 30):
+        draw.line((0, y, 569, y), fill=(215, 215, 215))
+    draw.text((120, 47), "Hot mustard", fill=(20, 20, 20))
+    draw.text((120, 77), "Dijon mustard", fill=(20, 20, 20))
+    draw.text((420, 47), "2", fill=(20, 20, 20))
+    draw.text((510, 47), "3", fill=(20, 20, 20))
+    draw.text((510, 77), "1", fill=(20, 20, 20))
+    image.save(path, format="PNG")
+
+
 def _save_sheet_below_browser_chrome(path: Path, size: tuple[int, int]) -> None:
     """Создаёт сжатый снимок таблицы ниже панели приложения."""
     table_path = path.with_name(f"{path.stem}-table.png")
@@ -492,6 +508,31 @@ def test_light_sheet_detects_independent_filled_order_row_count(tmp_path: Path) 
     assert preparation.detected_filled_order_row_count == 2
     assert preparation.table_focus_view_size is not None
     assert preparation.table_focus_view_size[0] < 1000 * preparation.upscale_factor
+
+
+def test_sheet_cropped_after_kitchen_still_builds_three_department_checks(
+    tmp_path: Path,
+) -> None:
+    """Находит три order-колонки, когда колонка комментария не попала в кадр."""
+    photo = tmp_path / "cropped-after-kitchen.png"
+    _save_named_department_sheet_cropped_after_kitchen(photo)
+
+    preparation = prepare_photo_views(
+        photo,
+        "image/png",
+        prefer_filled_order_rows=True,
+        include_department_column_check=True,
+    )
+
+    assert preparation.spreadsheet_layout_detected is True
+    assert preparation.detected_filled_order_row_count == 2
+    assert [view.name for view in preparation.views] == [
+        "table_focus",
+        "department_column_n",
+        "department_column_o",
+        "department_column_p",
+    ]
+    assert [view.expected_quantity_cell_count for view in preparation.views[1:]] == [0, 1, 2]
 
 
 def test_headerless_sheet_focuses_order_and_comment_rows_before_bottom_ui(

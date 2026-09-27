@@ -475,7 +475,36 @@ def _detect_light_sheet_order_columns(
         )
         if best is None or score < best[0]:
             best = score, rounded
-    return None if best is None else best[1]
+    if best is not None:
+        return best[1]
+
+    # Некоторые Telegram-скриншоты обрезаны сразу после «Кухни»:
+    # три order-колонки видны полностью, а широкая колонка комментария — нет.
+    # В таком случае край изображения служит безопасной правой границей
+    # только для служебной геометрии; подразделения по одной геометрии
+    # по-прежнему не назначаются.
+    edge_tolerance = max(4, round(width * 0.02))
+    cropped_best: tuple[float, tuple[int, int, int, int, int]] | None = None
+    for index in range(len(centers) - 3):
+        candidate = centers[index : index + 4]
+        order_widths = [candidate[offset + 1] - candidate[offset] for offset in range(3)]
+        mean_width = sum(order_widths) / 3
+        if mean_width < max(8, width * 0.01) or mean_width > width * 0.18:
+            continue
+        if min(order_widths) <= 0 or max(order_widths) / min(order_widths) > 1.8:
+            continue
+        if candidate[0] < width * 0.4:
+            continue
+        if width - candidate[-1] > edge_tolerance:
+            continue
+        score = sum(abs(value - mean_width) for value in order_widths)
+        rounded = cast(
+            tuple[int, int, int, int, int],
+            (*tuple(round(value) for value in candidate), width),
+        )
+        if cropped_best is None or score < cropped_best[0]:
+            cropped_best = score, rounded
+    return None if cropped_best is None else cropped_best[1]
 
 
 def _detect_light_sheet_horizontal_groups(
