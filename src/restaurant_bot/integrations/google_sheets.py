@@ -217,8 +217,12 @@ class GoogleSheetsGateway:
                         else ""
                     ),
                     supplier_schedule=self._first(
-                        row, "График заказов", "График доставки", "График поставщика"
+                        row, "График заказов", "График поставщика", "График доставки"
                     ),
+                    supplier_order_schedule=self._first(
+                        row, "График заказов", "График поставщика"
+                    ),
+                    supplier_delivery_schedule=self._first(row, "График доставки"),
                     department_quantities=DepartmentQuantities(
                         hall=to_float(row.get("Зал")),
                         bar=to_float(row.get("Бар")),

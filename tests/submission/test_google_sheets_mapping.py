@@ -337,6 +337,8 @@ def test_real_order_sheet_numbered_headers_fill_supplier_constraints(settings) -
     assert product.supplier_minimum_amount == 5000
     assert product.default_department == "Кухня"
     assert product.supplier_schedule == "Пн, Вт, Ср, Чт, Вс"
+    assert product.supplier_order_schedule == "Пн, Вт, Ср, Чт, Вс"
+    assert product.supplier_delivery_schedule == "Вт, Ср, Чт, Пт, Сб"
 
 
 def test_catalog_update_writes_quantity_and_merged_comment(settings) -> None:  # type: ignore[no-untyped-def]

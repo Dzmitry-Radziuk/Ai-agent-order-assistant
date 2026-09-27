@@ -346,6 +346,8 @@ class CatalogProduct(BaseModel):
     restaurant: str = ""
     default_department: str = ""
     supplier_schedule: str = ""
+    supplier_order_schedule: str = ""
+    supplier_delivery_schedule: str = ""
     department_quantities: DepartmentQuantities = Field(default_factory=DepartmentQuantities)
     supplier_current_sum: float | None = None
     comment: str = ""
@@ -410,6 +412,8 @@ class CartItem(BaseModel):
     useful_volume: float | None = None
     supplier_minimum_amount: float | None = None
     supplier_current_sum: float | None = None
+    supplier_order_schedule: str = ""
+    supplier_delivery_schedule: str = ""
     existing_quantity: float = 0
     candidates: list[Candidate] = Field(default_factory=list)
     suggested_quantity: float | None = None

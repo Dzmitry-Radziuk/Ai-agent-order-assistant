@@ -7,6 +7,7 @@ from collections.abc import Callable
 from datetime import UTC, datetime
 from math import isclose
 from typing import TYPE_CHECKING, Any
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from restaurant_bot.application.conversation.contracts import ConversationInteraction
 from restaurant_bot.domain.departments import normalize_department
@@ -20,8 +21,13 @@ from restaurant_bot.domain.models import (
     SessionStage,
 )
 from restaurant_bot.presentation.telegram.replies import submission_retry_reply
+from restaurant_bot.orders.supplier_schedules import (
+    supplier_schedule_fingerprint,
+    supplier_schedule_warnings,
+)
 from restaurant_bot.presentation.telegram.submission import (
     submission_dispatch_uncertain_reply,
+    supplier_schedule_warning_reply,
 )
 
 if TYPE_CHECKING:
@@ -75,6 +81,25 @@ class EngineSubmissionPreparationService:
         matched = [item for item in state.cart if item.status == ItemStatus.MATCHED]
         if not matched:
             return EngineResult(state=state, reply=self._cart_renderer(state))
+        try:
+            local_today = datetime.now(ZoneInfo(self._owner.settings.app_timezone)).date()
+        except ZoneInfoNotFoundError:
+            local_today = datetime.now(UTC).date()
+        schedule_warnings = supplier_schedule_warnings(matched, today=local_today)
+        schedule_fingerprint = supplier_schedule_fingerprint(matched, today=local_today)
+        schedule_override_key = "supplier_schedule_override_fingerprint"
+        if schedule_warnings:
+            if state.metadata.get(schedule_override_key) != schedule_fingerprint:
+                state.metadata[schedule_override_key] = schedule_fingerprint
+                state.stage = SessionStage.AWAIT_SUBMIT_CONFIRM
+                state.status = "await_supplier_schedule_override"
+                return EngineResult(
+                    state=state,
+                    reply=supplier_schedule_warning_reply(state, schedule_warnings),
+                )
+            state.metadata.pop(schedule_override_key, None)
+        else:
+            state.metadata.pop(schedule_override_key, None)
         now = datetime.now(UTC)
         order_no = f"{now:%Y%m%d-%H%M%S}-{event.conversation_id[-4:]}"
         supplier_totals: dict[str, float] = defaultdict(float)

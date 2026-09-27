@@ -8,6 +8,7 @@ from typing import Any
 
 from restaurant_bot.domain.models import BotReply, Button
 from restaurant_bot.history.product_list import extract_history_product_name
+from restaurant_bot.orders.supplier_schedules import SupplierScheduleWarning
 from restaurant_bot.presentation.telegram.formatting import (
     escape,
     format_status,
@@ -61,6 +62,53 @@ def submission_local_saved_reply(state: Any, order_no: str) -> BotReply:
                     callback_data=_callback_with_revision(state, "v2:clear"),
                 )
             ]
+        ],
+    )
+
+
+def supplier_schedule_warning_reply(
+    state: Any,
+    warnings: list[SupplierScheduleWarning],
+) -> BotReply:
+    """Предупреждает о графике поставщика до фиксации снимка заявки."""
+    lines = [f"🔸 {heading('Проверьте график поставщика')}", ""]
+    for warning in warnings:
+        label = escape(warning.supplier or "Поставщик")
+        products = ", ".join(product_name(name) for name in warning.product_names[:3])
+        if warning.order_date is not None and warning.nearest_order_date is not None:
+            lines.append(
+                f"<b>{label}</b>: сегодня заявки не принимаются. "
+                f"Ближайший день приёма: <b>{warning.nearest_order_date:%d.%m.%Y}</b>."
+            )
+        if (
+            warning.requested_delivery_date is not None
+            and warning.nearest_delivery_date is not None
+        ):
+            lines.append(
+                f"<b>{label}</b>: доставка на "
+                f"<b>{warning.requested_delivery_date:%d.%m.%Y}</b> недоступна. "
+                f"Ближайшая дата доставки: "
+                f"<b>{warning.nearest_delivery_date:%d.%m.%Y}</b>."
+            )
+        if products:
+            lines.append(f"Товары: {products}")
+        lines.append("")
+    lines.extend(
+        [
+            "Заявка ещё не записана.",
+            "Исправьте дату/комментарий или подтвердите запись несмотря на график.",
+        ]
+    )
+    return BotReply(
+        text="\n".join(lines),
+        rows=[
+            [
+                Button(
+                    text="Записать несмотря на график",
+                    callback_data=_callback_with_revision(state, "v2:submit"),
+                )
+            ],
+            [Button(text="К черновику", callback_data=_callback_with_revision(state, "v2:back"))],
         ],
     )
 

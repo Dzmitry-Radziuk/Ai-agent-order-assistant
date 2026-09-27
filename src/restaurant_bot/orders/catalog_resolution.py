@@ -864,6 +864,8 @@ class CatalogResolutionService:
         item.useful_volume = product.useful_volume
         item.supplier_minimum_amount = product.supplier_minimum_amount
         item.supplier_current_sum = product.supplier_current_sum
+        item.supplier_order_schedule = product.supplier_order_schedule or product.supplier_schedule
+        item.supplier_delivery_schedule = product.supplier_delivery_schedule
         if not item.has_department_assignment() and product.default_department:
             item.department = product.default_department
             item.department_confirmed = True
@@ -918,6 +920,8 @@ class CatalogResolutionService:
             item.supplier_current_sum = product.supplier_current_sum
             item.supplier_minimum_amount = product.supplier_minimum_amount
             item.minimum_multiple = product.minimum_multiple
+            item.supplier_order_schedule = product.supplier_order_schedule or product.supplier_schedule
+            item.supplier_delivery_schedule = product.supplier_delivery_schedule
             if not item.has_department_assignment() and product.default_department:
                 item.department = product.default_department
                 item.department_confirmed = True
