@@ -1097,53 +1097,87 @@ def test_lettered_department_columns_use_isolated_row_aligned_reads(
         assert f"колонка {letter}" in content[0]["text"]
 
 
-def test_headerless_department_values_are_not_mapped_by_visual_position(
+def test_headerless_department_values_are_rechecked_without_mapping_visual_position(
     settings,
     tmp_path: Path,
     mocker,
 ) -> None:  # type: ignore[no-untyped-def]
-    """Оставляет фото без заголовков и букв на ручной выбор подразделения."""
+    """Перечитывает подтверждённую сетку и сохраняет количества без угадывания отдела."""
     first = PhotoDocumentObservation(
         document_type_proposal="other",
         has_table_structure=False,
-        visible_filled_order_row_count=4,
+        visible_filled_order_row_count=3,
         rows=[
             _row("Горчица острая", hall_quantity=8),
             _row("Горчица дижонская", bar_quantity=2),
             _row("Лук жареный Metro Chef", kitchen_quantity=5),
         ],
     )
-    responses = _SequenceVisionResponses([first])
+    second = PhotoDocumentObservation(
+        document_type_proposal="order_table",
+        has_table_structure=True,
+        visible_filled_order_row_count=3,
+        rows=[
+            _row("Горчица острая", explicit_order_quantity=8, order_entry_text="8"),
+            _row("Горчица дижонская", explicit_order_quantity=2, order_entry_text="2"),
+            _row("Лук жареный Metro Chef", explicit_order_quantity=5, order_entry_text="5"),
+        ],
+    )
+    responses = _SequenceVisionResponses([first, second])
     service = object.__new__(OpenAIService)
     service.settings = settings
     service.tracer = Tracer(settings)
     service.vision_client = SimpleNamespace(responses=responses)
     photo = tmp_path / "headerless-departments.png"
     photo.write_bytes(b"image")
+    focus = PhotoImageView("table_focus", b"focus", "image/png", 764, 340)
+    checks = tuple(
+        PhotoImageView(
+            f"department_column_{letter}",
+            b"check",
+            "image/png",
+            400,
+            300,
+            expected_quantity_cell_count=1,
+        )
+        for letter in "nop"
+    )
     prepare = mocker.patch(
         "restaurant_bot.integrations.openai_client.prepare_photo_views",
-        return_value=PhotoImagePreparation(
-            views=(PhotoImageView("original", b"raw", "image/png", 764, 340),),
-            original_width=764,
-            original_height=340,
-            upscale_factor=1,
-            dense_table_views_used=False,
-            spreadsheet_layout_detected=True,
-            detected_filled_order_row_count=3,
-        ),
+        side_effect=[
+            PhotoImagePreparation(
+                views=(PhotoImageView("original", b"raw", "image/png", 764, 340),),
+                original_width=764,
+                original_height=340,
+                upscale_factor=1,
+                dense_table_views_used=False,
+                spreadsheet_layout_detected=True,
+                detected_filled_order_row_count=3,
+            ),
+            PhotoImagePreparation(
+                views=(focus, *checks, PhotoImageView("original", b"raw", "image/png", 764, 340)),
+                original_width=764,
+                original_height=340,
+                upscale_factor=2,
+                dense_table_views_used=True,
+                spreadsheet_layout_detected=True,
+                detected_filled_order_row_count=3,
+            ),
+        ],
     )
 
     result = service.parse_photo(photo, "image/png")
 
-    assert len(responses.calls) == 1
-    assert result.items == []
-    assert result.photo_outcome == "unsupported_photo"
-    prepare.assert_called_once_with(
-        photo,
-        "image/png",
-        include_original=True,
-        prefer_filled_order_rows=True,
-    )
+    assert len(responses.calls) == 2
+    assert [(item.product_query, item.quantity) for item in result.items] == [
+        ("Горчица острая", 8),
+        ("Горчица дижонская", 2),
+        ("Лук жареный Metro Chef", 5),
+    ]
+    assert all(item.department_quantities == DepartmentQuantities() for item in result.items)
+    assert result.photo_outcome == ""
+    assert prepare.call_count == 2
+    assert prepare.call_args_list[1].kwargs["include_department_column_check"] is True
 
 
 def test_incomplete_first_photo_read_retries_with_enlarged_and_original_views(
@@ -1204,6 +1238,88 @@ def test_incomplete_first_photo_read_retries_with_enlarged_and_original_views(
     assert read.call_args_list[1].kwargs["pass_number"] == 2
     assert len(read.call_args_list) == 2
     assert "Повторно внимательно прочитай" in read.call_args_list[1].args[4]
+
+
+def test_named_multi_department_row_requires_matching_second_read(
+    settings,
+    tmp_path: Path,
+    mocker,
+) -> None:  # type: ignore[no-untyped-def]
+    """Подтверждает две цифры одной строки только одинаковым независимым чтением."""
+    first = PhotoDocumentObservation(
+        document_type_proposal="client_order_sheet",
+        detected_columns=["Товар", "Зал", "Бар", "Кухня"],
+        has_table_structure=True,
+        rows=[_row("Горчица острая", bar_quantity=2, kitchen_quantity=3)],
+    )
+    second = first.model_copy(deep=True)
+    responses = _SequenceVisionResponses([first, second])
+    service = object.__new__(OpenAIService)
+    service.settings = settings
+    service.tracer = Tracer(settings)
+    service.vision_client = SimpleNamespace(responses=responses)
+    photo = tmp_path / "two-departments.png"
+    photo.write_bytes(b"image")
+    preparation = PhotoImagePreparation(
+        views=(PhotoImageView("original", b"raw", "image/png", 960, 518),),
+        original_width=960,
+        original_height=518,
+        upscale_factor=1,
+        dense_table_views_used=False,
+        spreadsheet_layout_detected=False,
+    )
+    mocker.patch(
+        "restaurant_bot.integrations.openai_client.prepare_photo_views",
+        return_value=preparation,
+    )
+
+    result = service.parse_photo(photo, "image/png")
+
+    assert len(responses.calls) == 2
+    assert len(result.items) == 1
+    assert result.items[0].quantity == 5
+    assert result.items[0].department_quantities == DepartmentQuantities(bar=2, kitchen=3)
+
+
+def test_named_multi_department_row_disagreement_is_not_silently_accepted(
+    settings,
+    tmp_path: Path,
+    mocker,
+) -> None:  # type: ignore[no-untyped-def]
+    """Исключает спорную строку, если повторное чтение дало другое количество."""
+    first = PhotoDocumentObservation(
+        document_type_proposal="client_order_sheet",
+        detected_columns=["Товар", "Зал", "Бар", "Кухня"],
+        has_table_structure=True,
+        rows=[_row("Горчица острая", bar_quantity=2, kitchen_quantity=3)],
+    )
+    second = first.model_copy(
+        update={"rows": [_row("Горчица острая", bar_quantity=2, kitchen_quantity=4)]}
+    )
+    responses = _SequenceVisionResponses([first, second])
+    service = object.__new__(OpenAIService)
+    service.settings = settings
+    service.tracer = Tracer(settings)
+    service.vision_client = SimpleNamespace(responses=responses)
+    photo = tmp_path / "two-departments-conflict.png"
+    photo.write_bytes(b"image")
+    mocker.patch(
+        "restaurant_bot.integrations.openai_client.prepare_photo_views",
+        return_value=PhotoImagePreparation(
+            views=(PhotoImageView("original", b"raw", "image/png", 960, 518),),
+            original_width=960,
+            original_height=518,
+            upscale_factor=1,
+            dense_table_views_used=False,
+            spreadsheet_layout_detected=False,
+        ),
+    )
+
+    result = service.parse_photo(photo, "image/png")
+
+    assert len(responses.calls) == 2
+    assert result.items == []
+    assert result.photo_outcome == "incomplete_photo_read"
 
 
 def test_lettered_departments_confirm_full_read_without_detected_grid(

@@ -109,6 +109,28 @@ def _photo_observation_needs_second_pass(
     )
 
 
+def _photo_observation_needs_named_department_confirmation(
+    observation: PhotoDocumentObservation,
+) -> bool:
+    """Требует независимое чтение строки с несколькими именованными отделами."""
+    if (
+        classify_photo_document(observation) != "client_order_sheet"
+        or uses_lettered_department_columns(observation)
+    ):
+        return False
+    for row in observation.rows:
+        quantities = photo_row_department_quantities(row, lettered_columns=False)
+        if quantities is None:
+            continue
+        positive_count = sum(
+            value is not None and value > 0
+            for value in quantities.model_dump().values()
+        )
+        if positive_count > 1:
+            return True
+    return False
+
+
 def _photo_observation_is_complete(
     observation: PhotoDocumentObservation,
     *,

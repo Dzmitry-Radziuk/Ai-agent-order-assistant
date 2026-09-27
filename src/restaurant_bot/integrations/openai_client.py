@@ -33,6 +33,7 @@ from restaurant_bot.input.photo_observation_reconciliation import (
     _merge_lettered_department_column_reads,
     _photo_observation_is_complete,
     _photo_observation_matches_preprocessed_count,
+    _photo_observation_needs_named_department_confirmation,
     _photo_observation_needs_second_pass,
     _read_lettered_department_column_values,
     _reconcile_department_observations,
@@ -915,18 +916,32 @@ class OpenAIService:
             observation,
             require_sheet_row_numbers=True,
         )
+        observed_document_type = classify_photo_document(observation)
         lettered_department_columns = uses_lettered_department_columns(observation)
         department_column_read_required = lettered_department_columns
-        department_order_sheet = classify_photo_document(observation) == "client_order_sheet"
+        department_order_sheet = observed_document_type == "client_order_sheet"
+        deterministic_order_layout_unconfirmed = (
+            preparation.spreadsheet_layout_detected
+            and expected_filled_order_row_count is not None
+            and expected_filled_order_row_count > 0
+            and observed_document_type
+            not in {"client_order_sheet", "order_table", "printed_order_form", "free_list"}
+        )
         missing_unlabelled_order_values = (
             not lettered_department_columns
             and not department_order_sheet
             and expected_filled_order_row_count is not None
             and expected_filled_order_row_count > 0
-            and not _photo_observation_matches_preprocessed_count(
-                observation,
-                expected_filled_order_row_count,
+            and (
+                deterministic_order_layout_unconfirmed
+                or not _photo_observation_matches_preprocessed_count(
+                    observation,
+                    expected_filled_order_row_count,
+                )
             )
+        )
+        named_department_confirmation_required = (
+            _photo_observation_needs_named_department_confirmation(observation)
         )
         order_column_read_required = (
             department_column_read_required or missing_unlabelled_order_values
@@ -948,13 +963,18 @@ class OpenAIService:
                 f"department_column_{letter}" in retry_view_names
                 for letter, _ in _LETTERED_DEPARTMENT_COLUMN_FIELDS
             )
-        needs_second_pass = _photo_observation_needs_second_pass(
-            observation,
-            expected_filled_order_row_count=expected_filled_order_row_count,
-        ) or (
-            department_column_read_required
-            and not department_column_views_available
-            and not preparation.spreadsheet_layout_detected
+        needs_second_pass = (
+            _photo_observation_needs_second_pass(
+                observation,
+                expected_filled_order_row_count=expected_filled_order_row_count,
+            )
+            or missing_unlabelled_order_values
+            or named_department_confirmation_required
+            or (
+                department_column_read_required
+                and not department_column_views_available
+                and not preparation.spreadsheet_layout_detected
+            )
         )
         logger.info(
             "photo_department_read_plan",
@@ -962,6 +982,8 @@ class OpenAIService:
             lettered_department_columns=lettered_department_columns,
             column_views_available=department_column_views_available,
             missing_unlabelled_order_values=missing_unlabelled_order_values,
+            deterministic_order_layout_unconfirmed=deterministic_order_layout_unconfirmed,
+            named_department_confirmation_required=named_department_confirmation_required,
             needs_second_pass=needs_second_pass,
         )
         if needs_second_pass or (
@@ -1045,12 +1067,23 @@ class OpenAIService:
                     retry_text,
                     pass_number=(3 if initial_retry_selected else 2),
                 )
+                named_department_reconciled = (
+                    _reconcile_department_observations(observation, retry_observation)
+                    if named_department_confirmation_required and retry_observation is not None
+                    else None
+                )
                 full_read_confirmation_matches = (
-                    not lettered_department_columns
-                    or department_column_views_available
-                    or (
-                        retry_observation is not None
-                        and _lettered_department_reads_match(observation, retry_observation)
+                    (
+                        not lettered_department_columns
+                        or department_column_views_available
+                        or (
+                            retry_observation is not None
+                            and _lettered_department_reads_match(observation, retry_observation)
+                        )
+                    )
+                    and (
+                        not named_department_confirmation_required
+                        or named_department_reconciled is not None
                     )
                 )
                 if (
@@ -1062,7 +1095,7 @@ class OpenAIService:
                         expected_filled_order_row_count=expected_filled_order_row_count,
                     )
                 ):
-                    observation = retry_observation
+                    observation = named_department_reconciled or retry_observation
                     generic_retry_selected = True
                     authoritative_sheet_rows = photo_sheet_row_mapping_is_authoritative(
                         observation,
@@ -1154,6 +1187,13 @@ class OpenAIService:
                                 intent=Intent.ADD_ITEMS,
                                 photo_outcome="incomplete_photo_read",
                             )
+                    if named_department_confirmation_required:
+                        return _confirmed_partial_photo_command(
+                            observation,
+                            retry_observation if retry_complete else None,
+                            self.settings,
+                            expected_filled_order_row_count=expected_filled_order_row_count,
+                        )
                     if lettered_department_columns and not department_column_views_available:
                         return _confirmed_partial_photo_command(
                             observation,
