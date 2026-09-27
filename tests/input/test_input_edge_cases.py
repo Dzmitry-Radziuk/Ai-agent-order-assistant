@@ -24,6 +24,11 @@ def test_packaging_and_trailing_order_quantity_are_not_split() -> None:
     assert (item.product_query, item.quantity, item.unit) == ("Сироп Роза 1 л", 12, "")
 
 
+def test_clock_time_is_not_parsed_as_bare_product_quantity() -> None:
+    """Не превращает время доставки в товар с количеством после двоеточия."""
+    assert parse_product_lines("Привезти завтра к 20:00") == []
+
+
 @pytest.mark.parametrize("text", ["Вино красное - 20", "Вино красное -20"])
 def test_bare_quantity_after_separator_is_marked_as_explicit_order_entry(text: str) -> None:
     """Считает число после разделителя явным количеством заказа без единицы."""

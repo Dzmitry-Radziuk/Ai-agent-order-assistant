@@ -382,12 +382,18 @@ def test_photo_parser_includes_detected_table_focus_and_original_together(
 
     service.parse_photo(photo, "image/png")
 
-    prepare.assert_called_once_with(
-        photo,
-        "image/png",
-        include_original=True,
-        prefer_filled_order_rows=True,
-    )
+    assert prepare.call_count == 2
+    assert prepare.call_args_list[0].args == (photo, "image/png")
+    assert prepare.call_args_list[0].kwargs == {
+        "include_original": True,
+        "prefer_filled_order_rows": True,
+    }
+    assert prepare.call_args_list[1].args == (photo, "image/png")
+    assert prepare.call_args_list[1].kwargs == {
+        "include_original": True,
+        "prefer_filled_order_rows": True,
+        "include_department_column_check": True,
+    }
     content = responses.calls[0]["input"][0]["content"]  # type: ignore[index]
     images = [part for part in content if part["type"] == "input_image"]
     assert len(images) == 2

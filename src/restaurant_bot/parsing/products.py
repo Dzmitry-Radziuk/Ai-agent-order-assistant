@@ -267,7 +267,7 @@ def _build_product_line_patterns(unit_pattern: str) -> _ProductLinePatterns:
     """Строит regex-шаблоны для последовательного разбора строки."""
     trailing = re.compile(
         rf"^(.*?)(?:(?:\s+|[-—–:]|(?<=[^\d\s]))(?P<qty>\d+(?:[,.]\d+)?)\s*(?P<unit>{unit_pattern})|"
-        rf"[-—–:]\s*(?P<bare_qty>\d+(?:[,.]\d+)?))\s*$",
+        rf"(?:[-—–]|(?<!\d):)\s*(?P<bare_qty>\d+(?:[,.]\d+)?))\s*$",
         re.I,
     )
     leading = re.compile(

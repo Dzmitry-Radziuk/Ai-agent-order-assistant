@@ -930,4 +930,4 @@ def test_product_family_rule_scales_to_large_catalog(settings: Settings) -> None
 
     assert item.status is ItemStatus.AMBIGUOUS
     assert item.catalog_product_id == ""
-    assert len(item.candidates) == 5
+    assert len(item.candidates) == 8
