@@ -134,11 +134,6 @@ def supplier_schedule_warnings(
             continue
 
         nearest_order = _next_allowed_day(today, order_days) if invalid_order else None
-        nearest_delivery = (
-            _next_allowed_day(requested_delivery, delivery_days)
-            if invalid_delivery and requested_delivery is not None
-            else None
-        )
         key = (
             item.supplier,
             item.supplier_order_schedule,
