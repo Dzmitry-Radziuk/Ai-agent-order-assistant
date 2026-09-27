@@ -83,6 +83,24 @@ def test_keyword_search_keeps_more_than_five_catalog_options() -> None:
     ]
 
 
+def test_partial_wine_name_finds_unique_catalog_product() -> None:
+    """Находит товар из баг-репорта по двум ключевым словам без слова «для»."""
+    resolver = CatalogResolver()
+    catalog = [
+        CatalogProduct(
+            product_id="wine-kitchen",
+            name="Вино красное ДЛЯ КУХНИ",
+            supplier="Тестовый поставщик",
+            unit="шт",
+        )
+    ]
+
+    result = resolver.search("Вино красное", catalog)
+
+    assert [candidate.product_id for candidate in result.candidates] == ["wine-kitchen"]
+    assert resolver.decide("Вино красное", result.candidates) is CatalogDecision.AUTO_SELECT
+
+
 def test_equal_products_from_different_suppliers_require_clarification() -> None:
     """Не выбирает первую из одинаковых строк разных поставщиков."""
     resolver = CatalogResolver()
