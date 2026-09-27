@@ -923,6 +923,12 @@ class OpenAIService:
             department_order_sheet
             and preparation.spreadsheet_layout_detected
             and not lettered_department_columns
+            and expected_filled_order_row_count is not None
+            and expected_filled_order_row_count > 0
+            and _photo_observation_matches_preprocessed_count(
+                observation,
+                expected_filled_order_row_count,
+            )
         )
         department_column_read_required = (
             lettered_department_columns or named_department_grid_verification

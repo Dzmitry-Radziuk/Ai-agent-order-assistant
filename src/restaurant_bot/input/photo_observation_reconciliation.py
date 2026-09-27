@@ -583,11 +583,20 @@ def _merge_lettered_department_column_reads(
     # Проверенные колонки заменяют предварительные значения отделов.
     cleared_fields.update(hall_quantity=None, bar_quantity=None, kitchen_quantity=None)
     merged_rows = [row.model_copy(update=cleared_fields) for row in baseline.rows]
-    for letter, field_name in _LETTERED_DEPARTMENT_COLUMN_FIELDS:
+    target_fields = (
+        tuple(field_name for _, field_name in _LETTERED_DEPARTMENT_COLUMN_FIELDS)
+        if uses_lettered_department_columns(baseline)
+        else ("hall_quantity", "bar_quantity", "kitchen_quantity")
+    )
+    for (letter, _), target_field in zip(
+        _LETTERED_DEPARTMENT_COLUMN_FIELDS,
+        target_fields,
+        strict=True,
+    ):
         for index, value in column_values[letter].items():
             if not 0 <= index < len(merged_rows):
                 return None
             if value is not None and (not math.isfinite(value) or value <= 0):
                 return None
-            merged_rows[index] = merged_rows[index].model_copy(update={field_name: value})
+            merged_rows[index] = merged_rows[index].model_copy(update={target_field: value})
     return baseline.model_copy(update={"rows": merged_rows})
