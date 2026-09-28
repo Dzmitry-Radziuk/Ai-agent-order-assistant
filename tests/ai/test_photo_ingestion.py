@@ -149,6 +149,53 @@ def test_partial_photo_keeps_only_agreed_items_without_multiplying_duplicates(se
     assert _confirmed_partial_photo_command(first, None, settings).items == []
 
 
+def test_unlabelled_photo_row_sums_multiple_active_order_cells(settings) -> None:  # type: ignore[no-untyped-def]
+    """Суммирует несколько значений одной строки, даже когда подразделения не видны."""
+    observation = PhotoDocumentObservation(
+        document_type_proposal="order_table",
+        detected_columns=["Товар"],
+        has_table_structure=True,
+        visible_filled_order_row_count=1,
+        rows=[
+            _row(
+                "Горчица Дижонская CHATEL",
+                explicit_order_quantity=10,
+                active_quantity_texts=["5", "5"],
+                order_entry_text="5 + 5",
+            )
+        ],
+    )
+
+    command = normalize_photo_observation(observation, settings).command
+
+    assert command.photo_outcome == ""
+    assert [(item.product_query, item.quantity) for item in command.items] == [
+        ("Горчица Дижонская CHATEL", 10)
+    ]
+    assert command.items[0].department_quantities == DepartmentQuantities()
+
+
+def test_unlabelled_photo_row_rejects_sum_that_disagrees_with_active_cells(settings) -> None:  # type: ignore[no-untyped-def]
+    """Не принимает сумму модели, если она не совпадает с активными ячейками строки."""
+    observation = PhotoDocumentObservation(
+        document_type_proposal="order_table",
+        detected_columns=["Товар"],
+        has_table_structure=True,
+        rows=[
+            _row(
+                "Горчица Дижонская CHATEL",
+                explicit_order_quantity=5,
+                active_quantity_texts=["5", "5"],
+                order_entry_text="5 + 5",
+            )
+        ],
+    )
+
+    command = normalize_photo_observation(observation, settings).command
+
+    assert command.items == []
+
+
 def test_reconciled_complete_photo_reads_do_not_keep_partial_warning(settings) -> None:  # type: ignore[no-untyped-def]
     """Считает фото полным, когда оба завершённых чтения подтверждают каждую позицию."""
     first = PhotoDocumentObservation(

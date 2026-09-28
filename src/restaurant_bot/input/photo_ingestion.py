@@ -606,8 +606,20 @@ def _resolve_row_quantity(
     aligned_table_quantities = _aligned_table_order_quantities(row)
     if len(aligned_table_quantities) > 1:
         return sum(aligned_table_quantities), _row_unit(row), "table_order_cells"
-    if len(row.active_quantity_texts) > 1:
-        return None
+    active_quantities = _active_order_quantities(row)
+    if row.active_quantity_texts:
+        if len(active_quantities) != len(row.active_quantity_texts):
+            return None
+        active_total = sum(active_quantities)
+        if row.explicit_order_quantity is not None and not math.isclose(
+            row.explicit_order_quantity,
+            active_total,
+            rel_tol=0,
+            abs_tol=1e-9,
+        ):
+            return None
+        if len(active_quantities) > 1:
+            return active_total, _row_unit(row), "active_order_cells"
     if len(_numbers(row.order_entry_text)) > 1:
         return None
     if len(_numbers(row.handwritten_quantity_text)) > 1:
@@ -617,6 +629,8 @@ def _resolve_row_quantity(
         quantity = _single_number(row.order_entry_text) or _single_number(
             row.handwritten_quantity_text
         )
+    if quantity is None and len(active_quantities) == 1:
+        quantity = active_quantities[0]
     if quantity is None and allow_unlabelled_table_cells:
         unlabelled_cells = _unlabelled_order_cell_quantities(row)
         if unlabelled_cells:
@@ -627,6 +641,20 @@ def _resolve_row_quantity(
         "handwritten" if row.handwritten_quantity_text else "photo_order_entry"
     )
     return quantity, _row_unit(row), source
+
+
+def _active_order_quantities(row: PhotoRowObservation) -> list[float]:
+    """Читает только однозначные положительные active quantities текущей строки."""
+    quantities: list[float] = []
+    for value_text in row.active_quantity_texts:
+        numbers = _numbers(value_text)
+        if len(numbers) != 1:
+            return []
+        value = numbers[0]
+        if not math.isfinite(value) or value <= 0:
+            return []
+        quantities.append(value)
+    return quantities
 
 
 def _aligned_table_order_quantities(row: PhotoRowObservation) -> list[float]:
@@ -717,6 +745,7 @@ def _row_has_order_evidence(row: PhotoRowObservation) -> bool:
         or bool(clean_text(row.order_entry_text))
         or bool(clean_text(row.handwritten_quantity_text))
         or bool(clean_text(row.corrected_quantity_text))
+        or bool(row.active_quantity_texts)
         or any(
             _positive_or_none(value) is not None
             for value in (
